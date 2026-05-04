@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clay Planning"
+  short_description: "Create rigorous numbered implementation plans"
+  default_prompt: "Use $clay-planning to create a numbered implementation plan with tasks, criteria, approaches, tests, and follow-up sections."

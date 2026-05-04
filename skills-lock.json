@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "find-docs": {
+      "source": "upstash/context7",
+      "sourceType": "github",
+      "skillPath": "skills/find-docs/SKILL.md",
+      "computedHash": "0210767e57873317edc8b91783a2f1b74eb9bbdd2139bd14e9129e9a0bbc2dd6"
+    },
+    "karpathy-guidelines": {
+      "source": "forrestchang/andrej-karpathy-skills",
+      "sourceType": "github",
+      "skillPath": "skills/karpathy-guidelines/SKILL.md",
+      "computedHash": "41e8ca055bbde13d240776a14a076a59614057200340c243130a76ba4e64cac8"
+    },
+    "rust-async-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/systems-programming/skills/rust-async-patterns/SKILL.md",
+      "computedHash": "1e68b5edfa95069e54af75acf2a34634a5d0266021fa4af3b9706eaec5b6207e"
+    },
+    "rust-best-practices": {
+      "source": "apollographql/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-best-practices/SKILL.md",
+      "computedHash": "fd336f2f772eb46ddf8658de5f9dd8faa1f35615b316665307fc82eeb4b2e658"
+    },
+    "skill-creator": {
+      "source": "openai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/.system/skill-creator/SKILL.md",
+      "computedHash": "c1f04920b03c2a412e1d0b90680dc10b6de64793db7daae7e4bf64535b9fdf75"
+    }
+  }
+}
