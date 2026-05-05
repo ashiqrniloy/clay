@@ -2,10 +2,14 @@ use std::error::Error;
 use std::sync::Arc;
 
 use crop::Rope;
-use vello::kurbo::{Circle, Rect};
+use parley::style::{LineHeight, StyleProperty};
+use parley::{
+    Alignment, AlignmentOptions, FontContext, Layout, LayoutContext, PositionedLayoutItem,
+};
+use vello::kurbo::{Affine, Circle, Rect};
 use vello::peniko::{Color, Fill};
 use vello::util::{RenderContext, RenderSurface};
-use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
+use vello::{AaConfig, AaSupport, Glyph, RenderParams, Renderer, RendererOptions, Scene};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, WindowEvent};
@@ -19,6 +23,11 @@ const WINDOW_HEIGHT: f64 = 600.0;
 const BACKGROUND_COLOR: Color = Color::from_rgb8(0x18, 0x18, 0x18);
 const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
+const TEXT_COLOR: [u8; 4] = [0xf4, 0xf1, 0xff, 0xff];
+const PLACEHOLDER_COLOR: [u8; 4] = [0x8d, 0x86, 0xa3, 0xff];
+const TEXT_INSET: f64 = 48.0;
+const TEXT_FONT_SIZE: f32 = 20.0;
+const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
 
 #[derive(Default)]
 pub struct EditorBuffer {
@@ -44,11 +53,86 @@ impl EditorBuffer {
     }
 }
 
+struct TextLayoutState {
+    font_context: FontContext,
+    layout_context: LayoutContext<[u8; 4]>,
+}
+
+impl TextLayoutState {
+    fn new() -> Self {
+        Self {
+            font_context: FontContext::new(),
+            layout_context: LayoutContext::new(),
+        }
+    }
+
+    fn draw_text(&mut self, scene: &mut Scene, text: &str, max_width: f32, origin: (f64, f64)) {
+        let (display_text, brush) = if text.is_empty() {
+            (PLACEHOLDER_TEXT, PLACEHOLDER_COLOR)
+        } else {
+            (text, TEXT_COLOR)
+        };
+
+        let mut builder =
+            self.layout_context
+                .ranged_builder(&mut self.font_context, display_text, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(TEXT_FONT_SIZE));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.4)));
+        builder.push_default(StyleProperty::Brush(brush));
+
+        let mut layout: Layout<[u8; 4]> = builder.build(display_text);
+        layout.break_all_lines(Some(max_width));
+        layout.align(
+            Some(max_width),
+            Alignment::Start,
+            AlignmentOptions::default(),
+        );
+
+        let transform = Affine::translate(origin);
+        for line in layout.lines() {
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+
+                let run = glyph_run.run();
+                let mut x = glyph_run.offset();
+                let y = glyph_run.baseline();
+                scene
+                    .draw_glyphs(run.font())
+                    .brush(Color::from_rgba8(
+                        glyph_run.style().brush[0],
+                        glyph_run.style().brush[1],
+                        glyph_run.style().brush[2],
+                        glyph_run.style().brush[3],
+                    ))
+                    .hint(true)
+                    .transform(transform)
+                    .font_size(run.font_size())
+                    .normalized_coords(run.normalized_coords())
+                    .draw(
+                        Fill::NonZero,
+                        glyph_run.glyphs().map(|glyph| {
+                            let positioned = Glyph {
+                                id: glyph.id,
+                                x: x + glyph.x,
+                                y: y + glyph.y,
+                            };
+                            x += glyph.advance;
+                            positioned
+                        }),
+                    );
+            }
+        }
+    }
+}
+
 struct VelloState {
     render_context: RenderContext,
     surface: RenderSurface<'static>,
     renderer: Renderer,
     scene: Scene,
+    text_layout: TextLayoutState,
 }
 
 impl VelloState {
@@ -75,6 +159,7 @@ impl VelloState {
             surface,
             renderer,
             scene: Scene::new(),
+            text_layout: TextLayoutState::new(),
         })
     }
 
@@ -87,14 +172,14 @@ impl VelloState {
             .resize_surface(&mut self.surface, size.width, size.height);
     }
 
-    fn render(&mut self) {
+    fn render(&mut self, text: &str) {
         let width = self.surface.config.width;
         let height = self.surface.config.height;
         if width == 0 || height == 0 {
             return;
         }
 
-        self.build_scene(width, height);
+        self.build_scene(width, height, text);
 
         let device_handle = &self.render_context.devices[self.surface.dev_id];
         let surface_texture = match self.surface.surface.get_current_texture() {
@@ -147,7 +232,7 @@ impl VelloState {
         surface_texture.present();
     }
 
-    fn build_scene(&mut self, width: u32, height: u32) {
+    fn build_scene(&mut self, width: u32, height: u32, text: &str) {
         self.scene.reset();
 
         let canvas = Rect::new(
@@ -165,13 +250,16 @@ impl VelloState {
         );
 
         let radius = (width.min(height) as f64 * 0.12).clamp(32.0, 96.0);
-        let circle = Circle::new((width as f64 * 0.5, height as f64 * 0.5), radius);
-        self.scene.fill(
-            Fill::NonZero,
-            vello::kurbo::Affine::IDENTITY,
-            ACCENT_COLOR,
-            None,
-            &circle,
+        let circle = Circle::new((width as f64 - 72.0, height as f64 - 72.0), radius);
+        self.scene
+            .fill(Fill::NonZero, Affine::IDENTITY, ACCENT_COLOR, None, &circle);
+
+        let max_text_width = (width as f32 - (TEXT_INSET as f32 * 2.0)).max(1.0);
+        self.text_layout.draw_text(
+            &mut self.scene,
+            text,
+            max_text_width,
+            (TEXT_INSET, TEXT_INSET),
         );
     }
 }
@@ -253,9 +341,9 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                let _current_text = self.buffer.visible_text();
+                let current_text = self.buffer.visible_text();
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.render();
+                    renderer.render(&current_text);
                 }
             }
             WindowEvent::Resized(size) => {

@@ -141,7 +141,7 @@
     - `editor_buffer_appends_input`: Validates inserted strings are visible in order.
     - `editor_buffer_backspace_removes_last_scalar`: Validates Backspace removes one Unicode scalar value and does not panic when empty.
 
-- [ ] Render rope text with Parley into the Vello scene
+- [x] Render rope text with Parley into the Vello scene
   - Acceptance Criteria:
     - Functional: The current `crop`-backed buffer is displayed as text in the Vello-rendered window, with an initial placeholder prompt when empty.
     - Performance: `FontContext` and `LayoutContext` are reused across redraws; layout is recalculated only from the visible text slice and current width.
@@ -169,12 +169,14 @@
       layout.break_all_lines(Some(width));
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Add reusable Parley layout state and draw current editor text into the Vello scene.
+      - `src/main.rs`: Added reusable `TextLayoutState` with Parley `FontContext`/`LayoutContext`, builds a plain layout from the rope-visible text or placeholder, and emits glyph runs into the Vello `Scene` with `Scene::draw_glyphs`.
     - References:
       - Context7 docs response `ctx7:docs:7baddd99b9f5002a3777ec2d` for Parley simple text layout.
+      - Context7 docs responses `ctx7:docs:1ff95dc8b933806d06305aea` and `ctx7:docs:6ee72b0f34aa5c4a9037d595` for Parley glyph-run iteration and Vello `Scene::draw_glyphs` usage.
   - Test Cases to Write:
     - Manual smoke test: Empty buffer shows placeholder text; non-empty initial/test text is visible.
-    - Build check: Run `cargo check` to validate Parley/Vello API usage against pinned versions.
+    - Build check: `cargo check` passed after adding Parley/Vello glyph rendering.
+    - Regression check: `cargo fmt` and `cargo test` passed after adding Parley/Vello glyph rendering.
 
 - [ ] Wire keyboard editing to the rope and visible renderer
   - Acceptance Criteria:
@@ -282,10 +284,10 @@
     - Manual GUI smoke test: Confirms launch, Vello render, visible text, typing, backspace, resize, and exit behavior.
 
 ## Compromises Made
-- The Vello renderer currently draws a minimal background/panel/circle scene only; text rendering remains deferred to the planned Parley task.
 - The implementation uses `pollster` to block only during renderer initialization so the existing synchronous `winit` `ApplicationHandler` shell can stay small until later Masonry integration.
-- `EditorBuffer::visible_text` currently materializes the entire prototype buffer into a `String`; this is acceptable for the Phase 0 visible-slice prototype but should become viewport/range based with Parley integration.
+- `EditorBuffer::visible_text` currently materializes the entire prototype buffer into a `String`; this is acceptable for the Phase 0 visible-slice prototype but should become viewport/range based after the initial native text canvas path is proven.
+- Parley layout is rebuilt on each redraw from the current visible text slice; the required `FontContext` and `LayoutContext` are reused, and finer dirty-state caching is deferred until editing, cursor, and viewport behavior exist.
 
 ## Further Actions
-- Render the `crop` buffer with Parley through the Vello scene before introducing the Masonry boundary.
-- Wire keyboard printable text and Backspace to `EditorBuffer` once rendered text is visible.
+- Wire keyboard printable text and Backspace to `EditorBuffer` now that rendered text is visible.
+- Introduce the Masonry boundary after direct `winit`/Vello/Parley/crop rendering and editing are verified together.
