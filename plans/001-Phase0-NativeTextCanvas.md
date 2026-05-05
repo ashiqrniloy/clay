@@ -220,7 +220,7 @@
     - Manual smoke test: Type `abc`, confirm displayed text includes `abc`; press Backspace, confirm `ab`; press Escape, confirm exit.
     - Verification: `cargo fmt`, `cargo test`, and `cargo check` passed after implementation.
 
-- [ ] Introduce a minimal Masonry editor module boundary
+- [x] Introduce a minimal Masonry editor module boundary
   - Acceptance Criteria:
     - Functional: A minimal Masonry-backed app/window or custom widget boundary owns event/widget routing, while the custom editor module owns `crop` state, Parley layout, and Vello painting.
     - Performance: Masonry integration does not introduce a busy redraw loop or recreate editor layout/render state unnecessarily.
@@ -235,7 +235,7 @@
       - Keep raw `winit` forever: proves Vello/Parley/crop but avoids Clay's intended retained widget/event system.
       - Add a minimal custom editor module boundary after direct Vello/Parley works: isolates renderer/text issues first, then proves Masonry wiring.
     - Chosen Approach:
-      - After direct Vello text rendering is stable, introduce the smallest Masonry boundary that can host or wrap the editor module. Prefer a custom widget if the pinned API is tractable; otherwise document the exact API blocker and use a Masonry shell with the editor module kept as a clearly separated component for the next iteration.
+      - Implemented a minimal `masonry_winit` shell with a single focusable custom Masonry widget. The widget owns Masonry event/focus routing and delegates buffer mutation, Parley layout, and Vello scene painting to a separate editor module.
     - API Notes and Examples:
       ```rust
       use masonry::core::{ErasedAction, NewWidget, Widget, WidgetId};
@@ -247,14 +247,15 @@
       }
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Either migrate to a minimal `masonry_winit` app shell or introduce a clearly separated editor module that is ready to be hosted by Masonry.
-      - Additional module files under `src/` may be created if the editor model/rendering code becomes too large for `main.rs`.
+      - `src/main.rs`: Migrated to a minimal `masonry_winit` app shell with an `AppDriver` that exits on the editor widget's Escape action and sets the editor as the focus fallback.
+      - `src/editor.rs`: Added the custom editor module boundary that owns the `crop` buffer, visible-text API, printable-text filtering, Masonry text-context Parley layout, and Vello scene painting.
+      - `src/masonry_editor.rs`: Added the Masonry custom widget boundary that owns focus/text event routing, redraw/accessibility invalidation, and delegates text editing/painting to `EditorSurface`.
     - References:
       - Docs.rs/code-search results for `masonry` 0.4.0 and `masonry_winit` 0.4.0 examples.
       - `concept.md` Phase 2 and Phase 3 roadmap.
   - Test Cases to Write:
     - Manual smoke test: Window still opens, renders editor text, accepts typing/backspace, and exits.
-    - Build check: Run `cargo check` after Masonry integration.
+    - Build check: `cargo fmt`, `cargo test`, and `cargo check` passed after Masonry integration.
 
 - [ ] Verify and document Phase 0 completion
   - Acceptance Criteria:
@@ -286,9 +287,9 @@
     - Manual GUI smoke test: Confirms launch, Vello render, visible text, typing, backspace, resize, and exit behavior.
 
 ## Compromises Made
-- The implementation uses `pollster` to block only during renderer initialization so the existing synchronous `winit` `ApplicationHandler` shell can stay small until later Masonry integration.
+- Masonry now owns the `winit` event loop and Vello/wgpu surface lifecycle; the prototype no longer keeps direct renderer ownership in `src/main.rs`.
 - `EditorBuffer::visible_text` currently materializes the entire prototype buffer into a `String`; this is acceptable for the Phase 0 visible-slice prototype but should become viewport/range based after the initial native text canvas path is proven.
-- Parley layout is rebuilt on each redraw from the current visible text slice; the required `FontContext` and `LayoutContext` are reused, and finer dirty-state caching is deferred until cursor, selection, and viewport behavior exist.
+- Parley layout is rebuilt during Masonry paint from the current visible text slice; Masonry's shared text contexts are reused, and finer dirty-state caching is deferred until cursor, selection, and viewport behavior exist.
 
 ## Further Actions
-- Introduce the Masonry boundary after direct `winit`/Vello/Parley/crop rendering and editing are verified together.
+- Run the final Phase 0 GUI smoke test in an interactive desktop session, then complete the remaining verification task.
