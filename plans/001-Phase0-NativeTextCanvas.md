@@ -98,7 +98,7 @@
     - Manual smoke test: Run `cargo run`, confirm a Vello-rendered non-blank scene appears and resizes correctly.
     - Build check: Run `cargo check` after removing `softbuffer`.
 
-- [ ] Replace the temporary `String` model with a `crop` rope-backed editor model
+- [x] Replace the temporary `String` model with a `crop` rope-backed editor model
   - Acceptance Criteria:
     - Functional: The editor model supports appending text, deleting the previous Unicode scalar value, and exposing visible text for layout from a `crop` rope.
     - Performance: Append/delete operations avoid full-buffer cloning; converting to `String` is limited to the visible/layout slice needed for the prototype.
@@ -107,7 +107,8 @@
   - Approach:
     - Documentation Reviewed:
       - Project `concept.md`: canonical state is a `crop` rope; the client eventually keeps a lightweight visible shadow rope for optimistic local typing.
-      - `crop` crate examples/docs lookup was attempted; public docs were not available through Context7 due name ambiguity, so implementation should verify exact API against local crate docs/compiler errors before editing.
+      - `crop` crate examples/docs lookup was attempted; public docs were not available through Context7 due name ambiguity.
+      - Local `crop` 0.4.3 crate source/docs: `Rope::new`/`Default`, `Rope::byte_len`, `Rope::insert`, `Rope::delete`, `Rope::chars`, and `Display`/`ToString` for visible text extraction.
     - Options Considered:
       - Keep `String`: easy but no longer proves the text-editor-module risk the prototype should target.
       - Use `crop` now: introduces the intended rope semantics early and exposes integration issues before IPC/server work.
@@ -116,14 +117,26 @@
     - API Notes and Examples:
       ```rust
       struct EditorBuffer {
-          // Exact crop type/API to be confirmed against the pinned crate.
           rope: crop::Rope,
+      }
+
+      impl EditorBuffer {
+          fn insert_str(&mut self, text: &str) {
+              self.rope.insert(self.rope.byte_len(), text);
+          }
+
+          fn backspace(&mut self) {
+              let Some(last_char) = self.rope.chars().next_back() else { return; };
+              let end = self.rope.byte_len();
+              self.rope.delete(end - last_char.len_utf8()..end);
+          }
       }
       ```
     - Files to Create/Edit:
       - `src/main.rs`: Replace `TextBuffer`/`String` internals with `EditorBuffer` backed by `crop`.
     - References:
       - `concept.md` section 3 and section 4 on `crop` and client shadow text state.
+      - Local `crop` 0.4.3 source at `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crop-0.4.3/src/rope/rope.rs`.
   - Test Cases to Write:
     - `editor_buffer_appends_input`: Validates inserted strings are visible in order.
     - `editor_buffer_backspace_removes_last_scalar`: Validates Backspace removes one Unicode scalar value and does not panic when empty.
@@ -271,8 +284,8 @@
 ## Compromises Made
 - The Vello renderer currently draws a minimal background/panel/circle scene only; text rendering remains deferred to the planned Parley task.
 - The implementation uses `pollster` to block only during renderer initialization so the existing synchronous `winit` `ApplicationHandler` shell can stay small until later Masonry integration.
-- The current `String`-backed `TextBuffer` is useful as a unit-tested placeholder but is no longer considered sufficient for the Phase 0 proof; it will be replaced by a `crop`-backed editor model.
+- `EditorBuffer::visible_text` currently materializes the entire prototype buffer into a `String`; this is acceptable for the Phase 0 visible-slice prototype but should become viewport/range based with Parley integration.
 
 ## Further Actions
-- Implement the next task first: replace placeholder text state with the actual `crop`-backed editor model.
-- Then render the `crop` buffer with Parley through the Vello scene before introducing the Masonry boundary.
+- Render the `crop` buffer with Parley through the Vello scene before introducing the Masonry boundary.
+- Wire keyboard printable text and Backspace to `EditorBuffer` once rendered text is visible.

@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use crop::Rope;
 use vello::kurbo::{Circle, Rect};
 use vello::peniko::{Color, Fill};
 use vello::util::{RenderContext, RenderSurface};
@@ -20,21 +21,26 @@ const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
 
 #[derive(Default)]
-pub struct TextBuffer {
-    text: String,
+pub struct EditorBuffer {
+    rope: Rope,
 }
 
-impl TextBuffer {
+impl EditorBuffer {
     pub fn insert_str(&mut self, text: &str) {
-        self.text.push_str(text);
+        self.rope.insert(self.rope.byte_len(), text);
     }
 
     pub fn backspace(&mut self) {
-        self.text.pop();
+        let Some(last_char) = self.rope.chars().next_back() else {
+            return;
+        };
+
+        let end = self.rope.byte_len();
+        self.rope.delete(end - last_char.len_utf8()..end);
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.text
+    pub fn visible_text(&self) -> String {
+        self.rope.to_string()
     }
 }
 
@@ -172,7 +178,7 @@ impl VelloState {
 
 #[derive(Default)]
 struct App {
-    buffer: TextBuffer,
+    buffer: EditorBuffer,
     renderer: Option<VelloState>,
     window: Option<Arc<Window>>,
 }
@@ -247,7 +253,7 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                let _current_text = self.buffer.as_str();
+                let _current_text = self.buffer.visible_text();
                 if let Some(renderer) = &mut self.renderer {
                     renderer.render();
                 }
@@ -275,28 +281,33 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::TextBuffer;
+    use super::EditorBuffer;
 
     #[test]
-    fn text_buffer_appends_input() {
-        let mut buffer = TextBuffer::default();
+    fn editor_buffer_appends_input() {
+        let mut buffer = EditorBuffer::default();
 
         buffer.insert_str("Hello");
         buffer.insert_str(", Clay");
 
-        assert_eq!(buffer.as_str(), "Hello, Clay");
+        assert_eq!(buffer.visible_text(), "Hello, Clay");
     }
 
     #[test]
-    fn text_buffer_backspace_removes_last_char() {
-        let mut buffer = TextBuffer::default();
+    fn editor_buffer_backspace_removes_last_scalar() {
+        let mut buffer = EditorBuffer::default();
         buffer.insert_str("aé🦀");
 
         buffer.backspace();
-        buffer.backspace();
-        buffer.backspace();
-        buffer.backspace();
+        assert_eq!(buffer.visible_text(), "aé");
 
-        assert_eq!(buffer.as_str(), "");
+        buffer.backspace();
+        assert_eq!(buffer.visible_text(), "a");
+
+        buffer.backspace();
+        assert_eq!(buffer.visible_text(), "");
+
+        buffer.backspace();
+        assert_eq!(buffer.visible_text(), "");
     }
 }
