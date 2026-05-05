@@ -1,10 +1,12 @@
 use std::error::Error;
-use std::num::NonZeroU32;
-use std::rc::Rc;
+use std::sync::Arc;
 
-use softbuffer::{Context, Surface};
+use vello::kurbo::{Circle, Rect};
+use vello::peniko::{Color, Fill};
+use vello::util::{RenderContext, RenderSurface};
+use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
@@ -13,7 +15,9 @@ use winit::window::{Window, WindowAttributes, WindowId};
 const WINDOW_TITLE: &str = "Clay Phase 0";
 const WINDOW_WIDTH: f64 = 900.0;
 const WINDOW_HEIGHT: f64 = 600.0;
-const BACKGROUND_COLOR: u32 = 0xff181818;
+const BACKGROUND_COLOR: Color = Color::from_rgb8(0x18, 0x18, 0x18);
+const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
+const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
 
 #[derive(Default)]
 pub struct TextBuffer {
@@ -34,22 +38,143 @@ impl TextBuffer {
     }
 }
 
-struct App {
-    buffer: TextBuffer,
-    surface: Option<Surface<Rc<Window>, Rc<Window>>>,
-    context: Option<Context<Rc<Window>>>,
-    window: Option<Rc<Window>>,
+struct VelloState {
+    render_context: RenderContext,
+    surface: RenderSurface<'static>,
+    renderer: Renderer,
+    scene: Scene,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            buffer: TextBuffer::default(),
-            surface: None,
-            context: None,
-            window: None,
-        }
+impl VelloState {
+    fn new(window: Arc<Window>, size: PhysicalSize<u32>) -> Result<Self, Box<dyn Error>> {
+        let mut render_context = RenderContext::new();
+        let surface = pollster::block_on(render_context.create_surface(
+            window,
+            size.width.max(1),
+            size.height.max(1),
+            vello::wgpu::PresentMode::AutoVsync,
+        ))?;
+
+        let device = &render_context.devices[surface.dev_id].device;
+        let renderer = Renderer::new(
+            device,
+            RendererOptions {
+                antialiasing_support: AaSupport::area_only(),
+                ..Default::default()
+            },
+        )?;
+
+        Ok(Self {
+            render_context,
+            surface,
+            renderer,
+            scene: Scene::new(),
+        })
     }
+
+    fn resize(&mut self, size: PhysicalSize<u32>) {
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+
+        self.render_context
+            .resize_surface(&mut self.surface, size.width, size.height);
+    }
+
+    fn render(&mut self) {
+        let width = self.surface.config.width;
+        let height = self.surface.config.height;
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        self.build_scene(width, height);
+
+        let device_handle = &self.render_context.devices[self.surface.dev_id];
+        let surface_texture = match self.surface.surface.get_current_texture() {
+            Ok(surface_texture) => surface_texture,
+            Err(vello::wgpu::SurfaceError::Lost | vello::wgpu::SurfaceError::Outdated) => {
+                self.render_context
+                    .resize_surface(&mut self.surface, width, height);
+                return;
+            }
+            Err(vello::wgpu::SurfaceError::Timeout) => return,
+            Err(error) => {
+                eprintln!("failed to acquire Vello surface texture: {error}");
+                return;
+            }
+        };
+
+        if let Err(error) = self.renderer.render_to_texture(
+            &device_handle.device,
+            &device_handle.queue,
+            &self.scene,
+            &self.surface.target_view,
+            &RenderParams {
+                base_color: BACKGROUND_COLOR,
+                width,
+                height,
+                antialiasing_method: AaConfig::Area,
+            },
+        ) {
+            eprintln!("failed to render Vello scene: {error}");
+            surface_texture.present();
+            return;
+        }
+
+        let surface_view = surface_texture
+            .texture
+            .create_view(&vello::wgpu::TextureViewDescriptor::default());
+        let mut encoder =
+            device_handle
+                .device
+                .create_command_encoder(&vello::wgpu::CommandEncoderDescriptor {
+                    label: Some("Vello surface blit encoder"),
+                });
+        self.surface.blitter.copy(
+            &device_handle.device,
+            &mut encoder,
+            &self.surface.target_view,
+            &surface_view,
+        );
+        device_handle.queue.submit([encoder.finish()]);
+        surface_texture.present();
+    }
+
+    fn build_scene(&mut self, width: u32, height: u32) {
+        self.scene.reset();
+
+        let canvas = Rect::new(
+            24.0,
+            24.0,
+            (width as f64 - 24.0).max(24.0),
+            (height as f64 - 24.0).max(24.0),
+        );
+        self.scene.fill(
+            Fill::NonZero,
+            vello::kurbo::Affine::IDENTITY,
+            PANEL_COLOR,
+            None,
+            &canvas,
+        );
+
+        let radius = (width.min(height) as f64 * 0.12).clamp(32.0, 96.0);
+        let circle = Circle::new((width as f64 * 0.5, height as f64 * 0.5), radius);
+        self.scene.fill(
+            Fill::NonZero,
+            vello::kurbo::Affine::IDENTITY,
+            ACCENT_COLOR,
+            None,
+            &circle,
+        );
+    }
+}
+
+#[derive(Default)]
+struct App {
+    buffer: TextBuffer,
+    renderer: Option<VelloState>,
+    window: Option<Arc<Window>>,
 }
 
 impl App {
@@ -61,7 +186,7 @@ impl App {
             .with_transparent(false);
 
         let window = match event_loop.create_window(attributes) {
-            Ok(window) => Rc::new(window),
+            Ok(window) => Arc::new(window),
             Err(error) => {
                 eprintln!("failed to create window: {error}");
                 event_loop.exit();
@@ -69,19 +194,10 @@ impl App {
             }
         };
 
-        let context = match Context::new(window.clone()) {
-            Ok(context) => context,
+        let renderer = match VelloState::new(window.clone(), window.inner_size()) {
+            Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!("failed to create softbuffer context: {error}");
-                event_loop.exit();
-                return;
-            }
-        };
-
-        let surface = match Surface::new(&context, window.clone()) {
-            Ok(surface) => surface,
-            Err(error) => {
-                eprintln!("failed to create softbuffer surface: {error}");
+                eprintln!("failed to create Vello renderer: {error}");
                 event_loop.exit();
                 return;
             }
@@ -90,45 +206,8 @@ impl App {
         window.set_visible(true);
         window.request_redraw();
 
-        self.surface = Some(surface);
-        self.context = Some(context);
+        self.renderer = Some(renderer);
         self.window = Some(window);
-    }
-
-    fn fill_window(&mut self) {
-        let Some(window) = &self.window else {
-            return;
-        };
-        let Some(surface) = &mut self.surface else {
-            return;
-        };
-        let _current_text = self.buffer.as_str();
-
-        let size = window.inner_size();
-        let (Some(width), Some(height)) =
-            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
-        else {
-            return;
-        };
-
-        if let Err(error) = surface.resize(width, height) {
-            eprintln!("failed to resize softbuffer surface: {error}");
-            return;
-        }
-
-        let mut buffer = match surface.buffer_mut() {
-            Ok(buffer) => buffer,
-            Err(error) => {
-                eprintln!("failed to acquire softbuffer buffer: {error}");
-                return;
-            }
-        };
-
-        buffer.fill(BACKGROUND_COLOR);
-
-        if let Err(error) = buffer.present() {
-            eprintln!("failed to present softbuffer buffer: {error}");
-        }
     }
 }
 
@@ -140,8 +219,7 @@ impl ApplicationHandler for App {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
-        self.surface = None;
-        self.context = None;
+        self.renderer = None;
         self.window = None;
     }
 
@@ -168,8 +246,18 @@ impl ApplicationHandler for App {
             {
                 event_loop.exit();
             }
-            WindowEvent::RedrawRequested => self.fill_window(),
-            WindowEvent::Resized(_) => window.request_redraw(),
+            WindowEvent::RedrawRequested => {
+                let _current_text = self.buffer.as_str();
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.render();
+                }
+            }
+            WindowEvent::Resized(size) => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.resize(size);
+                }
+                window.request_redraw();
+            }
             _ => {}
         }
     }

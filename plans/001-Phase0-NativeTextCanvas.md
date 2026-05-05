@@ -55,7 +55,7 @@
     - Manual smoke test: Run `cargo run`, confirm the window opens, and confirm close/Escape exits the process.
     - Build check: Run `cargo check` to validate API usage against pinned dependencies.
 
-- [ ] Replace `softbuffer` with a minimal Vello-backed renderer
+- [x] Replace `softbuffer` with a minimal Vello-backed renderer
   - Acceptance Criteria:
     - Functional: `RedrawRequested` renders a visible background and simple Vello shape through a window-backed Vello/wgpu surface; `softbuffer` is removed from runtime code and dependencies.
     - Performance: Vello `RenderContext`, surface, device renderer, and reusable scene/render state are initialized once per window/surface lifecycle, not recreated per frame.
@@ -90,8 +90,8 @@
       ```
     - Files to Create/Edit:
       - `src/main.rs`: Remove `softbuffer` state and add Vello render state/redraw path.
-      - `Cargo.toml`: Remove `softbuffer` after Vello rendering works.
-      - `Cargo.lock`: Update dependency graph after dependency changes.
+      - `Cargo.toml`: Removed `softbuffer` and added direct `pollster` usage for one-time async Vello/wgpu surface initialization.
+      - `Cargo.lock`: Updated dependency graph after dependency changes.
     - References:
       - Context7 docs response `ctx7:docs:13c5f871605fcadb4158651b` for Vello 0.6 winit integration.
   - Test Cases to Write:
@@ -269,9 +269,10 @@
     - Manual GUI smoke test: Confirms launch, Vello render, visible text, typing, backspace, resize, and exit behavior.
 
 ## Compromises Made
-- The current implementation includes a temporary `softbuffer` fill that proved window visibility but does not prove Clay's intended rendering stack; the updated plan makes removing it the immediate next task.
+- The Vello renderer currently draws a minimal background/panel/circle scene only; text rendering remains deferred to the planned Parley task.
+- The implementation uses `pollster` to block only during renderer initialization so the existing synchronous `winit` `ApplicationHandler` shell can stay small until later Masonry integration.
 - The current `String`-backed `TextBuffer` is useful as a unit-tested placeholder but is no longer considered sufficient for the Phase 0 proof; it will be replaced by a `crop`-backed editor model.
 
 ## Further Actions
-- Implement the next task first: replace `softbuffer` with Vello rendering.
-- Then move from placeholder text state to the actual `crop` + Parley + Vello text path before introducing the Masonry boundary.
+- Implement the next task first: replace placeholder text state with the actual `crop`-backed editor model.
+- Then render the `crop` buffer with Parley through the Vello scene before introducing the Masonry boundary.
