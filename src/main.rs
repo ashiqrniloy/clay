@@ -12,7 +12,7 @@ use vello::util::{RenderContext, RenderSurface};
 use vello::{AaConfig, AaSupport, Glyph, RenderParams, Renderer, RendererOptions, Scene};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -303,6 +303,35 @@ impl App {
         self.renderer = Some(renderer);
         self.window = Some(window);
     }
+
+    fn handle_key_press(&mut self, event_loop: &ActiveEventLoop, event: &KeyEvent) -> bool {
+        match &event.logical_key {
+            Key::Named(NamedKey::Escape) => {
+                event_loop.exit();
+                false
+            }
+            Key::Named(NamedKey::Backspace) => {
+                self.buffer.backspace();
+                true
+            }
+            _ => {
+                let Some(text) = event.text.as_deref() else {
+                    return false;
+                };
+
+                if is_printable_text(text) {
+                    self.buffer.insert_str(text);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}
+
+fn is_printable_text(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|character| !character.is_control())
 }
 
 impl ApplicationHandler for App {
@@ -334,11 +363,10 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed
-                    && matches!(event.logical_key, Key::Named(NamedKey::Escape)) =>
-            {
-                event_loop.exit();
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.handle_key_press(event_loop, &event) {
+                    window.request_redraw();
+                }
             }
             WindowEvent::RedrawRequested => {
                 let current_text = self.buffer.visible_text();
@@ -369,7 +397,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::EditorBuffer;
+    use super::{EditorBuffer, is_printable_text};
 
     #[test]
     fn editor_buffer_appends_input() {
@@ -397,5 +425,13 @@ mod tests {
 
         buffer.backspace();
         assert_eq!(buffer.visible_text(), "");
+    }
+
+    #[test]
+    fn printable_text_filter_accepts_plain_text_and_rejects_controls() {
+        assert!(is_printable_text("abc é 🦀"));
+        assert!(!is_printable_text(""));
+        assert!(!is_printable_text("\r"));
+        assert!(!is_printable_text("a\n"));
     }
 }

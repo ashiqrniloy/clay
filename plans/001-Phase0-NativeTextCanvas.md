@@ -178,7 +178,7 @@
     - Build check: `cargo check` passed after adding Parley/Vello glyph rendering.
     - Regression check: `cargo fmt` and `cargo test` passed after adding Parley/Vello glyph rendering.
 
-- [ ] Wire keyboard editing to the rope and visible renderer
+- [x] Wire keyboard editing to the rope and visible renderer
   - Acceptance Criteria:
     - Functional: Printable text input appends to the `crop` buffer; Backspace deletes; Escape exits; each edit requests a redraw and the text visibly updates.
     - Performance: Input handling performs no blocking work and no renderer/layout reinitialization per key event.
@@ -211,12 +211,14 @@
       }
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Add keyboard-to-editor wiring and redraw requests.
+      - `src/main.rs`: Added keyboard-to-editor wiring, printable-text filtering, redraw requests after edits, and a unit test for control-text rejection.
     - References:
       - Context7 docs response for `/rust-windowing/winit` keyboard input and event-loop examples.
   - Test Cases to Write:
     - Unit tests remain on `EditorBuffer`; GUI input is covered by manual smoke testing.
+    - `printable_text_filter_accepts_plain_text_and_rejects_controls`: Validates plain Unicode text is insertable while empty strings and control characters are ignored.
     - Manual smoke test: Type `abc`, confirm displayed text includes `abc`; press Backspace, confirm `ab`; press Escape, confirm exit.
+    - Verification: `cargo fmt`, `cargo test`, and `cargo check` passed after implementation.
 
 - [ ] Introduce a minimal Masonry editor module boundary
   - Acceptance Criteria:
@@ -286,8 +288,7 @@
 ## Compromises Made
 - The implementation uses `pollster` to block only during renderer initialization so the existing synchronous `winit` `ApplicationHandler` shell can stay small until later Masonry integration.
 - `EditorBuffer::visible_text` currently materializes the entire prototype buffer into a `String`; this is acceptable for the Phase 0 visible-slice prototype but should become viewport/range based after the initial native text canvas path is proven.
-- Parley layout is rebuilt on each redraw from the current visible text slice; the required `FontContext` and `LayoutContext` are reused, and finer dirty-state caching is deferred until editing, cursor, and viewport behavior exist.
+- Parley layout is rebuilt on each redraw from the current visible text slice; the required `FontContext` and `LayoutContext` are reused, and finer dirty-state caching is deferred until cursor, selection, and viewport behavior exist.
 
 ## Further Actions
-- Wire keyboard printable text and Backspace to `EditorBuffer` now that rendered text is visible.
 - Introduce the Masonry boundary after direct `winit`/Vello/Parley/crop rendering and editing are verified together.
