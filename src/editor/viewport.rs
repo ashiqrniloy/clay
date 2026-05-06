@@ -93,6 +93,7 @@ impl Viewport {
         self.bump_revision_if_changed(previous)
     }
 
+    #[cfg(test)]
     pub fn follow_document_end(&mut self, document_line_count: usize) -> bool {
         let Some(last_line) = document_line_count.checked_sub(1) else {
             return self.set_first_visible_line(0, document_line_count);

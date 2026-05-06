@@ -8,6 +8,12 @@ pub struct VisibleSnapshot {
     pub line_range: Range<usize>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditResult {
+    pub changed: bool,
+    pub caret: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct EditorBuffer {
     rope: Rope,
@@ -23,20 +29,165 @@ impl EditorBuffer {
         }
     }
 
+    #[cfg(test)]
     pub fn insert_str(&mut self, text: &str) {
-        self.rope.insert(self.rope.byte_len(), text);
-        self.revision = self.revision.saturating_add(1);
+        self.insert_at(self.rope.byte_len(), text);
     }
 
-    pub fn backspace(&mut self) -> bool {
-        let Some(last_char) = self.rope.chars().next_back() else {
-            return false;
+    pub fn insert_at(&mut self, caret: usize, text: &str) -> EditResult {
+        let caret = self.clamp_byte_offset(caret);
+        if text.is_empty() {
+            return EditResult {
+                changed: false,
+                caret,
+            };
+        }
+
+        self.rope.insert(caret, text);
+        self.bump_revision();
+        EditResult {
+            changed: true,
+            caret: caret + text.len(),
+        }
+    }
+
+    pub fn insert_newline_at(&mut self, caret: usize) -> EditResult {
+        self.insert_at(caret, "\n")
+    }
+
+    pub fn delete_range(&mut self, range: Range<usize>) -> EditResult {
+        let caret = self.clamp_byte_offset(range.start);
+        if range.start > range.end {
+            return EditResult {
+                changed: false,
+                caret,
+            };
+        }
+
+        let start = caret;
+        let end = self.clamp_byte_offset(range.end);
+        if start >= end {
+            return EditResult {
+                changed: false,
+                caret: start,
+            };
+        }
+
+        self.rope.delete(start..end);
+        self.bump_revision();
+        EditResult {
+            changed: true,
+            caret: start,
+        }
+    }
+
+    pub fn backspace_at(&mut self, caret: usize) -> EditResult {
+        let caret = self.clamp_byte_offset(caret);
+        let Some(previous) = self.previous_scalar_boundary(caret) else {
+            return EditResult {
+                changed: false,
+                caret,
+            };
         };
 
-        let end = self.rope.byte_len();
-        self.rope.delete(end - last_char.len_utf8()..end);
-        self.revision = self.revision.saturating_add(1);
-        true
+        self.delete_range(previous..caret)
+    }
+
+    pub fn delete_after(&mut self, caret: usize) -> EditResult {
+        let caret = self.clamp_byte_offset(caret);
+        let Some(next) = self.next_scalar_boundary(caret) else {
+            return EditResult {
+                changed: false,
+                caret,
+            };
+        };
+
+        self.delete_range(caret..next)
+    }
+
+    #[cfg(test)]
+    pub fn backspace(&mut self) -> bool {
+        self.backspace_at(self.rope.byte_len()).changed
+    }
+
+    pub fn clamp_byte_offset(&self, offset: usize) -> usize {
+        let mut offset = offset.min(self.rope.byte_len());
+        while offset > 0 && !self.rope.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        offset
+    }
+
+    pub fn previous_scalar_boundary(&self, caret: usize) -> Option<usize> {
+        let caret = self.clamp_byte_offset(caret);
+        if caret == 0 {
+            return None;
+        }
+
+        self.rope
+            .byte_slice(..caret)
+            .chars()
+            .next_back()
+            .map(|character| caret - character.len_utf8())
+    }
+
+    pub fn next_scalar_boundary(&self, caret: usize) -> Option<usize> {
+        let caret = self.clamp_byte_offset(caret);
+        if caret == self.rope.byte_len() {
+            return None;
+        }
+
+        self.rope
+            .byte_slice(caret..)
+            .chars()
+            .next()
+            .map(|character| caret + character.len_utf8())
+    }
+
+    pub fn document_start_byte(&self) -> usize {
+        0
+    }
+
+    pub fn document_end_byte(&self) -> usize {
+        self.rope.byte_len()
+    }
+
+    pub fn line_of_byte(&self, offset: usize) -> usize {
+        if self.rope.byte_len() == 0 {
+            0
+        } else {
+            self.rope.line_of_byte(self.clamp_byte_offset(offset))
+        }
+    }
+
+    pub fn byte_of_line(&self, line: usize) -> usize {
+        self.rope.byte_of_line(line.min(self.line_len()))
+    }
+
+    pub fn line_start_byte(&self, offset: usize) -> usize {
+        self.byte_of_line(self.line_of_byte(offset))
+    }
+
+    pub fn line_end_byte(&self, offset: usize) -> usize {
+        if self.rope.byte_len() == 0 {
+            return 0;
+        }
+
+        let line = self.line_of_byte(offset);
+        let start = self.byte_of_line(line);
+        let next_line_start = self.byte_of_line(line.saturating_add(1));
+        let mut end = next_line_start;
+        let slice = self.rope.byte_slice(start..next_line_start);
+        let mut chars = slice.chars().rev();
+
+        if let Some('\n') = chars.next() {
+            end -= '\n'.len_utf8();
+            if let Some('\r') = chars.next() {
+                end -= '\r'.len_utf8();
+            }
+        }
+
+        end
     }
 
     pub fn revision(&self) -> u64 {
@@ -79,6 +230,10 @@ impl EditorBuffer {
     #[cfg(test)]
     pub fn visible_text(&self) -> String {
         self.rope.to_string()
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.saturating_add(1);
     }
 }
 
@@ -164,6 +319,66 @@ mod tests {
 
         assert!(after_insert > 0);
         assert!(buffer.revision() > after_insert);
+    }
+
+    #[test]
+    fn insert_at_caret_updates_buffer_and_caret() {
+        let mut buffer = EditorBuffer::from_text("Hello Earth!");
+
+        let result = buffer.insert_at(5, " brave");
+
+        assert!(result.changed);
+        assert_eq!(result.caret, 11);
+        assert_eq!(buffer.visible_text(), "Hello brave Earth!");
+    }
+
+    #[test]
+    fn insert_at_invalid_byte_offset_clamps_to_scalar_boundary() {
+        let mut buffer = EditorBuffer::from_text("a🦀b");
+
+        let result = buffer.insert_at(2, "X");
+
+        assert!(result.changed);
+        assert_eq!(result.caret, 2);
+        assert_eq!(buffer.visible_text(), "aX🦀b");
+    }
+
+    #[test]
+    fn backspace_at_caret_deletes_previous_scalar_boundary() {
+        let mut buffer = EditorBuffer::from_text("a🦀b");
+        let caret_after_crab = "a🦀".len();
+
+        let result = buffer.backspace_at(caret_after_crab);
+
+        assert!(result.changed);
+        assert_eq!(result.caret, 1);
+        assert_eq!(buffer.visible_text(), "ab");
+    }
+
+    #[test]
+    fn delete_at_caret_deletes_next_scalar_boundary() {
+        let mut buffer = EditorBuffer::from_text("a🦀b");
+
+        let result = buffer.delete_after(1);
+
+        assert!(result.changed);
+        assert_eq!(result.caret, 1);
+        assert_eq!(buffer.visible_text(), "ab");
+    }
+
+    #[test]
+    fn delete_range_clamps_or_rejects_invalid_ranges() {
+        let mut buffer = EditorBuffer::from_text("a🦀b");
+
+        let result = buffer.delete_range(2..999);
+
+        assert!(result.changed);
+        assert_eq!(result.caret, 1);
+        assert_eq!(buffer.visible_text(), "a");
+
+        let rejected = buffer.delete_range(3..1);
+        assert!(!rejected.changed);
+        assert_eq!(buffer.visible_text(), "a");
     }
 
     #[test]

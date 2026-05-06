@@ -78,8 +78,36 @@ impl Widget for EditorWidget {
                         let changed = self.editor.backspace();
                         self.edit(ctx, changed);
                     }
+                    Key::Named(NamedKey::Delete) => {
+                        let changed = self.editor.delete_forward();
+                        self.edit(ctx, changed);
+                    }
                     Key::Named(NamedKey::Enter) => {
                         let changed = self.editor.insert_newline();
+                        self.edit(ctx, changed);
+                    }
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        let changed = self.editor.move_left();
+                        self.edit(ctx, changed);
+                    }
+                    Key::Named(NamedKey::ArrowRight) => {
+                        let changed = self.editor.move_right();
+                        self.edit(ctx, changed);
+                    }
+                    Key::Named(NamedKey::Home) => {
+                        let changed = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
+                            self.editor.move_to_document_start()
+                        } else {
+                            self.editor.move_to_line_start()
+                        };
+                        self.edit(ctx, changed);
+                    }
+                    Key::Named(NamedKey::End) => {
+                        let changed = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
+                            self.editor.move_to_document_end()
+                        } else {
+                            self.editor.move_to_line_end()
+                        };
                         self.edit(ctx, changed);
                     }
                     Key::Character(text) => {

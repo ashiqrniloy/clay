@@ -2,7 +2,8 @@ use masonry::core::PaintCtx;
 use masonry::kurbo::{Affine, Circle, Rect};
 use masonry::peniko::{Color, Fill};
 
-use super::buffer::EditorBuffer;
+use super::buffer::{EditResult, EditorBuffer};
+use super::cursor::CursorState;
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState};
 use super::viewport::{Viewport, visible_line_count_from_height};
@@ -19,6 +20,7 @@ const LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
 #[derive(Debug, Default)]
 pub struct EditorSurface {
     buffer: EditorBuffer,
+    cursor: CursorState,
     viewport: Viewport,
     layout: LayoutState,
     visual_scroll_y: f64,
@@ -32,27 +34,47 @@ impl EditorSurface {
             return false;
         }
 
-        self.buffer.insert_str(text);
-        self.follow_document_end();
-        self.follow_visual_end = true;
-        true
+        let result = self.buffer.insert_at(self.cursor.caret(), text);
+        self.finish_edit(result)
     }
 
     pub fn insert_newline(&mut self) -> bool {
-        self.buffer.insert_str("\n");
-        self.follow_document_end();
-        self.follow_visual_end = true;
-        true
+        let result = self.buffer.insert_newline_at(self.cursor.caret());
+        self.finish_edit(result)
     }
 
     pub fn backspace(&mut self) -> bool {
-        if !self.buffer.backspace() {
-            return false;
-        }
+        let result = self.buffer.backspace_at(self.cursor.caret());
+        self.finish_edit(result)
+    }
 
-        self.follow_document_end();
-        self.follow_visual_end = true;
-        true
+    pub fn delete_forward(&mut self) -> bool {
+        let result = self.buffer.delete_after(self.cursor.caret());
+        self.finish_edit(result)
+    }
+
+    pub fn move_left(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_previous_scalar(buffer))
+    }
+
+    pub fn move_right(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_next_scalar(buffer))
+    }
+
+    pub fn move_to_line_start(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_line_start(buffer))
+    }
+
+    pub fn move_to_line_end(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_line_end(buffer))
+    }
+
+    pub fn move_to_document_start(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_document_start(buffer))
+    }
+
+    pub fn move_to_document_end(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_document_end(buffer))
     }
 
     pub fn visible_text(&self) -> String {
@@ -163,8 +185,33 @@ impl EditorSurface {
         self.buffer.visible_snapshot(range).text
     }
 
-    fn follow_document_end(&mut self) -> bool {
-        self.viewport.follow_document_end(self.buffer.line_len())
+    fn finish_edit(&mut self, result: EditResult) -> bool {
+        self.cursor.set_caret(result.caret);
+        if !result.changed {
+            return false;
+        }
+
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = true;
+        true
+    }
+
+    fn ensure_caret_line_visible(&mut self) -> bool {
+        let caret_line = self.buffer.line_of_byte(self.cursor.caret());
+        self.viewport
+            .ensure_line_visible(caret_line, self.buffer.line_len())
+    }
+
+    fn move_cursor(
+        &mut self,
+        movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
+    ) -> bool {
+        let changed = movement(&mut self.cursor, &self.buffer);
+        if changed {
+            self.ensure_caret_line_visible();
+            self.follow_visual_end = false;
+        }
+        changed
     }
 
     fn scroll_visual_pixels(&mut self, delta_pixels: f64) -> bool {
@@ -177,6 +224,17 @@ impl EditorSurface {
             (self.visual_scroll_y + delta_pixels).clamp(0.0, self.last_visual_max_scroll_y);
         self.follow_visual_end = false;
         self.visual_scroll_y != previous
+    }
+
+    #[cfg(test)]
+    fn set_caret_for_test(&mut self, caret: usize) {
+        let caret = self.buffer.clamp_byte_offset(caret);
+        self.cursor.set_caret(caret);
+    }
+
+    #[cfg(test)]
+    fn caret_for_test(&self) -> usize {
+        self.cursor.caret()
     }
 
     #[cfg(test)]
@@ -210,6 +268,19 @@ mod tests {
     }
 
     #[test]
+    fn editor_insert_text_uses_caret_instead_of_appending() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.set_caret_for_test(1);
+
+        let changed = editor.insert_text("X");
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "aXbc");
+        assert_eq!(editor.caret_for_test(), 2);
+    }
+
+    #[test]
     fn editor_insert_newline_auto_scrolls_to_new_line() {
         let mut editor = EditorSurface::default();
         editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 1.0);
@@ -233,6 +304,45 @@ mod tests {
 
         assert!(changed);
         assert_eq!(editor.visible_text(), "secon");
+    }
+
+    #[test]
+    fn editor_delete_forward_removes_text_after_caret() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.set_caret_for_test(1);
+
+        let changed = editor.delete_forward();
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "ac");
+        assert_eq!(editor.caret_for_test(), 1);
+    }
+
+    #[test]
+    fn editor_cursor_navigation_moves_over_unicode_boundaries() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("a🦀b");
+        editor.set_caret_for_test("a🦀".len());
+
+        assert!(editor.move_left());
+        assert_eq!(editor.caret_for_test(), 1);
+        assert!(editor.move_right());
+        assert_eq!(editor.caret_for_test(), "a🦀".len());
+    }
+
+    #[test]
+    fn editor_home_end_navigation_uses_current_line() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("zero");
+        editor.insert_newline();
+        editor.insert_text("one");
+        editor.set_caret_for_test("zero\no".len());
+
+        assert!(editor.move_to_line_end());
+        assert_eq!(editor.caret_for_test(), "zero\none".len());
+        assert!(editor.move_to_line_start());
+        assert_eq!(editor.caret_for_test(), "zero\n".len());
     }
 
     #[test]

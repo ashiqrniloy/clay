@@ -1,4 +1,5 @@
 pub(crate) mod buffer;
+pub(crate) mod cursor;
 mod layout;
 mod surface;
 mod viewport;

@@ -17,7 +17,7 @@
 
 ## Tasks
 
-- [ ] Introduce cursor and text-range editing primitives
+- [x] Introduce cursor and text-range editing primitives
   - Acceptance Criteria:
     - Functional: `EditorBuffer` can insert text, insert newline, delete a byte range, backspace before an arbitrary caret, and delete after an arbitrary caret while returning updated caret offsets.
     - Performance: Edit operations use `crop::Rope` byte-offset insert/delete/replace APIs and do not materialize the whole buffer during normal editing.
@@ -59,7 +59,7 @@
     - `delete_at_caret_deletes_next_scalar_boundary`: Delete removes the next valid Unicode scalar after the caret.
     - `delete_range_clamps_or_rejects_invalid_ranges`: Invalid/out-of-order ranges do not panic and do not mutate unexpectedly.
 
-- [ ] Add Unicode-safe cursor movement helpers
+- [x] Add Unicode-safe cursor movement helpers
   - Acceptance Criteria:
     - Functional: The editor can move the caret to the previous/next valid text boundary, document start, document end, line start, and line end without panicking on multibyte Unicode text.
     - Performance: Movement operates on bounded rope slices around the current offset where practical and avoids cloning the whole document for each key press.
@@ -74,7 +74,7 @@
       - Add a direct `unicode-segmentation` dependency and move by grapheme clusters: better editor behavior and the crate is already present transitively, but adds an explicit dependency and may require chunk-aware helpers for large ropes.
       - Implement full UAX #29 over rope chunks manually: unnecessary and error-prone for this phase.
     - Chosen Approach:
-      - Prefer adding `unicode-segmentation` as a direct dependency if implementation confirms bounded chunk handling is practical. Otherwise, implement scalar-boundary movement first and document grapheme-perfect movement as a follow-up. In either case, all offsets passed to `crop` must be valid UTF-8 boundaries.
+      - Implemented scalar-boundary movement first, using `crop` byte-offset and character-boundary helpers to keep all offsets valid UTF-8. Grapheme-perfect movement with `unicode-segmentation` remains deferred until chunk-aware layout/caret work makes the extra dependency worthwhile.
     - API Notes and Examples:
       ```rust
       use unicode_segmentation::UnicodeSegmentation;
@@ -87,10 +87,10 @@
           .collect();
       ```
     - Files to Create/Edit:
-      - `Cargo.toml`: Tentatively add `unicode-segmentation` as a direct dependency if grapheme-boundary movement is implemented.
-      - `Cargo.lock`: Update if dependency graph changes.
-      - `src/editor/cursor.rs`: Add movement helpers and tests.
-      - `src/editor/buffer.rs`: Add bounded text-slice helpers needed by movement.
+      - `src/editor/cursor.rs`: Add scalar-boundary movement helpers and tests.
+      - `src/editor/buffer.rs`: Add bounded byte/line helper APIs needed by movement.
+      - `src/editor/surface.rs`: Expose cursor movement commands that keep the caret line visible.
+      - `src/masonry_editor.rs`: Map Left/Right/Home/End keyboard events to cursor movement, with Ctrl/Meta+Home/End for document start/end.
     - References:
       - Context7 docs response `ctx7:docs:84c9d8ddc267eeda13d6f4cf` for `unicode-segmentation` boundary APIs.
       - `crop` docs/code-search results for UTF-8 byte offset indexing and boundary panics.
