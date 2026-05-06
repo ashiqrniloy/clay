@@ -257,7 +257,7 @@
     - Manual smoke test: Window still opens, renders editor text, accepts typing/backspace, and exits.
     - Build check: `cargo fmt`, `cargo test`, and `cargo check` passed after Masonry integration.
 
-- [ ] Verify and document Phase 0 completion
+- [x] Verify and document Phase 0 completion
   - Acceptance Criteria:
     - Functional: The final Phase 0 prototype visibly edits rope-backed text through Vello/Parley and has a documented Masonry integration boundary.
     - Performance: No deliberate busy-loop redraw is left in place; redraws occur on startup, resize, and text edits.

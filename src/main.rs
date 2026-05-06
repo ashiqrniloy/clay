@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::editor::{EditorBuffer, is_printable_text};
+    use super::editor::{buffer::EditorBuffer, is_printable_text};
 
     #[test]
     fn editor_buffer_appends_input() {
