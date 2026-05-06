@@ -1,11 +1,11 @@
-use std::fmt;
+use std::{fmt, ops::Range};
 
 use masonry::core::{BrushIndex, PaintCtx, render_text};
 use masonry::kurbo::{Affine, Rect};
 use masonry::parley::Layout;
-use masonry::parley::layout::{Affinity, Cursor};
+use masonry::parley::layout::{Affinity, Cursor, Selection};
 use masonry::parley::style::{LineHeight, StyleProperty};
-use masonry::peniko::Color;
+use masonry::peniko::{Color, Fill};
 use masonry::{TextAlign, TextAlignOptions};
 
 use super::surface::{TEXT_FONT_SIZE, TEXT_INSET};
@@ -79,6 +79,8 @@ impl LayoutState {
         available_height: f64,
         key: LayoutCacheKey,
         caret_visible_byte_offset: Option<usize>,
+        selection_visible_byte_range: Option<Range<usize>>,
+        selection_color: Color,
     ) -> VisualLayoutMetrics {
         if self.should_rebuild(key, ctx.fonts_changed()) {
             self.rebuild(ctx, display_text, max_width, key);
@@ -109,6 +111,23 @@ impl LayoutState {
             TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
+        if let Some(range) = selection_visible_byte_range {
+            for rect in Self::selection_rects_in_layout(&cached.layout, cached.text_len, range) {
+                let rect = Rect::new(
+                    rect.x0 + TEXT_INSET,
+                    rect.y0 + TEXT_INSET - *scroll_y,
+                    rect.x1 + TEXT_INSET,
+                    rect.y1 + TEXT_INSET - *scroll_y,
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    selection_color,
+                    None,
+                    &rect,
+                );
+            }
+        }
         render_text(
             scene,
             Affine::translate((TEXT_INSET, TEXT_INSET - *scroll_y)),
@@ -145,6 +164,26 @@ impl LayoutState {
                 }
             }
         })
+    }
+
+    fn selection_rects_in_layout(
+        layout: &Layout<BrushIndex>,
+        text_len: usize,
+        range: Range<usize>,
+    ) -> Vec<Rect> {
+        let start = range.start.min(text_len);
+        let end = range.end.min(text_len);
+        if start >= end {
+            return Vec::new();
+        }
+
+        let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
+        let focus = Cursor::from_byte_index(layout, end, Affinity::Upstream);
+        Selection::new(anchor, focus)
+            .geometry(layout)
+            .into_iter()
+            .map(|(rect, _)| Rect::new(rect.x0, rect.y0, rect.x1, rect.y1))
+            .collect()
     }
 
     fn caret_geometry_in_layout(
@@ -374,5 +413,15 @@ mod tests {
         LayoutState::ensure_rect_visible(&mut scroll_y, caret, 56.0, 100.0);
 
         assert_eq!(scroll_y, 50.0);
+    }
+
+    #[test]
+    fn selection_geometry_is_available_for_visible_range() {
+        let layout = LayoutState::build_layout_for_test("abc", 300.0);
+
+        let rects = LayoutState::selection_rects_in_layout(&layout, "abc".len(), 1..3);
+
+        assert!(!rects.is_empty());
+        assert!(rects.iter().all(|rect| rect.width().is_finite()));
     }
 }

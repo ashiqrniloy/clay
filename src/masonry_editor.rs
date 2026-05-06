@@ -102,10 +102,20 @@ impl Widget for EditorWidget {
                         self.local_command(ctx, EditorCommand::Newline);
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
-                        self.local_command(ctx, EditorCommand::MoveLeft);
+                        let command = if key_event.modifiers.shift() {
+                            EditorCommand::SelectLeft
+                        } else {
+                            EditorCommand::MoveLeft
+                        };
+                        self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::ArrowRight) => {
-                        self.local_command(ctx, EditorCommand::MoveRight);
+                        let command = if key_event.modifiers.shift() {
+                            EditorCommand::SelectRight
+                        } else {
+                            EditorCommand::MoveRight
+                        };
+                        self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::ArrowUp) => {
                         self.local_command(ctx, EditorCommand::MoveUp);

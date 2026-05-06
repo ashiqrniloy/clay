@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use masonry::core::PaintCtx;
 use masonry::kurbo::{Affine, Circle, Point, Rect};
 use masonry::peniko::{Color, Fill};
@@ -6,12 +8,14 @@ use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
 use super::cursor::CursorState;
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState};
+use super::selection::SelectionState;
 use super::viewport::{Viewport, visible_line_count_from_height};
 
 const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
 const TEXT_COLOR: Color = Color::from_rgb8(0xf4, 0xf1, 0xff);
 const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
+const SELECTION_COLOR: Color = Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66);
 const CARET_COLOR: Color = Color::from_rgb8(0xff, 0xff, 0xff);
 const CARET_WIDTH: f64 = 1.5;
 pub(super) const TEXT_INSET: f64 = 48.0;
@@ -27,6 +31,8 @@ pub enum EditorCommand<'a> {
     DeleteForward,
     MoveLeft,
     MoveRight,
+    SelectLeft,
+    SelectRight,
     MoveUp,
     MoveDown,
     LineStart,
@@ -39,6 +45,7 @@ pub enum EditorCommand<'a> {
 pub struct EditorSurface {
     buffer: EditorBuffer,
     cursor: CursorState,
+    selection: Option<SelectionState>,
     viewport: Viewport,
     layout: LayoutState,
     visual_scroll_y: f64,
@@ -55,6 +62,8 @@ impl EditorSurface {
             EditorCommand::DeleteForward => self.delete_forward(),
             EditorCommand::MoveLeft => self.move_left(),
             EditorCommand::MoveRight => self.move_right(),
+            EditorCommand::SelectLeft => self.select_left(),
+            EditorCommand::SelectRight => self.select_right(),
             EditorCommand::MoveUp => self.move_up(),
             EditorCommand::MoveDown => self.move_down(),
             EditorCommand::LineStart => self.move_to_line_start(),
@@ -69,31 +78,60 @@ impl EditorSurface {
             return false;
         }
 
-        let result = self.buffer.insert_at(self.cursor.caret(), text);
-        self.finish_edit(result)
+        self.replace_selection_or_insert(text)
     }
 
     pub fn insert_newline(&mut self) -> bool {
-        let result = self.buffer.insert_newline_at(self.cursor.caret());
+        let result = if let Some(range) = self.selected_range() {
+            self.buffer.replace_range(range, "\n")
+        } else {
+            self.buffer.insert_newline_at(self.cursor.caret())
+        };
         self.finish_edit(result)
     }
 
     pub fn backspace(&mut self) -> bool {
+        if let Some(range) = self.selected_range() {
+            let result = self.buffer.delete_range(range);
+            return self.finish_edit(result);
+        }
+
         let result = self.buffer.backspace_at(self.cursor.caret());
         self.finish_edit(result)
     }
 
     pub fn delete_forward(&mut self) -> bool {
+        if let Some(range) = self.selected_range() {
+            let result = self.buffer.delete_range(range);
+            return self.finish_edit(result);
+        }
+
         let result = self.buffer.delete_after(self.cursor.caret());
         self.finish_edit(result)
     }
 
     pub fn move_left(&mut self) -> bool {
+        if let Some(range) = self.selected_range() {
+            return self.collapse_selection_to(range.start);
+        }
+
         self.move_cursor(|cursor, buffer| cursor.move_to_previous_scalar(buffer))
     }
 
     pub fn move_right(&mut self) -> bool {
+        if let Some(range) = self.selected_range() {
+            return self.collapse_selection_to(range.end);
+        }
+
         self.move_cursor(|cursor, buffer| cursor.move_to_next_scalar(buffer))
+    }
+
+    pub fn select_left(&mut self) -> bool {
+        self.extend_selection(|cursor, buffer| cursor.move_to_previous_scalar(buffer))
+    }
+
+    pub fn select_right(&mut self) -> bool {
+        self.extend_selection(|cursor, buffer| cursor.move_to_next_scalar(buffer))
     }
 
     pub fn move_up(&mut self) -> bool {
@@ -169,6 +207,7 @@ impl EditorSurface {
 
         let previous = self.cursor.caret();
         self.cursor.set_caret(caret);
+        self.selection = None;
         self.follow_visual_end = false;
         self.ensure_caret_line_visible();
         previous != self.cursor.caret()
@@ -256,6 +295,7 @@ impl EditorSurface {
         };
 
         let caret_visible_offset = self.visible_caret_offset(&snapshot);
+        let selection_visible_range = self.visible_selection_range(&snapshot);
         let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width);
         let metrics = self.layout.paint_text(
             ctx,
@@ -268,6 +308,8 @@ impl EditorSurface {
             available_height,
             key,
             caret_visible_offset,
+            selection_visible_range,
+            SELECTION_COLOR,
         );
         if current_text.is_empty() {
             self.visual_scroll_y = 0.0;
@@ -320,13 +362,49 @@ impl EditorSurface {
             .then_some(caret - snapshot.start_byte_offset)
     }
 
+    fn visible_selection_range(&self, snapshot: &VisibleSnapshot) -> Option<Range<usize>> {
+        let selection = self.selection?;
+        let range = selection.normalized_range();
+        let visible_start = snapshot.start_byte_offset;
+        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        let start = range.start.max(visible_start);
+        let end = range.end.min(visible_end);
+        (start < end).then_some((start - visible_start)..(end - visible_start))
+    }
+
     fn visible_snapshot(&self) -> VisibleSnapshot {
         let range = self.viewport.visible_range(self.buffer.line_len());
         self.buffer.visible_snapshot(range)
     }
 
+    fn selected_range(&self) -> Option<Range<usize>> {
+        let selection = self.selection?.clamped(&self.buffer);
+        let range = selection.normalized_range();
+        (range.start < range.end).then_some(range)
+    }
+
+    fn replace_selection_or_insert(&mut self, text: &str) -> bool {
+        let result = if let Some(range) = self.selected_range() {
+            self.buffer.replace_range(range, text)
+        } else {
+            self.buffer.insert_at(self.cursor.caret(), text)
+        };
+        self.finish_edit(result)
+    }
+
+    fn collapse_selection_to(&mut self, caret: usize) -> bool {
+        let previous_caret = self.cursor.caret();
+        let had_selection = self.selection.is_some();
+        self.cursor.set_caret(caret);
+        self.selection = None;
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        had_selection || previous_caret != self.cursor.caret()
+    }
+
     fn finish_edit(&mut self, result: EditResult) -> bool {
         self.cursor.set_caret(result.caret);
+        self.selection = None;
         if !result.changed {
             return false;
         }
@@ -346,12 +424,38 @@ impl EditorSurface {
         &mut self,
         movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
     ) -> bool {
+        let had_selection = self.selection.is_some();
         let changed = movement(&mut self.cursor, &self.buffer);
-        if changed {
+        self.selection = None;
+        if changed || had_selection {
             self.ensure_caret_line_visible();
             self.follow_visual_end = false;
         }
-        changed
+        changed || had_selection
+    }
+
+    fn extend_selection(
+        &mut self,
+        movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
+    ) -> bool {
+        let anchor = self
+            .selection
+            .map_or_else(|| self.cursor.caret(), |selection| selection.anchor());
+        let changed = movement(&mut self.cursor, &self.buffer);
+        if !changed {
+            return false;
+        }
+
+        let mut selection = SelectionState::new(anchor, self.cursor.caret()).clamped(&self.buffer);
+        if selection.is_collapsed() {
+            self.selection = None;
+        } else {
+            selection.set_focus(self.cursor.caret());
+            self.selection = Some(selection);
+        }
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        true
     }
 
     fn scroll_visual_pixels(&mut self, delta_pixels: f64) -> bool {
@@ -381,6 +485,19 @@ impl EditorSurface {
     #[cfg(test)]
     fn caret_for_test(&self) -> usize {
         self.cursor.caret()
+    }
+
+    #[cfg(test)]
+    fn selection_for_test(&self) -> Option<(usize, usize)> {
+        self.selection
+            .map(|selection| (selection.anchor(), selection.focus()))
+    }
+
+    #[cfg(test)]
+    fn set_selection_for_test(&mut self, anchor: usize, focus: usize) {
+        let selection = SelectionState::new(anchor, focus).clamped(&self.buffer);
+        self.cursor.set_caret(selection.focus());
+        self.selection = (!selection.is_collapsed()).then_some(selection);
     }
 
     #[cfg(test)]
@@ -549,6 +666,86 @@ mod tests {
         assert!(editor.command(EditorCommand::DeleteForward));
 
         assert_eq!(editor.visible_text(), "bXc");
+    }
+
+    #[test]
+    fn typing_replaces_selected_range() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abcdef");
+        editor.set_selection_for_test(2, 5);
+
+        let changed = editor.insert_text("X");
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "abXf");
+        assert_eq!(editor.caret_for_test(), 3);
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn enter_replaces_selected_range() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abcd");
+        editor.set_selection_for_test(1, 3);
+
+        let changed = editor.insert_newline();
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "a\nd");
+        assert_eq!(editor.caret_for_test(), 2);
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn backspace_deletes_selected_range() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abcdef");
+        editor.set_selection_for_test(5, 2);
+
+        let changed = editor.backspace();
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "abf");
+        assert_eq!(editor.caret_for_test(), 2);
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn delete_forward_deletes_selected_range() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abcdef");
+        editor.set_selection_for_test(1, 4);
+
+        let changed = editor.delete_forward();
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "aef");
+        assert_eq!(editor.caret_for_test(), 1);
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn shift_left_and_right_extend_selection() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+
+        assert!(editor.select_left());
+        assert_eq!(editor.selection_for_test(), Some((3, 2)));
+        assert!(editor.select_left());
+        assert_eq!(editor.selection_for_test(), Some((3, 1)));
+        assert!(editor.select_right());
+        assert_eq!(editor.selection_for_test(), Some((3, 2)));
+    }
+
+    #[test]
+    fn non_shift_movement_clears_selection() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.set_selection_for_test(1, 3);
+
+        assert!(editor.move_left());
+        assert_eq!(editor.caret_for_test(), 1);
+        assert_eq!(editor.selection_for_test(), None);
     }
 
     #[test]

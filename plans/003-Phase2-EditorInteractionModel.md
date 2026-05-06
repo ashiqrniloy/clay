@@ -250,7 +250,7 @@
     - `place_caret_at_point_after_text_moves_to_visible_end`: Click after trailing text maps to a valid end offset.
     - Manual smoke test: Click the middle of existing text and type; inserted text appears at the clicked caret.
 
-- [ ] Add basic selection model and selected-range editing
+- [x] Add basic selection model and selected-range editing
   - Acceptance Criteria:
     - Functional: The editor supports an optional selection range with anchor/focus offsets, Shift+Left/Right extension, pointer drag selection if practical, replacement of selected text on printable input/Enter, and deletion of selected text on Backspace/Delete.
     - Performance: Selection updates mutate small cursor/selection state and reuse cached layout geometry for painting; selected text deletion uses `crop` range deletion.
@@ -266,7 +266,7 @@
       - Implement keyboard-only selection first: simpler and testable; pointer drag can be added if Masonry pointer APIs are straightforward.
       - Implement full word/line multi-click selection: useful later, but too much for this phase.
     - Chosen Approach:
-      - Add `SelectionState { anchor, focus }` with normalized selected range helpers. Implement Shift+Left/Right first, selected-range deletion/replacement, and selection highlight painting. Add pointer drag selection if primary-down/move/up and pointer capture are straightforward in Masonry 0.4.
+      - Added `SelectionState { anchor, focus }` with normalized selected range helpers. Implemented Shift+Left/Right selection extension, non-shift selection collapse/clearing, selected-range deletion/replacement for printable input/Enter/Backspace/Delete, click-to-place selection clearing, and selection highlight painting via Parley selection geometry over the cached visible layout. Pointer drag selection was deferred because keyboard selection and selected-range editing complete the basic model without adding pointer-capture state yet.
     - API Notes and Examples:
       ```rust
       pub struct SelectionState {
@@ -280,9 +280,10 @@
     - Files to Create/Edit:
       - `src/editor/selection.rs`: New selection state and range normalization tests.
       - `src/editor.rs`: Export selection module as needed.
+      - `src/editor/buffer.rs`: Add range replacement helper for selected-range edits.
       - `src/editor/surface.rs`: Add selected-range replace/delete and selection-aware movement commands.
       - `src/editor/layout.rs`: Add selection highlight geometry/render support.
-      - `src/masonry_editor.rs`: Map Shift+navigation and optional drag selection events.
+      - `src/masonry_editor.rs`: Map Shift+Left/Right navigation to selection extension.
     - References:
       - Context7 Parley selection docs response `ctx7:docs:95021dc4b462504fb49442d4`.
       - `roadmap.md` Phase 2 basic selection model.
@@ -334,7 +335,7 @@
     - Manual GUI smoke test: launch, type, click to move caret, edit middle text, navigate with arrows/Home/End, select/replace/delete text, scroll wrapped and multiline content, resize, Backspace/Delete, and Escape exit.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Pointer drag selection was deferred during the basic selection task; Shift+Left/Right selection, selected-range replacement/deletion, click clearing, and highlight painting are implemented and verified.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+- Add pointer drag selection after the remaining Phase 2 regression task, using Masonry pointer capture once the minimal keyboard selection model is stable.

@@ -56,6 +56,32 @@ impl EditorBuffer {
         self.insert_at(caret, "\n")
     }
 
+    pub fn replace_range(&mut self, range: Range<usize>, text: &str) -> EditResult {
+        let caret = self.clamp_byte_offset(range.start);
+        if range.start > range.end {
+            return EditResult {
+                changed: false,
+                caret,
+            };
+        }
+
+        let start = caret;
+        let end = self.clamp_byte_offset(range.end);
+        if start == end && text.is_empty() {
+            return EditResult {
+                changed: false,
+                caret: start,
+            };
+        }
+
+        self.rope.replace(start..end, text);
+        self.bump_revision();
+        EditResult {
+            changed: true,
+            caret: start + text.len(),
+        }
+    }
+
     pub fn delete_range(&mut self, range: Range<usize>) -> EditResult {
         let caret = self.clamp_byte_offset(range.start);
         if range.start > range.end {
@@ -416,6 +442,17 @@ mod tests {
         let rejected = buffer.delete_range(3..1);
         assert!(!rejected.changed);
         assert_eq!(buffer.visible_text(), "a");
+    }
+
+    #[test]
+    fn replace_range_updates_text_and_caret() {
+        let mut buffer = EditorBuffer::from_text("abcdef");
+
+        let result = buffer.replace_range(2..5, "X");
+
+        assert!(result.changed);
+        assert_eq!(result.caret, 3);
+        assert_eq!(buffer.visible_text(), "abXf");
     }
 
     #[test]
