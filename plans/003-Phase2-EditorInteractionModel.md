@@ -294,7 +294,7 @@
     - `shift_left_and_right_extend_selection`: Keyboard selection updates anchor/focus as expected.
     - Manual smoke test: Select text with Shift+arrows, type replacement text, then delete another selection.
 
-- [ ] Preserve viewport, layout cache, accessibility, and large-buffer regressions
+- [x] Preserve viewport, layout cache, accessibility, and large-buffer regressions
   - Acceptance Criteria:
     - Functional: Existing Phase 1 behavior for bounded visible extraction, scrolling, visual wrapped-line overflow, placeholder text, accessibility label updates, resize, focus, and Escape exit still works after cursor/selection changes.
     - Performance: Large-buffer tests continue to demonstrate viewport-bounded extraction and layout cache reuse/invalidation; no new normal paint path uses whole-buffer `to_string()`.
@@ -309,7 +309,7 @@
       - Preserve and extend existing tests: keeps foundation guarantees while adding interaction coverage.
       - Add formal benchmarks now: useful later but not necessary for Phase 2 acceptance.
     - Chosen Approach:
-      - Update existing tests only where semantics intentionally change from append-only to caret-based behavior. Add interaction-focused unit tests and keep manual GUI smoke testing as the final check.
+      - Preserved the existing viewport, layout-cache, visual overflow, placeholder, focus, resize, and Escape behavior paths while adding regression tests around the new cursor/selection state. Added bounded large-buffer extraction coverage after caret/selection changes, verified caret/selection state does not alter the layout cache key when text/viewport/width are unchanged, and factored accessibility label creation so it can be unit-tested after middle insertion.
     - API Notes and Examples:
       ```bash
       cargo fmt
@@ -318,11 +318,11 @@
       cargo run
       ```
     - Files to Create/Edit:
-      - `src/editor/buffer.rs`: Update existing append/backspace tests for caret-aware APIs while preserving viewport extraction tests.
-      - `src/editor/layout.rs`: Preserve cache and visual-line tests; add caret/selection geometry tests where practical.
-      - `src/editor/surface.rs`: Update editor behavior tests for caret/selection semantics.
-      - `src/editor/viewport.rs`: Preserve viewport tests and add caret-visible cases if not added earlier.
-      - `src/masonry_editor.rs`: Preserve focus/accessibility behavior.
+      - `src/editor/buffer.rs`: Existing viewport extraction and large-buffer tests preserved.
+      - `src/editor/layout.rs`: Existing cache and visual-line tests preserved; caret/selection geometry tests retained.
+      - `src/editor/surface.rs`: Added regression tests for bounded large-buffer visible extraction after cursor/selection changes and layout-cache key stability across caret/selection-only state changes.
+      - `src/editor/viewport.rs`: Existing viewport tests preserved.
+      - `src/masonry_editor.rs`: Factored accessibility label generation and added label regression tests for empty text and middle insertion.
       - `plans/003-Phase2-EditorInteractionModel.md`: Mark completed tasks and fill post-implementation notes after verification.
     - References:
       - `plans/002-Phase1-TextCanvasFoundation.md` large-buffer and cache-regression tasks.
@@ -330,12 +330,15 @@
   - Test Cases to Write:
     - `large_buffer_visible_extraction_remains_bounded_after_cursor_changes`: Interaction state does not force full-buffer paint extraction.
     - `layout_cache_invalidates_on_caret_relevant_viewport_change_only_when_needed`: Caret/selection paint changes do not unnecessarily rebuild text layout unless text/range/width/font changes.
-    - `accessibility_label_updates_after_caret_edit`: Accessibility label reflects visible text after middle insertion/deletion.
+    - `accessibility_label_updates_after_caret_edit`: Accessibility label reflects visible text after middle insertion.
+    - `accessibility_label_uses_placeholder_for_empty_editor`: Empty editor retains the placeholder accessibility label.
     - `phase2_regression_commands`: `cargo fmt`, `cargo test`, and `cargo check` all pass.
     - Manual GUI smoke test: launch, type, click to move caret, edit middle text, navigate with arrows/Home/End, select/replace/delete text, scroll wrapped and multiline content, resize, Backspace/Delete, and Escape exit.
 
 ## Compromises Made
 - Pointer drag selection was deferred during the basic selection task; Shift+Left/Right selection, selected-range replacement/deletion, click clearing, and highlight painting are implemented and verified.
+- Phase 2 regression coverage is automated with unit tests and Cargo verification; a manual GUI smoke pass was not automated in this task.
 
 ## Further Actions
-- Add pointer drag selection after the remaining Phase 2 regression task, using Masonry pointer capture once the minimal keyboard selection model is stable.
+- Add pointer drag selection in a follow-up phase using Masonry pointer capture once the minimal keyboard selection model is stable.
+- Run a manual GUI smoke pass before release packaging: launch, type, click to move caret, edit middle text, navigate, select/replace/delete, scroll wrapped/multiline content, resize, Backspace/Delete, and Escape exit.

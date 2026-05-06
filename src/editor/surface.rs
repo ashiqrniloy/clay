@@ -477,6 +477,17 @@ impl EditorSurface {
     }
 
     #[cfg(test)]
+    fn set_text_for_test(&mut self, text: &str) {
+        self.buffer = EditorBuffer::from_text(text);
+        self.cursor.set_caret(0);
+        self.selection = None;
+        self.viewport = Viewport::default();
+        self.visual_scroll_y = 0.0;
+        self.last_visual_max_scroll_y = 0.0;
+        self.follow_visual_end = false;
+    }
+
+    #[cfg(test)]
     fn set_caret_for_test(&mut self, caret: usize) {
         let caret = self.buffer.clamp_byte_offset(caret);
         self.cursor.set_caret(caret);
@@ -516,7 +527,18 @@ impl EditorSurface {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::{EditorCommand, EditorSurface, TEXT_INSET};
+    use crate::editor::layout::LayoutCacheKey;
+
+    fn generated_lines(line_count: usize) -> String {
+        let mut text = String::new();
+        for line in 0..line_count {
+            writeln!(text, "line {line:05}").expect("writing to String cannot fail");
+        }
+        text
+    }
 
     #[test]
     fn editor_enter_inserts_newline() {
@@ -769,5 +791,39 @@ mod tests {
 
         assert!(changed);
         assert_eq!(editor.visual_scroll_y(), 80.0);
+    }
+
+    #[test]
+    fn large_buffer_visible_extraction_remains_bounded_after_cursor_changes() {
+        let text = generated_lines(10_000);
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(&text);
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 12.0 * 28.0);
+        assert!(editor.scroll_lines(5_000));
+        let visible_start = editor.visible_snapshot().start_byte_offset;
+        editor.set_caret_for_test(visible_start);
+        assert!(editor.move_right());
+        assert!(editor.select_right());
+
+        let snapshot = editor.visible_snapshot();
+
+        assert_eq!(snapshot.line_range, 5_000..5_016);
+        assert!(snapshot.text.len() < text.len() / 100);
+        assert!(snapshot.text.starts_with("line 05000\n"));
+    }
+
+    #[test]
+    fn layout_cache_invalidates_on_caret_relevant_viewport_change_only_when_needed() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.insert_text("abcdef"));
+        let key_before =
+            LayoutCacheKey::new(editor.buffer.revision(), editor.viewport.revision(), 300.0);
+
+        assert!(editor.move_left());
+        assert!(editor.select_left());
+        let key_after =
+            LayoutCacheKey::new(editor.buffer.revision(), editor.viewport.revision(), 300.0);
+
+        assert_eq!(key_after, key_before);
     }
 }

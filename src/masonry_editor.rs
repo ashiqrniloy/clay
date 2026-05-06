@@ -30,6 +30,15 @@ impl EditorWidget {
         }
         ctx.set_handled();
     }
+
+    fn accessibility_label(&self) -> String {
+        let text = self.editor.visible_text();
+        if text.is_empty() {
+            "Clay native text canvas".to_string()
+        } else {
+            text
+        }
+    }
 }
 
 impl Widget for EditorWidget {
@@ -199,12 +208,7 @@ impl Widget for EditorWidget {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        let text = self.editor.visible_text();
-        node.set_label(if text.is_empty() {
-            "Clay native text canvas".to_string()
-        } else {
-            text
-        });
+        node.set_label(self.accessibility_label());
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -217,5 +221,28 @@ impl Widget for EditorWidget {
 
     fn accepts_text_input(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorWidget;
+    use crate::editor::EditorCommand;
+
+    #[test]
+    fn accessibility_label_uses_placeholder_for_empty_editor() {
+        let widget = EditorWidget::default();
+
+        assert_eq!(widget.accessibility_label(), "Clay native text canvas");
+    }
+
+    #[test]
+    fn accessibility_label_updates_after_caret_edit() {
+        let mut widget = EditorWidget::default();
+        widget.editor.command(EditorCommand::Insert("abc"));
+        widget.editor.command(EditorCommand::MoveLeft);
+        widget.editor.command(EditorCommand::Insert("X"));
+
+        assert_eq!(widget.accessibility_label(), "abXc");
     }
 }
