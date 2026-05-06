@@ -84,8 +84,18 @@ impl EditorBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::EditorBuffer;
     use crate::editor::viewport::Viewport;
+
+    fn generated_lines(line_count: usize) -> String {
+        let mut text = String::new();
+        for line in 0..line_count {
+            writeln!(text, "line {line:05}").expect("writing to String cannot fail");
+        }
+        text
+    }
 
     #[test]
     fn visible_snapshot_limits_to_requested_lines() {
@@ -166,5 +176,35 @@ mod tests {
 
         assert_eq!(buffer.line_len(), 2);
         assert_eq!(buffer.visible_text(), "first\nsecond");
+    }
+
+    #[test]
+    fn large_buffer_visible_extraction_is_bounded() {
+        let text = generated_lines(10_000);
+        let buffer = EditorBuffer::from_text(&text);
+        let viewport = Viewport::new(5_000, 12, 3);
+
+        let snapshot = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(snapshot.line_range, 5_000..5_015);
+        assert!(snapshot.text.len() < text.len() / 100);
+        assert!(snapshot.text.starts_with("line 05000\n"));
+        assert!(snapshot.text.ends_with("line 05014\n"));
+    }
+
+    #[test]
+    fn large_buffer_scroll_changes_snapshot_without_changing_buffer() {
+        let text = generated_lines(10_000);
+        let buffer = EditorBuffer::from_text(&text);
+        let mut viewport = Viewport::new(0, 3, 0);
+        let before = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        let changed = viewport.scroll_lines(7_500, buffer.line_len());
+        let after = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert!(changed);
+        assert_eq!(before.text, "line 00000\nline 00001\nline 00002\n");
+        assert_eq!(after.text, "line 07500\nline 07501\nline 07502\n");
+        assert_eq!(buffer.visible_text().len(), text.len());
     }
 }

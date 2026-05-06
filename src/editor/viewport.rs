@@ -261,4 +261,15 @@ mod tests {
         assert!(!changed);
         assert_eq!(viewport.first_visible_line(), 3);
     }
+
+    #[test]
+    fn large_document_viewport_scroll_clamps_to_final_window() {
+        let mut viewport = Viewport::new(0, 25, 5);
+
+        let changed = viewport.scroll_lines(20_000, 10_000);
+
+        assert!(changed);
+        assert_eq!(viewport.first_visible_line(), 9_975);
+        assert_eq!(viewport.visible_range(10_000), 9_975..10_000);
+    }
 }

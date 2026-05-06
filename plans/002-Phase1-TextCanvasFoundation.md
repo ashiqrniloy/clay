@@ -301,7 +301,7 @@
     - `wrapped_text_follow_keeps_end_visible`: append-only wrapped text advances visual offset when visual lines exceed viewport height.
     - Manual smoke test: Type a long paragraph without Enter and confirm newly typed wrapped lines remain visible or scrollable.
 
-- [ ] Add large-buffer and regression checks for the Phase 1 foundation
+- [x] Add large-buffer and regression checks for the Phase 1 foundation
   - Acceptance Criteria:
     - Functional: A large multi-line in-memory buffer can be used in unit tests to verify bounded extraction, viewport clamping, and layout cache invalidation without changing runtime startup behavior.
     - Performance: Tests assert or otherwise demonstrate that paint-facing visible extraction is bounded by viewport size rather than total document size.
@@ -354,6 +354,7 @@
 - Added explicit Enter handling for newline insertion while keeping the generic printable-text filter strict against control newlines.
 - Added append-only logical-line follow behavior so insert, newline, and Backspace keep the end-of-buffer insertion point visible; this intentionally follows the document end until full cursor/selection state exists.
 - Added Parley visual-line overflow handling: cached layouts now report visual line count/height, text rendering is translated and clipped by a surface-level visual scroll offset, append-only edits follow the wrapped visual end, and wheel/trackpad scrolling uses visual overflow before falling back to logical-line scrolling.
+- Added large-buffer regression tests using generated in-memory text only: bounded visible extraction over 10,000 lines, large-buffer scroll snapshot changes, and final-window viewport clamping are covered by unit tests.
 
 ## Further Actions
-- Continue with the remaining Phase 1 task: large-buffer regression checks.
+- Phase 1 foundation plan tasks are complete. Continue with manual GUI smoke testing and the next roadmap phase when ready.
