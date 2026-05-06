@@ -9,7 +9,7 @@ use masonry::kurbo::Size;
 use masonry::peniko::Fill;
 use masonry::vello::Scene;
 
-use crate::editor::{EditorSurface, background_color};
+use crate::editor::{EditorCommand, EditorSurface, background_color};
 
 #[derive(Debug)]
 pub enum EditorAction {
@@ -22,12 +22,13 @@ pub struct EditorWidget {
 }
 
 impl EditorWidget {
-    fn edit(&mut self, ctx: &mut EventCtx<'_>, changed: bool) {
+    fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
+        let changed = self.editor.command(command);
         if changed {
             ctx.request_render();
             ctx.request_accessibility_update();
-            ctx.set_handled();
         }
+        ctx.set_handled();
     }
 }
 
@@ -68,58 +69,61 @@ impl Widget for EditorWidget {
         event: &TextEvent,
     ) {
         match event {
-            TextEvent::Keyboard(key_event) if key_event.state == KeyState::Down => {
+            TextEvent::Keyboard(key_event)
+                if key_event.state == KeyState::Down && !key_event.is_composing =>
+            {
                 match &key_event.key {
                     Key::Named(NamedKey::Escape) => {
                         ctx.submit_action::<Self::Action>(EditorAction::ExitRequested);
                         ctx.set_handled();
                     }
                     Key::Named(NamedKey::Backspace) => {
-                        let changed = self.editor.backspace();
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, EditorCommand::Backspace);
                     }
                     Key::Named(NamedKey::Delete) => {
-                        let changed = self.editor.delete_forward();
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, EditorCommand::DeleteForward);
                     }
                     Key::Named(NamedKey::Enter) => {
-                        let changed = self.editor.insert_newline();
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, EditorCommand::Newline);
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
-                        let changed = self.editor.move_left();
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, EditorCommand::MoveLeft);
                     }
                     Key::Named(NamedKey::ArrowRight) => {
-                        let changed = self.editor.move_right();
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, EditorCommand::MoveRight);
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        self.local_command(ctx, EditorCommand::MoveUp);
+                    }
+                    Key::Named(NamedKey::ArrowDown) => {
+                        self.local_command(ctx, EditorCommand::MoveDown);
                     }
                     Key::Named(NamedKey::Home) => {
-                        let changed = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
-                            self.editor.move_to_document_start()
+                        let command = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
+                            EditorCommand::DocumentStart
                         } else {
-                            self.editor.move_to_line_start()
+                            EditorCommand::LineStart
                         };
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::End) => {
-                        let changed = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
-                            self.editor.move_to_document_end()
+                        let command = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
+                            EditorCommand::DocumentEnd
                         } else {
-                            self.editor.move_to_line_end()
+                            EditorCommand::LineEnd
                         };
-                        self.edit(ctx, changed);
+                        self.local_command(ctx, command);
                     }
-                    Key::Character(text) => {
-                        let changed = self.editor.insert_text(text);
-                        self.edit(ctx, changed);
+                    Key::Character(text)
+                        if !key_event.modifiers.ctrl() && !key_event.modifiers.meta() =>
+                    {
+                        self.local_command(ctx, EditorCommand::Insert(text));
                     }
                     _ => {}
                 }
             }
             TextEvent::Ime(masonry::core::Ime::Commit(text)) => {
-                let changed = self.editor.insert_text(text);
-                self.edit(ctx, changed);
+                self.local_command(ctx, EditorCommand::Insert(text));
             }
             _ => {}
         }

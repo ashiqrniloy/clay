@@ -100,7 +100,7 @@
     - `cursor_boundary_policy_for_combining_marks_is_documented`: A test captures the chosen scalar-vs-grapheme behavior.
     - `line_start_and_line_end_handle_lf_and_final_line`: Home/End helpers work for middle lines and final non-newline-terminated lines.
 
-- [ ] Wire keyboard editing and navigation through Masonry text events
+- [x] Wire keyboard editing and navigation through Masonry text events
   - Acceptance Criteria:
     - Functional: Printable input, IME commits, Enter, Backspace, Delete, Left/Right, Up/Down, Home/End, and Escape behave as expected with the caret instead of always targeting the buffer end.
     - Performance: Key handling performs only local buffer/cursor/viewport mutations and requests Masonry render/accessibility updates when state changes.
@@ -115,7 +115,7 @@
       - Convert Masonry events into small editor commands: keeps UI boundary thin and makes future client/server edit messages clearer.
       - Use Masonry built-in `TextInput`/`TextArea`: would discard the custom `crop`/Parley/Vello canvas risk that Clay is proving.
     - Chosen Approach:
-      - Add an editor command layer such as `EditorCommand::{Insert, Newline, Backspace, Delete, MoveLeft, MoveRight, MoveUp, MoveDown, Home, End}`. `EditorWidget` maps Masonry text events to commands and delegates behavior to `EditorSurface`.
+      - Added an `EditorCommand` layer covering insert, newline, deletion, scalar left/right movement, scalar-column up/down movement, line start/end, and document start/end. `EditorWidget` maps Masonry text/IME events to commands and delegates behavior to `EditorSurface`.
     - API Notes and Examples:
       ```rust
       match &key_event.key {
@@ -139,7 +139,7 @@
     - `editor_delete_at_end_is_noop`: Delete at document end does not mutate or panic.
     - Manual smoke test: Type `abc`, move left, type `X`, verify `abXc`, then use Backspace/Delete/Home/End.
 
-- [ ] Prepare layout hit-testing and caret geometry APIs
+- [x] Prepare layout hit-testing and caret geometry APIs
   - Acceptance Criteria:
     - Functional: The layout layer can map a visible text coordinate to a visible-snapshot byte offset and can return caret geometry for a visible-snapshot byte offset.
     - Performance: Hit-testing and caret geometry reuse the cached Parley layout whenever the cache key is unchanged and do not rebuild layout more than the existing cache policy requires.
@@ -154,7 +154,7 @@
       - Use Parley editing cursor APIs over cached layouts: matches the chosen text engine and keeps hit-testing consistent with glyph layout.
       - Defer hit-testing until after IPC: not viable because real local editing needs click-to-place and selection before synchronization.
     - Chosen Approach:
-      - Extend `LayoutState` with methods that expose hit-testing and caret metrics from the cached layout. Convert between document byte offsets and visible-snapshot-relative byte offsets at the `EditorSurface` boundary.
+      - Extended `LayoutState` with cached-layout hit-testing and caret geometry APIs using Parley cursor support. Added visible snapshot start byte metadata and document/visible byte-offset conversion at the `EditorSurface` boundary.
     - API Notes and Examples:
       ```rust
       use parley::editing::Cursor;
@@ -178,7 +178,7 @@
     - `caret_geometry_is_available_for_visible_caret`: A visible caret offset returns finite geometry suitable for painting.
     - Manual smoke test: Click before, inside, and after text and verify subsequent typing appears at the clicked location.
 
-- [ ] Render caret and keep it visible during edits/navigation
+- [x] Render caret and keep it visible during edits/navigation
   - Acceptance Criteria:
     - Functional: A visible caret is drawn at the current insertion point when the editor has focus; edits and navigation keep the caret within the visible logical/visual viewport when possible.
     - Performance: Caret painting reuses cached layout/geometry and draws simple Vello primitives without forcing unrelated layout rebuilds.
@@ -194,7 +194,7 @@
       - Use Parley cursor geometry from cached layout: correct for visible text and prepares for selection rendering.
       - Add caret blinking now: useful UX, but requires animation/timers and is not necessary for the interaction model baseline.
     - Chosen Approach:
-      - Draw a non-blinking caret rectangle from cached Parley geometry when focused. Add `ensure_caret_visible` to scroll logical lines or visual offset based on the caret's document offset and layout geometry.
+      - Draws a non-blinking caret rectangle from cached Parley geometry when focused. Logical caret visibility is maintained through viewport line scrolling, and visual scroll is adjusted from caret geometry before rendering so navigation/edits keep the insertion point visible.
     - API Notes and Examples:
       ```rust
       let caret = Rect::new(x, y, x + 1.5, y + height);

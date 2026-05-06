@@ -75,6 +75,35 @@ impl CursorState {
         self.move_to(buffer.line_end_byte(self.caret), buffer)
     }
 
+    pub fn move_to_previous_line(&mut self, buffer: &EditorBuffer) -> bool {
+        let current_line = buffer.line_of_byte(self.caret);
+        let Some(target_line) = current_line.checked_sub(1) else {
+            return false;
+        };
+        self.move_to_line_preserving_scalar_column(target_line, buffer)
+    }
+
+    pub fn move_to_next_line(&mut self, buffer: &EditorBuffer) -> bool {
+        let current_line = buffer.line_of_byte(self.caret);
+        let target_line = current_line.saturating_add(1);
+        if target_line >= buffer.line_len() {
+            return false;
+        }
+        self.move_to_line_preserving_scalar_column(target_line, buffer)
+    }
+
+    fn move_to_line_preserving_scalar_column(
+        &mut self,
+        target_line: usize,
+        buffer: &EditorBuffer,
+    ) -> bool {
+        let column = buffer.scalar_column_of_byte(self.caret);
+        self.move_to(
+            buffer.byte_for_line_scalar_column(target_line, column),
+            buffer,
+        )
+    }
+
     fn move_to(&mut self, caret: usize, buffer: &EditorBuffer) -> bool {
         let previous = self.caret;
         self.set_caret(buffer.clamp_byte_offset(caret));
@@ -155,6 +184,19 @@ mod tests {
         cursor.set_caret(buffer.document_end_byte());
         assert!(!cursor.move_to_line_end(&buffer));
         assert_eq!(cursor.caret(), "zero\none\ntwo".len());
+    }
+
+    #[test]
+    fn up_and_down_preserve_scalar_column_and_clamp_to_line_end() {
+        let buffer = EditorBuffer::from_text("a🦀c\nxy\n三四五");
+        let mut cursor = CursorState::new("a🦀".len());
+
+        assert!(cursor.move_to_next_line(&buffer));
+        assert_eq!(cursor.caret(), "a🦀c\nxy".len());
+        assert!(cursor.move_to_next_line(&buffer));
+        assert_eq!(cursor.caret(), "a🦀c\nxy\n三四".len());
+        assert!(cursor.move_to_previous_line(&buffer));
+        assert_eq!(cursor.caret(), "a🦀c\nxy".len());
     }
 
     #[test]

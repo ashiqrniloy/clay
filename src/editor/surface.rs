@@ -1,8 +1,8 @@
 use masonry::core::PaintCtx;
-use masonry::kurbo::{Affine, Circle, Rect};
+use masonry::kurbo::{Affine, Circle, Point, Rect};
 use masonry::peniko::{Color, Fill};
 
-use super::buffer::{EditResult, EditorBuffer};
+use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
 use super::cursor::CursorState;
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState};
@@ -12,10 +12,28 @@ const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
 const TEXT_COLOR: Color = Color::from_rgb8(0xf4, 0xf1, 0xff);
 const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
+const CARET_COLOR: Color = Color::from_rgb8(0xff, 0xff, 0xff);
+const CARET_WIDTH: f64 = 1.5;
 pub(super) const TEXT_INSET: f64 = 48.0;
 pub(super) const TEXT_FONT_SIZE: f32 = 20.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
 const LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorCommand<'a> {
+    Insert(&'a str),
+    Newline,
+    Backspace,
+    DeleteForward,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    LineStart,
+    LineEnd,
+    DocumentStart,
+    DocumentEnd,
+}
 
 #[derive(Debug, Default)]
 pub struct EditorSurface {
@@ -29,6 +47,23 @@ pub struct EditorSurface {
 }
 
 impl EditorSurface {
+    pub fn command(&mut self, command: EditorCommand<'_>) -> bool {
+        match command {
+            EditorCommand::Insert(text) => self.insert_text(text),
+            EditorCommand::Newline => self.insert_newline(),
+            EditorCommand::Backspace => self.backspace(),
+            EditorCommand::DeleteForward => self.delete_forward(),
+            EditorCommand::MoveLeft => self.move_left(),
+            EditorCommand::MoveRight => self.move_right(),
+            EditorCommand::MoveUp => self.move_up(),
+            EditorCommand::MoveDown => self.move_down(),
+            EditorCommand::LineStart => self.move_to_line_start(),
+            EditorCommand::LineEnd => self.move_to_line_end(),
+            EditorCommand::DocumentStart => self.move_to_document_start(),
+            EditorCommand::DocumentEnd => self.move_to_document_end(),
+        }
+    }
+
     pub fn insert_text(&mut self, text: &str) -> bool {
         if !is_printable_text(text) {
             return false;
@@ -61,6 +96,14 @@ impl EditorSurface {
         self.move_cursor(|cursor, buffer| cursor.move_to_next_scalar(buffer))
     }
 
+    pub fn move_up(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_previous_line(buffer))
+    }
+
+    pub fn move_down(&mut self) -> bool {
+        self.move_cursor(|cursor, buffer| cursor.move_to_next_line(buffer))
+    }
+
     pub fn move_to_line_start(&mut self) -> bool {
         self.move_cursor(|cursor, buffer| cursor.move_to_line_start(buffer))
     }
@@ -78,7 +121,46 @@ impl EditorSurface {
     }
 
     pub fn visible_text(&self) -> String {
-        self.visible_snapshot_text()
+        self.visible_snapshot().text
+    }
+
+    #[expect(dead_code, reason = "prepared for upcoming pointer hit-testing task")]
+    pub fn hit_test_document_offset(&self, point: Point) -> Option<usize> {
+        let snapshot = self.visible_snapshot();
+        if snapshot.text.is_empty() {
+            return Some(snapshot.start_byte_offset);
+        }
+
+        let layout_x = (point.x - TEXT_INSET) as f32;
+        let layout_y = (point.y - TEXT_INSET + self.visual_scroll_y) as f32;
+        let visible_offset = self
+            .layout
+            .hit_test_visible_byte_offset(layout_x, layout_y)?
+            .min(snapshot.text.len());
+        Some(
+            self.buffer
+                .clamp_byte_offset(snapshot.start_byte_offset + visible_offset),
+        )
+    }
+
+    pub fn caret_geometry(&self, width: f32) -> Option<Rect> {
+        let snapshot = self.visible_snapshot();
+        let caret = self.cursor.caret();
+        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        if caret < snapshot.start_byte_offset || caret > visible_end {
+            return None;
+        }
+
+        let visible_offset = caret - snapshot.start_byte_offset;
+        let geometry = self
+            .layout
+            .caret_geometry_for_visible_byte_offset(visible_offset, width)?;
+        Some(Rect::new(
+            geometry.rect.x0 + TEXT_INSET,
+            geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
+            geometry.rect.x1 + TEXT_INSET,
+            geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
+        ))
     }
 
     pub fn scroll_lines(&mut self, delta_lines: isize) -> bool {
@@ -142,7 +224,8 @@ impl EditorSurface {
 
         let max_width = (width - (TEXT_INSET * 2.0)).max(1.0) as f32;
         let available_height = (height - (TEXT_INSET * 2.0)).max(0.0);
-        self.paint_text(ctx, scene, max_width, available_height);
+        let focused = ctx.is_focus_target();
+        self.paint_text(ctx, scene, max_width, available_height, focused);
     }
 
     fn paint_text(
@@ -151,14 +234,17 @@ impl EditorSurface {
         scene: &mut masonry::vello::Scene,
         max_width: f32,
         available_height: f64,
+        focused: bool,
     ) {
-        let current_text = self.visible_snapshot_text();
+        let snapshot = self.visible_snapshot();
+        let current_text = snapshot.text.as_str();
         let (display_text, color) = if current_text.is_empty() {
             (PLACEHOLDER_TEXT, PLACEHOLDER_COLOR)
         } else {
-            (current_text.as_str(), TEXT_COLOR)
+            (current_text, TEXT_COLOR)
         };
 
+        let caret_visible_offset = self.visible_caret_offset(&snapshot);
         let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width);
         let metrics = self.layout.paint_text(
             ctx,
@@ -170,6 +256,7 @@ impl EditorSurface {
             self.follow_visual_end && !current_text.is_empty(),
             available_height,
             key,
+            caret_visible_offset,
         );
         if current_text.is_empty() {
             self.visual_scroll_y = 0.0;
@@ -177,12 +264,54 @@ impl EditorSurface {
         } else {
             self.last_visual_max_scroll_y = metrics.max_scroll_y(available_height);
         }
+        if focused {
+            self.paint_caret(scene, current_text.is_empty(), max_width, available_height);
+        }
         self.follow_visual_end = false;
     }
 
-    fn visible_snapshot_text(&self) -> String {
+    fn paint_caret(
+        &self,
+        scene: &mut masonry::vello::Scene,
+        text_is_empty: bool,
+        max_width: f32,
+        available_height: f64,
+    ) {
+        let caret = if text_is_empty {
+            Rect::new(
+                TEXT_INSET,
+                TEXT_INSET,
+                TEXT_INSET + CARET_WIDTH,
+                (TEXT_INSET + TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER)
+                    .min(TEXT_INSET + available_height),
+            )
+        } else if let Some(rect) = self.caret_geometry(CARET_WIDTH as f32) {
+            rect
+        } else {
+            return;
+        };
+
+        let clip = Rect::new(
+            TEXT_INSET,
+            TEXT_INSET,
+            TEXT_INSET + max_width as f64,
+            TEXT_INSET + available_height,
+        );
+        scene.push_clip_layer(Affine::IDENTITY, &clip);
+        scene.fill(Fill::NonZero, Affine::IDENTITY, CARET_COLOR, None, &caret);
+        scene.pop_layer();
+    }
+
+    fn visible_caret_offset(&self, snapshot: &VisibleSnapshot) -> Option<usize> {
+        let caret = self.cursor.caret();
+        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        (caret >= snapshot.start_byte_offset && caret <= visible_end)
+            .then_some(caret - snapshot.start_byte_offset)
+    }
+
+    fn visible_snapshot(&self) -> VisibleSnapshot {
         let range = self.viewport.visible_range(self.buffer.line_len());
-        self.buffer.visible_snapshot(range).text
+        self.buffer.visible_snapshot(range)
     }
 
     fn finish_edit(&mut self, result: EditResult) -> bool {
@@ -253,7 +382,7 @@ impl EditorSurface {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSurface, TEXT_INSET};
+    use super::{EditorCommand, EditorSurface, TEXT_INSET};
 
     #[test]
     fn editor_enter_inserts_newline() {
@@ -343,6 +472,37 @@ mod tests {
         assert_eq!(editor.caret_for_test(), "zero\none".len());
         assert!(editor.move_to_line_start());
         assert_eq!(editor.caret_for_test(), "zero\n".len());
+    }
+
+    #[test]
+    fn editor_up_down_navigation_preserves_scalar_column() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("a🦀c");
+        editor.insert_newline();
+        editor.insert_text("xy");
+        editor.insert_newline();
+        editor.insert_text("三四五");
+        editor.set_caret_for_test("a🦀".len());
+
+        assert!(editor.move_down());
+        assert_eq!(editor.caret_for_test(), "a🦀c\nxy".len());
+        assert!(editor.move_down());
+        assert_eq!(editor.caret_for_test(), "a🦀c\nxy\n三四".len());
+        assert!(editor.move_up());
+        assert_eq!(editor.caret_for_test(), "a🦀c\nxy".len());
+    }
+
+    #[test]
+    fn editor_command_layer_routes_navigation_and_editing() {
+        let mut editor = EditorSurface::default();
+
+        assert!(editor.command(EditorCommand::Insert("abc")));
+        assert!(editor.command(EditorCommand::MoveLeft));
+        assert!(editor.command(EditorCommand::Insert("X")));
+        assert!(editor.command(EditorCommand::LineStart));
+        assert!(editor.command(EditorCommand::DeleteForward));
+
+        assert_eq!(editor.visible_text(), "bXc");
     }
 
     #[test]

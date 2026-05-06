@@ -3,6 +3,7 @@ use std::fmt;
 use masonry::core::{BrushIndex, PaintCtx, render_text};
 use masonry::kurbo::{Affine, Rect};
 use masonry::parley::Layout;
+use masonry::parley::layout::{Affinity, Cursor};
 use masonry::parley::style::{LineHeight, StyleProperty};
 use masonry::peniko::Color;
 use masonry::{TextAlign, TextAlignOptions};
@@ -20,6 +21,13 @@ impl VisualLayoutMetrics {
         (self.height as f64 - available_height.max(0.0)).max(0.0)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CaretGeometry {
+    pub rect: Rect,
+}
+
+const CARET_WIDTH: f32 = 1.5;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutCacheKey {
@@ -46,6 +54,7 @@ pub struct LayoutState {
 struct CachedLayout {
     key: LayoutCacheKey,
     layout: Layout<BrushIndex>,
+    text_len: usize,
 }
 
 impl fmt::Debug for LayoutState {
@@ -69,6 +78,7 @@ impl LayoutState {
         follow_visual_end: bool,
         available_height: f64,
         key: LayoutCacheKey,
+        caret_visible_byte_offset: Option<usize>,
     ) -> VisualLayoutMetrics {
         if self.should_rebuild(key, ctx.fonts_changed()) {
             self.rebuild(ctx, display_text, max_width, key);
@@ -84,6 +94,12 @@ impl LayoutState {
             *scroll_y = max_scroll_y;
         } else {
             *scroll_y = scroll_y.clamp(0.0, max_scroll_y);
+        }
+        if let Some(caret_offset) = caret_visible_byte_offset
+            && let Some(caret) =
+                Self::caret_geometry_in_layout(&cached.layout, cached.text_len, caret_offset)
+        {
+            Self::ensure_rect_visible(scroll_y, caret.rect, available_height, max_scroll_y);
         }
 
         let clip = Rect::new(
@@ -106,6 +122,66 @@ impl LayoutState {
 
     fn should_rebuild(&self, key: LayoutCacheKey, fonts_changed: bool) -> bool {
         fonts_changed || self.cached.as_ref().is_none_or(|cached| cached.key != key)
+    }
+
+    pub fn hit_test_visible_byte_offset(&self, x: f32, y: f32) -> Option<usize> {
+        let cached = self.cached.as_ref()?;
+        Some(Cursor::from_point(&cached.layout, x, y).index())
+    }
+
+    pub fn caret_geometry_for_visible_byte_offset(
+        &self,
+        byte_offset: usize,
+        width: f32,
+    ) -> Option<CaretGeometry> {
+        let cached = self.cached.as_ref()?;
+        Self::caret_geometry_in_layout(&cached.layout, cached.text_len, byte_offset).map(|caret| {
+            if width == CARET_WIDTH {
+                caret
+            } else {
+                let x0 = caret.rect.x0;
+                CaretGeometry {
+                    rect: Rect::new(x0, caret.rect.y0, x0 + width as f64, caret.rect.y1),
+                }
+            }
+        })
+    }
+
+    fn caret_geometry_in_layout(
+        layout: &Layout<BrushIndex>,
+        text_len: usize,
+        byte_offset: usize,
+    ) -> Option<CaretGeometry> {
+        let byte_offset = byte_offset.min(text_len);
+        let cursor = Cursor::from_byte_index(layout, byte_offset, Affinity::Downstream);
+        let geometry = cursor.geometry(layout, CARET_WIDTH);
+        Some(CaretGeometry {
+            rect: Rect::new(
+                geometry.x0 as f64,
+                geometry.y0 as f64,
+                geometry.x1 as f64,
+                geometry.y1 as f64,
+            ),
+        })
+    }
+
+    fn ensure_rect_visible(
+        scroll_y: &mut f64,
+        rect: Rect,
+        available_height: f64,
+        max_scroll_y: f64,
+    ) {
+        if available_height <= 0.0 {
+            *scroll_y = scroll_y.clamp(0.0, max_scroll_y);
+            return;
+        }
+
+        if rect.y0 < *scroll_y {
+            *scroll_y = rect.y0;
+        } else if rect.y1 > *scroll_y + available_height {
+            *scroll_y = rect.y1 - available_height;
+        }
+        *scroll_y = scroll_y.clamp(0.0, max_scroll_y);
     }
 
     fn visual_metrics(layout: &Layout<BrushIndex>) -> VisualLayoutMetrics {
@@ -136,7 +212,11 @@ impl LayoutState {
             TextAlignOptions::default(),
         );
 
-        self.cached = Some(CachedLayout { key, layout });
+        self.cached = Some(CachedLayout {
+            key,
+            layout,
+            text_len: display_text.len(),
+        });
     }
 
     #[cfg(test)]
@@ -163,6 +243,16 @@ impl LayoutState {
         self.cached = Some(CachedLayout {
             key,
             layout: Layout::default(),
+            text_len: 0,
+        });
+    }
+
+    #[cfg(test)]
+    fn set_cached_layout_for_test(&mut self, display_text: &str, max_width: f32) {
+        self.cached = Some(CachedLayout {
+            key: LayoutCacheKey::new(0, 0, max_width),
+            layout: Self::build_layout_for_test(display_text, max_width),
+            text_len: display_text.len(),
         });
     }
 }
@@ -234,5 +324,55 @@ mod tests {
 
         assert_eq!(metrics.max_scroll_y(56.0), 28.0);
         assert_eq!(metrics.max_scroll_y(100.0), 0.0);
+    }
+
+    #[test]
+    fn hit_test_clamps_before_and_after_text() {
+        let mut cache = LayoutState::default();
+        cache.set_cached_layout_for_test("abc", 300.0);
+
+        let before = cache
+            .hit_test_visible_byte_offset(-100.0, 0.0)
+            .expect("cached layout should hit-test");
+        let after = cache
+            .hit_test_visible_byte_offset(10_000.0, 0.0)
+            .expect("cached layout should hit-test");
+
+        assert!(before <= "abc".len());
+        assert!(after <= "abc".len());
+    }
+
+    #[test]
+    fn caret_geometry_is_available_for_visible_caret() {
+        let mut cache = LayoutState::default();
+        cache.set_cached_layout_for_test("abc", 300.0);
+
+        let geometry = cache
+            .caret_geometry_for_visible_byte_offset(1, 1.5)
+            .expect("cached layout should return caret geometry");
+
+        assert!(geometry.rect.x0.is_finite());
+        assert!(geometry.rect.y0.is_finite());
+        assert!(geometry.rect.height().is_finite());
+    }
+
+    #[test]
+    fn ensure_caret_visible_scrolls_to_caret_rect() {
+        let mut scroll_y = 0.0;
+        let caret = masonry::kurbo::Rect::new(0.0, 90.0, 1.5, 118.0);
+
+        LayoutState::ensure_rect_visible(&mut scroll_y, caret, 56.0, 100.0);
+
+        assert_eq!(scroll_y, 62.0);
+    }
+
+    #[test]
+    fn ensure_caret_visible_preserves_visible_rect() {
+        let mut scroll_y = 50.0;
+        let caret = masonry::kurbo::Rect::new(0.0, 60.0, 1.5, 80.0);
+
+        LayoutState::ensure_rect_visible(&mut scroll_y, caret, 56.0, 100.0);
+
+        assert_eq!(scroll_y, 50.0);
     }
 }

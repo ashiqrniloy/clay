@@ -6,6 +6,7 @@ use crop::Rope;
 pub struct VisibleSnapshot {
     pub text: String,
     pub line_range: Range<usize>,
+    pub start_byte_offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +175,34 @@ impl EditorBuffer {
         }
 
         let line = self.line_of_byte(offset);
+        self.line_end_byte_for_line(line)
+    }
+
+    pub fn scalar_column_of_byte(&self, offset: usize) -> usize {
+        let offset = self.clamp_byte_offset(offset);
+        let start = self.line_start_byte(offset);
+        self.rope.byte_slice(start..offset).chars().count()
+    }
+
+    pub fn byte_for_line_scalar_column(&self, line: usize, column: usize) -> usize {
+        if self.rope.byte_len() == 0 {
+            return 0;
+        }
+
+        let line = line.min(self.line_len().saturating_sub(1));
+        let start = self.byte_of_line(line);
+        let end = self.line_end_byte_for_line(line);
+        let mut offset = start;
+
+        for character in self.rope.byte_slice(start..end).chars().take(column) {
+            offset += character.len_utf8();
+        }
+
+        offset
+    }
+
+    fn line_end_byte_for_line(&self, line: usize) -> usize {
+        let line = line.min(self.line_len());
         let start = self.byte_of_line(line);
         let next_line_start = self.byte_of_line(line.saturating_add(1));
         let mut end = next_line_start;
@@ -211,6 +240,11 @@ impl EditorBuffer {
             return VisibleSnapshot {
                 text: String::new(),
                 line_range: start_line..end_line,
+                start_byte_offset: if document_line_count == 0 {
+                    0
+                } else {
+                    self.rope.byte_of_line(start_line)
+                },
             };
         }
 
@@ -224,6 +258,7 @@ impl EditorBuffer {
         VisibleSnapshot {
             text: self.rope.byte_slice(start_byte..end_byte).to_string(),
             line_range: start_line..end_line,
+            start_byte_offset: start_byte,
         }
     }
 
@@ -261,6 +296,7 @@ mod tests {
 
         assert_eq!(snapshot.text, "one\ntwo\nthree\n");
         assert_eq!(snapshot.line_range, 1..4);
+        assert_eq!(snapshot.start_byte_offset, "zero\n".len());
     }
 
     #[test]
@@ -294,6 +330,7 @@ mod tests {
 
         assert_eq!(snapshot.text, "");
         assert_eq!(snapshot.line_range, 0..0);
+        assert_eq!(snapshot.start_byte_offset, 0);
     }
 
     #[test]
@@ -405,6 +442,17 @@ mod tests {
         assert!(snapshot.text.len() < text.len() / 100);
         assert!(snapshot.text.starts_with("line 05000\n"));
         assert!(snapshot.text.ends_with("line 05014\n"));
+    }
+
+    #[test]
+    fn visible_snapshot_includes_start_byte_offset() {
+        let buffer = EditorBuffer::from_text("zero\none\ntwo");
+        let viewport = Viewport::new(1, 1, 0);
+
+        let snapshot = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(snapshot.text, "one\n");
+        assert_eq!(snapshot.start_byte_offset, "zero\n".len());
     }
 
     #[test]
