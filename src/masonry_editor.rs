@@ -57,8 +57,14 @@ impl Widget for EditorWidget {
                 if button_event.button == Some(PointerButton::Primary) =>
             {
                 let point = ctx.local_position(button_event.state.position);
+                ctx.capture_pointer();
                 (self.editor.place_caret_at_point(point), true)
             }
+            PointerEvent::Move(pointer_update) if ctx.is_active() => {
+                let point = ctx.local_position(pointer_update.current.position);
+                (self.editor.extend_selection_to_point(point), true)
+            }
+            PointerEvent::Up(_) | PointerEvent::Cancel(_) if ctx.is_active() => (false, true),
             PointerEvent::Scroll(PointerScrollEvent { delta, .. }) => {
                 let changed = match delta {
                     ScrollDelta::LineDelta(_, y) => {

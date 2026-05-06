@@ -336,9 +336,24 @@
     - Manual GUI smoke test: launch, type, click to move caret, edit middle text, navigate with arrows/Home/End, select/replace/delete text, scroll wrapped and multiline content, resize, Backspace/Delete, and Escape exit.
 
 ## Compromises Made
-- Pointer drag selection was deferred during the basic selection task; Shift+Left/Right selection, selected-range replacement/deletion, click clearing, and highlight painting are implemented and verified.
 - Phase 2 regression coverage is automated with unit tests and Cargo verification; a manual GUI smoke pass was not automated in this task.
 
+## Follow-up Implemented: Pointer Drag Selection
+- Documentation Reviewed:
+  - Masonry `EventCtx::capture_pointer`: pointer capture is only allowed during `PointerEvent::Down`, keeps delivering pointer events outside the widget bounds, and is automatically released after `Up` or `Cancel`.
+  - Masonry `EventCtx::is_active`: a widget is active while it has captured the pointer.
+  - Masonry `TextArea` pointer handling source: captures the pointer on primary down and extends selection on active pointer moves.
+- Chosen Approach:
+  - Capture the pointer on primary down, place the caret and clear any existing selection, then extend selection from that click anchor while active move events arrive.
+  - Keep selection behavior in `EditorSurface` with `extend_selection_to_point`, reusing existing layout hit-testing and selection rendering.
+- Tests Added:
+  - `place_caret_at_point_clears_selection_even_when_caret_stays_put`
+  - `pointer_drag_extends_selection_from_click_anchor`
+  - `pointer_drag_can_select_backwards`
+- Verification:
+  - `cargo fmt`
+  - `cargo test` — 79 passed
+  - `cargo check`
+
 ## Further Actions
-- Add pointer drag selection in a follow-up phase using Masonry pointer capture once the minimal keyboard selection model is stable.
-- Run a manual GUI smoke pass before release packaging: launch, type, click to move caret, edit middle text, navigate, select/replace/delete, scroll wrapped/multiline content, resize, Backspace/Delete, and Escape exit.
+- Run a manual GUI smoke pass before release packaging: launch, type, click to move caret, drag-select text forward/backward, edit middle text, navigate, select/replace/delete, scroll wrapped/multiline content, resize, Backspace/Delete, and Escape exit.

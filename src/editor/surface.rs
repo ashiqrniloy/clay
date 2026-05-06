@@ -206,11 +206,32 @@ impl EditorSurface {
         };
 
         let previous = self.cursor.caret();
+        let had_selection = self.selection.is_some();
         self.cursor.set_caret(caret);
         self.selection = None;
         self.follow_visual_end = false;
         self.ensure_caret_line_visible();
-        previous != self.cursor.caret()
+        had_selection || previous != self.cursor.caret()
+    }
+
+    pub fn extend_selection_to_point(&mut self, point: Point) -> bool {
+        let Some(focus) = self.hit_test_document_offset(point) else {
+            return false;
+        };
+
+        let previous_caret = self.cursor.caret();
+        let previous_selection = self.selection;
+        let anchor = self
+            .selection
+            .map_or(previous_caret, |selection| selection.anchor());
+        self.cursor.set_caret(focus);
+
+        let selection = SelectionState::new(anchor, self.cursor.caret()).clamped(&self.buffer);
+        self.selection = (!selection.is_collapsed()).then_some(selection);
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+
+        previous_caret != self.cursor.caret() || previous_selection != self.selection
     }
 
     pub fn scroll_lines(&mut self, delta_lines: isize) -> bool {
@@ -675,6 +696,64 @@ mod tests {
 
         assert!(changed);
         assert_eq!(editor.caret_for_test(), "abc".len());
+    }
+
+    #[test]
+    fn place_caret_at_point_clears_selection_even_when_caret_stays_put() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.set_selection_for_test(1, 3);
+        editor.build_visible_layout_for_test(300.0);
+
+        let changed = editor.place_caret_at_point(masonry::kurbo::Point::new(
+            TEXT_INSET + 10_000.0,
+            TEXT_INSET,
+        ));
+
+        assert!(changed);
+        assert_eq!(editor.caret_for_test(), "abc".len());
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn pointer_drag_extends_selection_from_click_anchor() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.build_visible_layout_for_test(300.0);
+
+        assert!(
+            editor
+                .place_caret_at_point(masonry::kurbo::Point::new(TEXT_INSET - 100.0, TEXT_INSET,))
+        );
+        assert!(editor.extend_selection_to_point(masonry::kurbo::Point::new(
+            TEXT_INSET + 10_000.0,
+            TEXT_INSET,
+        )));
+
+        assert_eq!(editor.caret_for_test(), "abc".len());
+        assert_eq!(editor.selection_for_test(), Some((0, "abc".len())));
+    }
+
+    #[test]
+    fn pointer_drag_can_select_backwards() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.set_caret_for_test(0);
+        editor.build_visible_layout_for_test(300.0);
+
+        assert!(editor.place_caret_at_point(masonry::kurbo::Point::new(
+            TEXT_INSET + 10_000.0,
+            TEXT_INSET,
+        )));
+        assert!(
+            editor.extend_selection_to_point(masonry::kurbo::Point::new(
+                TEXT_INSET - 100.0,
+                TEXT_INSET,
+            ))
+        );
+
+        assert_eq!(editor.caret_for_test(), 0);
+        assert_eq!(editor.selection_for_test(), Some(("abc".len(), 0)));
     }
 
     #[test]
