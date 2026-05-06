@@ -1,4 +1,12 @@
+use std::ops::Range;
+
 use crop::Rope;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleSnapshot {
+    pub text: String,
+    pub line_range: Range<usize>,
+}
 
 #[derive(Debug, Default)]
 pub struct EditorBuffer {
@@ -6,6 +14,13 @@ pub struct EditorBuffer {
 }
 
 impl EditorBuffer {
+    #[cfg(test)]
+    pub fn from_text(text: &str) -> Self {
+        Self {
+            rope: Rope::from(text),
+        }
+    }
+
     pub fn insert_str(&mut self, text: &str) {
         self.rope.insert(self.rope.byte_len(), text);
     }
@@ -19,7 +34,91 @@ impl EditorBuffer {
         self.rope.delete(end - last_char.len_utf8()..end);
     }
 
+    pub fn line_len(&self) -> usize {
+        if self.rope.byte_len() == 0 {
+            0
+        } else {
+            self.rope.line_len()
+        }
+    }
+
+    pub fn visible_snapshot(&self, line_range: Range<usize>) -> VisibleSnapshot {
+        let document_line_count = self.line_len();
+        let start_line = line_range.start.min(document_line_count);
+        let end_line = line_range.end.min(document_line_count).max(start_line);
+
+        if start_line == end_line {
+            return VisibleSnapshot {
+                text: String::new(),
+                line_range: start_line..end_line,
+            };
+        }
+
+        let start_byte = self.rope.byte_of_line(start_line);
+        let end_byte = if end_line == document_line_count {
+            self.rope.byte_len()
+        } else {
+            self.rope.byte_of_line(end_line)
+        };
+
+        VisibleSnapshot {
+            text: self.rope.byte_slice(start_byte..end_byte).to_string(),
+            line_range: start_line..end_line,
+        }
+    }
+
+    #[cfg(test)]
     pub fn visible_text(&self) -> String {
         self.rope.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorBuffer;
+    use crate::editor::viewport::Viewport;
+
+    #[test]
+    fn visible_snapshot_limits_to_requested_lines() {
+        let buffer = EditorBuffer::from_text("zero\none\ntwo\nthree\nfour\n");
+        let viewport = Viewport::new(1, 2, 1);
+
+        let snapshot = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(snapshot.text, "one\ntwo\nthree\n");
+        assert_eq!(snapshot.line_range, 1..4);
+    }
+
+    #[test]
+    fn visible_snapshot_clamps_past_document_end() {
+        let buffer = EditorBuffer::from_text("zero\none\ntwo");
+        let viewport = Viewport::new(1, 10, 10);
+
+        let snapshot = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(snapshot.text, "one\ntwo");
+        assert_eq!(snapshot.line_range, 1..3);
+    }
+
+    #[test]
+    fn visible_snapshot_preserves_utf8_boundaries() {
+        let buffer = EditorBuffer::from_text("alpha 🦀\nbéta é\n三\n");
+        let viewport = Viewport::new(1, 1, 1);
+
+        let snapshot = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(snapshot.text, "béta é\n三\n");
+        assert_eq!(snapshot.line_range, 1..3);
+    }
+
+    #[test]
+    fn empty_buffer_visible_snapshot_is_empty() {
+        let buffer = EditorBuffer::default();
+        let viewport = Viewport::default();
+
+        let snapshot = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(snapshot.text, "");
+        assert_eq!(snapshot.line_range, 0..0);
     }
 }

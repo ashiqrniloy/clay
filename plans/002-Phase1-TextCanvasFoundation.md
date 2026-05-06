@@ -65,7 +65,7 @@
     - Existing printable text filter test continues to pass after module split.
     - Manual smoke test: launch, type text, Backspace, resize, and Escape exit still work.
 
-- [ ] Add viewport state and bounded visible text extraction over `crop`
+- [x] Add viewport state and bounded visible text extraction over `crop`
   - Acceptance Criteria:
     - Functional: The editor can compute a visible text snapshot from a bounded line range, including a small configurable overscan, and painting uses that snapshot instead of unconditional whole-rope `to_string()`.
     - Performance: Visible text extraction is bounded by the selected viewport/overscan line range for non-empty documents; whole-buffer materialization is only allowed in tests or explicit debug helpers.
@@ -240,7 +240,8 @@
     - Manual GUI smoke test: launch, type, resize, scroll multi-line content, Backspace, and Escape exit.
 
 ## Compromises Made
-- Completed the initial module split without changing runtime behavior; `Viewport` and `LayoutState` are explicit module-owned state boundaries, while bounded extraction, scrolling, and layout caching remain deferred to the later Phase 1 tasks that define those behaviors.
+- Completed the initial module split without changing runtime behavior; `Viewport` and `LayoutState` are explicit module-owned state boundaries.
+- Added bounded visible extraction for painting and accessibility labels using line ranges over `crop`; scrolling and resize-derived line count updates remain deferred to the dedicated viewport scrolling task.
 
 ## Further Actions
-- Continue with the remaining Phase 1 tasks in order: bounded `crop` visible extraction, line-based scrolling/resize estimation, Parley layout cache invalidation, and large-buffer regression checks.
+- Continue with the remaining Phase 1 tasks in order: line-based scrolling/resize estimation, Parley layout cache invalidation, and large-buffer regression checks.

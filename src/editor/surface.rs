@@ -37,14 +37,13 @@ impl EditorSurface {
     }
 
     pub fn visible_text(&self) -> String {
-        self.buffer.visible_text()
+        self.visible_snapshot_text()
     }
 
     pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut masonry::vello::Scene) {
         let size = ctx.size();
         let width = size.width;
         let height = size.height;
-        let _viewport = &self.viewport;
 
         let canvas = Rect::new(
             24.0,
@@ -67,7 +66,7 @@ impl EditorSurface {
         scene: &mut masonry::vello::Scene,
         max_width: f32,
     ) {
-        let current_text = self.buffer.visible_text();
+        let current_text = self.visible_snapshot_text();
         let (display_text, color) = if current_text.is_empty() {
             (PLACEHOLDER_TEXT, PLACEHOLDER_COLOR)
         } else {
@@ -76,5 +75,10 @@ impl EditorSurface {
 
         self.layout
             .paint_text(ctx, scene, display_text, color, max_width);
+    }
+
+    fn visible_snapshot_text(&self) -> String {
+        let range = self.viewport.visible_range(self.buffer.line_len());
+        self.buffer.visible_snapshot(range).text
     }
 }
