@@ -144,7 +144,7 @@
     - `viewport_visible_line_count_updates_from_height`: Height changes produce expected minimum and larger visible-line counts.
     - Manual smoke test: Create enough lines, scroll, and confirm displayed text window changes.
 
-- [ ] Introduce Parley layout cache and explicit invalidation
+- [x] Introduce Parley layout cache and explicit invalidation
   - Acceptance Criteria:
     - Functional: Text still renders correctly, placeholder rendering still works, and layout is invalidated when visible text, available width, viewport range, or font state changes.
     - Performance: Repeated paint calls with unchanged text, width, viewport, and fonts reuse the cached layout instead of rebuilding it unconditionally.
@@ -193,6 +193,113 @@
     - `layout_cache_invalidates_on_width_change`: Resize width changes invalidate cached layout.
     - `layout_cache_invalidates_on_viewport_revision`: Scrolling invalidates cached visible layout.
     - Manual smoke test: Resize and edit text while confirming rendering remains correct.
+
+- [x] Support newline entry so logical-line viewport scrolling is manually testable
+  - Acceptance Criteria:
+    - Functional: Pressing Enter inserts a `\n` into the buffer, creates a new rope line, updates the accessibility label, requests repaint, and preserves existing printable text and Backspace behavior.
+    - Performance: Newline insertion uses the same append path and revision invalidation as other text edits; it does not materialize the full buffer during event handling.
+    - Code Quality: Newline handling is explicit in the Masonry text-event boundary instead of weakening the printable-text filter for all control characters.
+    - Security: Enter/newline input remains inert text and cannot trigger commands, filesystem access, IPC, network access, or script execution.
+  - Approach:
+    - Documentation Reviewed:
+      - Masonry 0.4 code-search: `TextArea::with_insert_newline` documents Enter/newline handling as editor behavior, while custom widgets receive keyboard `TextEvent`s through `Widget::on_text_event`.
+      - Masonry keyboard docs/code-search: `Key::Named(NamedKey::Enter)` is delivered through keyboard text events.
+      - `crop` 0.4.3 docs/code-search: LF and CRLF are tracked as line breaks and `Rope::line_len` / `Rope::byte_of_line` can convert line offsets.
+    - Options Considered:
+      - Allow `\n` through `is_printable_text`: simple, but broadens the text filter and risks accepting control text from IME paths unintentionally.
+      - Handle `NamedKey::Enter` explicitly in `src/masonry_editor.rs`: targeted and keeps control-key policy at the widget event boundary.
+      - Defer newline input until full editing commands exist: leaves logical-line scrolling impossible to validate manually.
+    - Chosen Approach:
+      - Add an explicit Enter branch that inserts `"\n"` through a small editor-surface method, while keeping the existing printable-text filter unchanged for ordinary character/IME commits.
+    - API Notes and Examples:
+      ```rust
+      Key::Named(NamedKey::Enter) => {
+          let changed = self.editor.insert_newline();
+          self.edit(ctx, changed);
+      }
+      ```
+    - Files to Create/Edit:
+      - `src/editor/surface.rs`: Add `insert_newline` or equivalent explicit text insertion path.
+      - `src/masonry_editor.rs`: Handle `NamedKey::Enter` and request render/accessibility updates.
+      - `src/editor/buffer.rs`: Add or reuse tests proving newline insertion increases visible line coverage.
+    - References:
+      - Masonry 0.4 docs/code-search for `TextArea::with_insert_newline`, `Widget::on_text_event`, and keyboard events.
+      - `crop` 0.4.3 docs/code-search for LF line tracking.
+  - Test Cases to Write:
+    - `editor_enter_inserts_newline`: Enter adds `\n` and creates an additional visible rope line.
+    - `printable_text_filter_still_rejects_control_newline`: generic text filtering still rejects raw control newline input.
+    - Manual smoke test: Type multiple lines with Enter, scroll, Backspace, and Escape exit.
+
+- [ ] Keep the insertion point visible for logical-line edits
+  - Acceptance Criteria:
+    - Functional: After inserting text, inserting a newline, or Backspace, the viewport clamps/follows so the end-of-buffer insertion point remains visible when the document has more logical lines than fit in the current viewport.
+    - Performance: Auto-follow updates viewport counters only and reuses bounded visible extraction; it does not clone or materialize the full rope.
+    - Code Quality: The follow behavior lives in viewport/editor-surface APIs with explicit tests and does not leak Masonry widget details into `EditorBuffer`.
+    - Security: Auto-scroll is a local viewport mutation only and cannot trigger commands, filesystem access, IPC, network access, or script execution.
+  - Approach:
+    - Documentation Reviewed:
+      - Current `src/editor/viewport.rs`: viewport already clamps first visible line based on document line count and visible line count.
+      - `crop` 0.4.3 docs/code-search: `Rope::line_len` provides logical line counts over LF/CRLF line breaks.
+      - Masonry 0.4 docs/code-search: `EventCtx::request_render` and `request_accessibility_update` are the correct pass requests after local widget state changes.
+    - Options Considered:
+      - Always jump to the document end after every edit: simple and matches append-only editing, but should be isolated for later cursor work.
+      - Preserve manual scroll position after edits: better for mature editors, but confusing before cursor selection and edit positions exist.
+      - Add full cursor tracking now: more correct eventually, but too large for the Phase 1 foundation.
+    - Chosen Approach:
+      - Because Phase 1 editing is append-only, add `Viewport::ensure_line_visible` / `follow_document_end` and call it after successful edits so new logical lines remain visible.
+    - API Notes and Examples:
+      ```rust
+      let insertion_line = buffer.line_len().saturating_sub(1);
+      viewport.ensure_line_visible(insertion_line, buffer.line_len());
+      ```
+    - Files to Create/Edit:
+      - `src/editor/viewport.rs`: Add follow/ensure-visible methods and unit tests.
+      - `src/editor/surface.rs`: Invoke follow behavior after successful insert/newline/backspace and return whether viewport/layout changed.
+      - `src/masonry_editor.rs`: Ensure edit handling requests repaint when text or viewport changes.
+    - References:
+      - Current viewport clamp tests in `src/editor/viewport.rs`.
+      - Phase 1 user smoke-test finding: append-only typing can move content outside the visible area without auto-follow.
+  - Test Cases to Write:
+    - `viewport_follow_document_end_shows_last_logical_line`: following moves first visible line so the final line is in range.
+    - `editor_insert_newline_auto_scrolls_to_new_line`: append-only newline edits keep the newest line visible.
+    - Manual smoke test: Type more newline-separated lines than fit and confirm older lines move upward while the newest line stays visible.
+
+- [ ] Account for Parley visual lines when wrapped text exceeds the viewport
+  - Acceptance Criteria:
+    - Functional: A long single logical line that wraps visually no longer disappears below the window; layout/viewport state can detect wrapped visual-line overflow and keep the typed end visible or make it scrollable.
+    - Performance: Visual-line accounting uses the already prepared Parley layout/cache and does not rebuild layout more than the cache key requires.
+    - Code Quality: The distinction between rope logical lines and Parley visual lines is explicit in layout/viewport APIs and covered by tests where possible.
+    - Security: Wrapped text remains inert display text and is not interpreted as markup, paths, commands, scripts, or external resources.
+  - Approach:
+    - Documentation Reviewed:
+      - Parley docs/code-search: `Layout::break_all_lines`, layout line iteration, and line metrics expose the visual line structure after wrapping.
+      - Masonry `render_text` docs/code-search: renders a prepared `Layout<BrushIndex>` into Vello; clipping/translation policy remains the widget's responsibility.
+      - Phase 1 smoke-test finding: rope-line scrolling does not help a single long paragraph because it is one logical `crop` line even when Parley wraps it visually.
+    - Options Considered:
+      - Treat Parley visual lines as the scroll unit immediately: solves wrapped paragraphs but requires additional mapping between visual and rope ranges.
+      - Add only newline/auto-follow support: improves logical multiline editing but leaves long wrapped paragraphs overflowing.
+      - Introduce a minimal visual-overflow offset in layout/surface first: addresses the observed overflow while deferring full cursor hit-testing.
+    - Chosen Approach:
+      - Extend layout state to expose visual line count/height or overflow after building the cached Parley layout, then use a surface-level visual scroll/follow offset so wrapped content can move upward without changing the canonical rope range.
+    - API Notes and Examples:
+      ```rust
+      layout.break_all_lines(Some(max_width));
+      let visual_line_count = layout.lines().len();
+      let overflow_lines = visual_line_count.saturating_sub(viewport.visible_line_count());
+      ```
+    - Files to Create/Edit:
+      - `src/editor/layout.rs`: Expose cached visual line metrics needed for overflow/follow behavior.
+      - `src/editor/viewport.rs`: Add explicit visual-line offset/follow state if needed.
+      - `src/editor/surface.rs`: Translate rendered text or adjust visible layout based on visual overflow.
+      - `src/masonry_editor.rs`: Route wheel scrolling to visual overflow when logical scrolling cannot move.
+    - References:
+      - Parley docs/code-search for layout line metrics and line iteration.
+      - Masonry `render_text` docs/code-search for rendering cached layouts with transforms.
+      - Phase 1 smoke-test finding about wrapped long text overflowing below the initial window.
+  - Test Cases to Write:
+    - `layout_reports_wrapped_visual_line_overflow`: a constrained-width long paragraph reports more visual lines than logical rope lines.
+    - `wrapped_text_follow_keeps_end_visible`: append-only wrapped text advances visual offset when visual lines exceed viewport height.
+    - Manual smoke test: Type a long paragraph without Enter and confirm newly typed wrapped lines remain visible or scrollable.
 
 - [ ] Add large-buffer and regression checks for the Phase 1 foundation
   - Acceptance Criteria:
@@ -243,6 +350,8 @@
 - Completed the initial module split without changing runtime behavior; `Viewport` and `LayoutState` are explicit module-owned state boundaries.
 - Added bounded visible extraction for painting and accessibility labels using line ranges over `crop`.
 - Implemented line-based wheel/trackpad scrolling and resize-derived visible line estimation using the current font-size line-height estimate; pixel-perfect scrolling based on Parley metrics remains deferred.
+- Added Parley layout caching keyed by text revision, viewport revision, and layout width, with explicit invalidation for Masonry font changes; cache behavior is unit-tested through cache-key checks rather than paint-context integration tests.
+- Added explicit Enter handling for newline insertion while keeping the generic printable-text filter strict against control newlines.
 
 ## Further Actions
-- Continue with the remaining Phase 1 tasks in order: Parley layout cache invalidation and large-buffer regression checks.
+- Continue with the remaining Phase 1 tasks: logical-line insertion follow/auto-scroll, wrapped visual-line overflow handling, and large-buffer regression checks.

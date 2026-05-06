@@ -8,6 +8,7 @@ pub struct Viewport {
     first_visible_line: usize,
     visible_line_count: usize,
     overscan_lines: usize,
+    revision: u64,
 }
 
 impl Default for Viewport {
@@ -16,6 +17,7 @@ impl Default for Viewport {
             first_visible_line: 0,
             visible_line_count: DEFAULT_VISIBLE_LINE_COUNT,
             overscan_lines: DEFAULT_OVERSCAN_LINES,
+            revision: 0,
         }
     }
 }
@@ -31,12 +33,17 @@ impl Viewport {
             first_visible_line,
             visible_line_count: visible_line_count.max(1),
             overscan_lines,
+            revision: 0,
         }
     }
 
     #[cfg(test)]
     pub fn first_visible_line(&self) -> usize {
         self.first_visible_line
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn visible_range(&self, document_line_count: usize) -> Range<usize> {
@@ -65,6 +72,7 @@ impl Viewport {
 
         self.visible_line_count = visible_line_count;
         self.clamp_first_visible_line(document_line_count);
+        self.bump_revision();
         true
     }
 
@@ -82,12 +90,20 @@ impl Viewport {
             self.first_visible_line = self.first_visible_line.saturating_add(delta_lines as usize);
         }
         self.clamp_first_visible_line(document_line_count);
-        self.first_visible_line != previous
+        let changed = self.first_visible_line != previous;
+        if changed {
+            self.bump_revision();
+        }
+        changed
     }
 
     fn clamp_first_visible_line(&mut self, document_line_count: usize) {
         let max_first_visible_line = document_line_count.saturating_sub(self.visible_line_count);
         self.first_visible_line = self.first_visible_line.min(max_first_visible_line);
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.saturating_add(1);
     }
 }
 
@@ -159,5 +175,23 @@ mod tests {
 
         assert!(changed);
         assert_eq!(viewport.first_visible_line(), 2);
+    }
+
+    #[test]
+    fn viewport_revision_changes_when_scroll_changes_visible_line() {
+        let mut viewport = Viewport::new(0, 3, 1);
+
+        viewport.scroll_lines(1, 10);
+
+        assert_eq!(viewport.revision(), 1);
+    }
+
+    #[test]
+    fn viewport_revision_changes_when_visible_line_count_changes() {
+        let mut viewport = Viewport::new(0, 3, 1);
+
+        viewport.set_visible_line_count(4, 10);
+
+        assert_eq!(viewport.revision(), 1);
     }
 }

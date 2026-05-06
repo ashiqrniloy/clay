@@ -4,7 +4,7 @@ use masonry::peniko::{Color, Fill};
 
 use super::buffer::EditorBuffer;
 use super::is_printable_text;
-use super::layout::LayoutState;
+use super::layout::{LayoutCacheKey, LayoutState};
 use super::viewport::{Viewport, visible_line_count_from_height};
 
 const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
@@ -30,6 +30,11 @@ impl EditorSurface {
         }
 
         self.buffer.insert_str(text);
+        true
+    }
+
+    pub fn insert_newline(&mut self) -> bool {
+        self.buffer.insert_str("\n");
         true
     }
 
@@ -99,12 +104,30 @@ impl EditorSurface {
             (current_text.as_str(), TEXT_COLOR)
         };
 
+        let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width);
         self.layout
-            .paint_text(ctx, scene, display_text, color, max_width);
+            .paint_text(ctx, scene, display_text, color, max_width, key);
     }
 
     fn visible_snapshot_text(&self) -> String {
         let range = self.viewport.visible_range(self.buffer.line_len());
         self.buffer.visible_snapshot(range).text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorSurface;
+
+    #[test]
+    fn editor_enter_inserts_newline() {
+        let mut editor = EditorSurface::default();
+
+        editor.insert_text("first");
+        let changed = editor.insert_newline();
+        editor.insert_text("second");
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "first\nsecond");
     }
 }

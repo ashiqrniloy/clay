@@ -11,6 +11,7 @@ pub struct VisibleSnapshot {
 #[derive(Debug, Default)]
 pub struct EditorBuffer {
     rope: Rope,
+    revision: u64,
 }
 
 impl EditorBuffer {
@@ -18,11 +19,13 @@ impl EditorBuffer {
     pub fn from_text(text: &str) -> Self {
         Self {
             rope: Rope::from(text),
+            revision: 0,
         }
     }
 
     pub fn insert_str(&mut self, text: &str) {
         self.rope.insert(self.rope.byte_len(), text);
+        self.revision = self.revision.saturating_add(1);
     }
 
     pub fn backspace(&mut self) {
@@ -32,6 +35,11 @@ impl EditorBuffer {
 
         let end = self.rope.byte_len();
         self.rope.delete(end - last_char.len_utf8()..end);
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn line_len(&self) -> usize {
@@ -133,5 +141,29 @@ mod tests {
 
         assert_eq!(before.text, "zero\none\n");
         assert_eq!(after.text, "two\nthree\n");
+    }
+
+    #[test]
+    fn editor_buffer_revision_changes_on_edits() {
+        let mut buffer = EditorBuffer::default();
+
+        buffer.insert_str("a");
+        let after_insert = buffer.revision();
+        buffer.backspace();
+
+        assert!(after_insert > 0);
+        assert!(buffer.revision() > after_insert);
+    }
+
+    #[test]
+    fn newline_insertion_creates_additional_visible_line() {
+        let mut buffer = EditorBuffer::default();
+
+        buffer.insert_str("first");
+        buffer.insert_str("\n");
+        buffer.insert_str("second");
+
+        assert_eq!(buffer.line_len(), 2);
+        assert_eq!(buffer.visible_text(), "first\nsecond");
     }
 }

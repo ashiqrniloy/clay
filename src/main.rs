@@ -94,6 +94,7 @@ mod tests {
         assert!(is_printable_text("abc é 🦀"));
         assert!(!is_printable_text(""));
         assert!(!is_printable_text("\r"));
+        assert!(!is_printable_text("\n"));
         assert!(!is_printable_text("a\n"));
     }
 }
