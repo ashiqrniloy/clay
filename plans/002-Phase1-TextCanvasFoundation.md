@@ -264,7 +264,7 @@
     - `editor_insert_newline_auto_scrolls_to_new_line`: append-only newline edits keep the newest line visible.
     - Manual smoke test: Type more newline-separated lines than fit and confirm older lines move upward while the newest line stays visible.
 
-- [ ] Account for Parley visual lines when wrapped text exceeds the viewport
+- [x] Account for Parley visual lines when wrapped text exceeds the viewport
   - Acceptance Criteria:
     - Functional: A long single logical line that wraps visually no longer disappears below the window; layout/viewport state can detect wrapped visual-line overflow and keep the typed end visible or make it scrollable.
     - Performance: Visual-line accounting uses the already prepared Parley layout/cache and does not rebuild layout more than the cache key requires.
@@ -353,6 +353,7 @@
 - Added Parley layout caching keyed by text revision, viewport revision, and layout width, with explicit invalidation for Masonry font changes; cache behavior is unit-tested through cache-key checks rather than paint-context integration tests.
 - Added explicit Enter handling for newline insertion while keeping the generic printable-text filter strict against control newlines.
 - Added append-only logical-line follow behavior so insert, newline, and Backspace keep the end-of-buffer insertion point visible; this intentionally follows the document end until full cursor/selection state exists.
+- Added Parley visual-line overflow handling: cached layouts now report visual line count/height, text rendering is translated and clipped by a surface-level visual scroll offset, append-only edits follow the wrapped visual end, and wheel/trackpad scrolling uses visual overflow before falling back to logical-line scrolling.
 
 ## Further Actions
-- Continue with the remaining Phase 1 tasks: wrapped visual-line overflow handling and large-buffer regression checks.
+- Continue with the remaining Phase 1 task: large-buffer regression checks.
