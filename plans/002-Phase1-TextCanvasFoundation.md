@@ -230,7 +230,7 @@
     - `printable_text_filter_still_rejects_control_newline`: generic text filtering still rejects raw control newline input.
     - Manual smoke test: Type multiple lines with Enter, scroll, Backspace, and Escape exit.
 
-- [ ] Keep the insertion point visible for logical-line edits
+- [x] Keep the insertion point visible for logical-line edits
   - Acceptance Criteria:
     - Functional: After inserting text, inserting a newline, or Backspace, the viewport clamps/follows so the end-of-buffer insertion point remains visible when the document has more logical lines than fit in the current viewport.
     - Performance: Auto-follow updates viewport counters only and reuses bounded visible extraction; it does not clone or materialize the full rope.
@@ -352,6 +352,7 @@
 - Implemented line-based wheel/trackpad scrolling and resize-derived visible line estimation using the current font-size line-height estimate; pixel-perfect scrolling based on Parley metrics remains deferred.
 - Added Parley layout caching keyed by text revision, viewport revision, and layout width, with explicit invalidation for Masonry font changes; cache behavior is unit-tested through cache-key checks rather than paint-context integration tests.
 - Added explicit Enter handling for newline insertion while keeping the generic printable-text filter strict against control newlines.
+- Added append-only logical-line follow behavior so insert, newline, and Backspace keep the end-of-buffer insertion point visible; this intentionally follows the document end until full cursor/selection state exists.
 
 ## Further Actions
-- Continue with the remaining Phase 1 tasks: logical-line insertion follow/auto-scroll, wrapped visual-line overflow handling, and large-buffer regression checks.
+- Continue with the remaining Phase 1 tasks: wrapped visual-line overflow handling and large-buffer regression checks.

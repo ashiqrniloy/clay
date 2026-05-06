@@ -75,8 +75,8 @@ impl Widget for EditorWidget {
                         ctx.set_handled();
                     }
                     Key::Named(NamedKey::Backspace) => {
-                        self.editor.backspace();
-                        self.edit(ctx, true);
+                        let changed = self.editor.backspace();
+                        self.edit(ctx, changed);
                     }
                     Key::Named(NamedKey::Enter) => {
                         let changed = self.editor.insert_newline();

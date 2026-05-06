@@ -90,16 +90,62 @@ impl Viewport {
             self.first_visible_line = self.first_visible_line.saturating_add(delta_lines as usize);
         }
         self.clamp_first_visible_line(document_line_count);
-        let changed = self.first_visible_line != previous;
-        if changed {
-            self.bump_revision();
+        self.bump_revision_if_changed(previous)
+    }
+
+    pub fn follow_document_end(&mut self, document_line_count: usize) -> bool {
+        let Some(last_line) = document_line_count.checked_sub(1) else {
+            return self.set_first_visible_line(0, document_line_count);
+        };
+
+        self.ensure_line_visible(last_line, document_line_count)
+    }
+
+    pub fn ensure_line_visible(&mut self, line: usize, document_line_count: usize) -> bool {
+        if document_line_count == 0 {
+            return self.set_first_visible_line(0, document_line_count);
         }
-        changed
+
+        let previous = self.first_visible_line;
+        let line = line.min(document_line_count - 1);
+        let visible_end = self
+            .first_visible_line
+            .saturating_add(self.visible_line_count);
+
+        if line < self.first_visible_line {
+            self.first_visible_line = line;
+        } else if line >= visible_end {
+            self.first_visible_line = line
+                .saturating_add(1)
+                .saturating_sub(self.visible_line_count);
+        }
+
+        self.clamp_first_visible_line(document_line_count);
+        self.bump_revision_if_changed(previous)
+    }
+
+    fn set_first_visible_line(
+        &mut self,
+        first_visible_line: usize,
+        document_line_count: usize,
+    ) -> bool {
+        let previous = self.first_visible_line;
+        self.first_visible_line = first_visible_line;
+        self.clamp_first_visible_line(document_line_count);
+        self.bump_revision_if_changed(previous)
     }
 
     fn clamp_first_visible_line(&mut self, document_line_count: usize) {
         let max_first_visible_line = document_line_count.saturating_sub(self.visible_line_count);
         self.first_visible_line = self.first_visible_line.min(max_first_visible_line);
+    }
+
+    fn bump_revision_if_changed(&mut self, previous_first_visible_line: usize) -> bool {
+        let changed = self.first_visible_line != previous_first_visible_line;
+        if changed {
+            self.bump_revision();
+        }
+        changed
     }
 
     fn bump_revision(&mut self) {
@@ -193,5 +239,26 @@ mod tests {
         viewport.set_visible_line_count(4, 10);
 
         assert_eq!(viewport.revision(), 1);
+    }
+
+    #[test]
+    fn viewport_follow_document_end_shows_last_logical_line() {
+        let mut viewport = Viewport::new(0, 3, 0);
+
+        let changed = viewport.follow_document_end(10);
+
+        assert!(changed);
+        assert_eq!(viewport.first_visible_line(), 7);
+        assert_eq!(viewport.visible_range(10), 7..10);
+    }
+
+    #[test]
+    fn viewport_ensure_line_visible_preserves_visible_line() {
+        let mut viewport = Viewport::new(3, 3, 0);
+
+        let changed = viewport.ensure_line_visible(4, 10);
+
+        assert!(!changed);
+        assert_eq!(viewport.first_visible_line(), 3);
     }
 }

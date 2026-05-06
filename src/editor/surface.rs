@@ -30,16 +30,23 @@ impl EditorSurface {
         }
 
         self.buffer.insert_str(text);
+        self.follow_document_end();
         true
     }
 
     pub fn insert_newline(&mut self) -> bool {
         self.buffer.insert_str("\n");
+        self.follow_document_end();
         true
     }
 
-    pub fn backspace(&mut self) {
-        self.buffer.backspace();
+    pub fn backspace(&mut self) -> bool {
+        if !self.buffer.backspace() {
+            return false;
+        }
+
+        self.follow_document_end();
+        true
     }
 
     pub fn visible_text(&self) -> String {
@@ -113,11 +120,15 @@ impl EditorSurface {
         let range = self.viewport.visible_range(self.buffer.line_len());
         self.buffer.visible_snapshot(range).text
     }
+
+    fn follow_document_end(&mut self) -> bool {
+        self.viewport.follow_document_end(self.buffer.line_len())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::EditorSurface;
+    use super::{EditorSurface, TEXT_INSET};
 
     #[test]
     fn editor_enter_inserts_newline() {
@@ -129,5 +140,31 @@ mod tests {
 
         assert!(changed);
         assert_eq!(editor.visible_text(), "first\nsecond");
+    }
+
+    #[test]
+    fn editor_insert_newline_auto_scrolls_to_new_line() {
+        let mut editor = EditorSurface::default();
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 1.0);
+
+        editor.insert_text("first");
+        editor.insert_newline();
+        editor.insert_text("second");
+
+        assert_eq!(editor.visible_text(), "second");
+    }
+
+    #[test]
+    fn editor_backspace_keeps_remaining_end_visible() {
+        let mut editor = EditorSurface::default();
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 1.0);
+        editor.insert_text("first");
+        editor.insert_newline();
+        editor.insert_text("second");
+
+        let changed = editor.backspace();
+
+        assert!(changed);
+        assert_eq!(editor.visible_text(), "secon");
     }
 }

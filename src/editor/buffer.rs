@@ -28,14 +28,15 @@ impl EditorBuffer {
         self.revision = self.revision.saturating_add(1);
     }
 
-    pub fn backspace(&mut self) {
+    pub fn backspace(&mut self) -> bool {
         let Some(last_char) = self.rope.chars().next_back() else {
-            return;
+            return false;
         };
 
         let end = self.rope.byte_len();
         self.rope.delete(end - last_char.len_utf8()..end);
         self.revision = self.revision.saturating_add(1);
+        true
     }
 
     pub fn revision(&self) -> u64 {
