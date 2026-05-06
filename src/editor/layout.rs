@@ -248,7 +248,7 @@ impl LayoutState {
     }
 
     #[cfg(test)]
-    fn set_cached_layout_for_test(&mut self, display_text: &str, max_width: f32) {
+    pub(super) fn set_cached_layout_for_test(&mut self, display_text: &str, max_width: f32) {
         self.cached = Some(CachedLayout {
             key: LayoutCacheKey::new(0, 0, max_width),
             layout: Self::build_layout_for_test(display_text, max_width),

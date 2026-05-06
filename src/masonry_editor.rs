@@ -2,8 +2,8 @@ use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
-    PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta,
-    TextEvent, Widget,
+    PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx,
+    ScrollDelta, TextEvent, Widget,
 };
 use masonry::kurbo::Size;
 use masonry::peniko::Fill;
@@ -43,21 +43,36 @@ impl Widget for EditorWidget {
     ) {
         ctx.request_focus();
 
-        let changed = match event {
-            PointerEvent::Scroll(PointerScrollEvent { delta, .. }) => match delta {
-                ScrollDelta::LineDelta(_, y) => self.editor.scroll_lines((-*y).round() as isize),
-                ScrollDelta::PixelDelta(position) => {
-                    let logical = position.to_logical::<f64>(ctx.get_scale_factor());
-                    self.editor.scroll_vertical_pixels(-logical.y)
-                }
-                ScrollDelta::PageDelta(_, y) => self.editor.scroll_lines((-*y).round() as isize),
-            },
-            _ => false,
+        let (changed, handled) = match event {
+            PointerEvent::Down(button_event)
+                if button_event.button == Some(PointerButton::Primary) =>
+            {
+                let point = ctx.local_position(button_event.state.position);
+                (self.editor.place_caret_at_point(point), true)
+            }
+            PointerEvent::Scroll(PointerScrollEvent { delta, .. }) => {
+                let changed = match delta {
+                    ScrollDelta::LineDelta(_, y) => {
+                        self.editor.scroll_lines((-*y).round() as isize)
+                    }
+                    ScrollDelta::PixelDelta(position) => {
+                        let logical = position.to_logical::<f64>(ctx.get_scale_factor());
+                        self.editor.scroll_vertical_pixels(-logical.y)
+                    }
+                    ScrollDelta::PageDelta(_, y) => {
+                        self.editor.scroll_lines((-*y).round() as isize)
+                    }
+                };
+                (changed, changed)
+            }
+            _ => (false, false),
         };
 
         if changed {
             ctx.request_render();
             ctx.request_accessibility_update();
+        }
+        if handled {
             ctx.set_handled();
         }
     }

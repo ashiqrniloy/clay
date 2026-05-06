@@ -124,7 +124,6 @@ impl EditorSurface {
         self.visible_snapshot().text
     }
 
-    #[expect(dead_code, reason = "prepared for upcoming pointer hit-testing task")]
     pub fn hit_test_document_offset(&self, point: Point) -> Option<usize> {
         let snapshot = self.visible_snapshot();
         if snapshot.text.is_empty() {
@@ -161,6 +160,18 @@ impl EditorSurface {
             geometry.rect.x1 + TEXT_INSET,
             geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
         ))
+    }
+
+    pub fn place_caret_at_point(&mut self, point: Point) -> bool {
+        let Some(caret) = self.hit_test_document_offset(point) else {
+            return false;
+        };
+
+        let previous = self.cursor.caret();
+        self.cursor.set_caret(caret);
+        self.follow_visual_end = false;
+        self.ensure_caret_line_visible();
+        previous != self.cursor.caret()
     }
 
     pub fn scroll_lines(&mut self, delta_lines: isize) -> bool {
@@ -356,6 +367,12 @@ impl EditorSurface {
     }
 
     #[cfg(test)]
+    fn build_visible_layout_for_test(&mut self, max_width: f32) {
+        let text = self.visible_text();
+        self.layout.set_cached_layout_for_test(&text, max_width);
+    }
+
+    #[cfg(test)]
     fn set_caret_for_test(&mut self, caret: usize) {
         let caret = self.buffer.clamp_byte_offset(caret);
         self.cursor.set_caret(caret);
@@ -490,6 +507,35 @@ mod tests {
         assert_eq!(editor.caret_for_test(), "a🦀c\nxy\n三四".len());
         assert!(editor.move_up());
         assert_eq!(editor.caret_for_test(), "a🦀c\nxy".len());
+    }
+
+    #[test]
+    fn place_caret_at_point_before_text_moves_to_visible_start() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.build_visible_layout_for_test(300.0);
+
+        let changed =
+            editor.place_caret_at_point(masonry::kurbo::Point::new(TEXT_INSET - 100.0, TEXT_INSET));
+
+        assert!(changed);
+        assert_eq!(editor.caret_for_test(), 0);
+    }
+
+    #[test]
+    fn place_caret_at_point_after_text_moves_to_visible_end() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("abc");
+        editor.set_caret_for_test(0);
+        editor.build_visible_layout_for_test(300.0);
+
+        let changed = editor.place_caret_at_point(masonry::kurbo::Point::new(
+            TEXT_INSET + 10_000.0,
+            TEXT_INSET,
+        ));
+
+        assert!(changed);
+        assert_eq!(editor.caret_for_test(), "abc".len());
     }
 
     #[test]

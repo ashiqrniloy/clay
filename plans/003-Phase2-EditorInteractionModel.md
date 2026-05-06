@@ -214,7 +214,7 @@
     - `caret_paint_geometry_is_clipped_to_text_area`: Geometry used for caret painting lies inside the text clip when visible.
     - Manual smoke test: Move the caret across wrapped and multiline content and verify it remains visible.
 
-- [ ] Add pointer hit-testing for click-to-place-caret
+- [x] Add pointer hit-testing for click-to-place-caret
   - Acceptance Criteria:
     - Functional: Primary pointer click focuses the editor, maps the click location to the nearest text offset in the visible layout, moves the caret, clears selection, and requests repaint/accessibility update.
     - Performance: Pointer hit-testing uses cached layout state and bounded visible snapshot text; it does not clone the full buffer or rebuild renderer/window state.
@@ -229,7 +229,7 @@
       - Approximate line/column from fixed width: incorrect for Parley wrapping/font fallback.
       - Use Parley hit-testing from pointer coordinates: consistent with rendered text and prepares for drag selection.
     - Chosen Approach:
-      - On primary pointer down, request focus and call `EditorSurface::place_caret_at_point(logical_point)`. Use existing visual scroll offset and text inset to convert widget coordinates into Parley layout coordinates.
+      - On primary pointer down, request focus and call `EditorSurface::place_caret_at_point(local_point)`. The widget converts the physical pointer state through `EventCtx::local_position`; the surface uses the existing visual scroll offset and text inset to convert widget coordinates into Parley layout coordinates.
     - API Notes and Examples:
       ```rust
       if let PointerEvent::Down { button: Some(PointerButton::Primary), position, .. } = event {
