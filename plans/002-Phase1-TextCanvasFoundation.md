@@ -107,7 +107,7 @@
     - `visible_snapshot_preserves_utf8_boundaries`: Unicode text sliced by line APIs remains valid and complete.
     - `empty_buffer_visible_snapshot_is_empty`: Empty documents produce an empty snapshot and keep placeholder behavior in paint.
 
-- [ ] Add basic viewport scrolling and resize-derived visible line estimation
+- [x] Add basic viewport scrolling and resize-derived visible line estimation
   - Acceptance Criteria:
     - Functional: Wheel or trackpad scrolling adjusts the first visible line, clamps within the document, requests repaint, and changes the displayed line window for multi-line buffers.
     - Performance: Scrolling updates viewport counters and bounded visible extraction only; it does not clone the full rope or rebuild unrelated application state.
@@ -241,7 +241,8 @@
 
 ## Compromises Made
 - Completed the initial module split without changing runtime behavior; `Viewport` and `LayoutState` are explicit module-owned state boundaries.
-- Added bounded visible extraction for painting and accessibility labels using line ranges over `crop`; scrolling and resize-derived line count updates remain deferred to the dedicated viewport scrolling task.
+- Added bounded visible extraction for painting and accessibility labels using line ranges over `crop`.
+- Implemented line-based wheel/trackpad scrolling and resize-derived visible line estimation using the current font-size line-height estimate; pixel-perfect scrolling based on Parley metrics remains deferred.
 
 ## Further Actions
-- Continue with the remaining Phase 1 tasks in order: line-based scrolling/resize estimation, Parley layout cache invalidation, and large-buffer regression checks.
+- Continue with the remaining Phase 1 tasks in order: Parley layout cache invalidation and large-buffer regression checks.

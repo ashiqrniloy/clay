@@ -5,7 +5,7 @@ use masonry::peniko::{Color, Fill};
 use super::buffer::EditorBuffer;
 use super::is_printable_text;
 use super::layout::LayoutState;
-use super::viewport::Viewport;
+use super::viewport::{Viewport, visible_line_count_from_height};
 
 const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
@@ -14,6 +14,7 @@ const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
 pub(super) const TEXT_INSET: f64 = 48.0;
 pub(super) const TEXT_FONT_SIZE: f32 = 20.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
+const LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
 
 #[derive(Debug, Default)]
 pub struct EditorSurface {
@@ -40,10 +41,35 @@ impl EditorSurface {
         self.visible_snapshot_text()
     }
 
+    pub fn scroll_lines(&mut self, delta_lines: isize) -> bool {
+        self.viewport
+            .scroll_lines(delta_lines, self.buffer.line_len())
+    }
+
+    pub fn scroll_vertical_pixels(&mut self, delta_pixels: f64) -> bool {
+        let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
+        let magnitude = (delta_pixels.abs() / line_height).ceil().max(1.0) as isize;
+        let delta_lines = if delta_pixels.is_sign_negative() {
+            -magnitude
+        } else {
+            magnitude
+        };
+        self.scroll_lines(delta_lines)
+    }
+
+    pub fn update_visible_line_count_for_height(&mut self, height: f64) -> bool {
+        let available_height = (height - (TEXT_INSET * 2.0)).max(0.0);
+        let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
+        let visible_line_count = visible_line_count_from_height(available_height, line_height);
+        self.viewport
+            .set_visible_line_count(visible_line_count, self.buffer.line_len())
+    }
+
     pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut masonry::vello::Scene) {
         let size = ctx.size();
         let width = size.width;
         let height = size.height;
+        self.update_visible_line_count_for_height(height);
 
         let canvas = Rect::new(
             24.0,

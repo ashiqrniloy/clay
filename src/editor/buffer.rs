@@ -121,4 +121,17 @@ mod tests {
         assert_eq!(snapshot.text, "");
         assert_eq!(snapshot.line_range, 0..0);
     }
+
+    #[test]
+    fn scrolling_viewport_changes_visible_snapshot() {
+        let buffer = EditorBuffer::from_text("zero\none\ntwo\nthree\nfour\n");
+        let mut viewport = Viewport::new(0, 2, 0);
+        let before = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        viewport.scroll_lines(2, buffer.line_len());
+        let after = buffer.visible_snapshot(viewport.visible_range(buffer.line_len()));
+
+        assert_eq!(before.text, "zero\none\n");
+        assert_eq!(after.text, "two\nthree\n");
+    }
 }

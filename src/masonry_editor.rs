@@ -2,7 +2,8 @@ use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
-    PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Widget,
+    PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta,
+    TextEvent, Widget,
 };
 use masonry::kurbo::Size;
 use masonry::peniko::Fill;
@@ -37,9 +38,27 @@ impl Widget for EditorWidget {
         &mut self,
         ctx: &mut EventCtx<'_>,
         _props: &mut PropertiesMut<'_>,
-        _event: &PointerEvent,
+        event: &PointerEvent,
     ) {
         ctx.request_focus();
+
+        let changed = match event {
+            PointerEvent::Scroll(PointerScrollEvent { delta, .. }) => match delta {
+                ScrollDelta::LineDelta(_, y) => self.editor.scroll_lines((-*y).round() as isize),
+                ScrollDelta::PixelDelta(position) => {
+                    let logical = position.to_logical::<f64>(ctx.get_scale_factor());
+                    self.editor.scroll_vertical_pixels(-logical.y)
+                }
+                ScrollDelta::PageDelta(_, y) => self.editor.scroll_lines((-*y).round() as isize),
+            },
+            _ => false,
+        };
+
+        if changed {
+            ctx.request_render();
+            ctx.request_accessibility_update();
+            ctx.set_handled();
+        }
     }
 
     fn on_text_event(
