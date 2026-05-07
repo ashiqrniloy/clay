@@ -53,18 +53,24 @@ Introduce the Thick Client / Asynchronous Server architecture without solving fu
 
 Focus areas:
 
+- Run the Phase 2 manual GUI smoke pass before cutting the client/server seam.
 - Scaffold an async Rust server using Tokio.
 - Keep the Masonry/Vello client separate from the server boundary.
-- Add local IPC transport abstraction.
-- Start with Unix Domain Sockets on Linux/macOS; leave Windows named-pipe support behind an abstraction.
+- Add a local IPC transport abstraction.
+- Start with Unix Domain Sockets on Linux/macOS; leave Windows named-pipe support behind the transport abstraction.
 - Define initial lifecycle messages: connect, initial document snapshot, edit event, acknowledgement.
-- Keep serialization simple enough to validate the protocol while preserving a path toward `rkyv`.
+- Use `rkyv` early for protocol encoding, but keep it behind a narrow codec boundary.
+- Validate received archived payloads before access and treat local IPC bytes as fallible input.
+- Keep the Phase 3 protocol intentionally small; do not make `rkyv` performance proving the phase's main goal.
+- Preserve a benchmark/swap point around the codec so future measurements can compare message shapes and payload sizes.
 
 Expected outcome:
 
 - Client and server run as separate architectural units.
 - Server can send initial document state.
 - Client can send basic edit operations.
+- Protocol messages are `rkyv`-serializable and exchanged through a length-prefixed local IPC frame.
+- Serialization remains isolated enough that Phase 4 synchronization work can evolve message semantics without broad UI/server rewrites.
 
 ## Phase 4: Versioned Text Synchronization
 
