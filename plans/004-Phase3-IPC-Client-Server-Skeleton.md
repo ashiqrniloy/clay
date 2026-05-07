@@ -4,23 +4,25 @@
 - Introduce Clay's Thick Client / Asynchronous Server architecture without attempting full versioned synchronization.
 - Keep the existing Masonry/Vello/Parley editor as the native client surface while adding a Tokio server boundary.
 - Exchange initial document snapshots and basic edit operations over local IPC.
+- Revisit and explicitly decide the Phase 3 document authority model before hard-coding client-shadow/server-canonical assumptions into the protocol.
 - Use `rkyv` early for protocol encoding, but keep it behind a small codec abstraction so protocol semantics remain easy to evolve.
 - Preserve Phase 2 editor behavior and tests while preparing the message boundary needed by Phase 4 versioned synchronization.
 
 ## Expected Outcome
 - A Phase 2 manual GUI smoke pass has been completed before IPC refactoring begins.
+- The plan records an explicit document-authority decision: whether the server owns canonical text, the client owns text with server-provided behavior, or Phase 3 temporarily supports a narrower hybrid.
 - The repository has separate client/server architectural units, preferably separate binaries or clearly separated modules.
 - A Tokio server listens on a local Unix Domain Socket on Linux/macOS.
 - The client connects to the server, receives an initial in-memory document snapshot, and loads it into the editor.
-- Local editing remains immediate and sends basic insert/delete/replace operations to the server.
-- The server receives edit operations and sends acknowledgements, but does not yet reject stale edits or perform full resync.
+- Local editing remains immediate and sends basic insert/delete/replace operations or editor intents to the server.
+- The server receives edit operations/intents and sends acknowledgements or simple edit transactions, but does not yet reject stale edits or perform full resync.
 - Protocol messages are encoded with `rkyv` through a length-prefixed codec with validation on receive.
 - `cargo fmt`, `cargo test`, and `cargo check` pass.
 - No `deno_core` runtime execution, SDUI protocol, file workspace authority, region-lock conflict handling, remote SSH/Docker mode, or AI edit sessions are introduced in this phase.
 
 ## Tasks
 
-- [ ] Run and record the Phase 2 manual GUI smoke pass
+- [x] Run and record the Phase 2 manual GUI smoke pass
   - Acceptance Criteria:
     - Functional: The existing single-process editor launches, accepts typing, click-to-place caret, drag selection forward/backward, middle-text edits, navigation, selection replacement/deletion, wrapped/multiline scrolling, resize, Backspace/Delete, and Escape exit before IPC changes begin.
     - Performance: The smoke pass does not reveal obvious regressions in bounded viewport extraction, layout cache reuse, or input latency from Phase 2.
@@ -34,7 +36,7 @@
       - Skip manual smoke testing and rely on unit tests: faster, but risks debugging local-editor defects after IPC is introduced.
       - Run and record the smoke pass first: preserves a known-good client baseline before architectural refactoring.
     - Chosen Approach:
-      - Execute the existing manual checklist, fix any blocking local editor regressions first, and record the result in this plan before continuing.
+      - The user has completed the existing manual checklist and reports that it passes. No additional Phase 2 verification is needed before Phase 3 beyond preserving automated `cargo fmt`, `cargo test`, and `cargo check` verification during implementation.
     - API Notes and Examples:
       ```bash
       cargo run
@@ -46,11 +48,59 @@
       - `plans/003-Phase2-EditorInteractionModel.md` Further Actions.
       - `roadmap.md` Phase 2 and Phase 3 transition.
   - Test Cases to Write:
-    - Manual smoke test: Launch, type, click, drag-select, navigate, replace/delete selection, scroll, resize, Backspace/Delete, and Escape.
+    - Manual smoke test: Launch, type, click, drag-select, navigate, replace/delete selection, scroll, resize, Backspace/Delete, and Escape. Completed by user and reported passing before Phase 3 implementation.
+
+- [ ] Decide the Phase 3 document authority and behavior model
+  - Acceptance Criteria:
+    - Functional: The project has a written decision for what text state lives on the client and server during Phase 3, including how server-owned editor behavior such as automatic indentation is represented.
+    - Performance: The decision preserves immediate local typing and avoids unnecessary full-document IPC round trips for ordinary keystrokes.
+    - Code Quality: The chosen model keeps behavior decisions, text storage, and transport messages separate enough that Phase 4 can add versioning without rewriting the editor surface.
+    - Security: The decision does not grant extensions, scripts, file IO, or remote network authority; behavior messages are inert editor intents or edit transactions only.
+  - Approach:
+    - Documentation Reviewed:
+      - `concept.md`: Client owns high-frequency local state; server owns authoritative logic and canonical document state in the original architecture.
+      - `roadmap.md`: Phase 3 introduces IPC without full synchronization; Phase 4 introduces versioned text synchronization.
+      - `plans/003-Phase2-EditorInteractionModel.md`: The local editor already represents edits as valid byte-offset/range operations.
+    - Options Considered:
+      - Server-canonical rope plus client shadow rope: best supports future file saving, AI edits, remote server authority, multi-view consistency, and server-computed behavior, but requires synchronization machinery in Phase 4.
+      - Client-only rope plus server behavior service: simpler for a single local editor and immediate UI, but the server cannot safely save, mutate, or coordinate AI/extension edits without trusting client-provided state/context.
+      - Hybrid Phase 3 model: keep the client as the immediate editing surface, let the server hold a simple mirror/canonical text copy for snapshots and acknowledgements, and defer conflict/version rules to Phase 4.
+    - Chosen Approach:
+      - Recommended default: use the hybrid as the Phase 3 implementation path while documenting that the long-term architecture remains server-canonical with a client shadow. Phase 3 should not implement full conflict handling, but it should avoid designing the server as only a stateless behavior service.
+      - For server-owned behavior such as auto-indent, introduce protocol room for editor intents or server-produced edit transactions. The client may apply a local prediction for latency, but the server's acknowledgement can later carry the canonical transaction/version in Phase 4.
+    - API Notes and Examples:
+      ```rust
+      pub enum ClientMessage {
+          Hello { protocol_version: u32 },
+          EditorIntent { document_id: u64, intent: EditorIntent },
+          Edit { document_id: u64, operation: EditOperation },
+      }
+
+      pub enum EditorIntent {
+          InsertText { byte_offset: u64, text: String },
+          PressEnter { byte_offset: u64 },
+      }
+
+      pub enum ServerMessage {
+          EditTransaction { document_id: u64, operations: Vec<EditOperation> },
+          EditAck { document_id: u64 },
+      }
+      ```
+    - Files to Create/Edit:
+      - `plans/004-Phase3-IPC-Client-Server-Skeleton.md`: Record the decision and update protocol tasks if needed.
+      - `roadmap.md`: Edit only if the decision changes the longer-term canonical/shadow architecture.
+      - `concept.md`: Edit only if the decision changes the architecture specification, not merely the Phase 3 implementation compromise.
+    - References:
+      - `concept.md` section 4 on canonical and shadow state.
+      - `roadmap.md` Phase 3 and Phase 4 boundaries.
+      - `plans/003-Phase2-EditorInteractionModel.md` edit-operation primitives.
+  - Test Cases to Write:
+    - `authority_model_decision_is_recorded`: Documentation review confirms the selected model is captured before protocol implementation begins.
+    - `auto_indent_intent_shape_is_representable`: Protocol tests cover either an Enter intent or a server-returned transaction capable of inserting newline plus indentation.
 
 - [ ] Define the minimal `rkyv` protocol and length-prefixed codec boundary
   - Acceptance Criteria:
-    - Functional: Protocol types can represent `Hello`, `Welcome`, `InitialDocument`, client edit operations, edit acknowledgements, and error responses.
+    - Functional: Protocol types can represent `Hello`, `Welcome`, `InitialDocument`, client edit operations and/or editor intents, edit transactions or acknowledgements, and error responses.
     - Performance: Encoding avoids protocol-wide heap-heavy conversion layers beyond required socket framing and inserted text ownership; received payload validation is explicit and measured later rather than assumed free.
     - Code Quality: Protocol types live in a focused module shared by client and server, derive `rkyv::Archive`, `rkyv::Serialize`, and `rkyv::Deserialize`, and are accessed through a `Codec` API instead of scattered serialization calls.
     - Security: Received archived bytes are validated before access; maximum frame size is bounded to prevent accidental unbounded memory allocation from malformed or oversized IPC frames.
@@ -71,6 +121,7 @@
       pub enum ClientMessage {
           Hello { protocol_version: u32 },
           Edit { document_id: u64, operation: EditOperation },
+          EditorIntent { document_id: u64, intent: EditorIntent },
       }
 
       #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug)]
@@ -78,6 +129,7 @@
           Welcome,
           InitialDocument { document_id: u64, text: String },
           EditAck { document_id: u64 },
+          EditTransaction { document_id: u64, operations: Vec<EditOperation> },
           Error { message: String },
       }
       ```
@@ -98,7 +150,7 @@
 
 - [ ] Add a Tokio Unix Domain Socket server skeleton
   - Acceptance Criteria:
-    - Functional: A server binary or server module can bind a Unix socket, accept one or more client connections, respond to `Hello`, send an initial in-memory document snapshot, receive edit operations, and send edit acknowledgements.
+    - Functional: A server binary or server module can bind a Unix socket, accept one or more client connections, respond to `Hello`, send an initial in-memory document snapshot, receive edit operations/intents, and send edit acknowledgements or simple edit transactions.
     - Performance: The server uses async I/O without blocking the Tokio runtime on socket reads/writes or edit dispatch; per-connection work is spawned or otherwise isolated enough not to block the accept loop.
     - Code Quality: Server startup, socket lifecycle, connection handling, and document state are separated into small modules; stale socket cleanup is handled clearly for development runs.
     - Security: Socket path selection avoids accidentally binding in unsafe shared locations without clear permissions; frame-size limits and decode errors close or reject bad connections gracefully.
@@ -112,7 +164,7 @@
       - Create a separate binary now: best matches Thick Client / Asynchronous Server architecture and makes IPC explicit.
       - Support Windows named pipes immediately: more complete, but outside the Phase 3 Linux/macOS skeleton scope.
     - Chosen Approach:
-      - Add a Tokio server entry point that binds a Unix socket path, accepts client connections, uses the shared codec for framed `rkyv` messages, and owns a simple in-memory document string or rope placeholder until Phase 4/5.
+      - Add a Tokio server entry point that binds a Unix socket path, accepts client connections, uses the shared codec for framed `rkyv` messages, and owns a simple mirrored document string or rope placeholder until Phase 4/5. This keeps the server from becoming only a stateless behavior service while avoiding full Phase 4 synchronization complexity.
     - API Notes and Examples:
       ```rust
       use tokio::net::UnixListener;

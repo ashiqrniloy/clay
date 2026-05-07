@@ -1,9 +1,9 @@
 ---
-name: clay-planning
-description: Create and maintain numbered implementation plan documents for work that requires documenting executable task lists. Use whenever an agent is asked to write, update, or execute an implementation plan, roadmap, task breakdown, phase plan, or plan document with objectives, expected outcomes, acceptance criteria, approaches, tests, compromises, and follow-up actions.
+name: create-plan
+description: Create and maintain numbered plan documents for work that requires documenting executable task lists. Use anytime a user asks an agent to create, write, update, execute, or maintain any plan, including an implementation plan, roadmap, task breakdown, phase plan, project plan, or plan document with objectives, expected outcomes, acceptance criteria, approaches, tests, compromises, and follow-up actions.
 ---
 
-# Clay Planning
+# Create Plan
 
 ## Overview
 

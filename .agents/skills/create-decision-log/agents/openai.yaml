@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Decision Log"
+  short_description: "Record approved project decisions"
+  default_prompt: "Use $create-decision-log to record an approved project decision with evidence and alternatives."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Plan"
+  short_description: "Create rigorous numbered plan documents"
+  default_prompt: "Use $create-plan to create a numbered plan with tasks, criteria, approaches, tests, and follow-up sections."
