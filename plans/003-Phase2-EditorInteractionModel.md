@@ -17,6 +17,67 @@
 
 ## Tasks
 
+- [ ] Set up the Clay JavaScript API facade boundary
+  - Acceptance Criteria:
+    - Functional: The project has a planned server-side Clay JS API module/facade structure that will expose JavaScript-callable APIs through explicit `deno_core` op wrappers instead of raw Rust function access.
+    - Performance: The setup is server-side only and does not add synchronous keypress, paint, or local editor hot-path work.
+    - Code Quality: The boundary separates Rust implementation functions, op wrappers, and stable JS/TS facade modules so future APIs can be documented and versioned.
+    - Security: The setup does not expose client-side Rust functions or arbitrary Rust public functions to JavaScript; authority checks remain at the server/API boundary.
+  - Approach:
+    - Documentation Reviewed:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`: Clay JS APIs are stable facades backed by explicit `deno_core` ops.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Documentation-as-code applies to Clay JS APIs.
+      - Context7 `/denoland/deno_core` docs: Rust functions are exposed to JavaScript through extensions and ops.
+    - Options Considered:
+      - Directly expose Rust public functions to JavaScript: rejected because it couples JS users to Rust internals.
+      - Document raw `Deno.core.ops.op_*` calls as the API: rejected because raw ops are implementation details.
+      - Create stable Clay JS facade modules backed by explicit ops: chosen as the durable boundary.
+    - Chosen Approach:
+      - Establish the intended file/module layout and conventions for future server-side Clay JS APIs before server implementation expands. Phase 2 remains client-local, so this task records the setup requirement and keeps implementation deferred until the server/runtime exists.
+    - API Notes and Examples:
+      ```ts
+      import { normalizeLineEndings } from "clay:core";
+
+      const normalized = normalizeLineEndings("hello\r\nworld");
+      ```
+    - Files to Create/Edit:
+      - `plans/003-Phase2-EditorInteractionModel.md`: Add this setup task.
+      - Future server/runtime files: `src/server/js/**`, `runtime/js/**`, or equivalent when Phase 4+ introduces the server.
+    - References:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`
+  - Test Cases to Write:
+    - `clay_js_api_boundary_is_documented`: Future test should fail if API boundary docs/conventions are absent when server JS runtime files are added.
+
+- [ ] Create or verify Clay JS APIs for existing server-side Rust public functions
+  - Acceptance Criteria:
+    - Functional: Existing server-side Rust public functions, if any, are inventoried; each has a Clay JS API, and functions that should not be exposed are kept private or `pub(crate)` instead of public.
+    - Performance: Inventory and facade creation do not add runtime overhead to client-local editor input/rendering.
+    - Code Quality: JS APIs use stable facade names and examples rather than exposing raw op names to users or agents.
+    - Security: Only server-side functions intended for JavaScript authority are exposed; client-side Rust functions remain unavailable to JavaScript.
+  - Approach:
+    - Documentation Reviewed:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`: Corresponding Clay JS API requirement for server-side Rust public functions.
+      - `plans/003-Phase2-EditorInteractionModel.md` expected outcome: Phase 2 introduces no server process or `deno_core` runtime.
+    - Options Considered:
+      - Add no task until server work exists: simpler, but loses the project rule in the plan history.
+      - Add a verification task that currently expects no server-side Rust public functions: chosen because Phase 2 is client-only while establishing the future invariant.
+    - Chosen Approach:
+      - Verify that Phase 2 has no server-side Rust public functions to expose yet. When server-side public functions are introduced in later phases, create explicit Clay JS APIs and docs for each one.
+    - API Notes and Examples:
+      ```text
+      server Rust public function -> deno_core op wrapper -> Clay JS facade export -> Markdown doc -> generated registry
+      ```
+    - Files to Create/Edit:
+      - `plans/003-Phase2-EditorInteractionModel.md`: Add this verification/API task.
+      - Future server/runtime files and docs when applicable.
+    - References:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
+      - `.agents/skills/create-plan/references/clay.md`
+  - Test Cases to Write:
+    - `server_public_rust_functions_have_clay_js_api`: Future coverage test should fail when server-side public Rust functions lack a Clay JS API.
+
+
 - [x] Introduce cursor and text-range editing primitives
   - Acceptance Criteria:
     - Functional: `EditorBuffer` can insert text, insert newline, delete a byte range, backspace before an arbitrary caret, and delete after an arbitrary caret while returning updated caret offsets.

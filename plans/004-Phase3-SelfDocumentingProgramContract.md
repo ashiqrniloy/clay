@@ -1,278 +1,409 @@
 # Phase 3 Self-Documenting Program Contract
 
 ## Objectives
-- Make Clay documentation part of the code contract before the IPC, protocol, behavior manifest, command, extension, and AI-tool surfaces grow.
-- Create a small documentation registry that auto-generates human-readable Markdown, machine-readable agent references, an indexed lookup artifact, and app/programmatic lookup data from the same source of truth.
-- Add validation so new public Clay surfaces cannot be added without inspectable, generated, indexed, and lookup-accessible documentation.
-- Document the existing editor-facing public concepts enough that future Phase 4 protocol work has a pattern to follow.
+- Make Clay JS API documentation part of the code contract before IPC, protocol, behavior manifest, command, extension, and AI-tool surfaces grow.
+- Make Markdown files the authoritative documentation source of truth, organized by a master Markdown index.
+- Generate app/programmatic documentation registries and lookup artifacts from the indexed Markdown files rather than authoring registry data separately.
+- Add validation so server-side Rust public functions cannot be added without corresponding Clay JS APIs, Markdown documentation, master-index inclusion, generated registry coverage, and lookup-accessible documentation.
+- Document the existing Clay JS API contract and current editor-facing concepts enough that future Phase 4 protocol work has a pattern to follow.
 - Keep the system local, build/test driven, and independent of server, extension, AI, file IO, remote, or network authority.
 
 ## Expected Outcome
-- The repository contains a focused documentation registry module or structured registry data for public Clay surfaces.
-- Human-readable generated documentation exists under a project documentation/reference directory.
-- Machine-readable agent documentation exists in a predictable file that AI agents can inspect without guessing from source.
-- A separate generated indexed artifact exists for direct lookup by stable ID, kind, owner, and capability tags.
-- The same registry exposes a programmatic lookup API that future app help, command palette, extension tooling, and AI tools can use without scraping Markdown.
-- Tests fail when any public interface surface is introduced or changed without required registry metadata, generated docs, indexed lookup output, and programmatic lookup coverage.
-- Current editor commands and user-facing editor behavior are documented through the registry.
+- The repository contains authoritative Markdown documentation files for Clay JS APIs and associated public programmatic capabilities.
+- A master Markdown index enumerates and links the Clay JS API documentation set used for registry generation.
+- A generated registry artifact exists for direct lookup by stable ID, kind, owner, and capability tags.
+- The generated registry exposes or feeds a programmatic lookup API that future app help, command palette, extension tooling, and AI tools can use without scraping Markdown.
+- Tests fail when server-side Rust public functions lack corresponding Clay JS APIs, or when Clay JS APIs lack required Markdown documentation, master-index inclusion, generated registry output, and programmatic lookup coverage.
+- Tests fail when the checked-in generated registry is stale relative to the Markdown source of truth and instruct the user to update it with `cargo run --bin update-doc-registry`.
+- Current editor-facing programmatic concepts and the Clay JS API exposure pattern are documented in Markdown and available through the generated registry where applicable.
 - `cargo fmt`, `cargo test`, and `cargo check` pass.
 - Phase 4 IPC/protocol work can add protocol messages and behavior manifest entries with documentation requirements already established.
 
 ## Tasks
 
-- [ ] Define the documentation registry scope and schema
+- [ ] Define the Markdown documentation schema and master index
   - Acceptance Criteria:
-    - Functional: The project has a documented schema for registered public surfaces, including at least surface kind, stable ID, name, summary, detailed description, owner component, phase, visibility, security notes, agent guidance, lookup tags, and app/help visibility.
-    - Performance: Registry lookup/generation is offline or test-time work and does not add runtime cost to the editor paint/input path.
-    - Code Quality: The schema is small, typed where practical, and avoids a sprawling documentation framework before Clay has public extension APIs.
+    - Functional: The project has a documented Markdown/frontmatter schema for Clay JS APIs, including at least stable ID, kind, JS module/export, backing Rust function path, `deno_core` op wrapper path/name, name, summary, detailed description, why/when to use it, JavaScript usage, code example, configuration/options, return/async behavior, errors, owner component, phase, visibility, permissions/security notes, agent guidance, lookup tags, and app/help visibility. A master Markdown index links every authored Clay JS API documentation file that participates in registry generation.
+    - Performance: Markdown parsing and registry generation are offline or test-time work and do not add runtime cost to the editor paint/input path.
+    - Code Quality: The Markdown schema is small, typed by the parser where practical, and avoids a sprawling documentation framework before Clay has public extension APIs.
     - Security: The schema can record permissions/security notes but does not grant permissions, execute scripts, load extensions, or expose filesystem/network authority.
   - Approach:
     - Documentation Reviewed:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`: Documentation must be part of the code contract and inspectable by users and AI agents.
-      - `.agents/skills/clay-patterns/references/planning-checklist.md`: New public surfaces require a registry/documentation path and tests or acceptance criteria.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Documentation-as-code applies to Clay JS APIs and must include what/why/when, JavaScript usage, examples, options, backing Rust/op paths, generated registries, and lookup APIs.
+      - `.agents/skills/project-patterns/references/planning-checklist.md`: New public programmatic surfaces require a registry/documentation path and tests or acceptance criteria.
       - `roadmap.md`: Phase 3 requires a self-documenting program contract before IPC and extension surfaces grow.
       - `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`: Future protocol, command, manifest, permission, and AI tool surfaces must stay inspectable.
     - Options Considered:
-      - Free-form Markdown only: easy to write, but it drifts from code and is hard for agents to query reliably.
-      - Rust-only doc comments: close to code, but not enough for command/permission/manifest registries and agent-readable indexes.
-      - Small typed registry plus generated Markdown, agent index, indexed lookup artifact, and lookup API: slightly more upfront work, but creates one source of truth for humans, users, the app, tooling, and AI agents.
+      - Free-form Markdown with no parser/index: easy to write, but it drifts from public interfaces and is hard for agents or the app to query reliably.
+      - Separately authored Rust/static registry plus generated docs: convenient for app lookup, but creates drift risk between human Markdown and programmatic docs.
+      - Markdown as source of truth plus generated registry: keeps the human-readable docs authoritative while still giving the app, tools, and agents structured lookup data.
     - Chosen Approach:
-      - Define a minimal `DocEntry`-style schema in Rust or structured data with explicit owner, security, lookup tag, and app/help visibility metadata. Start with enough fields to document current editor commands and future protocol/behavior entries without introducing macros unless duplication becomes painful.
+      - Define a minimal Markdown/frontmatter schema and a master `docs/index.md` that links all Clay JS API documentation files included in registry generation. Derive `DocEntry`-style registry records from those Markdown files instead of hand-authoring a separate registry source.
     - API Notes and Examples:
-      ```rust
-      pub enum DocSurfaceKind {
-          EditorCommand,
-          ProtocolMessage,
-          BehaviorManifestEntry,
-          Permission,
-          ExtensionApi,
-          AiTool,
-      }
+      ````markdown
+      ---
+      id: clay.editor.insertText
+      kind: clay-js-api
+      js_module: clay:editor
+      js_export: insertText
+      backing_rust: src/server/editor.rs::insert_text
+      deno_op: op_clay_editor_insert_text
+      name: insertText
+      owner: server
+      phase: Phase 3
+      visibility: public
+      app_visible: true
+      lookup_tags: [editor, js-api, text]
+      security: Requires document edit authority.
+      agent_guidance: Use this API when a script needs to request an authoritative text insertion.
+      ---
 
-      pub struct DocEntry {
-          pub id: &'static str,
-          pub kind: DocSurfaceKind,
-          pub name: &'static str,
-          pub summary: &'static str,
-          pub details: &'static str,
-          pub owner: &'static str,
-          pub phase: &'static str,
-          pub security: &'static str,
-          pub agent_guidance: &'static str,
-          pub lookup_tags: &'static [&'static str],
-          pub app_visible: bool,
-      }
+      # insertText
+
+      Inserts text through the server-authoritative edit path.
+
+      ## When to use
+
+      Use from JavaScript when an extension or AI tool needs to request text insertion with document authority.
+
+      ## JavaScript usage
+
+      ```ts
+      import { insertText } from "clay:editor";
+
+      await insertText({ documentId, offset, text: "hello" });
       ```
+
+      ## Options
+
+      - `documentId`: target document.
+      - `offset`: byte or protocol-defined text offset.
+      - `text`: inert text to insert.
+      ````
     - Files to Create/Edit:
-      - `src/docs.rs` or `src/docs/mod.rs`: Registry types and validation helpers.
+      - `docs/index.md`: Master Markdown documentation index used by users, agents, and registry generation.
+      - `docs/reference/*.md`: Authoritative Markdown documentation files for Clay JS APIs.
+      - `src/docs.rs` or `src/docs/mod.rs`: Markdown parser, generated registry types, and validation helpers.
       - `src/lib.rs` if the project is split into a library for shared registry/tests.
       - `plans/004-Phase3-SelfDocumentingProgramContract.md`: Track this plan.
     - References:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`
-      - `.agents/skills/clay-patterns/references/authority-boundaries.md`
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`
       - `roadmap.md` Phase 3.
   - Test Cases to Write:
-    - `doc_registry_rejects_empty_required_fields`: Validation fails when required fields are empty.
-    - `doc_registry_entry_ids_are_unique`: Duplicate stable IDs are rejected.
-    - `doc_registry_entries_have_lookup_metadata`: Every public entry has tags and app/help visibility metadata.
+    - `markdown_docs_reject_empty_required_fields`: Validation fails when required Markdown/frontmatter fields are empty.
+    - `markdown_doc_entry_ids_are_unique`: Duplicate stable IDs are rejected.
+    - `master_index_includes_all_public_doc_files`: Clay JS API Markdown files must be linked from `docs/index.md`.
+    - `doc_registry_entries_have_lookup_metadata`: Every generated registry entry has tags and app/help visibility metadata.
 
-- [ ] Register current editor commands and user-facing editor capabilities
+- [ ] Author Markdown docs for current Clay JS API concepts and editor-facing capabilities
   - Acceptance Criteria:
-    - Functional: Existing user-facing editor commands/capabilities such as text insertion, newline, Backspace/Delete, cursor movement, Home/End, selection, drag selection, scrolling, resize behavior, and Escape exit are represented in the documentation registry.
-    - Performance: Registration is static data or cheap construction and does not require inspecting editor buffers, layout caches, or runtime UI state.
-    - Code Quality: Documentation entries are close enough to command definitions that future command changes are unlikely to forget documentation updates.
+    - Functional: Existing editor-facing programmatic concepts and planned Clay JS APIs for editor capabilities such as text insertion, newline, Backspace/Delete, cursor movement, selection, scrolling, resize behavior, and Escape exit are documented in Markdown files linked from the master Markdown index where they are intended to become programmatic JS APIs.
+    - Performance: Documentation authoring and Markdown parsing do not require inspecting editor buffers, layout caches, or runtime UI state.
+    - Code Quality: Documentation files use stable public interface IDs close enough to command definitions/tests that future command changes are unlikely to forget documentation updates.
     - Security: Entries explicitly describe that current editor commands mutate only inert local text/UI state and do not introduce file IO, IPC, network, script execution, AI mutation, or extension authority.
   - Approach:
     - Documentation Reviewed:
       - `plans/003-Phase2-EditorInteractionModel.md`: Defines current editor behavior and completed interaction model.
       - `src/editor.rs`, `src/editor/surface.rs`, and `src/masonry_editor.rs`: Current command and event routing boundaries.
-      - `.agents/skills/clay-patterns/references/authority-boundaries.md`: Client owns rendering/input and transient local state.
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`: Client owns rendering/input and transient local state.
     - Options Considered:
       - Document only modules: insufficient for user/agent discovery of actual editor capabilities.
       - Document every private helper: too noisy and likely to slow development.
-      - Document public/user-facing command and capability surfaces first: matches the self-documenting requirement while keeping the phase small.
+      - Document Clay JS API concepts for command and capability surfaces first in Markdown: matches the self-documenting requirement while keeping the phase small.
     - Chosen Approach:
-      - Add registry entries for the user-facing editor command/capability layer, not every private helper. Keep entries grouped by stable IDs such as `editor.command.insert-text` and `editor.capability.drag-selection`.
+      - Add Markdown files for Clay JS API concepts around the editor command/capability layer, not every private helper. Keep entries grouped by stable IDs such as `clay.editor.insertText` and `clay.editor.dragSelection`, and include them in `docs/index.md` so generated registries can discover them.
     - API Notes and Examples:
-      ```rust
-      DocEntry {
-          id: "editor.command.insert-text",
-          kind: DocSurfaceKind::EditorCommand,
-          name: "Insert text",
-          summary: "Insert printable text at the caret or replace the active selection.",
-          owner: "client",
-          phase: "Phase 2",
-          security: "Mutates local inert text only.",
-          agent_guidance: "Use as the local editor precedent for Phase 4 edit-operation documentation.",
-          details: "...",
-      }
+      ```markdown
+      - [insertText](reference/clay-js-api/editor/insert-text.md) — `clay.editor.insertText`
       ```
     - Files to Create/Edit:
-      - `src/docs.rs` or `src/docs/editor.rs`: Editor command/capability documentation entries.
-      - `src/editor/surface.rs`: Add references or tests connecting `EditorCommand` variants to docs if practical.
+      - `docs/index.md`: Link Clay JS editor API documentation.
+      - `docs/reference/clay-js-api/editor/*.md`: Authoritative Markdown docs for Clay JS editor APIs and planned capabilities.
+      - `src/editor/surface.rs`: Add references or tests connecting editor capabilities to Clay JS API docs if practical.
       - `src/masonry_editor.rs`: Add references or tests for UI actions like Escape exit if practical.
     - References:
       - `plans/003-Phase2-EditorInteractionModel.md`
       - `src/editor/surface.rs`
       - `src/masonry_editor.rs`
   - Test Cases to Write:
-    - `all_editor_commands_have_doc_entries`: Every public `EditorCommand` variant has a registry entry.
-    - `editor_doc_entries_state_security_scope`: Editor command docs mention local-only/no external authority constraints.
+    - `all_clay_js_editor_api_concepts_have_markdown_docs`: Every editor capability intended as a Clay JS API has a linked Markdown doc entry.
+    - `editor_markdown_docs_state_security_scope`: Editor command docs mention local-only/no external authority constraints.
 
-- [ ] Generate human-readable, agent-readable, and indexed documentation artifacts
+- [ ] Generate and update the documentation registry from Markdown
   - Acceptance Criteria:
-    - Functional: A generation path produces human-readable Markdown, a machine-readable agent index, and a separate indexed lookup artifact from the same registry entries.
-    - Performance: Generation is deterministic and suitable for tests or a developer command; generated output size remains proportional to registered surfaces, and lookup indexes are precomputed rather than built in editor paint/input paths.
-    - Code Quality: Generated files have stable ordering to avoid noisy diffs, are not hand-edited as the source of truth, and use stable IDs so users and agents can link to exact public surfaces.
-    - Security: Generated docs do not include secrets, environment data, local paths beyond project-relative references, or runtime user content.
+    - Functional: A generation path reads `docs/index.md` and linked Clay JS API Markdown files, validates required metadata, and produces a generated registry artifact for programmatic/app/agent lookup.
+    - Performance: Generation is deterministic and suitable for tests or a developer command; generated registry size remains proportional to indexed Markdown docs, and lookup indexes are precomputed rather than built in editor paint/input paths.
+    - Code Quality: Generated registry files have stable ordering to avoid noisy diffs, are not hand-edited as the source of truth, and use stable IDs so users and agents can link to exact public surfaces.
+    - Security: Registry generation does not include secrets, environment data, local paths beyond project-relative references, or runtime user content.
   - Approach:
     - Documentation Reviewed:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`: Human-readable docs and machine-readable agent indexes should share a source of truth.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Clay JS API Markdown is authoritative; generated registries and lookup APIs are derived from the master Markdown index.
       - `roadmap.md`: AI agents must inspect app capabilities from structured documentation.
+      - `decision-logs/2026-05-08-1419-markdown-authoritative-documentation-registry.md`: Records Markdown-authoritative registry generation.
     - Options Considered:
-      - Generate only Markdown: good for users, but less reliable for agents and tools.
-      - Generate only JSON/RON/TOML: good for agents, less readable for users.
-      - Generate Markdown plus one agent index: useful, but does not guarantee direct lookup by app/tooling paths.
-      - Generate Markdown, agent index, and separate lookup index from one registry: best satisfies the strict self-documenting requirement.
+      - Generate Markdown from a code registry: good for app lookup, but makes Markdown secondary and risks human-doc drift.
+      - Use Markdown only with no generated registry: good for humans, but less reliable for app/agent/tool lookup.
+      - Generate a registry from indexed Markdown: best satisfies the strict self-documenting requirement while keeping Markdown authoritative.
     - Chosen Approach:
-      - Add a deterministic generation function or small binary/test helper that writes Markdown, a simple machine-readable agent index, and a separate lookup index keyed by stable ID/kind/tag. Prefer no new dependency in Phase 3; if JSON serialization would require adding a crate, use a simple deterministic text format first or explicitly add a small dependency only if justified.
+      - Add deterministic functions for checking/generating the registry from `docs/index.md` and linked Markdown files. Provide one non-mutating function used by tests and one update function/command that rewrites the checked-in generated registry when the Markdown source changes.
     - API Notes and Examples:
       ```bash
-      cargo test doc_registry_generated_outputs_are_current
+      cargo test generated_doc_registry_is_current
+      cargo run --bin update-doc-registry
       ```
       ```text
-      docs/reference/clay-reference.md
-      docs/agent-index/clay-capabilities.txt
-      docs/index/clay-doc-index.txt
+      docs/index.md
+      docs/reference/editor-commands/insert-text.md
+      generated/doc-registry.txt
       ```
     - Files to Create/Edit:
-      - `src/docs.rs` or `src/docs/generate.rs`: Rendering/generation helpers.
-      - `docs/reference/clay-reference.md`: Generated or checked-in human reference.
-      - `docs/agent-index/clay-capabilities.txt`: Generated or checked-in agent-readable index.
-      - `docs/index/clay-doc-index.txt`: Generated or checked-in indexed lookup artifact by stable ID, kind, owner, and tags.
+      - `src/docs.rs` or `src/docs/generate.rs`: Markdown parsing, registry generation, and registry update helpers.
+      - `src/bin/update-doc-registry.rs` or equivalent developer command: Writes the checked-in generated registry from Markdown.
+      - `generated/doc-registry.txt` or equivalent generated artifact: Checked-in app/agent lookup registry derived from Clay JS API Markdown.
       - `tests/` or module tests: Current-output validation.
     - References:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - `roadmap.md` Phase 3.
   - Test Cases to Write:
-    - `doc_registry_generates_markdown_in_stable_order`: Output order is deterministic.
-    - `doc_registry_generates_agent_index`: Agent-readable output includes IDs, kinds, owner, summary, and security notes.
-    - `doc_registry_generates_lookup_index`: Indexed output supports lookup by stable ID, kind, owner, and tags.
-    - `generated_docs_are_current`: Checked-in generated Markdown, agent index, and lookup index match registry output.
+    - `doc_registry_generates_from_master_markdown_index`: Generator reads `docs/index.md` and linked Markdown docs.
+    - `doc_registry_generation_is_stable`: Generated registry output order is deterministic.
+    - `doc_registry_supports_lookup_keys`: Generated registry includes stable ID, kind, owner, tags, summary, and security notes.
+    - `generated_doc_registry_is_current`: Checked-in generated registry matches output generated from Markdown; on mismatch, the failure instructs the user to run `cargo run --bin update-doc-registry`.
 
 - [ ] Expose programmatic and app-facing documentation lookup
   - Acceptance Criteria:
-    - Functional: The registry exposes lookup helpers that can resolve documentation by stable ID and list documentation by kind, owner, and tags for future in-app help, command palette, extension tooling, and AI tool discovery.
-    - Performance: Lookup uses static/precomputed registry data and does not scan generated Markdown or rebuild indexes during editor input/rendering.
-    - Code Quality: Lookup APIs return structured documentation entries or lightweight views instead of formatted prose only, so app UI and agents do not need to parse Markdown.
+    - Functional: The generated registry exposes lookup helpers that can resolve Clay JS API documentation by stable ID and list documentation by kind, owner, JS module/export, backing Rust path, op name, and tags for future in-app help, command palette, extension tooling, and AI tool discovery.
+    - Performance: Lookup uses static/precomputed registry data and does not scan source Markdown or rebuild indexes during editor input/rendering.
+    - Code Quality: Lookup APIs return structured documentation entries or lightweight views generated from Markdown instead of requiring app UI and agents to parse Markdown at runtime.
     - Security: Lookup exposes only public documentation metadata and does not reveal runtime user content, local environment values, secrets, or private implementation-only APIs.
   - Approach:
     - Documentation Reviewed:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`: Users and AI agents must be able to inspect capabilities, and user-facing behavior must be discoverable from the app.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Users and AI agents must be able to inspect capabilities, and user-facing behavior must be discoverable from Markdown, the generated registry, and the app.
       - `roadmap.md`: User-facing help, extension author docs, and agent tool descriptions should come from the same registry/metadata to prevent drift.
     - Options Considered:
-      - Require users and agents to read generated Markdown directly: simple, but not enough for app UI, command palette search, or reliable tool lookup.
-      - Require app/tooling to parse generated index files: keeps runtime separate from source, but makes the app depend on a serialization format too early.
-      - Expose lookup helpers over the in-process registry and generate separate artifacts from the same source: keeps app/programmatic lookup and generated docs consistent without scraping.
+      - Require users and agents to read Markdown directly: simple, but not enough for app UI, command palette search, or reliable tool lookup.
+      - Require app/tooling to parse Markdown at runtime: keeps one source of truth, but adds unnecessary runtime parsing and error handling.
+      - Expose lookup helpers over the generated registry derived from Markdown: keeps Markdown authoritative while avoiding runtime scraping/parsing.
     - Chosen Approach:
-      - Add `get_doc_entry`, `entries_by_kind`, `entries_by_owner`, and `entries_by_tag`-style helpers over the registry. Future protocol/server phases can expose these through IPC or SDUI later, but Phase 3 only needs local lookup APIs and generated artifacts.
+      - Add `get_doc_entry`, `entries_by_kind`, `entries_by_owner`, and `entries_by_tag`-style helpers over the generated registry. Future protocol/server phases can expose these through IPC or SDUI later, but Phase 3 only needs local lookup APIs and generated artifacts.
     - API Notes and Examples:
       ```rust
       pub fn get_doc_entry(id: &str) -> Option<&'static DocEntry>;
       pub fn entries_by_kind(kind: DocSurfaceKind) -> impl Iterator<Item = &'static DocEntry>;
       pub fn entries_by_tag(tag: &str) -> impl Iterator<Item = &'static DocEntry>;
+      pub fn entry_by_js_export(module: &str, export: &str) -> Option<&'static DocEntry>;
+      pub fn entry_by_backing_rust_path(path: &str) -> Option<&'static DocEntry>;
       ```
     - Files to Create/Edit:
-      - `src/docs.rs` or `src/docs/lookup.rs`: Structured lookup helpers over the registry.
-      - `tests/docs_contract.rs` or module tests: Lookup behavior and generated index consistency tests.
-      - `docs/documentation-workflow.md`: Explain app/programmatic lookup versus generated artifacts.
+      - `src/docs.rs` or `src/docs/lookup.rs`: Structured lookup helpers over the generated registry.
+      - `tests/docs_contract.rs` or module tests: Lookup behavior and generated registry consistency tests.
+      - `docs/documentation-workflow.md`: Explain Markdown authoring versus generated registry and app/programmatic lookup.
     - References:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - `roadmap.md` Documentation as Code Requirement.
   - Test Cases to Write:
     - `doc_lookup_finds_entry_by_stable_id`: Lookup resolves known public interface IDs.
     - `doc_lookup_lists_entries_by_kind_owner_and_tag`: Lookup supports app/help and agent discovery paths.
-    - `doc_lookup_matches_generated_index`: Programmatic lookup keys match the generated indexed artifact.
+    - `doc_lookup_matches_generated_registry`: Programmatic lookup keys match the generated registry artifact.
 
-- [ ] Add documentation coverage gates for every public interface surface
+- [ ] Add documentation coverage gates for server-side Rust public functions and Clay JS APIs
   - Acceptance Criteria:
-    - Functional: Tests fail when any public interface surface is added or changed without required documentation metadata, when a registered surface is malformed, when a documented enum has undocumented variants, or when generated docs/indexes are stale.
+    - Functional: `cargo test` fails when any server-side Rust public function lacks a corresponding Clay JS API, when a Clay JS API lacks required Markdown documentation, when a Clay JS API Markdown doc is missing from the master index, when a generated registry entry is malformed, when a documented API has undocumented options/configuration, or when the generated registry is stale.
     - Performance: Coverage tests run as normal unit/integration tests without launching the GUI or doing expensive filesystem scans beyond generated-doc comparison.
     - Code Quality: Coverage rules are explicit and easy to extend for Phase 4 protocol messages, behavior manifest entries, permissions, extension APIs, and AI tools; the tests name the missing public interface IDs so humans and agents know what documentation to add.
     - Security: Coverage gates prevent undocumented authority-bearing surfaces from being introduced silently.
   - Approach:
     - Documentation Reviewed:
-      - `.agents/skills/clay-patterns/references/planning-checklist.md`: Tests or acceptance criteria are required for documentation paths.
-      - `.agents/skills/clay-patterns/references/protocol-and-performance.md`: Phase 4 protocol surfaces should include final-compatible metadata and tests.
+      - `.agents/skills/project-patterns/references/planning-checklist.md`: Tests or acceptance criteria are required for documentation paths.
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`: Phase 4 protocol surfaces should include final-compatible metadata and tests.
       - `roadmap.md`: Documentation coverage gates are required as Clay hardens.
     - Options Considered:
       - Manual review only: too easy to miss, especially for AI-generated changes.
-      - Strict lint for all Rust public items immediately: too broad for this early codebase and may distract from product architecture.
-      - Targeted coverage gates for registered public Clay interfaces, plus explicit per-interface coverage tests: focused and expandable while still failing when public surfaces are missing docs.
+      - Strict lint for all Rust public items immediately: too broad because Rust public items may be internal implementation APIs rather than Clay JS APIs.
+      - Targeted coverage gates for server-side Rust public functions, Clay JS APIs, Markdown docs, master-index inclusion, and generated registry freshness: focused and expandable while still failing when public programmatic surfaces are missing docs.
     - Chosen Approach:
-      - Start with explicit lists/mappings for current editor commands, generated docs, and lookup indexes. Add extension points so Phase 4 can require protocol message documentation by writing a public interface coverage test next to the protocol enum/module. The required pattern is: public interface list -> documentation registry entries -> generated Markdown/agent/index artifacts -> tests that fail if any link is missing.
+      - Start with explicit lists/mappings for server-side Rust public functions, Clay JS facade exports, Markdown docs, master-index inclusion, and generated registry freshness. Add extension points so Phase 4 can require protocol and behavior-manifest JS APIs by writing coverage tests next to the server/protocol modules. The required pattern is: server Rust public function inventory -> Clay JS API -> Markdown doc -> `docs/index.md` link -> generated registry entry -> lookup API -> tests that fail if any link is missing. `cargo test` must run the non-mutating registry generation/check path; a separate update command writes regenerated artifacts.
     - API Notes and Examples:
       ```rust
       #[test]
-      fn all_documented_surfaces_are_valid() {
-          clay::docs::validate_registry(clay::docs::registry()).unwrap();
+      fn generated_doc_registry_is_current() {
+          clay::docs::assert_generated_registry_is_current().unwrap();
       }
       ```
     - Files to Create/Edit:
-      - `src/docs.rs`: Validation API.
+      - `src/docs.rs`: Markdown validation, registry generation, stale-check, and lookup APIs.
       - `src/editor/surface.rs` or tests: Editor command coverage mapping.
       - `tests/docs_contract.rs` if integration tests are preferred after adding `src/lib.rs`.
     - References:
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`
-      - `.agents/skills/clay-patterns/references/protocol-and-performance.md`
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
   - Test Cases to Write:
-    - `all_documented_surfaces_are_valid`: Registry validation succeeds for current docs.
-    - `editor_command_doc_coverage_is_complete`: Missing command docs fail the coverage test.
-    - `generated_docs_are_not_stale`: Generated docs match checked-in artifacts.
-    - `public_interface_without_doc_entry_fails`: Adding a command/protocol/manifest/permission/interface ID without a matching registry entry fails a targeted test.
-    - `doc_entry_without_generated_lookup_fails`: Registry entries that do not appear in generated Markdown, agent index, and lookup index fail tests.
+    - `all_markdown_documented_surfaces_are_valid`: Markdown/frontmatter validation succeeds for current docs.
+    - `server_public_rust_functions_have_clay_js_api`: Missing Clay JS API fails the coverage test.
+    - `generated_doc_registry_is_current`: Generated registry matches checked-in artifact and tells the user to run `cargo run --bin update-doc-registry` when stale.
+    - `clay_js_api_without_markdown_doc_fails`: Adding a Clay JS API without a matching Markdown doc fails a targeted test.
+    - `markdown_doc_missing_from_master_index_fails`: Public documentation files must be linked from `docs/index.md`.
+    - `doc_entry_without_generated_lookup_fails`: Clay JS API Markdown docs that do not appear in the generated registry and lookup API fail tests.
 
-- [ ] Document the documentation workflow for future phases
+- [ ] Document the Clay JS API documentation workflow for future phases
   - Acceptance Criteria:
-    - Functional: Future contributors and agents can find clear instructions for adding documented protocol messages, commands, behavior manifest entries, permissions, extension APIs, and AI tools, including how those docs become generated Markdown, generated indexes, and app/programmatic lookup results.
+    - Functional: Future contributors and agents can find clear instructions for adding documented Clay JS APIs for protocol messages, commands, behavior manifest entries, permissions, extension APIs, and AI tools, including how to author Markdown docs, add them to the master index, update the generated registry, and verify app/programmatic lookup results.
     - Performance: The workflow does not require running expensive generation steps during normal editing; verification remains part of normal Cargo checks/tests.
-    - Code Quality: The workflow points to the registry as source of truth and discourages hand-editing generated outputs.
+    - Code Quality: The workflow points to Markdown plus `docs/index.md` as the source of truth and discourages hand-editing generated registry outputs.
     - Security: The workflow requires security/authority notes for public surfaces and explicitly calls out permission-bearing APIs.
   - Approach:
     - Documentation Reviewed:
-      - `.agents/skills/clay-patterns/SKILL.md`: Plans must include documentation/manifest/protocol coverage when new public surfaces are added.
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`: Planning guidance for documentation metadata, generated docs, tests, and agent discovery.
+      - `.agents/skills/project-patterns/SKILL.md`: Plans must include documentation/manifest/protocol coverage when new public surfaces are added.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Planning guidance for Markdown-authoritative documentation, registry generation, tests, and agent discovery.
       - `roadmap.md`: Later phases add IPC, behavior manifests, file/workspace server, SDUI, JavaScript extensions, hot reload, and AI tools.
     - Options Considered:
       - Keep workflow only in the skill: useful for agents, but users/contributors need project-local docs too.
-      - Keep workflow only in generated reference: generated output should not be the source of authoring rules.
-      - Add a concise source-controlled workflow document plus skill references: readable by users and discoverable by agents, and explicit about the generated and app-lookup documentation paths.
+      - Keep workflow only in generated registry output: generated output should not be the source of authoring rules.
+      - Add a concise source-controlled workflow document plus skill references: readable by users and discoverable by agents, and explicit about Markdown authoring, master index inclusion, generated registry updates, and app-lookup documentation paths.
     - Chosen Approach:
-      - Add a short authoring guide under `docs/` that explains the registry, generated artifacts, lookup API, tests, and rules for adding new public surfaces in later phases.
+      - Add a short authoring guide under `docs/` that explains Markdown source files, `docs/index.md`, registry generation/update commands, lookup API, tests, and rules for adding new public surfaces in later phases.
     - API Notes and Examples:
       ```bash
-      cargo test generated_docs_are_current
+      cargo test generated_doc_registry_is_current
+      cargo run --bin update-doc-registry
       cargo fmt
       cargo check
       ```
     - Files to Create/Edit:
       - `docs/documentation-workflow.md`: Authoring workflow and rules.
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`: Update only if implementation discovers a reusable pattern change.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Update only if implementation discovers a reusable pattern change.
       - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`: No required edit unless Phase 3 changes the documentation workflow expected by Phase 4.
     - References:
-      - `.agents/skills/clay-patterns/SKILL.md`
-      - `.agents/skills/clay-patterns/references/documentation-as-code.md`
+      - `.agents/skills/project-patterns/SKILL.md`
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - `roadmap.md` Phases 4-13.
   - Test Cases to Write:
-    - `documentation_workflow_mentions_required_public_surfaces`: Guide includes protocol, command, behavior manifest, permission, extension API, AI tool, and SDUI documentation requirements.
-    - `documentation_workflow_explains_generated_and_lookup_outputs`: Guide explains Markdown generation, agent index generation, indexed lookup artifacts, app/programmatic lookup, and failing tests for missing docs.
+    - `documentation_workflow_mentions_required_clay_js_api_surfaces`: Guide includes Clay JS API documentation requirements for protocol, command, behavior manifest, permission, extension API, AI tool, and SDUI surfaces.
+    - `documentation_workflow_explains_markdown_index_registry_and_lookup`: Guide explains Markdown authoring, master-index inclusion, generated registry updates, app/programmatic lookup, and failing tests for missing docs.
     - Manual documentation review: Confirm a future agent can identify where to add docs for a new Phase 4 protocol message.
+
+
+- [ ] Create or verify Clay JS APIs for Rust public functions
+  - Acceptance Criteria:
+    - Functional: All server-side Rust public functions introduced or existing in this phase are inventoried; each has a stable Clay JS API facade backed by an explicit `deno_core` op wrapper. Functions that should not have JavaScript exposure are made private or `pub(crate)` instead of public.
+    - Performance: Clay JS API facade setup does not add work to the client editor input/render path and keeps JS execution server-side.
+    - Code Quality: The implementation separates Rust implementation functions, op wrappers, and JS/TS facade exports with stable names suitable for documentation and versioning.
+    - Security: Arbitrary Rust public functions and client-side Rust functions are not exposed directly to JavaScript; authority checks happen at the server/API boundary.
+  - Approach:
+    - Documentation Reviewed:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`: Approved Clay JS API facade boundary.
+      - `.agents/skills/create-plan/references/clay.md`: Clay plans require a JS API task for Rust public functions.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Clay JS APIs are the documentation-as-code public programmatic surface.
+      - Context7 `/denoland/deno_core` docs: Rust functions are exposed through extensions and ops.
+    - Options Considered:
+      - Expose Rust public functions directly: rejected due to unsafe coupling and accidental authority exposure.
+      - Make raw ops the public API: rejected because raw ops are implementation details.
+      - Stable Clay JS facade over explicit ops: chosen for versioning, docs, and authority boundaries.
+    - Chosen Approach:
+      - Add an inventory/check path for server-side Rust public functions and create Clay JS facade exports for each one. In Phase 3, this may establish the structure and tests before Phase 4 server implementation adds real authority-bearing APIs.
+    - API Notes and Examples:
+      ```rust
+      #[deno_core::op2]
+      #[string]
+      fn op_clay_text_normalize_line_endings(#[string] input: String) -> String {
+          clay::text::normalize_line_endings(&input)
+      }
+      ```
+      ```ts
+      import { normalizeLineEndings } from "clay:text";
+
+      const normalized = normalizeLineEndings("a\r\nb");
+      ```
+    - Files to Create/Edit:
+      - `src/docs.rs` or `src/docs/coverage.rs`: Server public Rust function to Clay JS API coverage checks.
+      - `src/server/js/**` or equivalent future server JS-op boundary files if introduced in this phase.
+      - `runtime/js/**` or equivalent Clay JS facade files if introduced in this phase.
+      - `docs/reference/clay-js-api/**/*.md`: Clay JS API docs for exposed functions.
+    - References:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
+      - `.agents/skills/create-plan/references/clay.md`
+  - Test Cases to Write:
+    - `server_public_rust_functions_have_clay_js_api`: Fails when a server-side Rust public function lacks a Clay JS API.
+    - `clay_js_api_has_backing_op_and_rust_function`: Fails when a Clay JS API doc/facade lacks backing Rust/op metadata.
+
+- [ ] Create the project code wiki structure
+  - Acceptance Criteria:
+    - Functional: A Markdown code wiki exists with `docs/wiki/index.md` as the master index and an initial navigable structure for architecture, modules, flows, and concepts.
+    - Performance: Wiki creation adds no runtime application work and is maintained as source-controlled Markdown.
+    - Code Quality: The wiki structure follows `.agents/skills/project-wiki/SKILL.md`, links pages from the master index, and distinguishes code-wiki implementation education from public Clay JS API registry docs.
+    - Security: Wiki pages do not include secrets, local user data, or sensitive environment values; security boundaries are documented where relevant.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-wiki/SKILL.md`: Code wiki scope, master index, page template, and quality bar.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Internal Rust implementation details belong in the project code wiki unless exposed through Clay JS APIs.
+    - Options Considered:
+      - Put implementation education into `docs/index.md`: rejected because public API registry docs and internal code wiki have different audiences and metadata needs.
+      - Create a separate `docs/wiki/` tree with its own master index: chosen to keep implementation education navigable and separate from generated public API registry docs.
+    - Chosen Approach:
+      - Create `docs/wiki/index.md` and initial pages such as architecture, editor modules, rendering/layout flow, input flow, and documentation/JS API boundaries.
+    - API Notes and Examples:
+      ```text
+      docs/wiki/index.md
+      docs/wiki/architecture.md
+      docs/wiki/modules/editor.md
+      docs/wiki/flows/input-to-edit.md
+      ```
+    - Files to Create/Edit:
+      - `docs/wiki/index.md`: Master code wiki index.
+      - `docs/wiki/architecture.md`: Initial architecture overview.
+      - `docs/wiki/modules/*.md`: Module implementation pages.
+      - `docs/wiki/flows/*.md`: Flow implementation pages.
+    - References:
+      - `.agents/skills/project-wiki/SKILL.md`
+  - Test Cases to Write:
+    - Manual wiki structure review: Confirm every created wiki page is linked from `docs/wiki/index.md` and explains what code it covers.
+
+- [ ] Document the existing Clay implementation in the code wiki
+  - Acceptance Criteria:
+    - Functional: Existing Clay code is documented in the code wiki deeply enough that a developer unfamiliar with the project can learn what the implementation does and how it works by reading the wiki.
+    - Performance: Performance-sensitive implementation details, especially bounded rendering/layout, local editor hot paths, and no synchronous JS/client round trips, are explicitly documented.
+    - Code Quality: Wiki pages include source paths, test paths, implementation flow, examples where useful, invariants/tradeoffs, and links to related pages.
+    - Security: Wiki pages document local-only editor behavior and current absence of filesystem, network, IPC, extension, and script authority where relevant.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-wiki/SKILL.md`: Required wiki content and quality bar.
+      - `plans/001-003`: Existing implementation history and accepted compromises/follow-up work.
+      - `src/editor.rs`, `src/editor/**`, `src/masonry_editor.rs`, and `src/main.rs`: Existing code to document.
+    - Options Considered:
+      - Document only public APIs: rejected because the code wiki must teach internal implementation.
+      - Document every trivial helper separately: rejected because it is noisy and hard to maintain.
+      - Document implementation units and flows at educational depth: chosen to make the wiki useful for onboarding and AI agents.
+    - Chosen Approach:
+      - Write wiki pages for the current editor buffer/cursor/selection/layout/viewport/surface/widget/main flow, including what each unit does, how it works, important invariants, examples, and tests.
+    - API Notes and Examples:
+      ```markdown
+      ## Source
+
+      - `src/editor/buffer.rs`
+      - `src/editor/cursor.rs`
+
+      ## How It Works
+
+      Explain byte-offset edits over `crop::Rope` and cursor boundary invariants.
+      ```
+    - Files to Create/Edit:
+      - `docs/wiki/modules/editor-buffer.md`: Buffer implementation details.
+      - `docs/wiki/modules/editor-cursor-selection.md`: Cursor and selection implementation details.
+      - `docs/wiki/modules/editor-layout-viewport.md`: Layout/cache/viewport implementation details.
+      - `docs/wiki/flows/editor-input-to-render.md`: Input-to-edit-to-render flow.
+      - `docs/wiki/index.md`: Link all implementation pages.
+    - References:
+      - `.agents/skills/project-wiki/SKILL.md`
+      - `plans/003-Phase2-EditorInteractionModel.md`
+  - Test Cases to Write:
+    - Manual wiki completeness review: Confirm existing source modules have corresponding wiki coverage or an explicit reason for omission.
 
 - [ ] Run verification and update the plan status
   - Acceptance Criteria:
-    - Functional: Documentation registry, generated docs, indexed artifacts, app/programmatic lookup, and coverage tests are implemented and pass.
+    - Functional: Clay JS API Markdown documentation, master index, generated registry, app/programmatic lookup, public Rust-to-JS API coverage, code wiki, and coverage tests are implemented and pass.
     - Performance: Verification does not require launching the GUI or server and remains fast enough for normal `cargo test` use.
-    - Code Quality: `cargo fmt`, `cargo test`, and `cargo check` pass; generated files and lookup indexes are stable across repeated runs.
+    - Code Quality: `cargo fmt`, `cargo test`, and `cargo check` pass; generated registry files are stable across repeated runs.
     - Security: No new runtime authority is introduced; docs do not leak secrets or inspect local user content.
   - Approach:
     - Documentation Reviewed:

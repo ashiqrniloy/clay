@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Wiki"
+  short_description: "Keep code wiki documentation current"
+  default_prompt: "Use $project-wiki to update the code wiki after implementing code changes."

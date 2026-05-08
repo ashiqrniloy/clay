@@ -22,8 +22,10 @@ Use this skill to create or update rigorous implementation plans in `plans/` at 
    - Use documentation lookup tools for external dependencies.
    - Record specific APIs, commands, examples, and references in the plan.
 5. If the project has `.agents/skills/project-patterns/`, use that skill before writing task approaches so the plan aligns with project-level pattern files in `.agents/skills/project-patterns/references/`.
-6. Write the plan using the required structure below.
-7. When executing an existing plan, update checkbox status as tasks complete. After implementation and passing tests, fill in `Compromises Made` and `Further Actions`.
+6. Inspect `.agents/skills/create-plan/references/` for project-specific plan requirements that match the current repository. Read and apply matching reference files before writing the plan. For this Clay repository, read `references/clay.md`.
+7. If the project has `.agents/skills/project-wiki/`, use that skill while creating the plan. The plan must always include one final task to update or explicitly verify the code wiki after the whole plan is complete and tests pass; do not add wiki-update subtasks after each implementation task.
+8. Write the plan using the required structure below.
+9. When executing an existing plan, update checkbox status as tasks complete. After implementation and passing tests, fill in `Compromises Made` and `Further Actions`.
 
 ## Required Plan Structure
 
@@ -67,6 +69,33 @@ Each plan must use this structure:
   - Test Cases to Write:
     - <test name or scenario>: <what it validates and which acceptance criteria it covers>
 
+- [ ] Update the code wiki after implementation
+  - Acceptance Criteria:
+    - Functional: The project code wiki is updated after all implementation tasks are complete, with Markdown pages covering changed public and internal implementation behavior.
+    - Performance: Wiki updates do not add runtime work to the application and document any performance-relevant implementation details changed by this plan.
+    - Code Quality: Wiki pages explain what changed code does, how it works, important invariants/tradeoffs, code examples where useful, source/test paths, and links from the master wiki index.
+    - Security: Wiki pages document any security boundaries, permissions, validation, secrets handling, or external authority touched by the implementation without exposing secrets.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-wiki/SKILL.md`: Use the project wiki workflow and quality bar.
+    - Options Considered:
+      - Update wiki after each task: more granular, but noisy and likely to churn while implementation is still changing.
+      - Update wiki once after the whole plan passes tests: keeps documentation aligned with final code and avoids intermediate drift.
+    - Chosen Approach:
+      - After implementation and verification pass, update the Markdown code wiki once using the project-wiki skill, including the master index and relevant implementation pages.
+    - API Notes and Examples:
+      ```text
+      docs/wiki/index.md
+      docs/wiki/modules/<module>.md
+      ```
+    - Files to Create/Edit:
+      - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas.
+      - `docs/wiki/**`: Add or update implementation wiki pages for changed code.
+    - References:
+      - `.agents/skills/project-wiki/SKILL.md`
+  - Test Cases to Write:
+    - Manual wiki review: Confirm the master index links relevant pages and the updated pages explain what the changed implementation does and how it works.
+
 ## Compromises Made
 - To be filled after tasks are completed and tests pass.
 
@@ -84,6 +113,8 @@ Each plan must use this structure:
 - List every file expected to be created or edited. If the list is uncertain, mark it as tentative and explain why.
 - Write test cases before implementation, derived from acceptance criteria.
 - Do not fill `Compromises Made` or `Further Actions` before executing tasks unless known constraints already exist; otherwise leave the provided placeholder.
+- Apply matching project-specific requirements from `.agents/skills/create-plan/references/` before finalizing the task list.
+- When `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification tasks. For non-code plans, that final task may verify that no implementation wiki changes are needed and record why.
 
 ## Execution Updates
 
