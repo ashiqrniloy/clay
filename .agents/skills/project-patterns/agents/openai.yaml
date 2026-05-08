@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Patterns"
+  short_description: "Apply and maintain project pattern memory"
+  default_prompt: "Use $project-patterns to align this plan or decision with project patterns."

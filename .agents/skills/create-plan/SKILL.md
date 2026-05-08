@@ -21,8 +21,9 @@ Use this skill to create or update rigorous implementation plans in `plans/` at 
    - Prefer project-local docs first when available.
    - Use documentation lookup tools for external dependencies.
    - Record specific APIs, commands, examples, and references in the plan.
-5. Write the plan using the required structure below.
-6. When executing an existing plan, update checkbox status as tasks complete. After implementation and passing tests, fill in `Compromises Made` and `Further Actions`.
+5. If the project has `.agents/skills/project-patterns/`, use that skill before writing task approaches so the plan aligns with project-level pattern files in `.agents/skills/project-patterns/references/`.
+6. Write the plan using the required structure below.
+7. When executing an existing plan, update checkbox status as tasks complete. After implementation and passing tests, fill in `Compromises Made` and `Further Actions`.
 
 ## Required Plan Structure
 

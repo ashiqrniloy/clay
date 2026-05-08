@@ -1,4 +1,0 @@
-interface:
-  display_name: "Clay Patterns"
-  short_description: "Apply Clay architecture patterns"
-  default_prompt: "Use $clay-patterns to align this plan with Clay architecture patterns."
