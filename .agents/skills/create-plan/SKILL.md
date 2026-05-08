@@ -5,31 +5,23 @@ description: Create and maintain numbered plan documents for work that requires 
 
 # Create Plan
 
-## Overview
+Create or update actionable, numbered, documentation-backed implementation plans in `plans/` at the repository root.
 
-Use this skill to create or update rigorous implementation plans in `plans/` at the repository root. Plans must be actionable, numbered in execution order, documentation-backed, and easy to update as tasks are completed.
+## Plan Creation Workflow
 
-## Workflow
-
-1. Locate the repository root from the current working directory.
-2. Ensure `plans/` exists at the repository root.
-3. Inspect existing `plans/` filenames to choose the next three-digit sequence number.
-   - Use `001-Topic.md`, `002-Another-Topic.md`, etc.
-   - Preserve ordering by incrementing the highest existing prefix.
-   - Use a concise PascalCase or Title-Case slug that reflects the plan topic, e.g. `001-Setup.md`, `002-Window-Creation.md`.
-4. Before writing task approaches, read current documentation for all relevant libraries, frameworks, SDKs, packages, and Rust crates involved in the planned implementation.
-   - Prefer project-local docs first when available.
-   - Use documentation lookup tools for external dependencies.
-   - Record specific APIs, commands, examples, and references in the plan.
-5. If the project has `.agents/skills/project-patterns/`, use that skill before writing task approaches so the plan aligns with project-level pattern files in `.agents/skills/project-patterns/references/`.
-6. Inspect `.agents/skills/create-plan/references/` for project-specific plan requirements that match the current repository. Read and apply matching reference files before writing the plan. For this Clay repository, read `references/clay.md`.
-7. If the project has `.agents/skills/project-wiki/`, use that skill while creating the plan. The plan must always include one final task to update or explicitly verify the code wiki after the whole plan is complete and tests pass; do not add wiki-update subtasks after each implementation task.
-8. Write the plan using the required structure below.
-9. When executing an existing plan, update checkbox status as tasks complete. After implementation and passing tests, fill in `Compromises Made` and `Further Actions`.
+1. Determine the repository root: Git root if available, otherwise current working directory.
+2. Ensure `plans/` exists.
+3. Choose the next filename by incrementing the highest existing three-digit prefix, e.g. `001-Setup.md`, `002-Window-Creation.md`.
+4. Read current docs for relevant libraries, frameworks, SDKs, packages, crates, CLIs, or services. Prefer project-local docs, then documentation lookup tools. Record exact docs/API references in the plan.
+5. If `.agents/skills/project-patterns/` exists, use it before writing task approaches and cite relevant pattern files.
+6. Load project-specific plan requirements deterministically:
+   - Read `.agents/skills/create-plan/references/default.md` if it exists.
+   - Read `.agents/skills/create-plan/references/<git-root-basename>.md` if it exists.
+   - Apply all loaded requirements before finalizing tasks.
+7. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
+8. Write the plan using the structure below.
 
 ## Required Plan Structure
-
-Each plan must use this structure:
 
 ```markdown
 # <Plan Title>
@@ -39,25 +31,25 @@ Each plan must use this structure:
 - <Objective 2>
 
 ## Expected Outcome
-- <What should be true after this plan is executed>
-- <Observable behavior, deliverables, or system state>
+- <Observable deliverable or behavior>
+- <System state after completion>
 
 ## Tasks
 
 - [ ] <Task title>
   - Acceptance Criteria:
-    - Functional: <task-specific behavior that must work>
-    - Performance: <task-specific latency, resource, scale, or non-regression expectation>
-    - Code Quality: <task-specific maintainability, architecture, typing, linting, error handling, or idiomatic requirements>
-    - Security: <task-specific safety, validation, permissions, secrets, input handling, or dependency requirements>
+    - Functional: <task-specific behavior>
+    - Performance: <latency/resource/scale/non-regression expectation>
+    - Code Quality: <maintainability/architecture/typing/linting/error-handling expectation>
+    - Security: <safety/validation/permissions/secrets/dependency expectation>
   - Approach:
     - Documentation Reviewed:
-      - <Library/package/crate docs and relevant version, section, or URL/tool reference>
+      - <docs, versions, sections, URLs, or tool references>
     - Options Considered:
-      - <Option A and tradeoff>
-      - <Option B and tradeoff>
+      - <Option and tradeoff>
+      - <Option and tradeoff>
     - Chosen Approach:
-      - <Why this approach fits the current codebase and constraints>
+      - <why this approach fits>
     - API Notes and Examples:
       ```<language>
       <minimal relevant API example or command>
@@ -65,36 +57,9 @@ Each plan must use this structure:
     - Files to Create/Edit:
       - `<path>`: <planned change>
     - References:
-      - <Where the approach was derived or inferred from: docs, code paths, examples, ADRs, issues>
+      - <docs, code paths, examples, decisions, issues, or patterns>
   - Test Cases to Write:
-    - <test name or scenario>: <what it validates and which acceptance criteria it covers>
-
-- [ ] Update the code wiki after implementation
-  - Acceptance Criteria:
-    - Functional: The project code wiki is updated after all implementation tasks are complete, with Markdown pages covering changed public and internal implementation behavior.
-    - Performance: Wiki updates do not add runtime work to the application and document any performance-relevant implementation details changed by this plan.
-    - Code Quality: Wiki pages explain what changed code does, how it works, important invariants/tradeoffs, code examples where useful, source/test paths, and links from the master wiki index.
-    - Security: Wiki pages document any security boundaries, permissions, validation, secrets handling, or external authority touched by the implementation without exposing secrets.
-  - Approach:
-    - Documentation Reviewed:
-      - `.agents/skills/project-wiki/SKILL.md`: Use the project wiki workflow and quality bar.
-    - Options Considered:
-      - Update wiki after each task: more granular, but noisy and likely to churn while implementation is still changing.
-      - Update wiki once after the whole plan passes tests: keeps documentation aligned with final code and avoids intermediate drift.
-    - Chosen Approach:
-      - After implementation and verification pass, update the Markdown code wiki once using the project-wiki skill, including the master index and relevant implementation pages.
-    - API Notes and Examples:
-      ```text
-      docs/wiki/index.md
-      docs/wiki/modules/<module>.md
-      ```
-    - Files to Create/Edit:
-      - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas.
-      - `docs/wiki/**`: Add or update implementation wiki pages for changed code.
-    - References:
-      - `.agents/skills/project-wiki/SKILL.md`
-  - Test Cases to Write:
-    - Manual wiki review: Confirm the master index links relevant pages and the updated pages explain what the changed implementation does and how it works.
+    - <test/scenario>: <what it validates>
 
 ## Compromises Made
 - To be filled after tasks are completed and tests pass.
@@ -106,21 +71,27 @@ Each plan must use this structure:
 ## Task Writing Rules
 
 - Make every task independently checkable with `- [ ]` or `- [x]`.
-- Keep acceptance criteria distinct and specific to the task; do not use generic placeholders.
-- Include functional, performance, code quality, and security criteria for every task.
-- Treat `Approach` as mandatory and evidence-based, not speculative.
-- Include documentation-derived API examples when a task depends on a library, framework, SDK, package, crate, CLI, or external service.
-- List every file expected to be created or edited. If the list is uncertain, mark it as tentative and explain why.
+- Keep acceptance criteria specific; include functional, performance, code quality, and security criteria for every task.
+- Treat `Approach` as mandatory and evidence-based.
+- Include documentation-derived API examples for library/framework/SDK/package/crate/CLI/service usage.
+- List every expected file. If uncertain, mark the list tentative and explain why.
 - Write test cases before implementation, derived from acceptance criteria.
-- Do not fill `Compromises Made` or `Further Actions` before executing tasks unless known constraints already exist; otherwise leave the provided placeholder.
-- Apply matching project-specific requirements from `.agents/skills/create-plan/references/` before finalizing the task list.
-- When `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification tasks. For non-code plans, that final task may verify that no implementation wiki changes are needed and record why.
+- Apply loaded project-specific requirements before finalizing the task list.
+- Do not fill `Compromises Made` or `Further Actions` before execution unless known constraints already exist.
 
-## Execution Updates
+## Deterministic Execution Loop
 
 When executing a plan:
 
-- Update each task checkbox from `- [ ]` to `- [x]` only after implementation and relevant tests/checks pass.
-- Add any discovered deviations to `Compromises Made` after completing tasks.
-- Add future improvements to `Further Actions`, including why they were deferred.
-- If the implementation requires a changed approach, update the task's `Approach`, `Files to Create/Edit`, and `Test Cases to Write` before continuing.
+1. Read the full plan.
+2. Select the first unchecked task unless the user names a specific task.
+3. Re-read relevant project patterns, loaded project-specific plan requirements, decision logs, and existing wiki pages for files/modules being changed.
+4. Implement only the selected task unless dependencies require a small, explicitly noted prerequisite.
+5. Run the task's listed tests/checks and any directly relevant validation.
+6. Update the task checkbox to `- [x]` only after implementation and checks pass.
+7. If the approach, files, or tests changed, update that task before continuing.
+8. Repeat from step 2 until implementation and verification tasks are complete.
+9. Execute any project-specific API/documentation maintenance task, such as Clay JS API verification, when present.
+10. Execute the final code-wiki task when present.
+11. Run final verification for the plan.
+12. Fill `Compromises Made` and `Further Actions` with actual deviations, deferred work, rationale, and priority.

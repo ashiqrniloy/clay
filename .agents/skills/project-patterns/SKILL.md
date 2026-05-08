@@ -1,6 +1,6 @@
 ---
 name: project-patterns
-description: Maintain and apply project-level pattern memory for repositories that also use create-plan and create-decision-log. Use this skill only at project level, never as a system-level skill. Use whenever creating, reviewing, or updating a plan document so the plan aligns with project patterns in references/. Use after an approved decision log is written so stable reusable guidance from the decision is added to new pattern files or folded into existing pattern files under references/.
+description: Maintain and apply project-level pattern memory for repositories that also use create-plan and create-decision-log. Use this skill only at project level, never as a system-level skill. Use whenever creating, reviewing, or updating a plan document so the plan aligns with project patterns in references/. Use for Clay JS API naming/design/refactor work, package distribution planning, and other durable project conventions captured under references/. Use after an approved decision log is written so stable reusable guidance from the decision is added to new pattern files or folded into existing pattern files under references/.
 ---
 
 # Project Patterns
@@ -16,7 +16,7 @@ Use this skill as a project-local pattern router. Keep `SKILL.md` generic; store
 
 ## When Creating or Updating a Plan
 
-1. Inspect `references/` and select only pattern files relevant to the plan.
+1. Inspect `references/` and select only pattern files relevant to the plan. For Clay JS API naming/design/refactor work, include `clay-js-api-naming.md` alongside API boundary/schema/documentation patterns. For package installation/distribution work, include `package-distribution.md` alongside extension, AI, documentation, and security patterns.
 2. Read those files before writing task approaches, acceptance criteria, phase boundaries, or follow-up actions.
 3. Align the plan with the selected patterns, or explicitly call out any approved exception with a decision-log reference.
 4. In the plan's task references or approach notes, cite the pattern files used.
@@ -27,8 +27,9 @@ Use this skill as a project-local pattern router. Keep `SKILL.md` generic; store
 2. Read the new decision log and inspect `references/` for related pattern files.
 3. Extract only durable planning guidance: ownership rules, architectural constraints, naming conventions, workflows, quality bars, testing expectations, or policy defaults.
 4. Add a concise new pattern file or update the smallest relevant existing file.
-5. Prefer one pattern per file. Use clear kebab-case filenames, e.g. `api-versioning.md`.
-6. If the decision is too narrow or not reusable, do not add a pattern; mention that no pattern update was needed.
+5. If the decision changes required plan structure or recurring plan tasks, update `.agents/skills/create-plan/references/<git-root-basename>.md` when present.
+6. Prefer one pattern per file. Use clear kebab-case filenames, e.g. `api-versioning.md`.
+7. If the decision is too narrow or not reusable, do not add a pattern; mention that no pattern update was needed.
 
 ## Pattern File Style
 

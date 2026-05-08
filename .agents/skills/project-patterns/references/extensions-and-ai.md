@@ -27,6 +27,12 @@ Hot reload flow:
 - Behavior-changing AI sessions should lock affected behavior/document scope until the new manifest is installed.
 - Server emits transactions or UI updates; clients do not grant AI direct local mutation authority.
 
+## Package Distribution
+
+- Installable Clay packages should use the npm-compatible package distribution direction in `package-distribution.md` unless a later approved decision supersedes it.
+- Package installation and package execution remain separate: package managers download and resolve dependencies; Clay validates package metadata, permissions, documentation coverage, behavior contributions, and runtime/load-time boundaries before server-side execution.
+- Package-provided Clay JS APIs must use the package name or registered package prefix so users and AI agents can identify provenance.
+
 ## Future WASM Modules
 
 WASM may eventually support sandboxed hot-path behavior modules, but plans should treat this as future architecture unless explicitly in scope.

@@ -18,7 +18,7 @@
 - Protocol messages are encoded with `rkyv` through a length-prefixed codec with validation on receive.
 - `cargo fmt`, `cargo test`, and `cargo check` pass.
 - No `deno_core` runtime execution, SDUI protocol, file workspace authority, region-lock conflict handling, remote SSH/Docker mode, or AI edit sessions are introduced in this phase.
-- Phase 3 documentation-as-code requirements are followed for any new protocol, behavior manifest, client, or server public surfaces.
+- Phase 3 documentation-as-code requirements are followed for any new server-side Rust public functions, public programmatic capabilities, and configuration surfaces: expose through Clay JS APIs where applicable, document in Markdown with user-facing names/key bindings/custom properties, link from `docs/index.md`, update generated registries, and keep internal implementation details in the code wiki.
 
 ## Tasks
 
@@ -33,7 +33,9 @@
       - Context7 `/rkyv/rkyv`: derive `Archive`, `Serialize`, and `Deserialize`; use `rkyv::access` for safe validated zero-copy access to archived bytes; validation is recommended for untrusted data and is enabled through bytecheck support.
       - `concept.md`: IPC serialization target is `rkyv`, intended for efficient server-driven UI and text/document payloads.
       - `roadmap.md`: Updated Phase 4 guidance says use `rkyv` early, but keep the protocol small and behind a codec boundary.
-      - `plans/004-Phase3-SelfDocumentingProgramContract.md`: New protocol and behavior manifest surfaces must be added to the documentation registry and generated docs.
+      - `plans/004-Phase3-SelfDocumentingProgramContract.md`: New public programmatic capabilities must be documented as Clay JS APIs with Markdown, registry, and lookup coverage when they are exposed.
+      - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`: Server-side Rust public functions must have Clay JS facades or be made private/`pub(crate)`.
+      - `.agents/skills/project-patterns/references/doc-registry-tests.md`: Registry/docs checks should fail without mutating generated files.
     - Options Considered:
       - Use JSON or bincode first: fastest to iterate, but delays proving the intended serialization stack.
       - Use `rkyv` directly throughout client/server code: performance-oriented, but couples business logic to archived representations too early.
@@ -258,6 +260,117 @@
     - `end_to_end_edit_gets_acknowledged`: Integration test sends an edit with version metadata and receives `EditAck`.
     - Manual smoke test: Run server and client, type in the client, confirm no GUI stalls and server logs/observes edit acknowledgements.
 
+- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+  - Acceptance Criteria:
+    - Functional: The Phase 4 implementation is reviewed and the Clay JS APIs needed for extensibility, configuration, customization, user search/help, key binding, AI-agent discovery, and future public programmatic use are proposed or created. All server-side Rust public functions introduced or changed by Phase 4 are inventoried; each has a stable Clay JS/TS facade API backed by an explicit `deno_core` op wrapper when it is a public programmatic capability, or is made private/`pub(crate)` when it should remain internal. Every Clay JS API has Markdown docs linked from `docs/index.md`, generated registry coverage, and lookup access.
+    - Performance: Clay JS API and documentation checks do not add synchronous work to Masonry input/paint paths or ordinary edit IPC; JavaScript remains server-side and outside the keypress hot path.
+    - Code Quality: Rust implementation functions, op wrappers, JS/TS facade exports, Markdown docs, generated registry entries, and lookup metadata use stable names that are easy to map in tests. Each API doc includes a searchable user-facing name, default key bindings or an empty key binding list, and custom properties for behavior-changing settings.
+    - Security: Raw `Deno.core.ops.op_*` calls and arbitrary Rust functions are not user-facing APIs; authority checks remain at the server/API boundary.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/create-plan/references/clay.md`: Clay plans require a JS API task for public programmatic surfaces and Rust public functions.
+      - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`: Public programmatic APIs are Clay JS facades backed by explicit ops.
+      - `.agents/skills/project-patterns/references/clay-js-api-schema.md`: Clay JS API docs include user-facing names, key binding metadata, and custom properties.
+      - `.agents/skills/project-patterns/references/documentation-as-code.md`: Clay JS API docs are Markdown-authoritative and registry-generated.
+      - `.agents/skills/project-patterns/references/doc-registry-tests.md`: Tests must fail for missing APIs, docs, index links, stale registries, or lookup gaps.
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`: Approved Rust-to-JS exposure boundary.
+    - Options Considered:
+      - Leave Phase 4 server/client public Rust functions undocumented until `deno_core` is embedded: rejected because it creates drift before extension APIs arrive.
+      - Document raw protocol/server Rust functions directly as the user API: rejected because Clay JS APIs are the public programmatic surface.
+      - Add explicit inventory and coverage now while allowing internal helpers to become private/`pub(crate)`: chosen to keep Phase 4 aligned with Phase 3 without adding JavaScript runtime execution.
+    - Chosen Approach:
+      - During Phase 4 implementation, review protocol/server/client surfaces for extensibility and customization, inventory server-side Rust public functions, and either route them through documented Clay JS API facade metadata or narrow visibility. For APIs that are not executable until the server-side JS runtime phase, add stable planned facade docs/metadata and tests that preserve the mapping without putting JavaScript on the hot path.
+    - API Notes and Examples:
+      ```text
+      server Rust function -> deno_core op wrapper -> Clay JS/TS facade -> docs/reference/clay-js-api/** -> docs/index.md -> generated registry -> lookup test
+      ```
+    - Files to Create/Edit:
+      - `src/server/**`: Narrow internal helper visibility or mark public API functions for facade coverage.
+      - `src/protocol/**`: Ensure protocol helpers exposed as public programmatic capabilities have Clay JS API documentation or remain internal.
+      - `docs/reference/clay-js-api/**/*.md`: Add/update Clay JS API docs for Phase 4 public capabilities, including user-facing names, key bindings, and custom properties.
+      - `docs/index.md`: Link new Clay JS API docs.
+      - `generated/**` or equivalent: Update generated registry artifacts using the project command.
+      - `tests/docs_contract.rs` or module tests: Add Phase 4 coverage mappings.
+    - References:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
+      - `plans/004-Phase3-SelfDocumentingProgramContract.md`
+  - Test Cases to Write:
+    - `phase4_server_public_rust_functions_have_clay_js_api`: Fails when a Phase 4 server-side Rust public function lacks a Clay JS API or is not made non-public.
+    - `phase4_clay_js_api_docs_are_indexed_and_generated`: Fails when Phase 4 Clay JS API docs are missing from `docs/index.md`, generated registry output, or lookup APIs.
+    - `phase4_clay_js_api_discovery_metadata_is_complete`: Fails when user-facing name, key binding metadata, or custom property metadata is missing or malformed.
+    - `phase4_generated_doc_registry_is_current`: Fails with `cargo run --bin update-doc-registry` instructions when generated registry artifacts are stale.
+
+- [ ] Create or verify Clay configuration APIs
+  - Acceptance Criteria:
+    - Functional: The Phase 4 implementation is reviewed for user-configurable behavior, key bindings, IPC/server/client customization points, and extensibility needs. Any configuration option introduced by Phase 4 is represented as a Clay JS API documented in Markdown, linked from `docs/index.md`, included in generated registry output, and lookup-accessible. The plan preserves `~/.config/clay/init.js` as the configuration entry point, with modular file loading supported when runtime configuration loading is implemented.
+    - Performance: Configuration APIs and docs do not add synchronous JavaScript, IPC, or server work to Masonry input/paint paths; ordinary typing remains client-first where the behavior manifest permits it.
+    - Code Quality: Configuration uses documented Clay JS APIs and `custom_properties` metadata instead of ad hoc undocumented keys.
+    - Security: Configuration does not implicitly grant filesystem, network, shell, extension loading, AI mutation, remote listener, or workspace authority.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/create-plan/references/clay.md`: Clay plans require a separate configuration task when adding user-visible behavior or public programmatic surfaces.
+      - `.agents/skills/project-patterns/references/configuration-system.md`: Configuration is loaded from `~/.config/clay/init.js` and each option is a Clay JS API.
+      - `.agents/skills/project-patterns/references/clay-js-api-schema.md`: Configuration APIs need user-facing names, key bindings, and custom properties.
+      - `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`: Approved configuration model.
+    - Options Considered:
+      - Defer all configuration review until a later preferences phase: rejected because Phase 4 introduces protocol/server/client surfaces that should not accidentally become unconfigurable or undocumented.
+      - Add ad hoc config keys for IPC paths or behavior toggles: rejected because every configuration option is a Clay JS API.
+      - Review Phase 4 surfaces and document planned configuration APIs without putting JS on the hot path: chosen to preserve Phase 4 scope and the Phase 3 documentation contract.
+    - Chosen Approach:
+      - Review Phase 4 protocol, server startup, client bootstrap, behavior manifest, and editor edit-event surfaces for configuration needs. Document any configuration APIs as Clay JS APIs with `custom_properties`; if runtime config loading is out of scope, mark them as planned docs/metadata and add coverage tests so the mapping does not drift.
+    - API Notes and Examples:
+      ```js
+      // ~/.config/clay/init.js
+      import { configureIpc } from "clay:client";
+
+      configureIpc({ socketPath: "~/.local/state/clay/clay.sock" });
+      ```
+    - Files to Create/Edit:
+      - `docs/reference/clay-js-api/**/*.md`: Add/update configuration API docs for Phase 4 surfaces.
+      - `docs/index.md`: Link configuration API docs.
+      - `generated/**` or equivalent: Update generated registry artifacts using the project command.
+      - `tests/docs_contract.rs` or module tests: Add configuration metadata coverage.
+    - References:
+      - `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`
+      - `.agents/skills/project-patterns/references/configuration-system.md`
+  - Test Cases to Write:
+    - `phase4_configuration_apis_are_documented`: Fails when Phase 4 configuration APIs lack Markdown docs, index links, generated registry entries, or lookup access.
+    - `phase4_configuration_custom_properties_are_complete`: Fails when behavior-changing configuration settings are absent from `custom_properties`.
+    - `phase4_configuration_does_not_enter_input_hot_path`: Verifies configuration handling does not add synchronous JavaScript/IPC/server work to editor input handling.
+
+- [ ] Update or verify the code wiki after Phase 4 implementation
+  - Acceptance Criteria:
+    - Functional: After Phase 4 implementation and tests pass, the code wiki documents or verifies the new client/server/protocol/codec/document-state implementation and links every relevant page from `docs/wiki/index.md`.
+    - Performance: Wiki updates add no runtime work and document hot-path guarantees: no blocking IPC in input/paint handlers, bounded queues, delta edits, and no synchronous server/JavaScript round trip for ordinary typing.
+    - Code Quality: Wiki pages explain what changed code does, how it works, key invariants/tradeoffs, source/test paths, and examples where useful; public API usage links to authoritative `docs/reference/` pages instead of duplicating them.
+    - Security: Wiki pages document IPC validation, frame-size bounds, socket-path assumptions, and absent authorities such as extension execution, SDUI, file workspace authority, remote listeners, and AI mutation.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-wiki/SKILL.md`: Use the project wiki workflow, public-reference linking boundary, and quality bar.
+      - `.agents/skills/project-wiki/references/page-template.md`: Use the default page template when creating substantial pages.
+      - `.agents/skills/project-patterns/references/maintenance-validation.md`: Prefer deterministic checks for wiki/docs maintenance where practical.
+    - Options Considered:
+      - Update wiki after each Phase 4 task: more granular, but noisy while protocol/server boundaries are still changing.
+      - Update once after Phase 4 verification: chosen to keep implementation education aligned with final code.
+    - Chosen Approach:
+      - After Phase 4 implementation and verification pass, update `docs/wiki/` pages for protocol/codec, server lifecycle, client bootstrap, editor edit-event flow, and end-to-end acknowledgement flow. Link to Clay JS API reference docs for public programmatic usage.
+    - API Notes and Examples:
+      ```text
+      docs/wiki/modules/protocol-codec.md
+      docs/wiki/modules/server-document-state.md
+      docs/wiki/flows/client-server-edit-ack.md
+      ```
+    - Files to Create/Edit:
+      - `docs/wiki/index.md`: Link new or updated Phase 4 implementation pages.
+      - `docs/wiki/modules/protocol-codec.md`: Explain protocol messages, codec boundary, validation, and tests.
+      - `docs/wiki/modules/server-document-state.md`: Explain server document ownership and edit application placeholder.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Explain initial snapshot, manifest install, local edit event, async send, and ack flow.
+    - References:
+      - `.agents/skills/project-wiki/SKILL.md`
+      - `.agents/skills/project-wiki/references/page-template.md`
+  - Test Cases to Write:
+    - Manual wiki review: Confirm `docs/wiki/index.md` links Phase 4 pages and the pages explain implementation flow, source paths, tests, performance constraints, and security boundaries.
+
 - [ ] Preserve Phase 2 behavior and document Phase 4 compromises
   - Acceptance Criteria:
     - Functional: Phase 2 editor behavior still passes automated tests and manual smoke testing after IPC integration.
@@ -290,7 +403,7 @@
       - `plans/003-Phase2-EditorInteractionModel.md`
       - `roadmap.md` Phase 4 expected outcome.
   - Test Cases to Write:
-    - `phase3_regression_commands`: `cargo fmt`, `cargo test`, and `cargo check` all pass.
+    - `phase4_regression_commands`: `cargo fmt`, `cargo test`, and `cargo check` all pass.
     - Manual GUI/IPC smoke test: Start server, start client, verify initial text, edit locally, observe acknowledgements, resize/scroll/select/navigate, and exit cleanly.
 
 ## Compromises Made

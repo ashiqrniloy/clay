@@ -39,10 +39,11 @@ Create an evidence-backed, chronological record of finalized project decisions i
      - Use local system time unless the user requests another timezone.
    - Keep existing logs immutable unless correcting factual errors or the user asks for an update. For superseding decisions, create a new log and reference the earlier log.
 
-6. **Update project pattern memory when available**
+6. **Update reusable project guidance when available**
    - If the project has `.agents/skills/project-patterns/`, use that skill after writing an approved decision log.
    - Extract only stable reusable planning guidance from the decision, not the full log text.
    - Add or update concise files under `.agents/skills/project-patterns/references/` when a new pattern is added or an existing pattern changes.
+   - If the decision changes required plan structure or recurring plan tasks, also update `.agents/skills/create-plan/references/<git-root-basename>.md` when present.
 
 ## Decision Log Template
 
