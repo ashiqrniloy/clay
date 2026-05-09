@@ -4,7 +4,7 @@
 
 Clay has proven the native client foundation: Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and a local `crop` rope backs editable text state. The editor now supports minimally real local interaction: cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, resize, and Phase 2 manual GUI smoke testing.
 
-The next architectural priority is to make Clay self-documenting, then establish user configuration as documented Clay JS APIs, before introducing the client/server boundary. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
+The next architectural priority is to establish the client/server architecture before building Clay JS APIs on top of it: implement the IPC skeleton, versioned text synchronization and leases, and behavior manifest system first, then introduce the Clay JS API structure and configuration surfaces. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
 
 ## Architectural Decisions Now Locked
 
@@ -101,43 +101,27 @@ Focus areas:
 
 - Define the Markdown/frontmatter schema for Clay JS API documentation, including JS module/export, backing Rust path, `deno_core` op, searchable user-facing name, key binding metadata, custom properties, permissions/security notes, examples, options, and lookup tags.
 - Establish `docs/index.md` as the master Markdown index and `docs/reference/` as the authoritative public Clay JS API reference area.
-- Generate machine-readable app/agent registries and lookup APIs from indexed Markdown, not from a separately authored registry.
-- Add tests that fail when server-side Rust public functions lack Clay JS APIs, Clay JS APIs lack Markdown docs, docs are missing from `docs/index.md`, generated registry artifacts are stale, or lookup APIs cannot find generated entries.
-- Create the implementation code wiki under `docs/wiki/` for internal architecture, modules, flows, invariants, and tests.
+- Lock the Clay JS API boundary, naming, discovery metadata, configuration-as-API, and Markdown-authoritative registry decisions as planning constraints.
 - Establish the recurring plan rule that new server-side Rust public functions, public programmatic behavior, key bindings, and configuration options must include Clay JS API, Markdown docs, generated registry, and lookup coverage in the same change.
 
-Expected outcome:
+Deferred from Phase 3 until the Phase 7 Clay JS API structure and inventory exist:
 
-- Clay has a strict, testable Clay JS API documentation contract before extension APIs and server-driven behavior multiply.
-- AI agents can inspect available Clay JS APIs, commands, key bindings, configuration options, protocol concepts, behavior manifest capabilities, and permissions from generated structured documentation.
-- Human Markdown docs and agent/app-readable registries share `docs/index.md` and linked Markdown files as the source of truth.
-- Developers and AI agents can inspect implementation knowledge through the separate project code wiki.
-
-## Phase 4: Configuration Foundation
-
-Establish Clay's user configuration model on top of the Phase 3 self-documenting Clay JS API contract before the IPC/server boundary grows.
-
-Focus areas:
-
-- Use `~/.config/clay/init.js` as the user configuration entry point.
-- Allow `init.js` to load other local configuration files so users can keep configuration modular.
-- Treat every configuration option as a Clay JS API, not as an undocumented key/value setting.
-- Define initial configuration Clay JS APIs for key binding management and editor customization, starting with documented planned surfaces where runtime execution is not ready yet.
-- Record default key bindings, including empty defaults, in Clay JS API docs and generated registry entries.
-- Record custom properties for every behavior-changing setting, such as cursor style color, blinking, and shape.
-- Ensure configuration APIs have Markdown docs, `docs/index.md` links, generated registry entries, lookup access, and tests that fail when metadata is missing or stale.
-- Keep configuration loading local and server-side; do not introduce client-side arbitrary JavaScript execution.
-- Preserve the no-authority-by-default security model: configuration cannot grant filesystem, network, shell, extension loading, AI mutation, or workspace access without explicit documented permissions and server-side validation.
+- Authoring per-API Markdown docs for current editor capabilities.
+- Generating machine-readable app/agent registries and registry update commands from indexed Markdown.
+- Exposing programmatic/app-facing documentation lookup over generated registry data.
+- Adding coverage gates that enforce server-side Rust public function -> Clay JS API -> Markdown doc -> `docs/index.md` -> generated registry -> lookup coverage.
+- Finalizing the Clay JS API documentation workflow for later protocol, behavior manifest, permission, extension, AI-tool, SDUI, and package surfaces.
+- Creating or verifying concrete configuration Clay JS APIs.
+- Creating or verifying concrete Clay JS APIs for public programmatic surfaces.
+- Creating/updating the implementation code wiki and final Phase 3 verification tied to those deferred implementation tasks.
 
 Expected outcome:
 
-- Clay has a documented configuration foundation before IPC, server, behavior manifest, and extension APIs multiply.
-- Users and AI agents can discover configurable behavior, default key bindings, missing key bindings, and custom properties through the generated documentation registry.
-- `~/.config/clay/init.js` is the committed user-facing configuration entry point, with modular loading semantics documented.
-- Configuration APIs are validated by the same Markdown/registry/lookup coverage gates as other Clay JS APIs.
-- Runtime configuration execution can be implemented later by the server-side JavaScript runtime without changing the public configuration contract.
+- Clay has the strict Clay JS API documentation contract, naming convention, and schema expectations before extension APIs and server-driven behavior multiply.
+- Deferred registry, lookup, coverage, per-API documentation, configuration API, and wiki implementation tasks are explicitly waiting on the Phase 7 Clay JS API structure and current-functionality inventory.
+- Human Markdown docs remain the intended source of truth for future agent/app-readable registries.
 
-## Phase 5: IPC Client/Server Skeleton
+## Phase 4: IPC Client/Server Skeleton
 
 Introduce the Thick Client / Asynchronous Server architecture without solving full synchronization yet.
 
@@ -151,7 +135,7 @@ Focus areas:
 - Use `rkyv` early for protocol encoding, but keep it behind a narrow codec boundary.
 - Validate received archived payloads before access and treat local IPC bytes as fallible input.
 - Include final-compatible protocol metadata where practical: document ID, client ID, editable/read-only access state, base document version, server version, transaction ID, and behavior version.
-- Keep the Phase 5 protocol intentionally small; do not make `rkyv` performance proving the phase's main goal.
+- Keep the Phase 4 protocol intentionally small; do not make `rkyv` performance proving the phase's main goal.
 - Preserve a benchmark/swap point around the codec so future measurements can compare message shapes and payload sizes.
 
 Expected outcome:
@@ -161,10 +145,10 @@ Expected outcome:
 - Server can send initial document state and a minimal behavior manifest.
 - Client can apply manifest-declared client-first text edits immediately and send basic edit operations asynchronously.
 - Protocol messages are `rkyv`-serializable and exchanged through a length-prefixed local IPC frame.
-- Any new server-side Rust public functions are either exposed through documented Clay JS APIs or made private/`pub(crate)`, and any new public programmatic capabilities follow Phase 3 Markdown/registry checks.
-- Serialization remains isolated enough that Phase 6 synchronization work can evolve message semantics without broad UI/server rewrites.
+- Any new server-side Rust public functions are either exposed through documented Clay JS APIs or made private/`pub(crate)`, and any new public programmatic capabilities preserve the Phase 3 documentation contract; concrete Clay JS facade/docs work can be completed in Phase 7 unless the API is intentionally introduced earlier.
+- Serialization remains isolated enough that Phase 5 synchronization work can evolve message semantics without broad UI/server rewrites.
 
-## Phase 6: Versioned Text Synchronization and Leases
+## Phase 5: Versioned Text Synchronization and Leases
 
 Implement the canonical/shadow text model described in `concept.md` and the approved authority decision.
 
@@ -187,7 +171,7 @@ Expected outcome:
 - Duplicate clients cannot edit the same file simultaneously.
 - The architecture can support future AI-driven edits safely.
 
-## Phase 7: Behavior Manifest System
+## Phase 6: Behavior Manifest System
 
 Make server-owned editor behavior executable on the client for hot-path latency without making the client authoritative.
 
@@ -206,7 +190,53 @@ Expected outcome:
 - Auto-indent, Enter, Tab, and simple mode-specific behavior can be immediate without janky correction in normal cases.
 - Server-first commands remain authoritative and safe.
 
-## Phase 8: File and Workspace Server
+## Phase 7: Clay JS API Structure and Current Functionality Inventory
+
+Introduce the Clay JS API module/facade structure after the IPC, synchronization, and behavior-manifest foundations exist. This phase creates the project shape and inventory needed for later documentation, configuration, extension, SDUI, AI, and package work.
+
+Focus areas:
+
+- Define the initial Clay JS API source tree and facade/module layout, separating stable JS/TS user APIs from raw Rust functions and raw `deno_core` ops.
+- Apply the approved Clay JS API boundary: server-side Rust public functions are exposed only through explicit `deno_core` op wrappers and stable Clay JS/TS facade modules; internal Rust functions remain private or `pub(crate)`.
+- Apply the approved naming model: domain modules such as `clay:editor`, concise lower-camel-case exports, server/client authority markers for editor-core APIs, globally namespaced stable registry IDs, and English `user_facing_name` metadata.
+- Inventory current Clay functionality that users, configuration, commands, help, key binding, or AI agents will need as public Clay JS APIs, including text insertion, newline, Backspace/Delete, cursor movement, selection, scrolling, resize/viewport behavior, cursor style/customization, key binding management, and application actions such as Escape/quit.
+- Classify each inventoried API by authority and runtime path: server-authoritative document mutation, client-local/UI behavior to be delivered through manifests or protocol, configuration API, command/key binding surface, or internal-only implementation detail.
+- For each inventoried public API, record the intended JS module/export, stable registry ID, user-facing name, key binding metadata requirement, custom property metadata requirement, backing Rust owner/path if known, future op wrapper name if applicable, permissions/security notes, and documentation path.
+- Identify which existing Rust functions should become non-public instead of gaining Clay JS API exposure.
+- Keep JavaScript execution server-side; do not introduce arbitrary JavaScript execution in the Rust client or a synchronous keypress -> IPC -> JavaScript -> IPC -> paint path.
+
+Expected outcome:
+
+- Clay has an agreed Clay JS API facade structure and inventory before per-API documentation and registry generation are resumed.
+- Future documentation tasks can document actual planned APIs rather than inventing docs for APIs with no project structure.
+- Configuration, extension, SDUI, AI, and package phases have a shared list of public user-facing functionality to expose and validate.
+- Phase 3 deferred tasks can be reactivated against concrete API names, modules, docs paths, and authority classifications.
+
+## Phase 8: Configuration Foundation
+
+Establish Clay's user configuration model on top of the Phase 3 self-documenting contract and Phase 7 Clay JS API structure/inventory after the IPC, synchronization, and behavior-manifest foundations exist.
+
+Focus areas:
+
+- Use `~/.config/clay/init.js` as the user configuration entry point.
+- Allow `init.js` to load other local configuration files so users can keep configuration modular.
+- Treat every configuration option as a Clay JS API, not as an undocumented key/value setting.
+- Define initial configuration Clay JS APIs for key binding management and editor customization, starting with documented planned surfaces where runtime execution is not ready yet.
+- Record default key bindings, including empty defaults, in Clay JS API docs and generated registry entries.
+- Record custom properties for every behavior-changing setting, such as cursor style color, blinking, and shape.
+- Ensure configuration APIs have Markdown docs, `docs/index.md` links, generated registry entries, lookup access, and tests that fail when metadata is missing or stale.
+- Keep configuration loading local and server-side; do not introduce client-side arbitrary JavaScript execution.
+- Preserve the no-authority-by-default security model: configuration cannot grant filesystem, network, shell, extension loading, AI mutation, or workspace access without explicit documented permissions and server-side validation.
+
+Expected outcome:
+
+- Clay has a documented configuration foundation before extension, SDUI, AI, and package APIs multiply.
+- Users and AI agents can discover configurable behavior, default key bindings, missing key bindings, and custom properties through the generated documentation registry.
+- `~/.config/clay/init.js` is the committed user-facing configuration entry point, with modular loading semantics documented.
+- Configuration APIs are validated by the same Markdown/registry/lookup coverage gates as other Clay JS APIs once the deferred Phase 3 registry and lookup tasks are resumed against the Phase 7 API inventory.
+- Runtime configuration execution can be implemented later by the server-side JavaScript runtime without changing the public configuration contract.
+
+## Phase 9: File and Workspace Server
 
 Make Clay edit real files through the authoritative server model.
 
@@ -227,7 +257,7 @@ Expected outcome:
 - The client remains a canvas/view/input layer.
 - The server is the only component that needs workspace filesystem permissions.
 
-## Phase 9: Server-Driven UI
+## Phase 10: Server-Driven UI
 
 Evolve Clay beyond a text editor into a programmable native canvas.
 
@@ -246,7 +276,7 @@ Expected outcome:
 - Clay can host multiple native panels/views.
 - UI capabilities are inspectable by users and AI agents through generated documentation.
 
-## Phase 10: Embedded JavaScript Runtime
+## Phase 11: Embedded JavaScript Runtime
 
 Add the `deno_core` extension brain after the client/server/document/manifest architecture is stable.
 
@@ -266,7 +296,7 @@ Expected outcome:
 - Extensions can create native UI through SDUI and define hot-path behavior through manifests.
 - Extension/package APIs are constrained, permissioned, documented as Clay JS APIs in Markdown, and available through generated registry lookup for users and AI agents.
 
-## Phase 11: Hot Reload and Behavior Update Semantics
+## Phase 12: Hot Reload and Behavior Update Semantics
 
 Make runtime behavior changes safe and non-janky.
 
@@ -286,7 +316,7 @@ Expected outcome:
 - Clients do not apply half-updated editing rules.
 - Behavior changes are visible, documented, versioned, and reversible or recoverable.
 
-## Phase 12: AI-Safe Mutation and Region Locks
+## Phase 13: AI-Safe Mutation and Region Locks
 
 Support AI-generated edits without corrupting user state.
 
@@ -306,7 +336,7 @@ Expected outcome:
 - User edits and agent edits have explicit conflict boundaries.
 - AI-visible tools and mutation capabilities are documented and inspectable.
 
-## Phase 13: Remote, Container, and Multi-Client Hardening
+## Phase 14: Remote, Container, and Multi-Client Hardening
 
 Make the server/client split useful beyond local IPC.
 
@@ -325,7 +355,7 @@ Expected outcome:
 - A host client can connect to a server running in a target development environment.
 - Clay can support local, container, and remote editing without changing the client authority model.
 
-## Phase 14: Package System
+## Phase 15: Package System
 
 Make Clay extensible through installable packages that use documented Clay JS APIs.
 
@@ -355,7 +385,7 @@ Expected outcome:
 - Users and AI agents can inspect installed packages, modes, commands, key bindings, configuration options, permissions, and behavior contributions through generated documentation and app lookup.
 - The package repository/distribution model is defined well enough for future package publishing and installation work.
 
-## Phase 15: Product Hardening
+## Phase 16: Product Hardening
 
 Move from architectural prototype toward a daily-usable application.
 

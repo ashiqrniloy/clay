@@ -22,7 +22,7 @@
 
 ## Tasks
 
-- [ ] Define the minimal `rkyv` protocol and length-prefixed codec boundary
+- [x] Define the minimal `rkyv` protocol and length-prefixed codec boundary
   - Acceptance Criteria:
     - Functional: Protocol types can represent `Hello`, `Welcome`, `InitialDocument`, a minimal `BehaviorManifest`, editable/read-only document access, client edit operations and/or editor intents, edit transactions or acknowledgements, and error responses.
     - Performance: Encoding avoids protocol-wide heap-heavy conversion layers beyond required socket framing and inserted text ownership; received payload validation is explicit and measured later rather than assumed free. Ordinary text edits carry deltas, not full-document payloads.
@@ -78,6 +78,8 @@
       - `src/protocol/codec.rs`: `rkyv` encode/decode and length-prefixed frame helpers.
       - `Cargo.toml`: Adjust `rkyv` features if validation support requires feature changes.
       - `src/lib.rs` if the project is split into library plus binaries.
+      - `docs/wiki/index.md`: Created initial code wiki navigation for the protocol codec implementation.
+      - `docs/wiki/modules/protocol-codec.md`: Documented protocol messages, codec framing, validation, constraints, and tests.
     - References:
       - Context7 docs response for `/rkyv/rkyv` derive and validated access.
       - `concept.md` section 3 on `rkyv` serialization.
@@ -88,6 +90,12 @@
     - `protocol_round_trips_behavior_manifest`: Encodes and decodes a minimal manifest that marks basic text insertion as client-first predictable behavior.
     - `codec_rejects_oversized_frame`: A length prefix above the configured maximum is rejected before allocation.
     - `codec_rejects_invalid_archive_bytes`: Malformed payload bytes do not produce a message.
+  - Completed Notes:
+    - Added `src/protocol/mod.rs` with shared owned protocol types, Phase 4 version fields, edit deltas/intents, inert behavior manifests, document access, acknowledgements/transactions, and error responses.
+    - Added `src/protocol/codec.rs` with a bounded `Codec` API for `rkyv` encode/decode and 4-byte big-endian length-prefixed frames. Decode rejects oversize/mismatched frames before payload allocation and validates archived bytes with `rkyv::from_bytes`/bytecheck before returning owned messages.
+    - Added `src/lib.rs` so shared protocol code can be used by future client/server binaries and tests.
+    - Added the protocol codec wiki page required by project wiki maintenance.
+    - Verification passed: `cargo fmt`, `cargo test protocol --quiet`, `cargo check --quiet`, and `cargo test --quiet`.
 
 - [ ] Add a Tokio Unix Domain Socket server skeleton
   - Acceptance Criteria:
