@@ -97,7 +97,7 @@
     - Added the protocol codec wiki page required by project wiki maintenance.
     - Verification passed: `cargo fmt`, `cargo test protocol --quiet`, `cargo check --quiet`, and `cargo test --quiet`.
 
-- [ ] Add a Tokio Unix Domain Socket server skeleton
+- [x] Add a Tokio Unix Domain Socket server skeleton
   - Acceptance Criteria:
     - Functional: A server binary or server module can bind a Unix socket, accept one or more client connections, respond to `Hello`, send an initial in-memory document snapshot and minimal behavior manifest, receive edit operations/intents, apply them to server-owned canonical state, and send edit acknowledgements or simple edit transactions.
     - Performance: The server uses async I/O without blocking the Tokio runtime on socket reads/writes or edit dispatch; per-connection work is spawned or otherwise isolated enough not to block the accept loop. Edit ordering is per-document rather than globally serialized across all documents.
@@ -139,8 +139,16 @@
     - `server_sends_minimal_behavior_manifest`: Client receives a behavior manifest declaring basic text edits as client-first predictable behavior.
     - `server_acknowledges_insert_edit`: Client sends an insert operation with document/behavior version metadata and receives `EditAck`.
     - `server_rejects_invalid_frame_without_panic`: Malformed frames do not crash the server connection task.
+  - Completed Notes:
+    - Added `src/bin/clay-server.rs` as the Phase 4 server binary. It accepts an optional socket path argument and otherwise uses `$XDG_RUNTIME_DIR/clay.sock` when available, with a process-scoped temp fallback for development.
+    - Added `src/server/mod.rs` with `IpcServer`, `ServerConfig`, Unix socket binding, stale socket cleanup that removes only socket nodes, and an async accept loop that spawns isolated per-connection tasks.
+    - Added `src/server/connection.rs` with the required `Hello` handshake, `Welcome`/`InitialDocument`/minimal `BehaviorManifest` responses, edit and editor-intent dispatch, decode-error handling, and edit acknowledgements.
+    - Added `src/server/document.rs` with server-owned canonical in-memory document state, editable/read-only checks, document ID validation, UTF-8 byte-boundary/range validation, edit application, and version increments.
+    - Extended `src/protocol/codec.rs` with async Tokio frame read/write helpers so server code uses the shared bounded `rkyv` codec boundary instead of direct serialization calls.
+    - Added `docs/wiki/modules/server-ipc-skeleton.md` and linked it from `docs/wiki/index.md` to document the server lifecycle, handshake, document state, constraints, and tests.
+    - Verification passed: `cargo fmt`, `cargo test server --quiet`, `cargo test protocol --quiet`, and `cargo check --quiet`.
 
-- [ ] Refactor the native app into a client unit that can load server snapshots
+- [x] Refactor the native app into a client unit that can load server snapshots
   - Acceptance Criteria:
     - Functional: The existing Masonry editor can initialize from a server-provided document snapshot and minimal behavior manifest instead of only a hardcoded local empty/default buffer.
     - Performance: Loading a snapshot creates or replaces the local editor buffer once and does not introduce whole-buffer extraction in the paint path after initialization. Installing a behavior manifest is a small configuration update, not executable script loading.
@@ -176,6 +184,9 @@
       - `src/editor/surface.rs`: Add document snapshot loading and reset caret/selection/viewport state.
       - `src/main.rs` or `src/bin/clay-client.rs`: Start the client app with server-provided initial state.
       - `src/masonry_editor.rs`: Accept initial editor state if construction currently assumes default state.
+      - `src/lib.rs`: Expose the client/editor/widget units to the package binary and tests.
+      - `docs/wiki/index.md`: Link the client snapshot bootstrap implementation page.
+      - `docs/wiki/modules/client-snapshot-bootstrap.md`: Document client bootstrap, snapshot loading, behavior manifest storage, constraints, and tests.
     - References:
       - `concept.md` section 4 on canonical/shadow state split.
       - Phase 1 and Phase 2 plans on preserving editor state boundaries.
@@ -184,8 +195,15 @@
     - `client_handles_initial_document_message`: Client bootstrap converts a decoded server message into editor initial state.
     - `client_installs_minimal_behavior_manifest`: Client stores the behavior version and applies manifest-declared client-first text behavior without script execution.
     - Manual smoke test: Start server, start client, confirm server-provided text appears and editor remains usable.
+  - Completed Notes:
+    - Added `src/client/mod.rs` with a bounded Tokio Unix socket bootstrap that sends `Hello`, receives `Welcome`/`InitialDocument`/`BehaviorManifest`, validates message ordering through the shared `Codec`, returns structured `ClientInitialState`, and reports fallible IPC/input as `ClientBootstrapError` without panics.
+    - Exposed `editor` and `masonry_editor` from `src/lib.rs` so the package binary can be a thin client shell over shared client/editor units.
+    - Added `EditorSurface::load_snapshot`, `EditorSurface::install_behavior_manifest`, and `EditorDocumentState` so the editor stores document ID, server version, access mode, behavior version, and manifest separately from rendering/layout state. Snapshot loading replaces the buffer once and resets caret, selection, viewport, layout cache, and scroll state.
+    - Added `EditorWidget::with_initial_state` and updated `src/main.rs` to optionally load a server snapshot from the first CLI socket-path argument before launching Masonry, falling back to the existing empty local editor on bootstrap failure.
+    - Added `docs/wiki/modules/client-snapshot-bootstrap.md` and linked it from `docs/wiki/index.md`.
+    - Verification passed: `cargo fmt`, `cargo test client --quiet`, `cargo test editor_load_snapshot_replaces_text_and_resets_caret --quiet`, `cargo test --quiet`, and `cargo check --quiet`.
 
-- [ ] Emit client edit operations from local editor mutations
+- [x] Emit client edit operations from local editor mutations
   - Acceptance Criteria:
     - Functional: Insert, newline, Backspace, Delete, selected-range replacement, and selected-range deletion produce basic client edit operations with valid byte offsets/ranges while preserving immediate local edits when the installed behavior manifest marks them client-first predictable.
     - Performance: Edit operation creation reuses known cursor/selection/range information from the local edit path and does not inspect or clone the whole document. Ordinary edits are enqueued asynchronously with bounded backpressure.
@@ -217,6 +235,8 @@
       - `src/client.rs` or `src/client/connection.rs`: Queue and send edit protocol messages.
       - `src/masonry_editor.rs`: Forward edit events without blocking UI handling.
       - `src/protocol.rs`: Shared `EditOperation` protocol type.
+      - `docs/wiki/index.md`: Link the client edit emission flow page.
+      - `docs/wiki/flows/client-edit-emission.md`: Document local edit events, manifest gating, bounded queueing, constraints, and tests.
     - References:
       - `plans/003-Phase2-EditorInteractionModel.md` cursor, selection, and range-edit tasks.
       - `roadmap.md` Phase 4 and Phase 5 boundary.
@@ -226,8 +246,16 @@
     - `selection_replacement_emits_replace_operation`: Replacing selected text emits a normalized range and replacement text.
     - `backspace_emits_delete_operation`: Backspace at a Unicode boundary emits the previous scalar range.
     - `editor_events_do_not_block_without_ipc_consumer`: Local editing still works if no sender is attached in tests.
+  - Completed Notes:
+    - Added `EditorEditEvent` and `EditorCommandOutcome` in `src/editor/surface.rs`. Insert, newline, Backspace, Delete, selected-range replacement, and selected-range deletion now apply locally first and return protocol `EditOperation` deltas with document ID, base document version, and behavior version when the document is editable and the installed behavior manifest declares the operation client-first.
+    - Kept existing boolean editor command APIs as compatibility wrappers over the event-returning path, so Phase 2 tests and callers continue to work.
+    - Added `ClientEditQueue` in `src/client/mod.rs`, backed by a bounded Tokio `mpsc` channel and `try_send`, to convert editor events into `ClientMessage::Edit` without socket I/O in editor code.
+    - Updated `EditorWidget` in `src/masonry_editor.rs` to optionally forward edit events to a client queue with monotonic transaction IDs while ignoring absent/full queues so local input does not block.
+    - Added tests for insert metadata, behavior-version metadata, selected replacement, Unicode-boundary Backspace, selected Delete, local editing without an IPC consumer, event-to-message conversion, and bounded queue backpressure.
+    - Added `docs/wiki/flows/client-edit-emission.md` and linked it from `docs/wiki/index.md`.
+    - Verification passed: `cargo fmt`, `cargo test editor --quiet`, `cargo test client --quiet`, `cargo test --quiet`, and `cargo check --quiet`.
 
-- [ ] Wire end-to-end client/server acknowledgement flow
+- [x] Wire end-to-end client/server acknowledgement flow
   - Acceptance Criteria:
     - Functional: With server and client running, the client connects, receives initial text and behavior manifest, edits locally for manifest-declared client-first text behavior, sends edit messages, and receives acknowledgements without blocking the GUI.
     - Performance: IPC send/receive work does not run synchronously in Masonry paint or text-event handlers; GUI input remains optimistic and redraw-on-demand. No Phase 4 keypress requires a synchronous server/JavaScript round trip.
@@ -258,6 +286,8 @@
       - `src/main.rs` or `src/bin/clay-client.rs`: Client/server startup wiring.
       - `src/masonry_editor.rs`: Non-blocking edit-event forwarding.
       - `src/protocol/codec.rs`: Shared frame read/write helpers used by both sides.
+      - `docs/wiki/index.md`: Link the client/server acknowledgement flow page.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Document startup, background IPC, acknowledgement events, constraints, and tests.
     - References:
       - Context7 Tokio docs response for UnixStream async I/O.
       - `concept.md` Thick Client / Asynchronous Server model.
@@ -267,6 +297,15 @@
     - `end_to_end_client_receives_behavior_manifest`: Integration test receives the minimal behavior manifest before client-first edits are emitted.
     - `end_to_end_edit_gets_acknowledged`: Integration test sends an edit with version metadata and receives `EditAck`.
     - Manual smoke test: Run server and client, type in the client, confirm no GUI stalls and server logs/observes edit acknowledgements.
+  - Completed Notes:
+    - Added `ClientSession` and `ClientConnectionEvent` in `src/client/mod.rs`. `client::connect` now performs the initial handshake, keeps the Unix socket open, and returns initial state plus a bounded edit queue and acknowledgement/error event receiver.
+    - Added a background Tokio client connection loop that uses `tokio::select!` to write queued `ClientMessage::Edit` values and read server `EditAck`, `EditTransaction`, and `Error` frames without blocking the GUI.
+    - Updated `src/main.rs` to parse `clay server`, `clay client`, and bare `clay` modes. `clay server` starts the foreground server, `clay client` attaches to the shared default socket when a server is running, and bare `clay` starts a separate background `clay server` process if one is not reachable before opening the client. The auto-started server is not embedded in the client process, so closing the client does not stop it. The client path keeps a multi-thread Tokio runtime alive while Masonry runs, passes `EditorWidget` both the server snapshot and edit queue, and logs client IPC acknowledgement/error events to stderr for Phase 4 observability.
+    - Preserved optimistic local editing: `EditorWidget` still applies edits immediately and only performs bounded `try_send` forwarding from input handlers.
+    - Added end-to-end client tests for snapshot receipt, behavior manifest receipt, edit acknowledgement over a paired socket, and edit acknowledgement through the real `IpcServer` over a Unix socket.
+    - Added `src/ipc.rs` with the shared default socket path used by the main `clay` binary and the `clay-server` compatibility binary.
+    - Added `docs/wiki/flows/client-server-edit-ack.md` and linked it from `docs/wiki/index.md`.
+    - Verification passed: `cargo fmt`, `cargo test client --quiet`, `cargo test server --quiet`, `cargo test --quiet`, and `cargo check --quiet`.
 
 - [ ] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
@@ -346,7 +385,7 @@
     - `phase4_configuration_custom_properties_are_complete`: Fails when behavior-changing configuration settings are absent from `custom_properties`.
     - `phase4_configuration_does_not_enter_input_hot_path`: Verifies configuration handling does not add synchronous JavaScript/IPC/server work to editor input handling.
 
-- [ ] Update or verify the code wiki after Phase 4 implementation
+- [x] Update or verify the code wiki after Phase 4 implementation
   - Acceptance Criteria:
     - Functional: After Phase 4 implementation and tests pass, the code wiki documents or verifies the new client/server/protocol/codec/document-state implementation and links every relevant page from `docs/wiki/index.md`.
     - Performance: Wiki updates add no runtime work and document hot-path guarantees: no blocking IPC in input/paint handlers, bounded queues, delta edits, and no synchronous server/JavaScript round trip for ordinary typing.
@@ -378,8 +417,15 @@
       - `.agents/skills/project-wiki/references/page-template.md`
   - Test Cases to Write:
     - Manual wiki review: Confirm `docs/wiki/index.md` links Phase 4 pages and the pages explain implementation flow, source paths, tests, performance constraints, and security boundaries.
+  - Completed Notes:
+    - Verified the existing Phase 4 wiki pages for protocol codec, server IPC lifecycle, client snapshot bootstrap, client edit emission, and client/server acknowledgement flow.
+    - Added `docs/wiki/modules/server-document-state.md` to document server-owned canonical text, edit validation, UTF-8 boundary checks, version increments, acknowledgement generation, and Phase 5 synchronization boundaries.
+    - Updated `docs/wiki/index.md` so every Phase 4 wiki page is discoverable, and cross-linked the server document state page from the server IPC page.
+    - Verified all `docs/wiki/**/*.md` pages except the index are linked from `docs/wiki/index.md` with a deterministic `python3` check.
+    - Verification passed: `cargo test --quiet` and `cargo check --quiet`.
+    - The Clay JS API and configuration API tasks remain intentionally unchecked/skipped for now per user direction.
 
-- [ ] Preserve Phase 2 behavior and document Phase 4 compromises
+- [x] Preserve Phase 2 behavior and document Phase 4 compromises
   - Acceptance Criteria:
     - Functional: Phase 2 editor behavior still passes automated tests and manual smoke testing after IPC integration.
     - Performance: Existing bounded extraction and layout cache tests remain valid; IPC integration does not add whole-buffer paint extraction or blocking GUI edit paths.
@@ -399,8 +445,6 @@
       cargo fmt
       cargo test
       cargo check
-      cargo run --bin clay-server
-      cargo run --bin clay-client
       ```
     - Files to Create/Edit:
       - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`: Mark completed tasks and fill post-implementation notes.
@@ -413,9 +457,25 @@
   - Test Cases to Write:
     - `phase4_regression_commands`: `cargo fmt`, `cargo test`, and `cargo check` all pass.
     - Manual GUI/IPC smoke test: Start server, start client, verify initial text, edit locally, observe acknowledgements, resize/scroll/select/navigate, and exit cleanly.
+  - Completed Notes:
+    - Ran final regression verification: `cargo fmt`, `cargo test --quiet`, and `cargo check --quiet` all passed.
+    - Automated tests include the preserved editor behavior covered by earlier Phase 2-style unit tests for insertion, newline, Backspace/Delete, cursor movement, selection, bounded visible text extraction, and layout/cache behavior, plus Phase 4 protocol/client/server tests.
+    - IPC integration preserves the Phase 2 hot path: Masonry input handlers apply local editor edits immediately, emit only delta edit events, and use bounded non-blocking queue forwarding instead of synchronous socket or server calls.
+    - Manual GUI/IPC smoke testing was performed during the task sequence: `cargo run` / `cargo run -- client` produced server `EditAck` events with monotonically increasing versions and transaction IDs while typing continued locally.
+    - Confirmed the completed Phase 4 scope still excludes extension execution, SDUI commands, file workspace authority, region locks, remote network listeners, and AI mutation privileges.
+    - The Clay JS API and configuration API tasks remain intentionally unchecked/skipped per user direction; they are not blockers for preserving Phase 2 behavior or documenting Phase 4 implementation compromises.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Full Phase 5 synchronization is intentionally deferred. Phase 4 carries document version, behavior version, and transaction IDs, but acknowledgements are observational; the client does not yet maintain confirmed-version state, reject stale edits, resync after divergence, or merge concurrent edits.
+- Server document state is an in-memory placeholder. It proves server ownership, edit validation, UTF-8 boundary checks, and version increments, but does not persist files, manage workspaces, or model multi-document/project state.
+- Bare `clay` auto-starts a separate background `clay server` process when no server is reachable. This matches the desired process lifetime semantics, but Phase 4 does not yet provide a first-class server shutdown/status command beyond normal process management.
+- Client connection errors and server acknowledgements are logged to stderr for Phase 4 observability. They are not yet surfaced in the UI with diagnostics, pending-edit indicators, reconnect controls, or resync prompts.
+- The outgoing edit queue is bounded and non-blocking. If the queue is absent/full, local edits continue and the send failure is intentionally not user-visible yet; Phase 5 should decide how to track unsent/pending edits.
+- The Clay JS API and configuration API plan tasks were skipped by user direction. Phase 4 therefore has internal Rust/client/server APIs and CLI behavior, but no completed Clay JS facade/configuration documentation pass for these surfaces yet.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+- High priority: Implement Phase 5 confirmed-version tracking, stale edit rejection, server correction transactions, reconnect/resync behavior, and multi-client convergence tests.
+- High priority: Add user-visible client IPC status, pending-edit/error reporting, and an explicit server lifecycle command set such as status/stop once CLI UX is designed.
+- Medium priority: Complete the skipped Clay JS API and configuration API review so public programmatic surfaces and configurable IPC behavior are documented through the approved Clay JS facade model.
+- Medium priority: Replace the in-memory server document placeholder with a proper document/workspace owner when file/workspace authority is introduced in a later phase.
+- Low priority: Convert the ad hoc wiki-link validation command into a checked repository test or docs validation script if wiki maintenance grows.

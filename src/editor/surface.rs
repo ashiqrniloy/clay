@@ -4,6 +4,10 @@ use masonry::core::PaintCtx;
 use masonry::kurbo::{Affine, Circle, Point, Rect};
 use masonry::peniko::{Color, Fill};
 
+use crate::protocol::{
+    BehaviorManifest, BehaviorVersion, DocumentAccess, DocumentId, DocumentVersion, EditOperation,
+};
+
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
 use super::cursor::CursorState;
 use super::is_printable_text;
@@ -41,9 +45,68 @@ pub enum EditorCommand<'a> {
     DocumentEnd,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorEditEvent {
+    pub document_id: DocumentId,
+    pub base_version: DocumentVersion,
+    pub behavior_version: BehaviorVersion,
+    pub operation: EditOperation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorCommandOutcome {
+    pub changed: bool,
+    pub edit_event: Option<EditorEditEvent>,
+}
+
+impl EditorCommandOutcome {
+    fn unchanged() -> Self {
+        Self {
+            changed: false,
+            edit_event: None,
+        }
+    }
+
+    fn changed(edit_event: Option<EditorEditEvent>) -> Self {
+        Self {
+            changed: true,
+            edit_event,
+        }
+    }
+
+    fn from_changed(changed: bool) -> Self {
+        Self {
+            changed,
+            edit_event: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorDocumentState {
+    pub document_id: DocumentId,
+    pub document_version: DocumentVersion,
+    pub access: DocumentAccess,
+    pub behavior_version: BehaviorVersion,
+    pub behavior_manifest: Option<BehaviorManifest>,
+}
+
+impl Default for EditorDocumentState {
+    fn default() -> Self {
+        Self {
+            document_id: 0,
+            document_version: 0,
+            access: DocumentAccess::Editable,
+            behavior_version: 0,
+            behavior_manifest: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct EditorSurface {
     buffer: EditorBuffer,
+    document: EditorDocumentState,
     cursor: CursorState,
     selection: Option<SelectionState>,
     viewport: Viewport,
@@ -54,60 +117,157 @@ pub struct EditorSurface {
 }
 
 impl EditorSurface {
+    pub fn load_snapshot(
+        &mut self,
+        document_id: DocumentId,
+        version: DocumentVersion,
+        text: String,
+        access: DocumentAccess,
+    ) {
+        self.buffer.replace_text(text);
+        self.document.document_id = document_id;
+        self.document.document_version = version;
+        self.document.access = access;
+        self.cursor.set_caret(0);
+        self.selection = None;
+        self.viewport = Viewport::default();
+        self.layout = LayoutState::default();
+        self.visual_scroll_y = 0.0;
+        self.last_visual_max_scroll_y = 0.0;
+        self.follow_visual_end = false;
+    }
+
+    pub fn install_behavior_manifest(&mut self, manifest: BehaviorManifest) {
+        self.document.behavior_version = manifest.behavior_version;
+        self.document.behavior_manifest = Some(manifest);
+    }
+
+    pub fn document_state(&self) -> &EditorDocumentState {
+        &self.document
+    }
+
     pub fn command(&mut self, command: EditorCommand<'_>) -> bool {
+        self.command_with_event(command).changed
+    }
+
+    pub fn command_with_event(&mut self, command: EditorCommand<'_>) -> EditorCommandOutcome {
         match command {
-            EditorCommand::Insert(text) => self.insert_text(text),
-            EditorCommand::Newline => self.insert_newline(),
-            EditorCommand::Backspace => self.backspace(),
-            EditorCommand::DeleteForward => self.delete_forward(),
-            EditorCommand::MoveLeft => self.move_left(),
-            EditorCommand::MoveRight => self.move_right(),
-            EditorCommand::SelectLeft => self.select_left(),
-            EditorCommand::SelectRight => self.select_right(),
-            EditorCommand::MoveUp => self.move_up(),
-            EditorCommand::MoveDown => self.move_down(),
-            EditorCommand::LineStart => self.move_to_line_start(),
-            EditorCommand::LineEnd => self.move_to_line_end(),
-            EditorCommand::DocumentStart => self.move_to_document_start(),
-            EditorCommand::DocumentEnd => self.move_to_document_end(),
+            EditorCommand::Insert(text) => self.insert_text_with_event(text),
+            EditorCommand::Newline => self.insert_newline_with_event(),
+            EditorCommand::Backspace => self.backspace_with_event(),
+            EditorCommand::DeleteForward => self.delete_forward_with_event(),
+            EditorCommand::MoveLeft => EditorCommandOutcome::from_changed(self.move_left()),
+            EditorCommand::MoveRight => EditorCommandOutcome::from_changed(self.move_right()),
+            EditorCommand::SelectLeft => EditorCommandOutcome::from_changed(self.select_left()),
+            EditorCommand::SelectRight => EditorCommandOutcome::from_changed(self.select_right()),
+            EditorCommand::MoveUp => EditorCommandOutcome::from_changed(self.move_up()),
+            EditorCommand::MoveDown => EditorCommandOutcome::from_changed(self.move_down()),
+            EditorCommand::LineStart => {
+                EditorCommandOutcome::from_changed(self.move_to_line_start())
+            }
+            EditorCommand::LineEnd => EditorCommandOutcome::from_changed(self.move_to_line_end()),
+            EditorCommand::DocumentStart => {
+                EditorCommandOutcome::from_changed(self.move_to_document_start())
+            }
+            EditorCommand::DocumentEnd => {
+                EditorCommandOutcome::from_changed(self.move_to_document_end())
+            }
         }
     }
 
     pub fn insert_text(&mut self, text: &str) -> bool {
+        self.insert_text_with_event(text).changed
+    }
+
+    pub fn insert_text_with_event(&mut self, text: &str) -> EditorCommandOutcome {
         if !is_printable_text(text) {
-            return false;
+            return EditorCommandOutcome::unchanged();
         }
 
-        self.replace_selection_or_insert(text)
+        self.replace_selection_or_insert_with_event(text)
     }
 
     pub fn insert_newline(&mut self) -> bool {
-        let result = if let Some(range) = self.selected_range() {
-            self.buffer.replace_range(range, "\n")
+        self.insert_newline_with_event().changed
+    }
+
+    pub fn insert_newline_with_event(&mut self) -> EditorCommandOutcome {
+        let (result, operation) = if let Some(range) = self.selected_range() {
+            let operation = EditOperation::Replace {
+                start: range.start as u64,
+                end: range.end as u64,
+                text: "\n".to_string(),
+            };
+            (self.buffer.replace_range(range, "\n"), operation)
         } else {
-            self.buffer.insert_newline_at(self.cursor.caret())
+            let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            (
+                self.buffer.insert_newline_at(byte_offset),
+                EditOperation::Insert {
+                    byte_offset: byte_offset as u64,
+                    text: "\n".to_string(),
+                },
+            )
         };
-        self.finish_edit(result)
+        self.finish_edit_with_operation(result, operation)
     }
 
     pub fn backspace(&mut self) -> bool {
+        self.backspace_with_event().changed
+    }
+
+    pub fn backspace_with_event(&mut self) -> EditorCommandOutcome {
         if let Some(range) = self.selected_range() {
+            let operation = EditOperation::Delete {
+                start: range.start as u64,
+                end: range.end as u64,
+            };
             let result = self.buffer.delete_range(range);
-            return self.finish_edit(result);
+            return self.finish_edit_with_operation(result, operation);
         }
 
-        let result = self.buffer.backspace_at(self.cursor.caret());
-        self.finish_edit(result)
+        let caret = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let Some(previous) = self.buffer.previous_scalar_boundary(caret) else {
+            let result = self.buffer.backspace_at(caret);
+            return self.finish_edit(result);
+        };
+        let result = self.buffer.delete_range(previous..caret);
+        self.finish_edit_with_operation(
+            result,
+            EditOperation::Delete {
+                start: previous as u64,
+                end: caret as u64,
+            },
+        )
     }
 
     pub fn delete_forward(&mut self) -> bool {
+        self.delete_forward_with_event().changed
+    }
+
+    pub fn delete_forward_with_event(&mut self) -> EditorCommandOutcome {
         if let Some(range) = self.selected_range() {
+            let operation = EditOperation::Delete {
+                start: range.start as u64,
+                end: range.end as u64,
+            };
             let result = self.buffer.delete_range(range);
-            return self.finish_edit(result);
+            return self.finish_edit_with_operation(result, operation);
         }
 
-        let result = self.buffer.delete_after(self.cursor.caret());
-        self.finish_edit(result)
+        let caret = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let Some(next) = self.buffer.next_scalar_boundary(caret) else {
+            let result = self.buffer.delete_after(caret);
+            return self.finish_edit(result);
+        };
+        let result = self.buffer.delete_range(caret..next);
+        self.finish_edit_with_operation(
+            result,
+            EditOperation::Delete {
+                start: caret as u64,
+                end: next as u64,
+            },
+        )
     }
 
     pub fn move_left(&mut self) -> bool {
@@ -404,13 +564,25 @@ impl EditorSurface {
         (range.start < range.end).then_some(range)
     }
 
-    fn replace_selection_or_insert(&mut self, text: &str) -> bool {
-        let result = if let Some(range) = self.selected_range() {
-            self.buffer.replace_range(range, text)
+    fn replace_selection_or_insert_with_event(&mut self, text: &str) -> EditorCommandOutcome {
+        let (result, operation) = if let Some(range) = self.selected_range() {
+            let operation = EditOperation::Replace {
+                start: range.start as u64,
+                end: range.end as u64,
+                text: text.to_string(),
+            };
+            (self.buffer.replace_range(range, text), operation)
         } else {
-            self.buffer.insert_at(self.cursor.caret(), text)
+            let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            (
+                self.buffer.insert_at(byte_offset, text),
+                EditOperation::Insert {
+                    byte_offset: byte_offset as u64,
+                    text: text.to_string(),
+                },
+            )
         };
-        self.finish_edit(result)
+        self.finish_edit_with_operation(result, operation)
     }
 
     fn collapse_selection_to(&mut self, caret: usize) -> bool {
@@ -423,16 +595,75 @@ impl EditorSurface {
         had_selection || previous_caret != self.cursor.caret()
     }
 
-    fn finish_edit(&mut self, result: EditResult) -> bool {
+    fn finish_edit(&mut self, result: EditResult) -> EditorCommandOutcome {
         self.cursor.set_caret(result.caret);
         self.selection = None;
         if !result.changed {
-            return false;
+            return EditorCommandOutcome::unchanged();
         }
 
         self.ensure_caret_line_visible();
         self.follow_visual_end = true;
-        true
+        EditorCommandOutcome::changed(None)
+    }
+
+    fn finish_edit_with_operation(
+        &mut self,
+        result: EditResult,
+        operation: EditOperation,
+    ) -> EditorCommandOutcome {
+        self.cursor.set_caret(result.caret);
+        self.selection = None;
+        if !result.changed {
+            return EditorCommandOutcome::unchanged();
+        }
+
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = true;
+        let edit_event = self.client_first_event(operation);
+        EditorCommandOutcome::changed(edit_event)
+    }
+
+    fn client_first_event(&self, operation: EditOperation) -> Option<EditorEditEvent> {
+        if self.document.access != DocumentAccess::Editable || !self.manifest_allows(&operation) {
+            return None;
+        }
+
+        Some(EditorEditEvent {
+            document_id: self.document.document_id,
+            base_version: self.document.document_version,
+            behavior_version: self.document.behavior_version,
+            operation,
+        })
+    }
+
+    fn manifest_allows(&self, operation: &EditOperation) -> bool {
+        let Some(manifest) = &self.document.behavior_manifest else {
+            return false;
+        };
+
+        manifest
+            .capabilities
+            .iter()
+            .any(|capability| match capability {
+                crate::protocol::BehaviorCapability::ClientFirstTextEditing { operations } => {
+                    operations.iter().any(|capability| {
+                        matches!(
+                            (operation, capability),
+                            (
+                                EditOperation::Insert { .. },
+                                crate::protocol::TextEditCapability::Insert
+                            ) | (
+                                EditOperation::Delete { .. },
+                                crate::protocol::TextEditCapability::Delete
+                            ) | (
+                                EditOperation::Replace { .. },
+                                crate::protocol::TextEditCapability::Replace
+                            )
+                        )
+                    })
+                }
+            })
     }
 
     fn ensure_caret_line_visible(&mut self) -> bool {
@@ -499,13 +730,7 @@ impl EditorSurface {
 
     #[cfg(test)]
     fn set_text_for_test(&mut self, text: &str) {
-        self.buffer = EditorBuffer::from_text(text);
-        self.cursor.set_caret(0);
-        self.selection = None;
-        self.viewport = Viewport::default();
-        self.visual_scroll_y = 0.0;
-        self.last_visual_max_scroll_y = 0.0;
-        self.follow_visual_end = false;
+        self.load_snapshot(0, 0, text.to_string(), DocumentAccess::Editable);
     }
 
     #[cfg(test)]
@@ -552,6 +777,7 @@ mod tests {
 
     use super::{EditorCommand, EditorSurface, TEXT_INSET};
     use crate::editor::layout::LayoutCacheKey;
+    use crate::protocol::{BehaviorManifest, DocumentAccess, EditOperation};
 
     fn generated_lines(line_count: usize) -> String {
         let mut text = String::new();
@@ -559,6 +785,146 @@ mod tests {
             writeln!(text, "line {line:05}").expect("writing to String cannot fail");
         }
         text
+    }
+
+    #[test]
+    fn editor_load_snapshot_replaces_text_and_resets_caret() {
+        let mut editor = EditorSurface::default();
+        editor.insert_text("local");
+        editor.set_caret_for_test("local".len());
+        editor.set_visual_scroll_bounds_for_test(100.0);
+        assert!(editor.scroll_vertical_pixels(10.0));
+
+        editor.load_snapshot(
+            42,
+            7,
+            "server 🦀\ntext".to_string(),
+            DocumentAccess::ReadOnly,
+        );
+
+        assert_eq!(editor.visible_text(), "server 🦀\ntext");
+        assert_eq!(editor.caret_for_test(), 0);
+        assert_eq!(editor.selection_for_test(), None);
+        assert_eq!(editor.visual_scroll_y(), 0.0);
+        assert_eq!(editor.document_state().document_id, 42);
+        assert_eq!(editor.document_state().document_version, 7);
+        assert_eq!(editor.document_state().access, DocumentAccess::ReadOnly);
+    }
+
+    #[test]
+    fn editor_installs_minimal_behavior_manifest() {
+        let mut editor = EditorSurface::default();
+        let manifest = BehaviorManifest::minimal_text_editing(5);
+
+        editor.install_behavior_manifest(manifest.clone());
+
+        assert_eq!(editor.document_state().behavior_version, 5);
+        assert_eq!(editor.document_state().behavior_manifest, Some(manifest));
+    }
+
+    #[test]
+    fn insert_command_emits_insert_operation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(42, 7, "ab".to_string(), DocumentAccess::Editable);
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(9));
+        editor.set_caret_for_test(1);
+
+        let outcome = editor.command_with_event(EditorCommand::Insert("X"));
+
+        assert!(outcome.changed);
+        let event = outcome.edit_event.expect("editable manifest emits edits");
+        assert_eq!(event.document_id, 42);
+        assert_eq!(event.base_version, 7);
+        assert_eq!(event.behavior_version, 9);
+        assert_eq!(
+            event.operation,
+            EditOperation::Insert {
+                byte_offset: 1,
+                text: "X".to_string()
+            }
+        );
+        assert_eq!(editor.visible_text(), "aXb");
+    }
+
+    #[test]
+    fn edit_event_carries_behavior_version() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 2, String::new(), DocumentAccess::Editable);
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(99));
+
+        let outcome = editor.insert_text_with_event("x");
+
+        assert_eq!(outcome.edit_event.unwrap().behavior_version, 99);
+    }
+
+    #[test]
+    fn selection_replacement_emits_replace_operation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 2, "abcdef".to_string(), DocumentAccess::Editable);
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_selection_for_test(2, 5);
+
+        let outcome = editor.insert_text_with_event("XY");
+
+        assert!(outcome.changed);
+        assert_eq!(editor.visible_text(), "abXYf");
+        assert_eq!(
+            outcome.edit_event.unwrap().operation,
+            EditOperation::Replace {
+                start: 2,
+                end: 5,
+                text: "XY".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn backspace_emits_delete_operation_at_unicode_boundary() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 2, "a🦀b".to_string(), DocumentAccess::Editable);
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_caret_for_test("a🦀".len());
+
+        let outcome = editor.backspace_with_event();
+
+        assert!(outcome.changed);
+        assert_eq!(editor.visible_text(), "ab");
+        assert_eq!(
+            outcome.edit_event.unwrap().operation,
+            EditOperation::Delete {
+                start: 1,
+                end: "a🦀".len() as u64
+            }
+        );
+    }
+
+    #[test]
+    fn delete_forward_selected_range_emits_delete_operation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 2, "abcdef".to_string(), DocumentAccess::Editable);
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_selection_for_test(5, 2);
+
+        let outcome = editor.delete_forward_with_event();
+
+        assert!(outcome.changed);
+        assert_eq!(editor.visible_text(), "abf");
+        assert_eq!(
+            outcome.edit_event.unwrap().operation,
+            EditOperation::Delete { start: 2, end: 5 }
+        );
+    }
+
+    #[test]
+    fn editor_events_do_not_block_without_ipc_consumer() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 2, String::new(), DocumentAccess::Editable);
+
+        let outcome = editor.command_with_event(EditorCommand::Insert("a"));
+
+        assert!(outcome.changed);
+        assert_eq!(outcome.edit_event, None);
+        assert_eq!(editor.visible_text(), "a");
     }
 
     #[test]

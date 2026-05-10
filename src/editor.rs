@@ -7,7 +7,7 @@ mod viewport;
 
 use masonry::peniko::Color;
 
-pub use surface::{EditorCommand, EditorSurface};
+pub use surface::{EditorCommand, EditorCommandOutcome, EditorEditEvent, EditorSurface};
 
 const BACKGROUND_COLOR: Color = Color::from_rgb8(0x18, 0x18, 0x18);
 

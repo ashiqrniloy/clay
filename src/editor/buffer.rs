@@ -30,6 +30,11 @@ impl EditorBuffer {
         }
     }
 
+    pub fn replace_text(&mut self, text: String) {
+        self.rope = Rope::from(text);
+        self.bump_revision();
+    }
+
     #[cfg(test)]
     pub fn insert_str(&mut self, text: &str) {
         self.insert_at(self.rope.byte_len(), text);

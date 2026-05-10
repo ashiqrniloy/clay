@@ -1,6 +1,7 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, io};
 
 use rkyv::{Archive, Deserialize, Serialize, rancor};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{ClientMessage, ServerMessage};
 
@@ -43,6 +44,74 @@ impl Codec {
 
     pub fn decode_server_message(&self, frame: &[u8]) -> Result<ServerMessage, CodecError> {
         self.decode_frame(frame)
+    }
+
+    pub async fn read_client_message<R>(&self, reader: &mut R) -> Result<ClientMessage, CodecError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let frame = self.read_frame(reader).await?;
+        self.decode_client_message(&frame)
+    }
+
+    pub async fn write_client_message<W>(
+        &self,
+        writer: &mut W,
+        message: &ClientMessage,
+    ) -> Result<(), CodecError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let frame = self.encode_client_message(message)?;
+        writer.write_all(&frame).await.map_err(CodecError::io)
+    }
+
+    pub async fn read_server_message<R>(&self, reader: &mut R) -> Result<ServerMessage, CodecError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let frame = self.read_frame(reader).await?;
+        self.decode_server_message(&frame)
+    }
+
+    pub async fn write_server_message<W>(
+        &self,
+        writer: &mut W,
+        message: &ServerMessage,
+    ) -> Result<(), CodecError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let frame = self.encode_server_message(message)?;
+        writer.write_all(&frame).await.map_err(CodecError::io)
+    }
+
+    async fn read_frame<R>(&self, reader: &mut R) -> Result<Vec<u8>, CodecError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let mut header = [0; LENGTH_PREFIX_BYTES];
+        reader
+            .read_exact(&mut header)
+            .await
+            .map_err(CodecError::io)?;
+
+        let declared_len = u32::from_be_bytes(header) as usize;
+        if declared_len > self.max_frame_size {
+            return Err(CodecError::FrameTooLarge {
+                len: declared_len,
+                max: self.max_frame_size,
+            });
+        }
+
+        let mut frame = Vec::with_capacity(LENGTH_PREFIX_BYTES + declared_len);
+        frame.extend_from_slice(&header);
+        frame.resize(LENGTH_PREFIX_BYTES + declared_len, 0);
+        reader
+            .read_exact(&mut frame[LENGTH_PREFIX_BYTES..])
+            .await
+            .map_err(CodecError::io)?;
+        Ok(frame)
     }
 
     fn encode_frame<T>(&self, message: &T) -> Result<Vec<u8>, CodecError>
@@ -119,6 +188,7 @@ pub enum CodecError {
     LengthMismatch { declared: usize, actual: usize },
     Serialize(String),
     Deserialize(String),
+    Io(io::Error),
 }
 
 impl CodecError {
@@ -128,6 +198,10 @@ impl CodecError {
 
     fn deserialize(error: rancor::Error) -> Self {
         Self::Deserialize(error.to_string())
+    }
+
+    fn io(error: io::Error) -> Self {
+        Self::Io(error)
     }
 }
 
@@ -148,11 +222,19 @@ impl fmt::Display for CodecError {
             Self::Deserialize(error) => {
                 write!(formatter, "failed to deserialize protocol frame: {error}")
             }
+            Self::Io(error) => write!(formatter, "protocol socket I/O failed: {error}"),
         }
     }
 }
 
-impl Error for CodecError {}
+impl Error for CodecError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

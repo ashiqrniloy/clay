@@ -9,6 +9,7 @@ use masonry::kurbo::Size;
 use masonry::peniko::Fill;
 use masonry::vello::Scene;
 
+use crate::client::{ClientEditQueue, ClientInitialState};
 use crate::editor::{EditorCommand, EditorSurface, background_color};
 
 #[derive(Debug)]
@@ -19,12 +20,42 @@ pub enum EditorAction {
 #[derive(Debug, Default)]
 pub struct EditorWidget {
     editor: EditorSurface,
+    edit_queue: Option<ClientEditQueue>,
+    next_transaction_id: u64,
 }
 
 impl EditorWidget {
+    pub fn with_initial_state(initial_state: ClientInitialState) -> Self {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            initial_state.document_id,
+            initial_state.document_version,
+            initial_state.text,
+            initial_state.access,
+        );
+        editor.install_behavior_manifest(initial_state.behavior_manifest);
+        Self {
+            editor,
+            edit_queue: None,
+            next_transaction_id: 1,
+        }
+    }
+
+    pub fn with_edit_queue(mut self, edit_queue: ClientEditQueue) -> Self {
+        self.edit_queue = Some(edit_queue);
+        self
+    }
+
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
-        let changed = self.editor.command(command);
-        if changed {
+        let outcome = self.editor.command_with_event(command);
+        if let Some(event) = outcome.edit_event
+            && let Some(edit_queue) = &self.edit_queue
+        {
+            let transaction_id = self.next_transaction_id;
+            self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+            let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+        }
+        if outcome.changed {
             ctx.request_render();
             ctx.request_accessibility_update();
         }
