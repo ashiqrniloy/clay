@@ -70,6 +70,9 @@ if let Some(event) = outcome.edit_event {
 ## Related
 
 - [Client Snapshot Bootstrap](../modules/client-snapshot-bootstrap.md)
+- [Client/Server Edit Acknowledgement Flow](client-server-edit-ack.md)
+- [Versioned Text Synchronization](versioned-text-synchronization.md)
+- [Document Leases and Region Locks](document-leases-and-region-locks.md)
 - [Protocol Codec](../modules/protocol-codec.md)
 - [Server IPC Skeleton](../modules/server-ipc-skeleton.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`

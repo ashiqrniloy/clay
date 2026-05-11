@@ -55,7 +55,6 @@ let widget = clay::masonry_editor::EditorWidget::with_initial_state(state);
 
 ## Tests
 
-- `src/client/mod.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState`.
 - `src/client/mod.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState` with version and access metadata.
 - `src/client/mod.rs`: behavior-manifest tests verify manifest version/access data is preserved.
 - `src/editor/surface.rs`: `editor_load_snapshot_replaces_text_and_resets_caret` verifies snapshot text, metadata, caret, selection, and scroll reset.

@@ -82,6 +82,8 @@ cargo run
 ## Related
 
 - [Client Edit Emission](client-edit-emission.md)
+- [Versioned Text Synchronization](versioned-text-synchronization.md)
+- [Document Leases and Region Locks](document-leases-and-region-locks.md)
 - [Client Snapshot Bootstrap](../modules/client-snapshot-bootstrap.md)
 - [Server IPC Skeleton](../modules/server-ipc-skeleton.md)
 - [Protocol Codec](../modules/protocol-codec.md)

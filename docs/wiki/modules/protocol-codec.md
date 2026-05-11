@@ -55,6 +55,8 @@ let message = codec.decode_client_message(&frame)?;
 
 ## Related
 
+- [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
+- [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`
 - `plans/006-Phase5-Versioned-Text-Synchronization-and-Leases.md`
 - `concept.md`

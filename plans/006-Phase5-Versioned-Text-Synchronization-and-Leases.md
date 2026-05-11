@@ -460,7 +460,7 @@
     - `phase5_configuration_custom_properties_are_complete`: Fails when behavior-changing synchronization/lease settings are absent from `custom_properties`.
     - `phase5_configuration_does_not_enter_input_hot_path`: Verifies configuration handling does not add synchronous JavaScript/IPC/server work to editor input handling.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all Phase 5 implementation tasks are complete, documenting or verifying protocol synchronization messages, canonical rope document state, version enforcement, client pending/confirmed state, resync flow, leases/read-only observers, and region-lock enforcement.
     - Performance: Wiki updates add no runtime work and document hot-path guarantees: no blocking IPC in input/paint handlers, bounded queues, delta edits for ordinary typing, snapshots only for initial load/resync, and no synchronous server/JavaScript round trip.
@@ -495,9 +495,19 @@
   - Test Cases to Write:
     - Manual wiki review: Confirm `docs/wiki/index.md` links Phase 5 pages and the pages explain implementation flow, source paths, tests, performance constraints, and security boundaries.
     - `wiki_index_links_all_pages`: Run or add a deterministic check that every `docs/wiki/**/*.md` page except the index is linked from `docs/wiki/index.md`.
+  - Verification Completed:
+    - Manual wiki review of Phase 5 pages and related module/flow pages.
+    - `python3 - <<'PY' ... PY` deterministic check confirmed every `docs/wiki/**/*.md` page except `docs/wiki/index.md` is linked from `docs/wiki/index.md`.
+  - Implementation Notes:
+    - Added `docs/wiki/flows/versioned-text-synchronization.md` to document client shadow state, pending transactions, confirmed/optimistic versions, stale/future rejection, resync snapshots, hot-path constraints, and IPC validation boundaries.
+    - Added `docs/wiki/flows/document-leases-and-region-locks.md` to document editable lease ownership, read-only observer behavior, queue/editor enforcement, region-lock registration, overlap checks, conflict metadata, and absent authorities.
+    - Updated `docs/wiki/index.md` navigation and cross-links in protocol, server document, client edit, and acknowledgement pages so Phase 5 synchronization, lease, and lock documentation is discoverable.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Resync recovery is intentionally snapshot-based: stale/future version, lease, read-only, and region-lock rejections request a full canonical snapshot, clear pending edits, and reset confirmed/optimistic client versions instead of replaying pending local edits or applying correction transactions. This keeps Phase 5 deterministic but can discard optimistic local edits that were not acknowledged.
+- Collaboration remains a single-writer lease model. The first connected client holds the editable lease, later clients are read-only observers, and disconnect releases the lease; user-facing lease transfer/steal/renewal UX is deferred.
+- Region locks are in-memory server-owned metadata with internal/test registration only. Phase 5 enforces conflicts and exposes rejection metadata, but public lock-management APIs, persistence, UI, and AI/extension ownership flows are deferred.
+- Ordinary edit IPC remains delta-only, but initial load and explicit resync still serialize full document snapshots as `String` values at the protocol edge while canonical server text is stored as `crop::Rope`.
 
 ## Further Actions
 - To be filled after task completion with improvements, rationale, and priority.
