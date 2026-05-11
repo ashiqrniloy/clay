@@ -96,7 +96,7 @@ impl Default for EditorDocumentState {
         Self {
             document_id: 0,
             document_version: 0,
-            access: DocumentAccess::Editable,
+            access: DocumentAccess::Editable { lease_id: 1 },
             behavior_version: 0,
             behavior_manifest: None,
         }
@@ -180,7 +180,7 @@ impl EditorSurface {
     }
 
     pub fn insert_text_with_event(&mut self, text: &str) -> EditorCommandOutcome {
-        if !is_printable_text(text) {
+        if !self.is_editable() || !is_printable_text(text) {
             return EditorCommandOutcome::unchanged();
         }
 
@@ -192,6 +192,10 @@ impl EditorSurface {
     }
 
     pub fn insert_newline_with_event(&mut self) -> EditorCommandOutcome {
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+
         let (result, operation) = if let Some(range) = self.selected_range() {
             let operation = EditOperation::Replace {
                 start: range.start as u64,
@@ -217,6 +221,10 @@ impl EditorSurface {
     }
 
     pub fn backspace_with_event(&mut self) -> EditorCommandOutcome {
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+
         if let Some(range) = self.selected_range() {
             let operation = EditOperation::Delete {
                 start: range.start as u64,
@@ -246,6 +254,10 @@ impl EditorSurface {
     }
 
     pub fn delete_forward_with_event(&mut self) -> EditorCommandOutcome {
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+
         if let Some(range) = self.selected_range() {
             let operation = EditOperation::Delete {
                 start: range.start as u64,
@@ -625,7 +637,7 @@ impl EditorSurface {
     }
 
     fn client_first_event(&self, operation: EditOperation) -> Option<EditorEditEvent> {
-        if self.document.access != DocumentAccess::Editable || !self.manifest_allows(&operation) {
+        if !self.is_editable() || !self.manifest_allows(&operation) {
             return None;
         }
 
@@ -635,6 +647,10 @@ impl EditorSurface {
             behavior_version: self.document.behavior_version,
             operation,
         })
+    }
+
+    fn is_editable(&self) -> bool {
+        matches!(self.document.access, DocumentAccess::Editable { .. })
     }
 
     fn manifest_allows(&self, operation: &EditOperation) -> bool {
@@ -730,7 +746,12 @@ impl EditorSurface {
 
     #[cfg(test)]
     fn set_text_for_test(&mut self, text: &str) {
-        self.load_snapshot(0, 0, text.to_string(), DocumentAccess::Editable);
+        self.load_snapshot(
+            0,
+            0,
+            text.to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
     }
 
     #[cfg(test)]
@@ -825,7 +846,12 @@ mod tests {
     #[test]
     fn insert_command_emits_insert_operation() {
         let mut editor = EditorSurface::default();
-        editor.load_snapshot(42, 7, "ab".to_string(), DocumentAccess::Editable);
+        editor.load_snapshot(
+            42,
+            7,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
         editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(9));
         editor.set_caret_for_test(1);
 
@@ -849,7 +875,12 @@ mod tests {
     #[test]
     fn edit_event_carries_behavior_version() {
         let mut editor = EditorSurface::default();
-        editor.load_snapshot(1, 2, String::new(), DocumentAccess::Editable);
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
         editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(99));
 
         let outcome = editor.insert_text_with_event("x");
@@ -860,7 +891,12 @@ mod tests {
     #[test]
     fn selection_replacement_emits_replace_operation() {
         let mut editor = EditorSurface::default();
-        editor.load_snapshot(1, 2, "abcdef".to_string(), DocumentAccess::Editable);
+        editor.load_snapshot(
+            1,
+            2,
+            "abcdef".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
         editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
         editor.set_selection_for_test(2, 5);
 
@@ -881,7 +917,12 @@ mod tests {
     #[test]
     fn backspace_emits_delete_operation_at_unicode_boundary() {
         let mut editor = EditorSurface::default();
-        editor.load_snapshot(1, 2, "a🦀b".to_string(), DocumentAccess::Editable);
+        editor.load_snapshot(
+            1,
+            2,
+            "a🦀b".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
         editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
         editor.set_caret_for_test("a🦀".len());
 
@@ -901,7 +942,12 @@ mod tests {
     #[test]
     fn delete_forward_selected_range_emits_delete_operation() {
         let mut editor = EditorSurface::default();
-        editor.load_snapshot(1, 2, "abcdef".to_string(), DocumentAccess::Editable);
+        editor.load_snapshot(
+            1,
+            2,
+            "abcdef".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
         editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
         editor.set_selection_for_test(5, 2);
 
@@ -916,9 +962,31 @@ mod tests {
     }
 
     #[test]
+    fn read_only_editor_allows_navigation_but_not_mutation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 2, "abc".to_string(), DocumentAccess::ReadOnly);
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_caret_for_test(1);
+
+        let move_outcome = editor.command_with_event(EditorCommand::MoveRight);
+        assert!(move_outcome.changed);
+        assert_eq!(editor.caret_for_test(), 2);
+
+        let edit_outcome = editor.command_with_event(EditorCommand::Insert("X"));
+        assert!(!edit_outcome.changed);
+        assert_eq!(edit_outcome.edit_event, None);
+        assert_eq!(editor.visible_text(), "abc");
+    }
+
+    #[test]
     fn editor_events_do_not_block_without_ipc_consumer() {
         let mut editor = EditorSurface::default();
-        editor.load_snapshot(1, 2, String::new(), DocumentAccess::Editable);
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
 
         let outcome = editor.command_with_event(EditorCommand::Insert("a"));
 

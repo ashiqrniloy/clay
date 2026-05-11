@@ -166,13 +166,21 @@ impl Error for ServerError {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, time::SystemTime};
+    use std::{
+        fs,
+        sync::{Arc, atomic::AtomicU64},
+        time::SystemTime,
+    };
 
-    use tokio::net::UnixStream;
+    use tokio::{net::UnixStream, sync::Mutex};
 
     use super::{IpcServer, ServerConfig};
-    use crate::protocol::{
-        ClientMessage, DocumentAccess, PROTOCOL_VERSION, ServerMessage, codec::Codec,
+    use crate::{
+        protocol::{
+            ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
+            PROTOCOL_VERSION, ServerMessage, codec::Codec,
+        },
+        server::document::DocumentState,
     };
 
     fn unique_socket_path(name: &str) -> std::path::PathBuf {
@@ -183,6 +191,96 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("clay-{name}-{}-{unique}", std::process::id()));
         fs::create_dir(&dir).unwrap();
         dir.join("clay.sock")
+    }
+
+    fn server_with_document(socket_path: &std::path::Path, document: DocumentState) -> IpcServer {
+        IpcServer {
+            config: ServerConfig::new(socket_path),
+            codec: Codec::default(),
+            document: Arc::new(Mutex::new(document)),
+            next_client_id: AtomicU64::new(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn real_server_end_to_end_region_locked_edit_rejected() {
+        let socket_path = unique_socket_path("region-lock");
+        let mut document = DocumentState::default();
+        let lock_id = document
+            .register_region_lock(0, 7, LockOwner::Server)
+            .unwrap();
+        let server = server_with_document(&socket_path, document);
+        let server_task = tokio::spawn(server.run());
+
+        let mut stream = connect_with_retry(&socket_path).await;
+        let codec = Codec::default();
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "region-lock-test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let client_id = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::Welcome { client_id, .. } => client_id,
+            message => panic!("expected Welcome, got {message:?}"),
+        };
+        let (document_id, version, lease_id) =
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::InitialDocument {
+                    document_id,
+                    version,
+                    access: DocumentAccess::Editable { lease_id },
+                    lease_id: Some(snapshot_lease_id),
+                    ..
+                } => {
+                    assert_eq!(lease_id, snapshot_lease_id);
+                    (document_id, version, lease_id)
+                }
+                message => panic!("expected editable InitialDocument, got {message:?}"),
+            };
+        let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::Edit {
+                    document_id,
+                    client_id,
+                    lease_id: Some(lease_id),
+                    base_version: version,
+                    behavior_version: 1,
+                    transaction_id: 12,
+                    operation: EditOperation::Insert {
+                        byte_offset: 1,
+                        text: "x".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            codec.read_server_message(&mut stream).await.unwrap(),
+            ServerMessage::EditRejected {
+                document_id: rejected_document_id,
+                transaction_id: 12,
+                reason: EditRejection::RegionLocked { conflict },
+            } if rejected_document_id == document_id
+                && conflict.lock_id == lock_id
+                && conflict.start == 0
+                && conflict.end == 7
+                && conflict.owner == LockOwner::Server
+                && conflict.created_at_version == version
+        ));
+
+        server_task.abort();
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 
     #[tokio::test]
@@ -211,7 +309,7 @@ mod tests {
         assert!(matches!(
             codec.read_server_message(&mut stream).await.unwrap(),
             ServerMessage::InitialDocument {
-                access: DocumentAccess::Editable,
+                access: DocumentAccess::Editable { lease_id: 1 },
                 ..
             }
         ));

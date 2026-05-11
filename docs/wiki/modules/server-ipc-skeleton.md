@@ -10,7 +10,7 @@
 
 ## Overview
 
-The Phase 4 server skeleton is a Tokio Unix Domain Socket server. It proves the IPC/process seam without adding full Phase 5 synchronization, file workspace authority, extension execution, SDUI, remote listeners, or AI mutation privileges.
+The server skeleton is a Tokio Unix Domain Socket server. It proves the local IPC/process seam and now dispatches Phase 5 versioned edits, editable/read-only lease snapshots, explicit resync requests, and region-lock rejections without adding file workspace authority, extension execution, SDUI, remote listeners, shell/network access, or AI mutation privileges.
 
 ## How It Works
 
@@ -22,7 +22,9 @@ Each connection must send `ClientMessage::Hello` first. The server responds with
 2. `ServerMessage::InitialDocument`
 3. `ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))`
 
-After the handshake, edit messages and editor intents are translated into `EditOperation`s and applied to `DocumentState`. The document state owns the canonical Phase 4 in-memory string and validates document IDs, editable access, byte ranges, and UTF-8 boundaries before mutating. Successful edits increment the server document version and return `EditAck`.
+During the handshake, `DocumentState::acquire_access` grants the first connected client an editable lease and returns later clients as read-only observers. After the handshake, edit messages and editor intents are translated into `EditOperation`s and applied to the shared `DocumentState`. The document state owns the canonical Phase 5 `crop::Rope`, validates document IDs, base versions, lease authority, region locks, byte ranges, and UTF-8 boundaries before mutating, then returns `EditAck` only for accepted mutations.
+
+`ClientMessage::RequestResync` is handled by extracting a bounded recovery snapshot from the canonical rope through `DocumentState::resync_snapshot_message_for_client`. The snapshot preserves the requesting client's current access state and lease metadata. Connection shutdown releases the editable lease only when the disconnected client is the active lease holder.
 
 ## Invariants and Constraints
 
@@ -30,19 +32,22 @@ After the handshake, edit messages and editor intents are translated into `EditO
 - Wire messages continue to go through `Codec`; server code does not call `rkyv` directly.
 - Frame-size validation and archive validation happen before messages reach the server dispatch loop.
 - Stale socket cleanup removes only filesystem socket nodes and refuses to replace normal files.
-- Version fields are carried for Phase 5 compatibility, but stale edit rejection and resync are intentionally deferred.
+- Ordinary accepted edit responses are metadata acknowledgements; full text snapshots are reserved for initial load and explicit resync recovery.
+- Version fields are enforced by `DocumentState` before mutation; stale/future edits are rejected and can trigger client resync.
 
 ## Tests
 
-- `src/server/connection.rs`: handshake, initial document, behavior manifest, edit acknowledgement, and malformed-frame handling.
-- `src/server/document.rs`: edit application and UTF-8 boundary rejection.
-- `src/server/mod.rs`: listener-level Unix socket accept smoke test.
-- Relevant commands: `cargo test server`, `cargo test protocol`, `cargo check`.
+- `src/server/connection.rs`: handshake, initial document, behavior manifest, editable/read-only access, edit acknowledgement, resync response, and malformed-frame handling.
+- `src/server/document.rs`: canonical rope edit application, base-version enforcement, lease validation, region-lock rejection, and UTF-8 boundary rejection.
+- `src/server/mod.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync and region-lock rejection coverage.
+- Relevant commands: `cargo test server --quiet`, `cargo test protocol --quiet`, `cargo check --quiet`.
 
 ## Related
 
 - [Protocol Codec](protocol-codec.md)
 - [Server Document State](server-document-state.md)
 - [Client/Server Edit Acknowledgement Flow](../flows/client-server-edit-ack.md)
+- [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
+- [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`
 - `roadmap.md`

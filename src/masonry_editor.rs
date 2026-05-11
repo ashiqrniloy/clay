@@ -9,7 +9,7 @@ use masonry::kurbo::Size;
 use masonry::peniko::Fill;
 use masonry::vello::Scene;
 
-use crate::client::{ClientEditQueue, ClientInitialState};
+use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
 use crate::editor::{EditorCommand, EditorSurface, background_color};
 
 #[derive(Debug)]
@@ -44,6 +44,19 @@ impl EditorWidget {
     pub fn with_edit_queue(mut self, edit_queue: ClientEditQueue) -> Self {
         self.edit_queue = Some(edit_queue);
         self
+    }
+
+    pub fn apply_connection_event(&mut self, event: ClientConnectionEvent) -> bool {
+        let ClientConnectionEvent::ResyncSnapshot(snapshot) = event else {
+            return false;
+        };
+        self.editor.load_snapshot(
+            snapshot.document_id,
+            snapshot.version,
+            snapshot.text,
+            snapshot.access,
+        );
+        true
     }
 
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
@@ -264,7 +277,9 @@ impl Widget for EditorWidget {
 #[cfg(test)]
 mod tests {
     use super::EditorWidget;
+    use crate::client::{ClientConnectionEvent, ClientResyncSnapshot};
     use crate::editor::EditorCommand;
+    use crate::protocol::DocumentAccess;
 
     #[test]
     fn accessibility_label_uses_placeholder_for_empty_editor() {
@@ -281,5 +296,31 @@ mod tests {
         widget.editor.command(EditorCommand::Insert("X"));
 
         assert_eq!(widget.accessibility_label(), "abXc");
+    }
+
+    #[test]
+    fn resync_event_replaces_editor_snapshot() {
+        let mut widget = EditorWidget::default();
+        widget.editor.command(EditorCommand::Insert("local"));
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::ResyncSnapshot(
+                ClientResyncSnapshot {
+                    document_id: 7,
+                    version: 12,
+                    text: "server 🦀".to_string(),
+                    access: DocumentAccess::ReadOnly,
+                    lease_id: None,
+                },
+            ))
+        );
+
+        assert_eq!(widget.editor.visible_text(), "server 🦀");
+        assert_eq!(widget.editor.document_state().document_id, 7);
+        assert_eq!(widget.editor.document_state().document_version, 12);
+        assert_eq!(
+            widget.editor.document_state().access,
+            DocumentAccess::ReadOnly
+        );
     }
 }

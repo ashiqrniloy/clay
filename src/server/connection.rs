@@ -60,28 +60,43 @@ pub(crate) async fn handle_connection(
                         | std::io::ErrorKind::BrokenPipe
                 ) =>
             {
+                document.lock().await.release_access(client_id);
                 return Ok(());
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                document.lock().await.release_access(client_id);
+                return Err(error);
+            }
         };
 
         match message {
             ClientMessage::Edit {
                 document_id,
-                base_version: _,
+                client_id,
+                lease_id,
+                base_version,
                 behavior_version: _,
                 transaction_id,
                 operation,
             } => {
                 let response = {
                     let mut document = document.lock().await;
-                    document.apply_edit(document_id, transaction_id, operation)
+                    document.apply_edit(
+                        document_id,
+                        client_id,
+                        lease_id,
+                        base_version,
+                        transaction_id,
+                        operation,
+                    )
                 };
                 codec.write_server_message(&mut stream, &response).await?;
             }
             ClientMessage::EditorIntent {
                 document_id,
-                base_version: _,
+                client_id,
+                lease_id,
+                base_version,
                 behavior_version: _,
                 transaction_id,
                 intent,
@@ -96,7 +111,25 @@ pub(crate) async fn handle_connection(
                 };
                 let response = {
                     let mut document = document.lock().await;
-                    document.apply_edit(document_id, transaction_id, operation)
+                    document.apply_edit(
+                        document_id,
+                        client_id,
+                        lease_id,
+                        base_version,
+                        transaction_id,
+                        operation,
+                    )
+                };
+                codec.write_server_message(&mut stream, &response).await?;
+            }
+            ClientMessage::RequestResync {
+                document_id,
+                client_id,
+                known_version: _,
+            } => {
+                let response = {
+                    let document = document.lock().await;
+                    document.resync_snapshot_message_for_client(document_id, client_id)
                 };
                 codec.write_server_message(&mut stream, &response).await?;
             }
@@ -132,8 +165,9 @@ async fn send_welcome_snapshot_and_manifest(
         .await?;
 
     let initial_document = {
-        let document = document.lock().await;
-        document.initial_document_message()
+        let mut document = document.lock().await;
+        let access = document.acquire_access(client_id);
+        document.initial_document_message(access)
     };
     codec
         .write_server_message(stream, &initial_document)
@@ -169,7 +203,7 @@ mod tests {
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
             "Hello from server".to_string(),
-            DocumentAccess::Editable,
+            DocumentAccess::Editable { lease_id: 1 },
         )));
         let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
         let mut client = client;
@@ -198,7 +232,8 @@ mod tests {
                 document_id: 7,
                 version: 1,
                 text: "Hello from server".to_string(),
-                access: DocumentAccess::Editable,
+                access: DocumentAccess::Editable { lease_id: 1 },
+                lease_id: Some(1),
             }
         );
 
@@ -243,7 +278,7 @@ mod tests {
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
             "Hi".to_string(),
-            DocumentAccess::Editable,
+            DocumentAccess::Editable { lease_id: 1 },
         )));
         let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
         let mut client = client;
@@ -267,6 +302,8 @@ mod tests {
                 &mut client,
                 &ClientMessage::Edit {
                     document_id: 7,
+                    client_id: 99,
+                    lease_id: Some(1),
                     base_version: 1,
                     behavior_version: 1,
                     transaction_id: 123,
@@ -283,8 +320,61 @@ mod tests {
             codec.read_server_message(&mut client).await.unwrap(),
             ServerMessage::EditAck {
                 document_id: 7,
-                version: 2,
+                confirmed_version: 2,
                 transaction_id: 123,
+            }
+        );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn server_sends_resync_snapshot_after_request() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "server 🦀".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::RequestResync {
+                    document_id: 7,
+                    client_id: 99,
+                    known_version: 0,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::ResyncSnapshot {
+                document_id: 7,
+                version: 1,
+                text: "server 🦀".to_string(),
+                access: DocumentAccess::Editable { lease_id: 1 },
+                lease_id: Some(1),
             }
         );
 

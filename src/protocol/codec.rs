@@ -240,8 +240,8 @@ impl Error for CodecError {
 mod tests {
     use super::{Codec, CodecError};
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, PROTOCOL_VERSION,
-        ServerMessage,
+        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
+        PROTOCOL_VERSION, RegionLockConflict, ServerMessage,
     };
 
     #[test]
@@ -265,7 +265,8 @@ mod tests {
             document_id: 7,
             version: 42,
             text: "Hello, Clay 🦀\nSecond line".to_string(),
-            access: DocumentAccess::Editable,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
         };
 
         let frame = codec.encode_server_message(&message).unwrap();
@@ -286,10 +287,12 @@ mod tests {
     }
 
     #[test]
-    fn protocol_round_trips_edit_operation_delta() {
+    fn protocol_round_trips_edit_with_lease_and_versions() {
         let codec = Codec::default();
         let message = ClientMessage::Edit {
             document_id: 7,
+            client_id: 11,
+            lease_id: Some(5),
             base_version: 42,
             behavior_version: 3,
             transaction_id: 99,
@@ -307,7 +310,65 @@ mod tests {
     }
 
     #[test]
-    fn codec_rejects_oversized_frame() {
+    fn protocol_round_trips_stale_edit_rejection() {
+        let codec = Codec::default();
+        let message = ServerMessage::EditRejected {
+            document_id: 7,
+            transaction_id: 99,
+            reason: EditRejection::StaleVersion {
+                client_base_version: 40,
+                server_version: 42,
+            },
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn protocol_round_trips_resync_snapshot() {
+        let codec = Codec::default();
+        let message = ServerMessage::ResyncSnapshot {
+            document_id: 7,
+            version: 42,
+            text: "Hello 🦀 é".to_string(),
+            access: DocumentAccess::Editable { lease_id: 5 },
+            lease_id: Some(5),
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn protocol_round_trips_region_lock_rejection() {
+        let codec = Codec::default();
+        let message = ServerMessage::EditRejected {
+            document_id: 7,
+            transaction_id: 99,
+            reason: EditRejection::RegionLocked {
+                conflict: RegionLockConflict {
+                    lock_id: 3,
+                    start: 2,
+                    end: 8,
+                    owner: LockOwner::Server,
+                    created_at_version: 41,
+                },
+            },
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn codec_rejects_oversized_phase5_frame() {
         let codec = Codec::new(8);
         let mut frame = Vec::new();
         frame.extend_from_slice(&9_u32.to_be_bytes());
@@ -322,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn codec_rejects_invalid_archive_bytes() {
+    fn codec_rejects_invalid_phase5_archive_bytes() {
         let codec = Codec::default();
         let mut frame = Vec::new();
         frame.extend_from_slice(&4_u32.to_be_bytes());

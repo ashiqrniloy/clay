@@ -1,10 +1,15 @@
 #[cfg(unix)]
 use std::path::Path;
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 
 use crate::editor::EditorEditEvent;
 use crate::protocol::{
     BehaviorManifest, ClientId, ClientMessage, DocumentAccess, DocumentId, DocumentVersion,
-    PROTOCOL_VERSION, ProtocolErrorCode, ServerMessage, TransactionId,
+    EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode, ServerMessage,
+    TransactionId,
     codec::{Codec, CodecError},
 };
 
@@ -30,19 +35,154 @@ pub struct ClientInitialState {
     pub behavior_manifest: BehaviorManifest,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingEdit {
+    pub document_id: DocumentId,
+    pub base_version: DocumentVersion,
+    pub transaction_id: TransactionId,
+    pub operation: EditOperation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientResyncSnapshot {
+    pub document_id: DocumentId,
+    pub version: DocumentVersion,
+    pub text: String,
+    pub access: DocumentAccess,
+    pub lease_id: Option<crate::protocol::LeaseId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientSyncSnapshot {
+    pub confirmed_version: DocumentVersion,
+    pub optimistic_version: DocumentVersion,
+    pub pending: Vec<PendingEdit>,
+    pub last_resync: Option<ClientResyncSnapshot>,
+}
+
+#[derive(Debug)]
+struct ClientSyncState {
+    confirmed_version: DocumentVersion,
+    optimistic_version: DocumentVersion,
+    pending: VecDeque<PendingEdit>,
+    last_resync: Option<ClientResyncSnapshot>,
+}
+
+impl ClientSyncState {
+    fn new(confirmed_version: DocumentVersion) -> Self {
+        Self {
+            confirmed_version,
+            optimistic_version: confirmed_version,
+            pending: VecDeque::new(),
+            last_resync: None,
+        }
+    }
+
+    fn reserve_pending(
+        &mut self,
+        document_id: DocumentId,
+        transaction_id: TransactionId,
+        operation: EditOperation,
+    ) -> DocumentVersion {
+        let base_version = self.optimistic_version;
+        self.optimistic_version = self.optimistic_version.saturating_add(1);
+        self.pending.push_back(PendingEdit {
+            document_id,
+            base_version,
+            transaction_id,
+            operation,
+        });
+        base_version
+    }
+
+    fn rollback_pending_reservation(&mut self, transaction_id: TransactionId) {
+        if let Some(position) = self
+            .pending
+            .iter()
+            .position(|pending| pending.transaction_id == transaction_id)
+        {
+            self.pending.remove(position);
+            self.optimistic_version = self
+                .pending
+                .back()
+                .map_or(self.confirmed_version, |pending| pending.base_version + 1);
+        }
+    }
+
+    fn acknowledge(&mut self, confirmed_version: DocumentVersion, transaction_id: TransactionId) {
+        self.confirmed_version = confirmed_version;
+        if let Some(position) = self
+            .pending
+            .iter()
+            .position(|pending| pending.transaction_id == transaction_id)
+        {
+            self.pending.remove(position);
+        }
+        if self.optimistic_version < confirmed_version {
+            self.optimistic_version = confirmed_version;
+        }
+    }
+
+    fn reject(&mut self, transaction_id: TransactionId) {
+        if let Some(position) = self
+            .pending
+            .iter()
+            .position(|pending| pending.transaction_id == transaction_id)
+        {
+            self.pending.remove(position);
+        }
+        self.optimistic_version = self
+            .pending
+            .back()
+            .map_or(self.confirmed_version, |pending| pending.base_version + 1);
+    }
+
+    fn apply_resync_snapshot(&mut self, snapshot: ClientResyncSnapshot) {
+        self.confirmed_version = snapshot.version;
+        self.optimistic_version = snapshot.version;
+        self.pending.clear();
+        self.last_resync = Some(snapshot);
+    }
+
+    fn snapshot(&self) -> ClientSyncSnapshot {
+        ClientSyncSnapshot {
+            confirmed_version: self.confirmed_version,
+            optimistic_version: self.optimistic_version,
+            pending: self.pending.iter().cloned().collect(),
+            last_resync: self.last_resync.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ClientEditQueue {
     sender: mpsc::Sender<ClientMessage>,
+    client_id: ClientId,
+    lease_id: Option<crate::protocol::LeaseId>,
+    sync_state: Arc<Mutex<ClientSyncState>>,
 }
 
 impl ClientEditQueue {
     pub fn bounded(capacity: usize) -> (Self, mpsc::Receiver<ClientMessage>) {
         let (sender, receiver) = mpsc::channel(capacity);
-        (Self { sender }, receiver)
+        (
+            Self {
+                sender,
+                client_id: 0,
+                lease_id: None,
+                sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
+            },
+            receiver,
+        )
     }
 
     pub fn from_sender(sender: mpsc::Sender<ClientMessage>) -> Self {
-        Self { sender }
+        Self {
+            sender,
+            client_id: 0,
+            lease_id: None,
+            sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
+        }
     }
 
     pub fn enqueue_edit_event(
@@ -50,13 +190,52 @@ impl ClientEditQueue {
         event: EditorEditEvent,
         transaction_id: TransactionId,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::Edit {
+        let operation = event.operation;
+        let base_version = {
+            let mut state = self.sync_state.lock().expect("client sync state poisoned");
+            state.reserve_pending(event.document_id, transaction_id, operation.clone())
+        };
+        let message = ClientMessage::Edit {
             document_id: event.document_id,
-            base_version: event.base_version,
+            client_id: self.client_id,
+            lease_id: self.lease_id,
+            base_version,
             behavior_version: event.behavior_version,
             transaction_id,
-            operation: event.operation,
-        })
+            operation,
+        };
+
+        if self.lease_id.is_none() {
+            let mut state = self.sync_state.lock().expect("client sync state poisoned");
+            state.rollback_pending_reservation(transaction_id);
+            return Err(mpsc::error::TrySendError::Closed(message));
+        }
+
+        if let Err(error) = self.sender.try_send(message) {
+            let mut state = self.sync_state.lock().expect("client sync state poisoned");
+            state.rollback_pending_reservation(transaction_id);
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    pub fn sync_snapshot(&self) -> ClientSyncSnapshot {
+        self.sync_state
+            .lock()
+            .expect("client sync state poisoned")
+            .snapshot()
+    }
+
+    fn with_authority(mut self, client_id: ClientId, access: &DocumentAccess) -> Self {
+        self.client_id = client_id;
+        self.lease_id = access.lease_id();
+        self
+    }
+
+    fn with_confirmed_version(mut self, confirmed_version: DocumentVersion) -> Self {
+        self.sync_state = Arc::new(Mutex::new(ClientSyncState::new(confirmed_version)));
+        self
     }
 }
 
@@ -74,6 +253,12 @@ pub enum ClientConnectionEvent {
         version: DocumentVersion,
         transaction_id: TransactionId,
     },
+    EditRejected {
+        document_id: DocumentId,
+        transaction_id: TransactionId,
+        reason: EditRejection,
+    },
+    ResyncSnapshot(ClientResyncSnapshot),
     EditTransaction(ServerMessage),
     ServerError {
         code: ProtocolErrorCode,
@@ -159,8 +344,19 @@ pub async fn connect_from_stream(
 ) -> Result<ClientSession, ClientBootstrapError> {
     let initial_state = handshake_initial_state(&mut stream, codec).await?;
     let (edit_queue, outgoing_edits) = ClientEditQueue::bounded(EDIT_QUEUE_CAPACITY);
+    let edit_queue = edit_queue
+        .with_authority(initial_state.client_id, &initial_state.access)
+        .with_confirmed_version(initial_state.document_version);
+    let sync_state = Arc::clone(&edit_queue.sync_state);
     let (event_sender, events) = mpsc::channel(EDIT_QUEUE_CAPACITY);
-    tokio::spawn(run_connection(stream, codec, outgoing_edits, event_sender));
+    tokio::spawn(run_connection(
+        stream,
+        codec,
+        outgoing_edits,
+        event_sender,
+        sync_state,
+        initial_state.client_id,
+    ));
 
     Ok(ClientSession {
         initial_state,
@@ -202,6 +398,7 @@ async fn handshake_initial_state(
                 version,
                 text,
                 access,
+                lease_id: _,
             } => (document_id, version, text, access),
             ServerMessage::Error { code, message } => {
                 return Err(ClientBootstrapError::ServerError { code, message });
@@ -235,12 +432,26 @@ async fn handshake_initial_state(
     })
 }
 
+fn rejection_requests_resync(reason: &EditRejection) -> bool {
+    matches!(
+        reason,
+        EditRejection::StaleVersion { .. }
+            | EditRejection::FutureVersion { .. }
+            | EditRejection::LeaseRequired
+            | EditRejection::LeaseExpired { .. }
+            | EditRejection::ReadOnlyDocument
+            | EditRejection::RegionLocked { .. }
+    )
+}
+
 #[cfg(unix)]
 async fn run_connection(
     stream: UnixStream,
     codec: Codec,
     mut outgoing_edits: mpsc::Receiver<ClientMessage>,
     events: mpsc::Sender<ClientConnectionEvent>,
+    sync_state: Arc<Mutex<ClientSyncState>>,
+    client_id: ClientId,
 ) {
     let (mut reader, mut writer) = stream.into_split();
 
@@ -258,8 +469,42 @@ async fn run_connection(
             }
             incoming = codec.read_server_message(&mut reader) => {
                 match incoming {
-                    Ok(ServerMessage::EditAck { document_id, version, transaction_id }) => {
-                        let _ = events.send(ClientConnectionEvent::EditAck { document_id, version, transaction_id }).await;
+                    Ok(ServerMessage::EditAck { document_id, confirmed_version, transaction_id }) => {
+                        sync_state
+                            .lock()
+                            .expect("client sync state poisoned")
+                            .acknowledge(confirmed_version, transaction_id);
+                        let _ = events.send(ClientConnectionEvent::EditAck { document_id, version: confirmed_version, transaction_id }).await;
+                    }
+                    Ok(ServerMessage::EditRejected { document_id, transaction_id, reason }) => {
+                        let known_version = {
+                            let mut state = sync_state
+                                .lock()
+                                .expect("client sync state poisoned");
+                            state.reject(transaction_id);
+                            state.confirmed_version
+                        };
+                        let should_resync = rejection_requests_resync(&reason);
+                        let _ = events.send(ClientConnectionEvent::EditRejected { document_id, transaction_id, reason }).await;
+                        if should_resync {
+                            let request = ClientMessage::RequestResync {
+                                document_id,
+                                client_id,
+                                known_version,
+                            };
+                            if let Err(error) = codec.write_client_message(&mut writer, &request).await {
+                                let _ = events.send(ClientConnectionEvent::ConnectionError(error.to_string())).await;
+                                return;
+                            }
+                        }
+                    }
+                    Ok(ServerMessage::ResyncSnapshot { document_id, version, text, access, lease_id }) => {
+                        let snapshot = ClientResyncSnapshot { document_id, version, text, access, lease_id };
+                        sync_state
+                            .lock()
+                            .expect("client sync state poisoned")
+                            .apply_resync_snapshot(snapshot.clone());
+                        let _ = events.send(ClientConnectionEvent::ResyncSnapshot(snapshot)).await;
                     }
                     Ok(message @ ServerMessage::EditTransaction { .. }) => {
                         let _ = events.send(ClientConnectionEvent::EditTransaction(message)).await;
@@ -299,8 +544,8 @@ mod tests {
     };
     use crate::editor::EditorEditEvent;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, PROTOCOL_VERSION,
-        ServerMessage, codec::Codec,
+        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, EditRejection,
+        PROTOCOL_VERSION, ServerMessage, codec::Codec,
     };
     use crate::server::{IpcServer, ServerConfig};
 
@@ -331,6 +576,20 @@ mod tests {
         panic!("failed to connect to test socket: {:?}", last_error);
     }
 
+    async fn connect_stream_with_retry(socket_path: &std::path::Path) -> UnixStream {
+        let mut last_error = None;
+        for _ in 0..50 {
+            match UnixStream::connect(socket_path).await {
+                Ok(stream) => return stream,
+                Err(error) => {
+                    last_error = Some(error);
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
+        panic!("failed to connect to test socket: {:?}", last_error);
+    }
+
     #[tokio::test]
     async fn client_handles_initial_document_message() {
         let (client, mut server) = UnixStream::pair().unwrap();
@@ -354,7 +613,8 @@ mod tests {
                         document_id: 7,
                         version: 3,
                         text: "Loaded from server 🦀".to_string(),
-                        access: DocumentAccess::Editable,
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
                     },
                 )
                 .await
@@ -374,7 +634,7 @@ mod tests {
         assert_eq!(state.document_id, 7);
         assert_eq!(state.document_version, 3);
         assert_eq!(state.text, "Loaded from server 🦀");
-        assert_eq!(state.access, DocumentAccess::Editable);
+        assert_eq!(state.access, DocumentAccess::Editable { lease_id: 1 });
         assert_eq!(
             state.behavior_manifest,
             BehaviorManifest::minimal_text_editing(9)
@@ -385,6 +645,9 @@ mod tests {
     #[tokio::test]
     async fn edit_event_is_enqueued_as_client_edit_message() {
         let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue
+            .with_authority(0, &DocumentAccess::Editable { lease_id: 1 })
+            .with_confirmed_version(5);
 
         queue
             .enqueue_edit_event(
@@ -405,6 +668,8 @@ mod tests {
             receiver.recv().await.unwrap(),
             crate::protocol::ClientMessage::Edit {
                 document_id: 4,
+                client_id: 0,
+                lease_id: Some(1),
                 base_version: 5,
                 behavior_version: 6,
                 transaction_id: 7,
@@ -417,8 +682,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_only_client_queue_does_not_emit_edit_message() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_confirmed_version(5);
+
+        let result = queue.enqueue_edit_event(
+            EditorEditEvent {
+                document_id: 4,
+                base_version: 5,
+                behavior_version: 6,
+                operation: EditOperation::Insert {
+                    byte_offset: 2,
+                    text: "x".to_string(),
+                },
+            },
+            7,
+        );
+
+        assert!(result.is_err());
+        assert!(receiver.try_recv().is_err());
+        assert!(queue.sync_snapshot().pending.is_empty());
+    }
+
+    #[tokio::test]
     async fn bounded_edit_queue_applies_backpressure() {
         let (queue, _receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(0, &DocumentAccess::Editable { lease_id: 1 });
         let event = EditorEditEvent {
             document_id: 1,
             base_version: 2,
@@ -428,6 +717,314 @@ mod tests {
 
         assert!(queue.enqueue_edit_event(event.clone(), 1).is_ok());
         assert!(queue.enqueue_edit_event(event, 2).is_err());
+        assert_eq!(queue.sync_snapshot().pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn client_keeps_pending_edit_until_ack_or_rejection() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(2);
+        let queue = queue
+            .with_authority(0, &DocumentAccess::Editable { lease_id: 1 })
+            .with_confirmed_version(10);
+        let event = EditorEditEvent {
+            document_id: 1,
+            base_version: 0,
+            behavior_version: 3,
+            operation: EditOperation::Insert {
+                byte_offset: 0,
+                text: "a".to_string(),
+            },
+        };
+
+        queue.enqueue_edit_event(event, 44).unwrap();
+        let message = receiver.recv().await.unwrap();
+
+        assert!(matches!(
+            message,
+            ClientMessage::Edit {
+                base_version: 10,
+                transaction_id: 44,
+                ..
+            }
+        ));
+        let snapshot = queue.sync_snapshot();
+        assert_eq!(snapshot.confirmed_version, 10);
+        assert_eq!(snapshot.optimistic_version, 11);
+        assert_eq!(snapshot.pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn client_ack_advances_confirmed_version() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 7,
+                        version: 10,
+                        text: String::new(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            let _edit = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::EditAck {
+                        document_id: 7,
+                        confirmed_version: 11,
+                        transaction_id: 44,
+                    },
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+        session
+            .edit_queue
+            .enqueue_edit_event(
+                EditorEditEvent {
+                    document_id: 7,
+                    base_version: 0,
+                    behavior_version: 3,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "a".to_string(),
+                    },
+                },
+                44,
+            )
+            .unwrap();
+        assert_eq!(session.edit_queue.sync_snapshot().pending.len(), 1);
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::EditAck {
+                document_id: 7,
+                version: 11,
+                transaction_id: 44,
+            }
+        );
+        let snapshot = session.edit_queue.sync_snapshot();
+        assert_eq!(snapshot.confirmed_version, 11);
+        assert_eq!(snapshot.pending.len(), 0);
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_requests_resync_after_stale_rejection() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 12,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 7,
+                        version: 10,
+                        text: "local".to_string(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            let _edit = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::EditRejected {
+                        document_id: 7,
+                        transaction_id: 44,
+                        reason: crate::protocol::EditRejection::StaleVersion {
+                            client_base_version: 10,
+                            server_version: 12,
+                        },
+                    },
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                codec.read_client_message(&mut server).await.unwrap(),
+                ClientMessage::RequestResync {
+                    document_id: 7,
+                    client_id: 12,
+                    known_version: 10,
+                }
+            );
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+        session
+            .edit_queue
+            .enqueue_edit_event(
+                EditorEditEvent {
+                    document_id: 7,
+                    base_version: 0,
+                    behavior_version: 3,
+                    operation: EditOperation::Insert {
+                        byte_offset: 5,
+                        text: "!".to_string(),
+                    },
+                },
+                44,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::EditRejected {
+                transaction_id: 44,
+                ..
+            }
+        ));
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_applies_resync_snapshot_and_clears_pending_edits() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 7,
+                        version: 10,
+                        text: "local".to_string(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            let _edit = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::EditRejected {
+                        document_id: 7,
+                        transaction_id: 44,
+                        reason: crate::protocol::EditRejection::StaleVersion {
+                            client_base_version: 10,
+                            server_version: 12,
+                        },
+                    },
+                )
+                .await
+                .unwrap();
+            let _resync = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ResyncSnapshot {
+                        document_id: 7,
+                        version: 12,
+                        text: "server 🦀".to_string(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+        session
+            .edit_queue
+            .enqueue_edit_event(
+                EditorEditEvent {
+                    document_id: 7,
+                    base_version: 0,
+                    behavior_version: 3,
+                    operation: EditOperation::Insert {
+                        byte_offset: 5,
+                        text: "!".to_string(),
+                    },
+                },
+                44,
+            )
+            .unwrap();
+        let _rejection = session.events.recv().await.unwrap();
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::ResyncSnapshot(super::ClientResyncSnapshot {
+                document_id: 7,
+                version: 12,
+                text: "server 🦀".to_string(),
+                access: DocumentAccess::Editable { lease_id: 1 },
+                lease_id: Some(1),
+            })
+        );
+        let snapshot = session.edit_queue.sync_snapshot();
+        assert_eq!(snapshot.confirmed_version, 12);
+        assert_eq!(snapshot.optimistic_version, 12);
+        assert!(snapshot.pending.is_empty());
+        assert_eq!(snapshot.last_resync.unwrap().text, "server 🦀");
+        server_task.await.unwrap();
     }
 
     #[tokio::test]
@@ -454,6 +1051,7 @@ mod tests {
                         version: 1,
                         text: String::new(),
                         access: DocumentAccess::ReadOnly,
+                        lease_id: None,
                     },
                 )
                 .await
@@ -497,7 +1095,8 @@ mod tests {
                         document_id: 22,
                         version: 23,
                         text: "snapshot".to_string(),
-                        access: DocumentAccess::Editable,
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
                     },
                 )
                 .await
@@ -542,7 +1141,8 @@ mod tests {
                         document_id: 2,
                         version: 3,
                         text: String::new(),
-                        access: DocumentAccess::Editable,
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
                     },
                 )
                 .await
@@ -560,6 +1160,28 @@ mod tests {
 
         assert_eq!(session.initial_state.behavior_manifest.behavior_version, 44);
         server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn end_to_end_second_client_is_read_only() {
+        let socket_path = unique_socket_path("read-only");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+
+        let first = connect_with_retry(&socket_path).await;
+        let second = connect_with_retry(&socket_path).await;
+
+        assert!(matches!(
+            first.initial_state.access,
+            DocumentAccess::Editable { lease_id: 1 }
+        ));
+        assert_eq!(second.initial_state.access, DocumentAccess::ReadOnly);
+
+        drop(first);
+        drop(second);
+        server_task.abort();
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 
     #[tokio::test]
@@ -600,6 +1222,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
+        let socket_path = unique_socket_path("stale-resync");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+
+        let mut stream = connect_stream_with_retry(&socket_path).await;
+        let codec = Codec::default();
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "stale-test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let client_id = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::Welcome { client_id, .. } => client_id,
+            message => panic!("expected Welcome, got {message:?}"),
+        };
+        let (document_id, version, text, lease_id) =
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::InitialDocument {
+                    document_id,
+                    version,
+                    text,
+                    access: DocumentAccess::Editable { lease_id },
+                    lease_id: Some(snapshot_lease_id),
+                } => {
+                    assert_eq!(lease_id, snapshot_lease_id);
+                    (document_id, version, text, lease_id)
+                }
+                message => panic!("expected editable InitialDocument, got {message:?}"),
+            };
+        let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::Edit {
+                    document_id,
+                    client_id,
+                    lease_id: Some(lease_id),
+                    base_version: version - 1,
+                    behavior_version: 1,
+                    transaction_id: 99,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "stale".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut stream).await.unwrap(),
+            ServerMessage::EditRejected {
+                document_id,
+                transaction_id: 99,
+                reason: EditRejection::StaleVersion {
+                    client_base_version: version - 1,
+                    server_version: version,
+                },
+            }
+        );
+
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::RequestResync {
+                    document_id,
+                    client_id,
+                    known_version: version - 1,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut stream).await.unwrap(),
+            ServerMessage::ResyncSnapshot {
+                document_id,
+                version,
+                text,
+                access: DocumentAccess::Editable { lease_id },
+                lease_id: Some(lease_id),
+            }
+        );
+
+        server_task.abort();
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn end_to_end_edit_gets_acknowledged() {
         let (client, mut server) = UnixStream::pair().unwrap();
         let codec = Codec::default();
@@ -622,7 +1342,8 @@ mod tests {
                         document_id: 7,
                         version: 1,
                         text: "Hi".to_string(),
-                        access: DocumentAccess::Editable,
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
                     },
                 )
                 .await
@@ -639,6 +1360,8 @@ mod tests {
                 codec.read_client_message(&mut server).await.unwrap(),
                 ClientMessage::Edit {
                     document_id: 7,
+                    client_id: 1,
+                    lease_id: Some(1),
                     base_version: 1,
                     behavior_version: 1,
                     transaction_id: 9,
@@ -653,7 +1376,7 @@ mod tests {
                     &mut server,
                     &ServerMessage::EditAck {
                         document_id: 7,
-                        version: 2,
+                        confirmed_version: 2,
                         transaction_id: 9,
                     },
                 )

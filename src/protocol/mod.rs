@@ -1,6 +1,6 @@
 pub mod codec;
 
-/// Current wire protocol version for the Phase 4 IPC skeleton.
+/// Current wire protocol version for the local Clay IPC boundary.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 pub type ClientId = u64;
@@ -8,11 +8,22 @@ pub type DocumentId = u64;
 pub type DocumentVersion = u64;
 pub type BehaviorVersion = u64;
 pub type TransactionId = u64;
+pub type LeaseId = u64;
+pub type RegionLockId = u64;
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum DocumentAccess {
     ReadOnly,
-    Editable,
+    Editable { lease_id: LeaseId },
+}
+
+impl DocumentAccess {
+    pub const fn lease_id(&self) -> Option<LeaseId> {
+        match self {
+            Self::ReadOnly => None,
+            Self::Editable { lease_id } => Some(*lease_id),
+        }
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -62,6 +73,53 @@ pub enum TextEditCapability {
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RegionLockConflict {
+    pub lock_id: RegionLockId,
+    pub start: u64,
+    pub end: u64,
+    pub owner: LockOwner,
+    pub created_at_version: DocumentVersion,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum LockOwner {
+    Server,
+    Client { client_id: ClientId },
+    Extension { extension_id: String },
+    AiAgent { agent_id: String },
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum EditRejection {
+    StaleVersion {
+        client_base_version: DocumentVersion,
+        server_version: DocumentVersion,
+    },
+    FutureVersion {
+        client_base_version: DocumentVersion,
+        server_version: DocumentVersion,
+    },
+    LeaseRequired,
+    LeaseExpired {
+        lease_id: LeaseId,
+    },
+    ReadOnlyDocument,
+    RegionLocked {
+        conflict: RegionLockConflict,
+    },
+    InvalidDocument {
+        document_id: DocumentId,
+    },
+    InvalidRange {
+        message: String,
+    },
+    InvalidBehaviorVersion {
+        behavior_version: BehaviorVersion,
+        server_behavior_version: BehaviorVersion,
+    },
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum ClientMessage {
     Hello {
         protocol_version: u32,
@@ -69,6 +127,8 @@ pub enum ClientMessage {
     },
     Edit {
         document_id: DocumentId,
+        client_id: ClientId,
+        lease_id: Option<LeaseId>,
         base_version: DocumentVersion,
         behavior_version: BehaviorVersion,
         transaction_id: TransactionId,
@@ -76,10 +136,17 @@ pub enum ClientMessage {
     },
     EditorIntent {
         document_id: DocumentId,
+        client_id: ClientId,
+        lease_id: Option<LeaseId>,
         base_version: DocumentVersion,
         behavior_version: BehaviorVersion,
         transaction_id: TransactionId,
         intent: EditorIntent,
+    },
+    RequestResync {
+        document_id: DocumentId,
+        client_id: ClientId,
+        known_version: DocumentVersion,
     },
 }
 
@@ -94,18 +161,31 @@ pub enum ServerMessage {
         version: DocumentVersion,
         text: String,
         access: DocumentAccess,
+        lease_id: Option<LeaseId>,
     },
     BehaviorManifest(BehaviorManifest),
     EditAck {
         document_id: DocumentId,
-        version: DocumentVersion,
+        confirmed_version: DocumentVersion,
         transaction_id: TransactionId,
+    },
+    EditRejected {
+        document_id: DocumentId,
+        transaction_id: TransactionId,
+        reason: EditRejection,
     },
     EditTransaction {
         document_id: DocumentId,
         version: DocumentVersion,
         transaction_id: TransactionId,
         operations: Vec<EditOperation>,
+    },
+    ResyncSnapshot {
+        document_id: DocumentId,
+        version: DocumentVersion,
+        text: String,
+        access: DocumentAccess,
+        lease_id: Option<LeaseId>,
     },
     Error {
         code: ProtocolErrorCode,
