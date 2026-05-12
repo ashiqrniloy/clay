@@ -57,10 +57,6 @@ impl EditorBuffer {
         }
     }
 
-    pub fn insert_newline_at(&mut self, caret: usize) -> EditResult {
-        self.insert_at(caret, "\n")
-    }
-
     pub fn replace_range(&mut self, range: Range<usize>, text: &str) -> EditResult {
         let caret = self.clamp_byte_offset(range.start);
         if range.start > range.end {
@@ -198,6 +194,22 @@ impl EditorBuffer {
 
     pub fn line_start_byte(&self, offset: usize) -> usize {
         self.byte_of_line(self.line_of_byte(offset))
+    }
+
+    pub fn text_range(&self, range: Range<usize>) -> String {
+        let start = self.clamp_byte_offset(range.start);
+        let end = self.clamp_byte_offset(range.end);
+        if start >= end {
+            return String::new();
+        }
+
+        self.rope.byte_slice(start..end).to_string()
+    }
+
+    pub fn line_text_before_byte(&self, offset: usize) -> String {
+        let offset = self.clamp_byte_offset(offset);
+        let start = self.line_start_byte(offset);
+        self.rope.byte_slice(start..offset).to_string()
     }
 
     pub fn line_end_byte(&self, offset: usize) -> usize {

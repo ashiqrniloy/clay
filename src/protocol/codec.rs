@@ -276,9 +276,40 @@ mod tests {
     }
 
     #[test]
-    fn protocol_round_trips_behavior_manifest() {
+    fn protocol_round_trips_behavior_manifest_schema() {
         let codec = Codec::default();
         let message = ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3));
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn codec_round_trips_behavior_manifest_update() {
+        let codec = Codec::default();
+        let mut manifest = BehaviorManifest::minimal_text_editing(8);
+        manifest.manifest_id = "clay.default.text.hot-reload".to_string();
+        let message = ServerMessage::BehaviorManifest(manifest);
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn codec_round_trips_behavior_version_rejection() {
+        let codec = Codec::default();
+        let message = ServerMessage::EditRejected {
+            document_id: 7,
+            transaction_id: 99,
+            reason: EditRejection::InvalidBehaviorVersion {
+                behavior_version: 2,
+                server_behavior_version: 3,
+            },
+        };
 
         let frame = codec.encode_server_message(&message).unwrap();
         let decoded = codec.decode_server_message(&frame).unwrap();
@@ -383,6 +414,16 @@ mod tests {
     }
 
     #[test]
+    fn codec_rejects_oversized_manifest_frame() {
+        let codec = Codec::new(8);
+        let message = ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1));
+
+        let error = codec.encode_server_message(&message).unwrap_err();
+
+        assert!(matches!(error, CodecError::FrameTooLarge { max: 8, .. }));
+    }
+
+    #[test]
     fn codec_rejects_invalid_phase5_archive_bytes() {
         let codec = Codec::default();
         let mut frame = Vec::new();
@@ -390,6 +431,18 @@ mod tests {
         frame.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
 
         let error = codec.decode_client_message(&frame).unwrap_err();
+
+        assert!(matches!(error, CodecError::Deserialize(_)));
+    }
+
+    #[test]
+    fn codec_rejects_invalid_manifest_archive_bytes() {
+        let codec = Codec::default();
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&4_u32.to_be_bytes());
+        frame.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+
+        let error = codec.decode_server_message(&frame).unwrap_err();
 
         assert!(matches!(error, CodecError::Deserialize(_)));
     }

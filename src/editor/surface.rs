@@ -4,8 +4,12 @@ use masonry::core::PaintCtx;
 use masonry::kurbo::{Affine, Circle, Point, Rect};
 use masonry::peniko::{Color, Fill};
 
+use crate::client::behavior::{
+    ClientBehaviorState, ClientLocalEdit, RoutedBehavior, ServerIntentRoute,
+};
 use crate::protocol::{
     BehaviorManifest, BehaviorVersion, DocumentAccess, DocumentId, DocumentVersion, EditOperation,
+    EnterRule, KeyStroke, PairRule,
 };
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
@@ -57,6 +61,32 @@ pub struct EditorEditEvent {
 pub struct EditorCommandOutcome {
     pub changed: bool,
     pub edit_event: Option<EditorEditEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorKeyOutcome {
+    pub(crate) command_outcome: EditorCommandOutcome,
+    pub(crate) server_intent: Option<ServerIntentRoute>,
+}
+
+impl EditorKeyOutcome {
+    fn client(command_outcome: EditorCommandOutcome) -> Self {
+        Self {
+            command_outcome,
+            server_intent: None,
+        }
+    }
+
+    fn server(server_intent: ServerIntentRoute) -> Self {
+        Self {
+            command_outcome: EditorCommandOutcome::unchanged(),
+            server_intent: Some(server_intent),
+        }
+    }
+
+    fn unhandled() -> Self {
+        Self::client(EditorCommandOutcome::unchanged())
+    }
 }
 
 impl EditorCommandOutcome {
@@ -138,8 +168,35 @@ impl EditorSurface {
     }
 
     pub fn install_behavior_manifest(&mut self, manifest: BehaviorManifest) {
-        self.document.behavior_version = manifest.behavior_version;
-        self.document.behavior_manifest = Some(manifest);
+        if ClientBehaviorState::new(manifest.clone()).is_ok() {
+            self.document.behavior_version = manifest.behavior_version;
+            self.document.behavior_manifest = Some(manifest);
+        }
+    }
+
+    pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
+        let Some(manifest) = &self.document.behavior_manifest else {
+            return EditorKeyOutcome::unhandled();
+        };
+        let Ok(router) = ClientBehaviorState::new(manifest.clone()) else {
+            return EditorKeyOutcome::unhandled();
+        };
+
+        match router.route_key(key) {
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text)) => {
+                let outcome = if let Some(pair) = self.pair_rule_for_inserted_text(&text).cloned() {
+                    self.insert_pair_with_event(&pair)
+                } else {
+                    self.insert_text_with_event(&text)
+                };
+                EditorKeyOutcome::client(outcome)
+            }
+            RoutedBehavior::ClientEdit(ClientLocalEdit::Newline) => {
+                EditorKeyOutcome::client(self.insert_newline_with_event())
+            }
+            RoutedBehavior::ServerIntent(intent) => EditorKeyOutcome::server(intent),
+            RoutedBehavior::Unhandled => EditorKeyOutcome::unhandled(),
+        }
     }
 
     pub fn document_state(&self) -> &EditorDocumentState {
@@ -205,11 +262,12 @@ impl EditorSurface {
             (self.buffer.replace_range(range, "\n"), operation)
         } else {
             let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            let text = self.newline_text_at(byte_offset);
             (
-                self.buffer.insert_newline_at(byte_offset),
+                self.buffer.insert_at(byte_offset, &text),
                 EditOperation::Insert {
                     byte_offset: byte_offset as u64,
-                    text: "\n".to_string(),
+                    text,
                 },
             )
         };
@@ -576,6 +634,73 @@ impl EditorSurface {
         (range.start < range.end).then_some(range)
     }
 
+    fn pair_rule_for_inserted_text(&self, text: &str) -> Option<&PairRule> {
+        let manifest = self.document.behavior_manifest.as_ref()?;
+        manifest
+            .editor_rules
+            .pairs
+            .iter()
+            .find(|pair| pair.open == text)
+    }
+
+    fn newline_text_at(&self, byte_offset: usize) -> String {
+        let Some(manifest) = &self.document.behavior_manifest else {
+            return "\n".to_string();
+        };
+
+        match manifest.editor_rules.enter {
+            EnterRule::InsertNewlineOnly => "\n".to_string(),
+            EnterRule::PreserveLeadingWhitespace => {
+                let line_before = self.buffer.line_text_before_byte(byte_offset);
+                let indent: String = line_before
+                    .chars()
+                    .take_while(|character| *character == ' ' || *character == '\t')
+                    .collect();
+                let trimmed = line_before.trim_start_matches([' ', '\t']);
+                let continuation = manifest
+                    .editor_rules
+                    .comments
+                    .iter()
+                    .find(|rule| trimmed.starts_with(&rule.line_prefix))
+                    .map(|rule| rule.continue_prefix.as_str())
+                    .unwrap_or("");
+
+                format!("\n{indent}{continuation}")
+            }
+        }
+    }
+
+    fn insert_pair_with_event(&mut self, pair: &PairRule) -> EditorCommandOutcome {
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+
+        let (result, operation, final_caret) = if let Some(range) = self.selected_range() {
+            let selected_text = self.buffer.text_range(range.clone());
+            let replacement = format!("{}{}{}", pair.open, selected_text, pair.close);
+            let operation = EditOperation::Replace {
+                start: range.start as u64,
+                end: range.end as u64,
+                text: replacement.clone(),
+            };
+            let result = self.buffer.replace_range(range, &replacement);
+            let final_caret = result.caret;
+            (result, operation, final_caret)
+        } else {
+            let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            let insertion = format!("{}{}", pair.open, pair.close);
+            let operation = EditOperation::Insert {
+                byte_offset: byte_offset as u64,
+                text: insertion.clone(),
+            };
+            let result = self.buffer.insert_at(byte_offset, &insertion);
+            let final_caret = byte_offset + pair.open.len();
+            (result, operation, final_caret)
+        };
+
+        self.finish_edit_with_operation_and_caret(result, operation, final_caret)
+    }
+
     fn replace_selection_or_insert_with_event(&mut self, text: &str) -> EditorCommandOutcome {
         let (result, operation) = if let Some(range) = self.selected_range() {
             let operation = EditOperation::Replace {
@@ -624,7 +749,16 @@ impl EditorSurface {
         result: EditResult,
         operation: EditOperation,
     ) -> EditorCommandOutcome {
-        self.cursor.set_caret(result.caret);
+        self.finish_edit_with_operation_and_caret(result, operation, result.caret)
+    }
+
+    fn finish_edit_with_operation_and_caret(
+        &mut self,
+        result: EditResult,
+        operation: EditOperation,
+        caret: usize,
+    ) -> EditorCommandOutcome {
+        self.cursor.set_caret(self.buffer.clamp_byte_offset(caret));
         self.selection = None;
         if !result.changed {
             return EditorCommandOutcome::unchanged();
@@ -658,28 +792,7 @@ impl EditorSurface {
             return false;
         };
 
-        manifest
-            .capabilities
-            .iter()
-            .any(|capability| match capability {
-                crate::protocol::BehaviorCapability::ClientFirstTextEditing { operations } => {
-                    operations.iter().any(|capability| {
-                        matches!(
-                            (operation, capability),
-                            (
-                                EditOperation::Insert { .. },
-                                crate::protocol::TextEditCapability::Insert
-                            ) | (
-                                EditOperation::Delete { .. },
-                                crate::protocol::TextEditCapability::Delete
-                            ) | (
-                                EditOperation::Replace { .. },
-                                crate::protocol::TextEditCapability::Replace
-                            )
-                        )
-                    })
-                }
-            })
+        manifest.allows_client_first_edit(operation)
     }
 
     fn ensure_caret_line_visible(&mut self) -> bool {
@@ -798,7 +911,10 @@ mod tests {
 
     use super::{EditorCommand, EditorSurface, TEXT_INSET};
     use crate::editor::layout::LayoutCacheKey;
-    use crate::protocol::{BehaviorManifest, DocumentAccess, EditOperation};
+    use crate::protocol::{
+        BehaviorManifest, CommandDeclaration, DocumentAccess, EditOperation, KeyBindingContext,
+        KeyBindingRule, KeyCode, KeyStroke, RoutingPolicy, TabMode,
+    };
 
     fn generated_lines(line_count: usize) -> String {
         let mut text = String::new();
@@ -886,6 +1002,183 @@ mod tests {
         let outcome = editor.insert_text_with_event("x");
 
         assert_eq!(outcome.edit_event.unwrap().behavior_version, 99);
+    }
+
+    #[test]
+    fn editor_routes_client_first_key_through_manifest() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("x".to_string())));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(outcome.server_intent, None);
+        assert_eq!(editor.visible_text(), "x");
+        assert_eq!(
+            outcome.command_outcome.edit_event.unwrap().behavior_version,
+            3
+        );
+    }
+
+    #[test]
+    fn editor_routes_server_first_key_without_local_mutation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.commands.push(CommandDeclaration::server_intent(
+            "workspace.save",
+            "Save Workspace File",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "workspace.save".to_string(),
+            sequence: vec![KeyStroke::new(KeyCode::Character("s".to_string()))],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        editor.install_behavior_manifest(manifest);
+
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("s".to_string())));
+
+        assert!(!outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "");
+        assert_eq!(outcome.server_intent.unwrap().command_id, "workspace.save");
+    }
+
+    #[test]
+    fn enter_rule_preserves_leading_indentation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "    child".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_caret_for_test("    child".len());
+
+        let outcome = editor.route_key_with_event(&KeyStroke::new(KeyCode::Enter));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "    child\n    ");
+        assert_eq!(editor.caret_for_test(), "    child\n    ".len());
+        assert_eq!(
+            outcome.command_outcome.edit_event.unwrap().operation,
+            EditOperation::Insert {
+                byte_offset: "    child".len() as u64,
+                text: "\n    ".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn tab_rule_inserts_configured_spaces() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.editor_rules.tab.mode = TabMode::InsertSpaces;
+        manifest.editor_rules.tab.spaces_per_tab = 2;
+        editor.install_behavior_manifest(manifest);
+
+        let outcome = editor.route_key_with_event(&KeyStroke::new(KeyCode::Tab));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "  ");
+        assert_eq!(
+            outcome.command_outcome.edit_event.unwrap().operation,
+            EditOperation::Insert {
+                byte_offset: 0,
+                text: "  ".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn pair_rule_wraps_selection_or_inserts_pair() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_caret_for_test(1);
+
+        let caret_outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("(".to_string())));
+
+        assert!(caret_outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "a()b");
+        assert_eq!(editor.caret_for_test(), 2);
+        assert_eq!(
+            caret_outcome.command_outcome.edit_event.unwrap().operation,
+            EditOperation::Insert {
+                byte_offset: 1,
+                text: "()".to_string(),
+            }
+        );
+
+        editor.set_selection_for_test(1, 3);
+        let selection_outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("[".to_string())));
+
+        assert!(selection_outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "a[()]b");
+        assert_eq!(
+            selection_outcome
+                .command_outcome
+                .edit_event
+                .unwrap()
+                .operation,
+            EditOperation::Replace {
+                start: 1,
+                end: 3,
+                text: "[()]".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn comment_continuation_rule_continues_simple_comment_prefix() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "  // note".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_caret_for_test("  // note".len());
+
+        let outcome = editor.route_key_with_event(&KeyStroke::new(KeyCode::Enter));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "  // note\n  // ");
+        assert_eq!(
+            outcome.command_outcome.edit_event.unwrap().operation,
+            EditOperation::Insert {
+                byte_offset: "  // note".len() as u64,
+                text: "\n  // ".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -993,6 +1286,31 @@ mod tests {
         assert!(outcome.changed);
         assert_eq!(outcome.edit_event, None);
         assert_eq!(editor.visible_text(), "a");
+    }
+
+    #[test]
+    fn ordinary_typing_does_not_wait_for_server_or_javascript() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+
+        let started = std::time::Instant::now();
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("x".to_string())));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(outcome.server_intent, None);
+        assert_eq!(editor.visible_text(), "x");
+        assert!(outcome.command_outcome.edit_event.is_some());
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(50),
+            "manifest-declared typing should complete locally before any async IPC/JS work"
+        );
     }
 
     #[test]

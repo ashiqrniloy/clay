@@ -2,6 +2,7 @@
 
 ## Modules
 
+- [Behavior Manifests](modules/behavior-manifests.md): Server-issued inert behavior schema, routing policies, validation rules, editor declarations, and tests.
 - [Protocol Codec](modules/protocol-codec.md): IPC protocol messages, `rkyv` serialization, length-prefixed framing, validation, and tests.
 - [Server IPC Skeleton](modules/server-ipc-skeleton.md): Tokio Unix Domain Socket server lifecycle, connection handshake, shared document state, versioned edit dispatch, resync responses, and tests.
 - [Server Document State](modules/server-document-state.md): Server-owned canonical `crop::Rope` text, version enforcement, lease validation, region-lock enforcement, acknowledgement/resync generation, and tests.
@@ -9,6 +10,7 @@
 
 ## Flows
 
+- [Client Behavior Routing](flows/client-behavior-routing.md): Atomic client manifest installation, hot-path key classification, local edit routing, and server-intent routing without synchronous IPC.
 - [Client Edit Emission](flows/client-edit-emission.md): Local editor mutations, behavior-manifest-gated edit events, optimistic base-version assignment, bounded client edit queueing, and non-blocking Masonry forwarding.
 - [Client/Server Edit Acknowledgement Flow](flows/client-server-edit-ack.md): Open client IPC session, background edit sending, asynchronous acknowledgements/rejections, resync handling, and non-blocking GUI wiring.
 - [Versioned Text Synchronization](flows/versioned-text-synchronization.md): Client shadow state, pending transactions, confirmed/optimistic versions, stale rejection, and snapshot resync.

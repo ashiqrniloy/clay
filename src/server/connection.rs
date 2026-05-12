@@ -3,16 +3,17 @@ use std::sync::Arc;
 use tokio::{net::UnixStream, sync::Mutex};
 
 use crate::protocol::{
-    BehaviorManifest, ClientMessage, PROTOCOL_VERSION, ProtocolErrorCode, ServerMessage,
+    ClientMessage, PROTOCOL_VERSION, ProtocolErrorCode, ServerMessage,
     codec::{Codec, CodecError},
 };
 
-use super::document::DocumentState;
+use super::{behavior::ActiveBehaviorManifest, document::DocumentState};
 
 pub(crate) async fn handle_connection(
     mut stream: UnixStream,
     client_id: u64,
     document: Arc<Mutex<DocumentState>>,
+    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     codec: Codec,
 ) -> Result<(), CodecError> {
     let first_message = codec.read_client_message(&mut stream).await?;
@@ -21,7 +22,8 @@ pub(crate) async fn handle_connection(
             protocol_version,
             client_name: _,
         } if protocol_version == PROTOCOL_VERSION => {
-            send_welcome_snapshot_and_manifest(&mut stream, client_id, &document, codec).await?;
+            send_welcome_snapshot_and_manifest(&mut stream, client_id, &document, &behavior, codec)
+                .await?;
         }
         ClientMessage::Hello { .. } => {
             codec
@@ -75,10 +77,19 @@ pub(crate) async fn handle_connection(
                 client_id,
                 lease_id,
                 base_version,
-                behavior_version: _,
+                behavior_version,
                 transaction_id,
                 operation,
             } => {
+                if let Err(response) = behavior.lock().await.validate_message_version(
+                    document_id,
+                    transaction_id,
+                    behavior_version,
+                ) {
+                    codec.write_server_message(&mut stream, &response).await?;
+                    continue;
+                }
+
                 let response = {
                     let mut document = document.lock().await;
                     document.apply_edit(
@@ -97,10 +108,19 @@ pub(crate) async fn handle_connection(
                 client_id,
                 lease_id,
                 base_version,
-                behavior_version: _,
+                behavior_version,
                 transaction_id,
                 intent,
             } => {
+                if let Err(response) = behavior.lock().await.validate_message_version(
+                    document_id,
+                    transaction_id,
+                    behavior_version,
+                ) {
+                    codec.write_server_message(&mut stream, &response).await?;
+                    continue;
+                }
+
                 let operation = match intent {
                     crate::protocol::EditorIntent::InsertText { byte_offset, text } => {
                         crate::protocol::EditOperation::Insert { byte_offset, text }
@@ -152,6 +172,7 @@ async fn send_welcome_snapshot_and_manifest(
     stream: &mut UnixStream,
     client_id: u64,
     document: &Arc<Mutex<DocumentState>>,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     codec: Codec,
 ) -> Result<(), CodecError> {
     codec
@@ -173,12 +194,8 @@ async fn send_welcome_snapshot_and_manifest(
         .write_server_message(stream, &initial_document)
         .await?;
 
-    codec
-        .write_server_message(
-            stream,
-            &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1)),
-        )
-        .await
+    let manifest_message = behavior.lock().await.manifest_message();
+    codec.write_server_message(stream, &manifest_message).await
 }
 
 #[cfg(test)]
@@ -190,10 +207,10 @@ mod tests {
     use super::handle_connection;
     use crate::{
         protocol::{
-            BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, PROTOCOL_VERSION,
-            ServerMessage, codec::Codec,
+            BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, EditRejection,
+            PROTOCOL_VERSION, ServerMessage, codec::Codec,
         },
-        server::document::DocumentState,
+        server::{behavior::ActiveBehaviorManifest, document::DocumentState},
     };
 
     #[tokio::test]
@@ -205,7 +222,8 @@ mod tests {
             "Hello from server".to_string(),
             DocumentAccess::Editable { lease_id: 1 },
         )));
-        let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(server, 99, document, behavior, codec));
         let mut client = client;
 
         codec
@@ -246,7 +264,8 @@ mod tests {
         let (client, server) = UnixStream::pair().unwrap();
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
-        let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(server, 99, document, behavior, codec));
         let mut client = client;
 
         codec
@@ -280,7 +299,8 @@ mod tests {
             "Hi".to_string(),
             DocumentAccess::Editable { lease_id: 1 },
         )));
-        let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(server, 99, document, behavior, codec));
         let mut client = client;
 
         codec
@@ -330,6 +350,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_rejects_edit_with_stale_behavior_version_without_mutating_document() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "Hi".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            Arc::clone(&document),
+            behavior,
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Edit {
+                    document_id: 7,
+                    client_id: 99,
+                    lease_id: Some(1),
+                    base_version: 1,
+                    behavior_version: 0,
+                    transaction_id: 123,
+                    operation: EditOperation::Insert {
+                        byte_offset: 2,
+                        text: " stale".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::EditRejected {
+                document_id: 7,
+                transaction_id: 123,
+                reason: EditRejection::InvalidBehaviorVersion {
+                    behavior_version: 0,
+                    server_behavior_version: 1,
+                },
+            }
+        );
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Edit {
+                    document_id: 7,
+                    client_id: 99,
+                    lease_id: Some(1),
+                    base_version: 1,
+                    behavior_version: 1,
+                    transaction_id: 124,
+                    operation: EditOperation::Insert {
+                        byte_offset: 2,
+                        text: " ok".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::EditAck {
+                document_id: 7,
+                confirmed_version: 2,
+                transaction_id: 124,
+            }
+        );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn server_sends_resync_snapshot_after_request() {
         let (client, server) = UnixStream::pair().unwrap();
         let codec = Codec::default();
@@ -338,7 +454,8 @@ mod tests {
             "server 🦀".to_string(),
             DocumentAccess::Editable { lease_id: 1 },
         )));
-        let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(server, 99, document, behavior, codec));
         let mut client = client;
 
         codec
@@ -387,7 +504,8 @@ mod tests {
         let (mut client, server) = UnixStream::pair().unwrap();
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
-        let server_task = tokio::spawn(handle_connection(server, 99, document, codec));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(server, 99, document, behavior, codec));
 
         tokio::io::AsyncWriteExt::write_all(&mut client, &[0, 0, 0, 4, 0xde, 0xad, 0xbe, 0xef])
             .await

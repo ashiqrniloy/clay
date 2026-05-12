@@ -1,3 +1,4 @@
+pub mod behavior;
 pub mod client;
 pub mod editor;
 pub mod ipc;

@@ -28,7 +28,7 @@ After an editable buffer mutation succeeds, `finish_edit_with_operation` updates
 
 1. The document access mode is `DocumentAccess::Editable`.
 2. A behavior manifest is installed.
-3. The manifest contains `ClientFirstTextEditing` for the operation kind.
+3. The manifest declares the operation kind in its client-first text edit capabilities.
 
 The event stores the editor's current document version and the installed manifest version as `behavior_version`. Before sending, `ClientEditQueue` replaces the outgoing `base_version` with its shared optimistic version, records the pending transaction, and advances the optimistic version. Confirmed server versions are updated only when acknowledgements arrive on the background connection task.
 
@@ -64,12 +64,14 @@ if let Some(event) = outcome.edit_event {
 - `src/client/mod.rs`: `edit_event_is_enqueued_as_client_edit_message` validates event-to-protocol conversion.
 - `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side read-only enforcement.
 - `src/client/mod.rs`: `bounded_edit_queue_applies_backpressure` validates bounded queue behavior and pending rollback.
+- `src/client/mod.rs`: `client_hot_path_does_not_await_full_ipc_queue` validates a full queue returns immediately instead of awaiting capacity.
 - `src/client/mod.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates optimistic base-version assignment and pending state.
 - Relevant commands: `cargo test editor --quiet`, `cargo test client --quiet`, `cargo test --quiet`.
 
 ## Related
 
 - [Client Snapshot Bootstrap](../modules/client-snapshot-bootstrap.md)
+- [Client Behavior Routing](client-behavior-routing.md)
 - [Client/Server Edit Acknowledgement Flow](client-server-edit-ack.md)
 - [Versioned Text Synchronization](versioned-text-synchronization.md)
 - [Document Leases and Region Locks](document-leases-and-region-locks.md)

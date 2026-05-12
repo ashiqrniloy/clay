@@ -1,27 +1,40 @@
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
-    PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx,
-    ScrollDelta, TextEvent, Widget,
+    AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, KeyboardEvent, LayoutCtx,
+    PaintCtx, PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
+    RegisterCtx, ScrollDelta, TextEvent, Widget,
 };
 use masonry::kurbo::Size;
 use masonry::peniko::Fill;
 use masonry::vello::Scene;
 
 use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
-use crate::editor::{EditorCommand, EditorSurface, background_color};
+use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, background_color};
+use crate::protocol::{BehaviorManifest, KeyCode, KeyModifiers, KeyStroke};
 
 #[derive(Debug)]
 pub enum EditorAction {
     ExitRequested,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EditorWidget {
     editor: EditorSurface,
     edit_queue: Option<ClientEditQueue>,
     next_transaction_id: u64,
+}
+
+impl Default for EditorWidget {
+    fn default() -> Self {
+        let mut editor = EditorSurface::default();
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(0));
+        Self {
+            editor,
+            edit_queue: None,
+            next_transaction_id: 1,
+        }
+    }
 }
 
 impl EditorWidget {
@@ -47,16 +60,22 @@ impl EditorWidget {
     }
 
     pub fn apply_connection_event(&mut self, event: ClientConnectionEvent) -> bool {
-        let ClientConnectionEvent::ResyncSnapshot(snapshot) = event else {
-            return false;
-        };
-        self.editor.load_snapshot(
-            snapshot.document_id,
-            snapshot.version,
-            snapshot.text,
-            snapshot.access,
-        );
-        true
+        match event {
+            ClientConnectionEvent::ResyncSnapshot(snapshot) => {
+                self.editor.load_snapshot(
+                    snapshot.document_id,
+                    snapshot.version,
+                    snapshot.text,
+                    snapshot.access,
+                );
+                true
+            }
+            ClientConnectionEvent::BehaviorManifestInstalled { manifest, .. } => {
+                self.editor.install_behavior_manifest(manifest);
+                false
+            }
+            _ => false,
+        }
     }
 
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
@@ -75,6 +94,29 @@ impl EditorWidget {
         ctx.set_handled();
     }
 
+    fn local_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
+        let outcome = self.editor.route_key_with_event(&key);
+        self.finish_local_outcome(ctx, outcome.command_outcome);
+        if outcome.server_intent.is_some() {
+            ctx.set_handled();
+        }
+    }
+
+    fn finish_local_outcome(&mut self, ctx: &mut EventCtx<'_>, outcome: EditorCommandOutcome) {
+        if let Some(event) = outcome.edit_event
+            && let Some(edit_queue) = &self.edit_queue
+        {
+            let transaction_id = self.next_transaction_id;
+            self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+            let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+        }
+        if outcome.changed {
+            ctx.request_render();
+            ctx.request_accessibility_update();
+            ctx.set_handled();
+        }
+    }
+
     fn accessibility_label(&self) -> String {
         let text = self.editor.visible_text();
         if text.is_empty() {
@@ -82,6 +124,18 @@ impl EditorWidget {
         } else {
             text
         }
+    }
+}
+
+fn key_stroke(key: KeyCode, key_event: &KeyboardEvent) -> KeyStroke {
+    KeyStroke {
+        key,
+        modifiers: KeyModifiers {
+            shift: key_event.modifiers.shift(),
+            control: key_event.modifiers.ctrl(),
+            alt: key_event.modifiers.alt(),
+            super_key: key_event.modifiers.meta(),
+        },
     }
 }
 
@@ -158,7 +212,10 @@ impl Widget for EditorWidget {
                         self.local_command(ctx, EditorCommand::DeleteForward);
                     }
                     Key::Named(NamedKey::Enter) => {
-                        self.local_command(ctx, EditorCommand::Newline);
+                        self.local_key(ctx, key_stroke(KeyCode::Enter, key_event));
+                    }
+                    Key::Named(NamedKey::Tab) => {
+                        self.local_key(ctx, key_stroke(KeyCode::Tab, key_event));
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
                         let command = if key_event.modifiers.shift() {
@@ -201,7 +258,10 @@ impl Widget for EditorWidget {
                     Key::Character(text)
                         if !key_event.modifiers.ctrl() && !key_event.modifiers.meta() =>
                     {
-                        self.local_command(ctx, EditorCommand::Insert(text));
+                        self.local_key(
+                            ctx,
+                            key_stroke(KeyCode::Character(text.to_string()), key_event),
+                        );
                     }
                     _ => {}
                 }

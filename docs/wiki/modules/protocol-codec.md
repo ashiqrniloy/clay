@@ -23,9 +23,9 @@ The protocol module defines the shared client/server IPC message contract. It us
 
 `DocumentAccess::Editable { lease_id }` records the editable lease in the access state, while read-only observers use `DocumentAccess::ReadOnly`. Region-lock conflicts are described by `RegionLockConflict` and `LockOwner` metadata so later UI/AI phases can explain why an overlapping edit was rejected without granting AI, extension, file, shell, or network authority.
 
-`BehaviorManifest::minimal_text_editing` declares predictable built-in text editing capabilities only; it is data, not script code.
+`BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, key bindings, command declarations, routing policies, and editor rules; it is data, not script code.
 
-`Codec` in `src/protocol/codec.rs` serializes a client or server message with `rkyv::to_bytes`, checks the payload against `max_frame_size`, then prefixes the payload with its 32-bit length. Decode first validates the declared length against the configured maximum and the actual payload size. It then copies the payload into an aligned `rkyv::util::AlignedVec` before calling `rkyv::from_bytes`, which performs checked archived-byte validation through `bytecheck` before deserializing to the owned message type.
+`Codec` in `src/protocol/codec.rs` serializes a client or server message with `rkyv::to_bytes`, checks the payload against `max_frame_size`, then prefixes the payload with its 32-bit length. Decode first validates the declared length against the configured maximum and the actual payload size. It then copies the payload into an aligned `rkyv::util::AlignedVec` before calling `rkyv::from_bytes`, which performs checked archived-byte validation through `bytecheck` before deserializing to the owned message type. Behavior manifest publications and behavior-version rejection messages cross this same boundary; there is no manifest-specific serialization side channel.
 
 ## Code Examples
 
@@ -49,12 +49,13 @@ let message = codec.decode_client_message(&frame)?;
 
 ## Tests
 
-- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifests, lease/version edit deltas, stale-edit rejection, resync snapshots, and region-lock rejection metadata.
-- `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames and invalid archived bytes.
+- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, and region-lock rejection metadata.
+- `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, and invalid server/manifest archived bytes.
 - Relevant command: `cargo test protocol`.
 
 ## Related
 
+- [Behavior Manifests](behavior-manifests.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`

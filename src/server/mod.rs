@@ -1,3 +1,4 @@
+mod behavior;
 mod connection;
 mod document;
 
@@ -16,7 +17,9 @@ use tokio::{net::UnixListener, sync::Mutex, task::JoinSet};
 
 use crate::protocol::codec::Codec;
 
-use self::{connection::handle_connection, document::DocumentState};
+use self::{
+    behavior::ActiveBehaviorManifest, connection::handle_connection, document::DocumentState,
+};
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -36,6 +39,7 @@ pub struct IpcServer {
     config: ServerConfig,
     codec: Codec,
     document: Arc<Mutex<DocumentState>>,
+    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     next_client_id: AtomicU64,
 }
 
@@ -45,6 +49,7 @@ impl IpcServer {
             config,
             codec: Codec::default(),
             document: Arc::new(Mutex::new(DocumentState::default())),
+            behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
             next_client_id: AtomicU64::new(1),
         }
     }
@@ -62,9 +67,10 @@ impl IpcServer {
                     let (stream, _address) = accepted.map_err(ServerError::Accept)?;
                     let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
                     let document = Arc::clone(&self.document);
+                    let behavior = Arc::clone(&self.behavior);
                     let codec = self.codec;
                     connections.spawn(async move {
-                        if let Err(error) = handle_connection(stream, client_id, document, codec).await {
+                        if let Err(error) = handle_connection(stream, client_id, document, behavior, codec).await {
                             eprintln!("clay server connection {client_id} closed with error: {error}");
                         }
                     });
@@ -174,7 +180,7 @@ mod tests {
 
     use tokio::{net::UnixStream, sync::Mutex};
 
-    use super::{IpcServer, ServerConfig};
+    use super::{ActiveBehaviorManifest, IpcServer, ServerConfig};
     use crate::{
         protocol::{
             ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
@@ -198,6 +204,7 @@ mod tests {
             config: ServerConfig::new(socket_path),
             codec: Codec::default(),
             document: Arc::new(Mutex::new(document)),
+            behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
             next_client_id: AtomicU64::new(1),
         }
     }

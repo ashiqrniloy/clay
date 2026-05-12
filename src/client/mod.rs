@@ -1,3 +1,5 @@
+pub(crate) mod behavior;
+
 #[cfg(unix)]
 use std::path::Path;
 use std::{
@@ -7,9 +9,9 @@ use std::{
 
 use crate::editor::EditorEditEvent;
 use crate::protocol::{
-    BehaviorManifest, ClientId, ClientMessage, DocumentAccess, DocumentId, DocumentVersion,
-    EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode, ServerMessage,
-    TransactionId,
+    BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, DocumentAccess, DocumentId,
+    DocumentVersion, EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode,
+    ServerMessage, TransactionId,
     codec::{Codec, CodecError},
 };
 
@@ -258,6 +260,14 @@ pub enum ClientConnectionEvent {
         transaction_id: TransactionId,
         reason: EditRejection,
     },
+    BehaviorManifestInstalled {
+        behavior_version: BehaviorVersion,
+        manifest: BehaviorManifest,
+    },
+    BehaviorManifestRejected {
+        behavior_version: BehaviorVersion,
+        reason: String,
+    },
     ResyncSnapshot(ClientResyncSnapshot),
     EditTransaction(ServerMessage),
     ServerError {
@@ -348,6 +358,10 @@ pub async fn connect_from_stream(
         .with_authority(initial_state.client_id, &initial_state.access)
         .with_confirmed_version(initial_state.document_version);
     let sync_state = Arc::clone(&edit_queue.sync_state);
+    let behavior_state = Arc::new(Mutex::new(
+        behavior::ClientBehaviorState::new(initial_state.behavior_manifest.clone())
+            .map_err(|_| ClientBootstrapError::UnexpectedMessage("invalid BehaviorManifest"))?,
+    ));
     let (event_sender, events) = mpsc::channel(EDIT_QUEUE_CAPACITY);
     tokio::spawn(run_connection(
         stream,
@@ -355,6 +369,7 @@ pub async fn connect_from_stream(
         outgoing_edits,
         event_sender,
         sync_state,
+        behavior_state,
         initial_state.client_id,
     ));
 
@@ -411,7 +426,11 @@ async fn handshake_initial_state(
         };
 
     let behavior_manifest = match codec.read_server_message(&mut *stream).await? {
-        ServerMessage::BehaviorManifest(manifest) => manifest,
+        ServerMessage::BehaviorManifest(manifest) => {
+            behavior::ClientBehaviorState::new(manifest.clone())
+                .map_err(|_| ClientBootstrapError::UnexpectedMessage("invalid BehaviorManifest"))?;
+            manifest
+        }
         ServerMessage::Error { code, message } => {
             return Err(ClientBootstrapError::ServerError { code, message });
         }
@@ -451,6 +470,7 @@ async fn run_connection(
     mut outgoing_edits: mpsc::Receiver<ClientMessage>,
     events: mpsc::Sender<ClientConnectionEvent>,
     sync_state: Arc<Mutex<ClientSyncState>>,
+    behavior_state: Arc<Mutex<behavior::ClientBehaviorState>>,
     client_id: ClientId,
 ) {
     let (mut reader, mut writer) = stream.into_split();
@@ -509,6 +529,24 @@ async fn run_connection(
                     Ok(message @ ServerMessage::EditTransaction { .. }) => {
                         let _ = events.send(ClientConnectionEvent::EditTransaction(message)).await;
                     }
+                    Ok(ServerMessage::BehaviorManifest(manifest)) => {
+                        let behavior_version = manifest.behavior_version;
+                        let install_result = behavior_state
+                            .lock()
+                            .expect("client behavior state poisoned")
+                            .install_replacement(manifest.clone());
+                        match install_result {
+                            Ok(()) => {
+                                let _ = events.send(ClientConnectionEvent::BehaviorManifestInstalled { behavior_version, manifest }).await;
+                            }
+                            Err(error) => {
+                                let _ = events.send(ClientConnectionEvent::BehaviorManifestRejected {
+                                    behavior_version,
+                                    reason: format!("{error:?}"),
+                                }).await;
+                            }
+                        }
+                    }
                     Ok(ServerMessage::Error { code, message }) => {
                         let _ = events.send(ClientConnectionEvent::ServerError { code, message }).await;
                     }
@@ -544,8 +582,8 @@ mod tests {
     };
     use crate::editor::EditorEditEvent;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, EditRejection,
-        PROTOCOL_VERSION, ServerMessage, codec::Codec,
+        BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess, EditOperation,
+        EditRejection, PROTOCOL_VERSION, ServerMessage, codec::Codec,
     };
     use crate::server::{IpcServer, ServerConfig};
 
@@ -717,6 +755,32 @@ mod tests {
 
         assert!(queue.enqueue_edit_event(event.clone(), 1).is_ok());
         assert!(queue.enqueue_edit_event(event, 2).is_err());
+        assert_eq!(queue.sync_snapshot().pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn client_hot_path_does_not_await_full_ipc_queue() {
+        let (queue, _receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(0, &DocumentAccess::Editable { lease_id: 1 });
+        let event = EditorEditEvent {
+            document_id: 1,
+            base_version: 2,
+            behavior_version: 3,
+            operation: EditOperation::Insert {
+                byte_offset: 0,
+                text: "x".to_string(),
+            },
+        };
+        queue.enqueue_edit_event(event.clone(), 1).unwrap();
+
+        let started = std::time::Instant::now();
+        let result = queue.enqueue_edit_event(event, 2);
+
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(50),
+            "full queue should fail through try_send instead of awaiting capacity"
+        );
         assert_eq!(queue.sync_snapshot().pending.len(), 1);
     }
 
@@ -1159,6 +1223,121 @@ mod tests {
         let session = connect_from_stream(client, codec).await.unwrap();
 
         assert_eq!(session.initial_state.behavior_manifest.behavior_version, 44);
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_installs_behavior_manifest_replacement_event() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 2,
+                        version: 3,
+                        text: String::new(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(5)),
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::BehaviorManifestInstalled {
+                behavior_version: 5,
+                manifest: BehaviorManifest::minimal_text_editing(5),
+            }
+        );
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_rejects_invalid_behavior_manifest_replacement_event() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let codec = Codec::default();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 2,
+                        version: 3,
+                        text: String::new(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                )
+                .await
+                .unwrap();
+            let mut invalid = BehaviorManifest::minimal_text_editing(5);
+            invalid
+                .commands
+                .push(CommandDeclaration::client_edit("text.insert", "Duplicate"));
+            codec
+                .write_server_message(&mut server, &ServerMessage::BehaviorManifest(invalid))
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+
+        assert!(matches!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::BehaviorManifestRejected {
+                behavior_version: 5,
+                ..
+            }
+        ));
         server_task.await.unwrap();
     }
 
