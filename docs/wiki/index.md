@@ -8,6 +8,7 @@
 - [Server Document State](modules/server-document-state.md): Server-owned canonical `crop::Rope` text, version enforcement, lease validation, region-lock enforcement, acknowledgement/resync generation, and tests.
 - [Client Snapshot Bootstrap](modules/client-snapshot-bootstrap.md): Native app client bootstrap, server snapshot loading, editable/read-only access storage, behavior manifest storage, editor state reset, and tests.
 - [Clay JS Facade Skeleton](modules/clay-js-facade-skeleton.md): Planned Clay JavaScript/TypeScript facade source tree, domain modules, typed planned stubs, authority boundaries, and validation tests.
+- [Clay JS Documentation Registry](modules/clay-js-doc-registry.md): Markdown-derived generated Clay JS API registry artifacts, stale checks, update command, validation rules, and tests.
 
 ## Flows
 

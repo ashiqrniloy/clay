@@ -16,7 +16,7 @@
 
 ## Tasks
 
-- [ ] Reconcile Phase 8 prerequisites from earlier plans
+- [x] Reconcile Phase 8 prerequisites from earlier plans
   - Acceptance Criteria:
     - Functional: Review checked implementations in `plans/001` through `plans/008`, identify only prerequisite gaps that block Phase 8, and bring those gaps into this plan rather than modifying intentionally unchecked earlier-plan tasks.
     - Performance: The review confirms that ordinary typing/rendering remains client-local or client-first and does not wait on configuration loading, registry generation, JavaScript, IPC, AI, file IO, or full-document serialization.
@@ -49,8 +49,15 @@
       - `.agents/skills/project-patterns/references/planning-checklist.md`
   - Test Cases to Write:
     - Manual prerequisite review: Confirm Phase 4 IPC, Phase 5 synchronization/leases, Phase 6 behavior manifests, and Phase 7 API inventory/facades have passing checked-task tests, and list any blocking Phase 8 gaps before implementation proceeds.
+  - Completion Notes:
+    - Reviewed task status from `plans/001` through `plans/008`: Phase 0/1 checked tasks are complete; Phase 2 completed editor interaction while its early Clay JS facade tasks remained intentionally deferred; Phase 3 completed schema/index/naming and left per-API docs, generated registry, lookup, configuration, public API coverage, and wiki tasks deferred; Phase 4, Phase 5, and Phase 6 completed IPC, synchronization/leases, and behavior manifests while leaving recurring Clay JS/configuration verification tasks deferred; Phase 7 completed facade layout, inventory, Rust visibility audit, planned API docs/indexing, readiness validation, and public API verification while leaving configuration verification, final verification, and wiki tasks unchecked.
+    - Confirmed current Phase 8 blocking gaps are already represented in this plan: generated registry artifact/update command, read-only registry lookup, `clay:configuration` API docs/inventory/index entries for `loadConfigurationModule` and `getConfigurationState`, keybinding configuration metadata/lookup, cursor customization metadata/lookup, no-authority validation, final configuration API audit, public-surface audit, phase verification, and wiki update.
+    - Confirmed non-blocking earlier leftovers should remain in earlier plans and not be reopened here except where Phase 8 explicitly carries them forward: broad Phase 3 workflow/docs/wiki cleanup, older final verification tasks, and recurring Clay JS/configuration checks from Phases 4-7.
+    - Confirmed performance boundary from checked tests and roadmap: ordinary typing/rendering remains client-local or client-first and does not synchronously wait on configuration loading, registry generation, JavaScript, IPC, AI, file IO, or full-document serialization.
+    - Confirmed security boundary: current code/docs/tests do not introduce implicit configuration authority or arbitrary JavaScript execution in the Rust client; configuration remains no-authority-by-default and server-side runtime execution is deferred to Phase 11.
+    - Verification run: `cargo test` passed (161 lib tests, 6 main tests, 10 Clay JS API inventory tests, 2 facade layout tests, 1 Rust visibility mapping test, and doc tests).
 
-- [ ] Implement generated Clay JS API registry artifacts and stale-check command
+- [x] Implement generated Clay JS API registry artifacts and stale-check command
   - Acceptance Criteria:
     - Functional: A deterministic generator reads `docs/index.md` registry source links and Clay JS API Markdown/frontmatter, writes checked-in generated registry artifacts, and a non-mutating check mode fails when generated artifacts are stale or malformed.
     - Performance: Registry generation and checking run only in developer/test commands and add no runtime work to Masonry paint/input, IPC frame handling, or ordinary edit hot paths.
@@ -93,6 +100,12 @@
     - `generated_registry_is_current`: Fails if `docs/generated/clay-js-api-registry.json` differs from Markdown-derived output and prints `cargo run --bin update-doc-registry`.
     - `generated_registry_contains_all_indexed_public_apis`: Confirms every `docs/index.md` registry source link appears exactly once.
     - `generated_registry_preserves_configuration_metadata`: Confirms key bindings, custom properties, permissions, security notes, JS module/export, Rust owner, op name, facade path, and lookup tags survive generation.
+  - Completion Notes:
+    - Added `src/docs/registry.rs` and `src/docs/mod.rs` with std-only Clay JS API Markdown/frontmatter parsing, deterministic registry generation, duplicate-ID and schema validation, no-authority security validation, and non-mutating stale checks.
+    - Added `src/bin/update-doc-registry.rs` as the explicit developer update command and generated the checked-in artifact at `docs/generated/clay-js-api-registry.json` from `docs/index.md` registry source links.
+    - Added `tests/clay_js_doc_registry.rs` covering stale artifact detection with the `cargo run --bin update-doc-registry` repair command, exact index coverage, unique IDs, and preservation of configuration/key binding/custom property/security/facade/op/Rust-owner/lookup metadata.
+    - Updated the implementation wiki with `docs/wiki/modules/clay-js-doc-registry.md` and linked it from `docs/wiki/index.md`.
+    - Verification run: `cargo fmt --check`, `cargo test`, and `cargo check` passed.
 
 - [ ] Expose documentation registry lookup APIs for app/help/agent discovery
   - Acceptance Criteria:
