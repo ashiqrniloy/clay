@@ -1,0 +1,466 @@
+# Clay JS API inventory for Phase 7.
+#
+# This file classifies current Clay functionality by public Clay JS API
+# authority, runtime path, and implementation ownership. It is planning and
+# validation input only; it does not expose Rust functions, execute JavaScript,
+# or grant permissions.
+
+[[api]]
+id = "clay.editor.serverInsertText"
+category = "text-insertion"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "serverInsertText"
+user_facing_name = "Insert Text"
+authority = "server-authoritative-document-mutation"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Ordinary typed characters are currently client-first predictable through the behavior manifest and are enqueued asynchronously; this API is the future authoritative programmatic mutation path."
+facade_path = "runtime/js/editor.ts::serverInsertText"
+backing_rust = "src/server/document.rs::DocumentState::apply_edit"
+deno_op = "op_clay_editor_insert_text"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_insert_text"
+documentation_path = "docs/reference/clay-js-api/editor/server-insert-text.md"
+key_bindings = []
+custom_properties = ["normalizeLineEndings:boolean=true"]
+permissions = ["document-edit"]
+security_notes = "Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::insert_text_with_event; src/server/document.rs::DocumentState::apply_edit"
+registry_public = true
+
+[[api]]
+id = "clay.editor.serverInsertNewline"
+category = "newline"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "serverInsertNewline"
+user_facing_name = "Insert Newline"
+authority = "server-authoritative-document-mutation-with-behavior-context"
+runtime_path = "client-first-predictable-hot-path-and-server-ack"
+hot_path_policy = "Enter is routed locally through the active behavior manifest for indentation/comment continuation, then emitted asynchronously as an edit transaction."
+facade_path = "runtime/js/editor.ts::serverInsertNewline"
+backing_rust = "src/editor/surface.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit"
+deno_op = "op_clay_editor_insert_newline"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_insert_newline"
+documentation_path = "docs/reference/clay-js-api/editor/server-insert-newline.md"
+key_bindings = ["Enter"]
+custom_properties = ["enterRule:manifest=PreserveLeadingWhitespace", "commentContinuation:manifest=//"]
+permissions = ["document-edit"]
+security_notes = "Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::newline_text_at; src/client/behavior.rs::ClientBehaviorState::route_key"
+registry_public = true
+
+[[api]]
+id = "clay.editor.serverDeleteRange"
+category = "backspace-delete"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "serverDeleteRange"
+user_facing_name = "Delete Text Range"
+authority = "server-authoritative-document-mutation"
+runtime_path = "client-first-predictable-hot-path-and-server-ack"
+hot_path_policy = "Backspace/Delete are applied locally for editable documents and emitted asynchronously when the manifest allows delete/replace operations."
+facade_path = "runtime/js/editor.ts::serverDeleteRange"
+backing_rust = "src/server/document.rs::DocumentState::apply_edit"
+deno_op = "op_clay_editor_delete_range"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_delete_range"
+documentation_path = "docs/reference/clay-js-api/editor/server-delete-range.md"
+key_bindings = ["Backspace", "Delete"]
+custom_properties = []
+permissions = ["document-edit"]
+security_notes = "Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::backspace_with_event; src/editor/surface.rs::EditorSurface::delete_forward_with_event; src/server/document.rs::DocumentState::apply_edit"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientMoveCursor"
+category = "cursor-movement"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "clientMoveCursor"
+user_facing_name = "Move Cursor"
+authority = "client-local-ui-state"
+runtime_path = "client-local-hot-path"
+hot_path_policy = "Arrow/Home/End movement updates local caret/viewport state without IPC, server work, or JavaScript."
+facade_path = "runtime/js/editor.ts::clientMoveCursor"
+backing_rust = "src/editor/surface.rs::EditorSurface::move_left"
+deno_op = "op_clay_editor_move_cursor"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_move_cursor"
+documentation_path = "docs/reference/clay-js-api/editor/client-move-cursor.md"
+key_bindings = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+Home", "Ctrl+End"]
+custom_properties = ["direction:enum", "extendSelection:boolean=false"]
+permissions = []
+security_notes = "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/cursor.rs::CursorState; src/editor/surface.rs::EditorSurface::command_with_event"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSetSelection"
+category = "selection"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "clientSetSelection"
+user_facing_name = "Set Selection"
+authority = "client-local-ui-state"
+runtime_path = "client-local-hot-path"
+hot_path_policy = "Shift-arrow and pointer-drag selection update local state and are not serialized unless followed by a document edit."
+facade_path = "runtime/js/editor.ts::clientSetSelection"
+backing_rust = "src/editor/selection.rs::SelectionState"
+deno_op = "op_clay_editor_set_selection"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_selection"
+documentation_path = "docs/reference/clay-js-api/editor/client-set-selection.md"
+key_bindings = ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag"]
+custom_properties = []
+permissions = []
+security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::extend_selection_to_point; src/editor/surface.rs::EditorSurface::select_left"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientScrollTo"
+category = "scrolling"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "clientScrollTo"
+user_facing_name = "Scroll Editor"
+authority = "client-local-ui-state"
+runtime_path = "client-local-hot-path"
+hot_path_policy = "Wheel/page/line scrolling updates viewport and visual overflow locally during input handling."
+facade_path = "runtime/js/editor.ts::clientScrollTo"
+backing_rust = "src/editor/viewport.rs::Viewport::scroll_lines"
+deno_op = "op_clay_editor_scroll_to"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_scroll_to"
+documentation_path = "docs/reference/clay-js-api/editor/client-scroll-to.md"
+key_bindings = ["PointerScroll"]
+custom_properties = ["line:number", "column:number", "revealCursor:boolean=false"]
+permissions = []
+security_notes = "Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::scroll_lines; src/editor/surface.rs::EditorSurface::scroll_vertical_pixels"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSetViewport"
+category = "resize-viewport"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "clientSetViewport"
+user_facing_name = "Set Editor Viewport"
+authority = "client-local-ui-state"
+runtime_path = "client-local-layout-paint"
+hot_path_policy = "Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC."
+facade_path = "runtime/js/editor.ts::clientSetViewport"
+backing_rust = "src/editor/surface.rs::EditorSurface::update_visible_line_count_for_height"
+deno_op = "op_clay_editor_set_viewport"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_viewport"
+documentation_path = "docs/reference/clay-js-api/editor/client-set-viewport.md"
+key_bindings = []
+custom_properties = ["visibleLineCount:number", "overscanLines:number=4"]
+permissions = []
+security_notes = "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/viewport.rs::Viewport; src/editor/buffer.rs::EditorBuffer::visible_snapshot"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSetCursorStyle"
+category = "cursor-style-customization"
+visibility = "public"
+status = "planned"
+js_module = "clay:editor"
+js_export = "clientSetCursorStyle"
+user_facing_name = "Set Cursor Style"
+authority = "configuration-driven-client-ui-state"
+runtime_path = "configuration-api-to-client-ui"
+hot_path_policy = "Cursor styling is paint-time UI metadata; changing it must not route ordinary keypresses through JavaScript."
+facade_path = "runtime/js/editor.ts::clientSetCursorStyle"
+backing_rust = "src/editor/surface.rs::EditorSurface::paint_caret"
+deno_op = "op_clay_editor_set_cursor_style"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_cursor_style"
+documentation_path = "docs/reference/clay-js-api/editor/client-set-cursor-style.md"
+key_bindings = []
+custom_properties = ["color:string=inherited", "blinking:boolean=true", "type:enum=bar"]
+permissions = []
+security_notes = "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::CARET_COLOR; src/editor/surface.rs::CARET_WIDTH"
+registry_public = true
+
+[[api]]
+id = "clay.keybindings.bindKey"
+category = "key-binding-management"
+visibility = "public"
+status = "planned"
+js_module = "clay:keybindings"
+js_export = "bindKey"
+user_facing_name = "Bind Key"
+authority = "configuration-api"
+runtime_path = "server-side-configuration-to-behavior-manifest"
+hot_path_policy = "Binding keys updates future inert behavior manifests; the Rust client executes the resulting manifest without arbitrary JavaScript."
+facade_path = "runtime/js/keybindings.ts::bindKey"
+backing_rust = "src/protocol/mod.rs::KeyBindingRule"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/keybindings/bind-key.md"
+key_bindings = []
+custom_properties = ["key:string", "command:string", "scope:enum=editor", "when:string"]
+permissions = []
+security_notes = "May bind only documented Clay command/API IDs unless a future permissioned extension command is registered; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs::KeyBindingRule; src/client/behavior.rs::ClientBehaviorState::route_key"
+registry_public = true
+
+[[api]]
+id = "clay.keybindings.unbindKey"
+category = "key-binding-management"
+visibility = "public"
+status = "planned"
+js_module = "clay:keybindings"
+js_export = "unbindKey"
+user_facing_name = "Unbind Key"
+authority = "configuration-api"
+runtime_path = "server-side-configuration-to-behavior-manifest"
+hot_path_policy = "Unbinding affects future manifest routing only and must not execute JavaScript in keypress handlers."
+facade_path = "runtime/js/keybindings.ts::unbindKey"
+backing_rust = "src/protocol/mod.rs::KeyBindingRule"
+deno_op = "op_clay_keybindings_unbind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_unbind_key"
+documentation_path = "docs/reference/clay-js-api/keybindings/unbind-key.md"
+key_bindings = []
+custom_properties = ["key:string", "scope:enum=editor", "when:string"]
+permissions = []
+security_notes = "Changes documented key routing only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs::KeyBindingRule"
+registry_public = true
+
+[[api]]
+id = "clay.keybindings.listKeyBindings"
+category = "key-binding-management"
+visibility = "public"
+status = "planned"
+js_module = "clay:keybindings"
+js_export = "listKeyBindings"
+user_facing_name = "List Key Bindings"
+authority = "configuration-query-api"
+runtime_path = "server-side-query"
+hot_path_policy = "Listing key bindings is a background/help/configuration query and is not part of ordinary keypress handling."
+facade_path = "runtime/js/keybindings.ts::listKeyBindings"
+backing_rust = "src/protocol/mod.rs::BehaviorManifest::minimal_text_editing"
+deno_op = "op_clay_keybindings_list_keybindings"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_list_keybindings"
+documentation_path = "docs/reference/clay-js-api/keybindings/list-key-bindings.md"
+key_bindings = []
+custom_properties = ["scope:enum=all"]
+permissions = []
+security_notes = "Returns documented key binding metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs::BehaviorManifest; src/protocol/mod.rs::KeyBindingRule"
+registry_public = true
+
+[[api]]
+id = "clay.behavior.getActiveBehaviorManifest"
+category = "behavior-manifest-routing"
+visibility = "public"
+status = "planned"
+js_module = "clay:behavior"
+js_export = "getActiveBehaviorManifest"
+user_facing_name = "Get Active Behavior Manifest"
+authority = "server-owned-behavior-query"
+runtime_path = "background-query"
+hot_path_policy = "Queries manifest metadata for help/agents/configuration; hot-path routing uses the already-installed inert manifest locally."
+facade_path = "runtime/js/behavior.ts::getActiveBehaviorManifest"
+backing_rust = "src/client/behavior.rs::ClientBehaviorState::active_manifest"
+deno_op = "op_clay_behavior_get_active_manifest"
+deno_op_path = "src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest"
+documentation_path = "docs/reference/clay-js-api/behavior/get-active-behavior-manifest.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Exposes behavior metadata, not executable JavaScript; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/behavior/manifest.rs::validate_manifest; src/client/behavior.rs::ClientBehaviorState"
+registry_public = true
+
+[[api]]
+id = "clay.behavior.listBehaviorRoutes"
+category = "behavior-manifest-routing"
+visibility = "public"
+status = "planned"
+js_module = "clay:behavior"
+js_export = "listBehaviorRoutes"
+user_facing_name = "List Behavior Routes"
+authority = "server-owned-behavior-query"
+runtime_path = "background-query"
+hot_path_policy = "Route inspection is a background query; actual route decisions for keypresses remain local manifest evaluation."
+facade_path = "runtime/js/behavior.ts::listBehaviorRoutes"
+backing_rust = "src/client/behavior.rs::ClientBehaviorState::route_key"
+deno_op = "op_clay_behavior_list_routes"
+deno_op_path = "src/server/ops/behavior.rs::op_clay_behavior_list_routes"
+documentation_path = "docs/reference/clay-js-api/behavior/list-behavior-routes.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Returns inert routing metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs::RoutingPolicy; src/client/behavior.rs::ClientBehaviorState::route_key"
+registry_public = true
+
+[[api]]
+id = "clay.documents.serverGetDocumentSnapshot"
+category = "lease-read-only-state"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverGetDocumentSnapshot"
+user_facing_name = "Get Document Snapshot"
+authority = "server-authoritative-document-read"
+runtime_path = "server-first-query"
+hot_path_policy = "Snapshot/resync reads are explicit server queries and are not used for normal paint or ordinary edit updates."
+facade_path = "runtime/js/documents.ts::serverGetDocumentSnapshot"
+backing_rust = "src/server/document.rs::DocumentState::resync_snapshot_message_for_client"
+deno_op = "op_clay_documents_get_document_snapshot"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_get_document_snapshot"
+documentation_path = "docs/reference/clay-js-api/documents/server-get-document-snapshot.md"
+key_bindings = []
+custom_properties = []
+permissions = ["document-read"]
+security_notes = "Requires read access to the document; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/document.rs::DocumentState::initial_document_message; src/server/document.rs::DocumentState::resync_snapshot_message_for_client"
+registry_public = true
+
+[[api]]
+id = "clay.documents.serverGetDocumentLease"
+category = "lease-read-only-state"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverGetDocumentLease"
+user_facing_name = "Get Document Lease"
+authority = "server-authoritative-lease-query"
+runtime_path = "server-first-query"
+hot_path_policy = "Lease state is server-owned and queried outside the local input hot path."
+facade_path = "runtime/js/documents.ts::serverGetDocumentLease"
+backing_rust = "src/server/document.rs::DocumentState::acquire_access"
+deno_op = "op_clay_documents_get_document_lease"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_get_document_lease"
+documentation_path = "docs/reference/clay-js-api/documents/server-get-document-lease.md"
+key_bindings = []
+custom_properties = []
+permissions = ["document-read"]
+security_notes = "Reports or requests lease metadata according to server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/document.rs::DocumentState::acquire_access; src/server/document.rs::DocumentState::release_access"
+registry_public = true
+
+[[api]]
+id = "clay.application.quit"
+category = "escape-quit-application-actions"
+visibility = "public"
+status = "planned"
+js_module = "clay:application"
+js_export = "quit"
+user_facing_name = "Quit Clay"
+authority = "client-application-lifecycle"
+runtime_path = "client-local-application-action"
+hot_path_policy = "Escape currently submits a local application action; it does not execute JavaScript or wait on IPC."
+facade_path = "runtime/js/application.ts::quit"
+backing_rust = "src/masonry_editor.rs::EditorAction::ExitRequested"
+deno_op = "op_clay_application_quit"
+deno_op_path = "src/server/ops/application.rs::op_clay_application_quit"
+documentation_path = "docs/reference/clay-js-api/application/quit.md"
+key_bindings = ["Escape"]
+custom_properties = []
+permissions = []
+security_notes = "Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_editor.rs::EditorWidget::on_text_event; src/main.rs::Driver::on_action"
+registry_public = true
+
+[[api]]
+id = "internal.editor.buffer"
+category = "internal-only-implementation-detail"
+visibility = "internal"
+status = "current-internal"
+js_module = ""
+js_export = ""
+user_facing_name = "Editor Buffer Internal"
+authority = "client-local-implementation-detail"
+runtime_path = "client-local-hot-path"
+hot_path_policy = "Rope mutation and visible extraction are internal implementation details behind public editor APIs."
+facade_path = ""
+backing_rust = "src/editor/buffer.rs::EditorBuffer"
+deno_op = ""
+deno_op_path = ""
+documentation_path = "docs/wiki/modules/clay-js-facade-skeleton.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Not a public registry API and grants no authority."
+current_rust_owner = "src/editor/buffer.rs"
+registry_public = false
+
+[[api]]
+id = "internal.editor.layoutPaint"
+category = "internal-only-implementation-detail"
+visibility = "internal"
+status = "current-internal"
+js_module = ""
+js_export = ""
+user_facing_name = "Editor Layout and Paint Internal"
+authority = "client-local-rendering-implementation-detail"
+runtime_path = "masonry-paint-layout-hot-path"
+hot_path_policy = "Masonry paint/layout and Parley/Vello rendering remain native Rust implementation details, not Clay JS APIs."
+facade_path = ""
+backing_rust = "src/editor/layout.rs::LayoutState; src/editor/surface.rs::EditorSurface::paint"
+deno_op = ""
+deno_op_path = ""
+documentation_path = "docs/wiki/modules/clay-js-facade-skeleton.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Not a public registry API and grants no authority."
+current_rust_owner = "src/editor/layout.rs; src/editor/surface.rs"
+registry_public = false
+
+[[api]]
+id = "internal.protocol.dto"
+category = "internal-only-implementation-detail"
+visibility = "internal"
+status = "current-internal"
+js_module = ""
+js_export = ""
+user_facing_name = "Protocol DTO Internal"
+authority = "wire-protocol-implementation-detail"
+runtime_path = "local-ipc-codec"
+hot_path_policy = "Wire DTOs are serialization contracts for local IPC and are not the user-facing Clay JS API."
+facade_path = ""
+backing_rust = "src/protocol/mod.rs"
+deno_op = ""
+deno_op_path = ""
+documentation_path = "docs/wiki/modules/protocol-codec.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Not a public registry API and grants no authority."
+current_rust_owner = "src/protocol/mod.rs"
+registry_public = false
+
+[[api]]
+id = "internal.server.ipcRuntime"
+category = "internal-only-server-infrastructure"
+visibility = "internal"
+status = "current-internal"
+js_module = ""
+js_export = ""
+user_facing_name = "Server IPC Runtime Internal"
+authority = "server-process-and-local-ipc-infrastructure"
+runtime_path = "unix-socket-server-runtime"
+hot_path_policy = "Server listener startup, accept loop, and IPC error handling are process infrastructure, not Clay JS APIs or editor input hot-path behavior."
+facade_path = ""
+backing_rust = "src/server/mod.rs::ServerConfig; src/server/mod.rs::IpcServer; src/server/mod.rs::ServerError"
+deno_op = ""
+deno_op_path = ""
+documentation_path = "docs/wiki/modules/protocol-codec.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Not a public registry API and grants no authority."
+current_rust_owner = "src/server/mod.rs::ServerConfig; src/server/mod.rs::IpcServer; src/server/mod.rs::ServerError"
+registry_public = false

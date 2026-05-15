@@ -19,7 +19,7 @@
 
 ## Tasks
 
-- [ ] Define the Clay JS facade source tree and module layout
+- [x] Define the Clay JS facade source tree and module layout
   - Acceptance Criteria:
     - Functional: The repository contains an initial JS/TS facade source-tree skeleton for domain modules, with public exports represented as typed planned stubs or documented placeholders rather than raw op calls.
     - Performance: The facade layout introduces no runtime work in Masonry paint/input handlers and no synchronous keypress -> IPC -> JavaScript -> IPC -> paint path.
@@ -60,17 +60,24 @@
       - `runtime/js/behavior.ts`: Planned behavior manifest/query facade exports.
       - `runtime/js/mod.ts`: Re-export or document module entry points.
       - `runtime/js/README.md`: Explain facade status, module specifiers, and why raw ops are not user-facing.
-      - `docs/reference/clay-js-api/schema.md`: Update only if the skeleton reveals a necessary schema clarification.
+      - `tests/clay_js_facade_layout.rs`: Deterministic facade layout, export, and naming/boundary checks.
+      - `docs/wiki/modules/clay-js-facade-skeleton.md` and `docs/wiki/index.md`: Implementation wiki coverage for the new skeleton.
+      - `docs/reference/clay-js-api/schema.md`: No update needed; the existing schema already covered the skeleton boundary.
     - References:
       - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
       - `.agents/skills/project-patterns/references/clay-js-api-naming.md`
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - Context7 `/denoland/deno_core` op/extension documentation.
-  - Test Cases to Write:
-    - Facade export smoke test or deterministic script: Confirms every inventory-listed JS facade path/export exists or is explicitly marked planned.
-    - Naming check: Rejects redundant names such as `clayEditorInsertText`, raw `op_*` exports, and missing `server*`/`client*` authority markers for editor-core state APIs.
+  - Test Cases Written:
+    - `tests/clay_js_facade_layout.rs::clay_js_facade_modules_exist_with_expected_exports`: Confirms initial domain facade paths and planned exports exist.
+    - `tests/clay_js_facade_layout.rs::clay_js_facade_exports_follow_naming_and_boundary_rules`: Rejects raw op-shaped exports, redundant names, and raw `Deno.core.ops` calls from facade files.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test clay_js_facade --test clay_js_facade_layout`
+    - `cargo test`
+    - `cargo check`
 
-- [ ] Inventory current functionality and classify API authority/runtime paths
+- [x] Inventory current functionality and classify API authority/runtime paths
   - Acceptance Criteria:
     - Functional: Current functionality is inventoried for text insertion, newline, Backspace/Delete, cursor movement, selection, scrolling, resize/viewport behavior, cursor style/customization, key binding management, behavior manifest routing, lease/read-only state, and Escape/quit/application actions.
     - Performance: The inventory classifies hot-path client-first behavior separately from server-first or background work and records that ordinary typing remains local and asynchronous to the server.
@@ -118,12 +125,15 @@
       - `.agents/skills/project-patterns/references/behavior-manifests.md`
       - `.agents/skills/project-patterns/references/clay-js-api-schema.md`
       - `docs/reference/clay-js-api/schema.md`
-  - Test Cases to Write:
-    - `api_inventory_has_required_fields`: Every inventory entry has ID, module/export, user-facing name, authority, runtime path, docs path, permissions, key binding metadata, and status.
-    - `api_inventory_classifies_current_editor_behavior`: Required Phase 7 functionality categories are present and classified.
-    - `api_inventory_does_not_mark_internal_details_public`: Internal implementation entries are not listed as public registry APIs.
+  - Test Cases Written:
+    - `tests/clay_js_api_inventory.rs::api_inventory_has_required_fields`: Every public inventory entry has ID, module/export, user-facing name, authority, runtime path, docs path, permissions, key binding metadata, security notes, and status; IDs are unique.
+    - `tests/clay_js_api_inventory.rs::api_inventory_classifies_current_editor_behavior`: Required Phase 7 functionality categories are present and hot-path entries record asynchronous server behavior.
+    - `tests/clay_js_api_inventory.rs::api_inventory_does_not_mark_internal_details_public`: Internal implementation entries are classified as internal, excluded from public registry generation, and have no JS module/export.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test --test clay_js_api_inventory`
 
-- [ ] Audit Rust visibility and map intended public capabilities to facades and future ops
+- [x] Audit Rust visibility and map intended public capabilities to facades and future ops
   - Acceptance Criteria:
     - Functional: Existing Rust public items are reviewed, server-side public programmatic capabilities are mapped to Clay JS facade exports and future `deno_core` op names, and non-public implementation details are made private or `pub(crate)` where practical without breaking intended crate tests.
     - Performance: Visibility and mapping changes do not alter edit hot-path behavior or introduce new synchronization/serialization work.
@@ -141,7 +151,7 @@
       - Leave all current visibility unchanged and only document later: easy, but conflicts with the approved API boundary.
       - Perform a surgical visibility audit: convert clear internals to `pub(crate)`, keep protocol DTOs and necessary crate-facing types public, and record unresolved exposure decisions in the inventory.
     - Chosen Approach:
-      - Use `cargo check` and targeted code review to identify externally visible server/editor items. Change only obvious internals to `pub(crate)` in Phase 7, and record each intentionally public capability's facade/op/docs mapping.
+      - Used `rg`/targeted review plus deterministic tests to identify externally visible server/editor items. Existing server document/behavior/connection implementation details were already `pub(crate)`, so no Rust visibility reductions were required for this task; public server process infrastructure is classified as internal/non-JS inventory or allowlisted by validation, while public capabilities remain mapped through facade/op/docs metadata.
     - API Notes and Examples:
       ```text
       Rust owner: src/server/document.rs::DocumentState::apply_edit
@@ -155,17 +165,23 @@
       - `src/server/*.rs`: Make internal server helpers private/`pub(crate)` as appropriate.
       - `src/editor.rs` and `src/editor/**`: Keep UI/editor internals private unless intentionally crate-facing.
       - `src/protocol/mod.rs`: Keep wire DTOs public where needed, but document that they are not the Clay JS user API.
-      - `docs/reference/clay-js-api/api-inventory.toml`: Record Rust owner/op/facade mapping.
+      - `docs/reference/clay-js-api/api-inventory.toml`: Record Rust owner/op/facade mapping and classify public server IPC runtime types as internal/non-JS infrastructure.
+      - `tests/clay_js_api_inventory.rs`: Add future-op/user-facing-export boundary validation.
+      - `tests/rust_visibility_api_mapping.rs`: Add deterministic server Rust visibility mapping/allowlist validation.
     - References:
       - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - `.agents/skills/project-patterns/references/maintenance-validation.md`
-  - Test Cases to Write:
-    - `server_public_items_have_api_inventory_entries_or_are_allowlisted`: Deterministic check over server Rust files catches unclassified public server items.
-    - `inventory_future_ops_are_not_user_facing_exports`: Ensures JS exports do not start with raw `op_` names.
-    - Existing unit/integration tests: Confirm visibility changes do not break behavior.
+  - Test Cases Written:
+    - `tests/rust_visibility_api_mapping.rs::server_public_items_have_api_inventory_entries_or_are_allowlisted`: Deterministic check over server Rust files catches unclassified public server items.
+    - `tests/clay_js_api_inventory.rs::inventory_future_ops_are_not_user_facing_exports`: Ensures JS exports do not start with raw `op_` names and future ops remain explicit `op_clay_*` wrappers.
+    - Existing unit/integration behavior was unaffected because no Rust visibility reductions were necessary.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test --test clay_js_api_inventory`
+    - `cargo test --test rust_visibility_api_mapping`
 
-- [ ] Author planned Clay JS API reference docs and link them from the master index
+- [x] Author planned Clay JS API reference docs and link them from the master index
   - Acceptance Criteria:
     - Functional: Every inventoried public/planned API has a Markdown reference path or explicitly documented deferred status, with required frontmatter/body fields where full API docs are authored.
     - Performance: Documentation and registry preparation remain offline developer/test work and add no runtime editor hot-path cost.
@@ -208,18 +224,22 @@
       - `docs/reference/clay-js-api/keybindings/bind-key.md`: Planned key binding management API.
       - `docs/reference/clay-js-api/behavior/get-active-behavior-manifest.md`: Planned behavior discovery/query API.
       - `docs/reference/clay-js-api/application/quit.md`: Planned quit/application action API, if classified public.
+      - `docs/reference/clay-js-api/editor/server-insert-newline.md`, `editor/client-set-viewport.md`, `keybindings/unbind-key.md`, `keybindings/list-key-bindings.md`, `behavior/list-behavior-routes.md`, `documents/server-get-document-snapshot.md`, and `documents/server-get-document-lease.md`: Additional public inventory API docs authored because the inventory classified them as public planned APIs.
       - `docs/index.md`: Add every public API page to the registry source list.
     - References:
       - `docs/reference/clay-js-api/schema.md`
       - `.agents/skills/project-patterns/references/clay-js-api-schema.md`
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - `.agents/skills/project-patterns/references/doc-registry-tests.md`
-  - Test Cases to Write:
-    - `clay_js_api_docs_have_required_frontmatter`: Validates required schema fields for all linked API docs.
-    - `docs_index_links_all_public_inventory_docs`: Fails when public inventory docs are not linked from `docs/index.md`.
-    - `api_docs_match_inventory_ids_and_exports`: Fails when docs and inventory disagree on stable IDs, modules, exports, or facade paths.
+  - Test Cases Written:
+    - `tests/clay_js_api_inventory.rs::clay_js_api_docs_have_required_frontmatter_and_body_sections`: Validates required schema fields, required body headings, security notes, lookup tags, and TypeScript usage examples for all public API docs.
+    - `tests/clay_js_api_inventory.rs::docs_index_links_all_public_inventory_docs`: Fails when public inventory docs are not linked from `docs/index.md`.
+    - `tests/clay_js_api_inventory.rs::api_docs_match_inventory_ids_and_exports`: Fails when docs and inventory disagree on stable IDs, modules, exports, facade paths, Rust owners, op names, or user-facing names.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test --test clay_js_api_inventory`
 
-- [ ] Create deterministic inventory, naming, and registry-readiness validation
+- [x] Create deterministic inventory, naming, and registry-readiness validation
   - Acceptance Criteria:
     - Functional: `cargo test` or a deterministic repository check fails when inventory entries, facade exports, docs, master-index links, key binding metadata, custom property metadata, or naming rules are missing or stale.
     - Performance: Validation runs only in tests/developer commands, not in editor runtime, IPC handlers, or Masonry paint/input handlers.
@@ -236,7 +256,7 @@
       - Build the full generated registry and lookup API now: ideal eventually, but may exceed Phase 7 if Phase 3 generator infrastructure is absent.
       - Add focused validation tests now and leave full registry generation to the resumed Phase 3 tasks: good coverage without overbuilding.
     - Chosen Approach:
-      - Add validation tests or a small internal checker module for inventory/docs/index/facade consistency. If the registry generator already exists by implementation time, wire it into the checks; otherwise fail with a clear message describing the future generator command expected by Phase 3.
+      - Added focused non-mutating validation tests for inventory/docs/index/facade consistency, naming rules, security metadata, key binding metadata, and custom property metadata. Full generated registry/lookup artifact validation remains deferred to resumed Phase 3 generator work because no checked-in generator exists yet; the new tests validate registry readiness from the authoritative Markdown/index inputs without mutating artifacts.
     - API Notes and Examples:
       ```rust
       #[test]
@@ -247,20 +267,27 @@
       }
       ```
     - Files to Create/Edit:
-      - `tests/clay_js_api_inventory.rs` or `src/docs_validation.rs`: Deterministic validation of inventory/docs/index/facade consistency.
-      - `Cargo.toml`: Add dev-dependencies only if necessary for parsing; prefer minimal parsing if practical.
-      - `docs/reference/clay-js-api/api-inventory.toml`: Adjust schema to support validation.
-      - `docs/index.md`: Keep index links aligned with validation expectations.
+      - `tests/clay_js_api_inventory.rs`: Deterministic validation of inventory/docs/index/facade consistency, naming rules, and metadata completeness.
+      - `tests/clay_js_facade_layout.rs`: Extended facade export smoke coverage for newly validated editor/application exports.
+      - `runtime/js/editor.ts`: Added planned facade stubs for inventory-listed editor APIs that validation now checks.
+      - `runtime/js/application.ts`: Added the planned application lifecycle facade stub used by the public `quit` API inventory entry.
+      - `runtime/js/mod.ts`: Re-exported the application facade namespace.
+      - `docs/wiki/modules/clay-js-facade-skeleton.md`: Updated implementation wiki coverage for the application facade and stricter validation.
     - References:
       - `.agents/skills/project-patterns/references/maintenance-validation.md`
       - `.agents/skills/project-patterns/references/doc-registry-tests.md`
       - `docs/reference/clay-js-api/schema.md`
-  - Test Cases to Write:
-    - `clay_js_api_inventory_docs_and_index_are_consistent`: Cross-validates inventory, docs, and index links.
-    - `clay_js_api_names_follow_project_conventions`: Enforces lower-camel-case exports, authority markers, and no raw op exports.
-    - `public_api_docs_include_security_keybinding_and_custom_properties`: Validates required discoverability/security fields.
+  - Test Cases Written:
+    - `tests/clay_js_api_inventory.rs::clay_js_api_inventory_docs_and_index_are_consistent`: Cross-validates public inventory entries, per-API docs, exact `docs/index.md` registry-source links, backing implementation metadata, and facade export paths.
+    - `tests/clay_js_api_inventory.rs::clay_js_api_names_follow_project_conventions`: Enforces `clay.<module>.<export>` stable IDs, lower-camel-case exports, server/client authority markers for editor/document state APIs, and no raw op/Rust/project-shaped callable names.
+    - `tests/clay_js_api_inventory.rs::public_api_docs_include_security_keybinding_and_custom_properties`: Validates required discoverability/security fields, declared key bindings, custom property metadata in frontmatter/body content, and explicit denial of unauthorized authority.
+    - `tests/clay_js_facade_layout.rs::clay_js_facade_modules_exist_with_expected_exports`: Extended to include the application facade plus newly validated editor facade exports.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test --test clay_js_facade_layout`
+    - `cargo test --test clay_js_api_inventory`
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: The phase's public programmatic surfaces and changed Rust public functions are represented by stable Clay JS API facade exports, future op wrapper mappings, Markdown docs, master-index links, and inventory entries.
     - Performance: API verification does not add synchronous JavaScript/runtime execution to the editor hot path and keeps ordinary typing client-first/asynchronous according to behavior manifests.
@@ -293,10 +320,13 @@
       - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
       - `.agents/skills/project-patterns/references/clay-js-api-schema.md`
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
-  - Test Cases to Write:
-    - API verification tests from earlier tasks pass under `cargo test`.
-    - Manual API audit: For each changed public Rust function, confirm a Clay JS API mapping exists or the function is not public.
-    - Documentation audit: Confirm each public API has user-facing name, key bindings, custom properties, examples, permissions, backing Rust path, future op name, facade path, and lookup tags.
+  - Test Cases Written:
+    - API verification tests from earlier tasks pass under `cargo test --test clay_js_facade_layout --test clay_js_api_inventory --test rust_visibility_api_mapping`.
+    - Manual API audit: `rg '^pub ' src/server -n` plus `tests/rust_visibility_api_mapping.rs` confirmed public server Rust items are inventoried or explicitly allowlisted as non-JS server infrastructure.
+    - Documentation audit: `tests/clay_js_api_inventory.rs` confirmed each public API has user-facing name, key bindings, custom properties, examples, permissions/security notes, backing Rust path, future op name, facade path, lookup tags, and `docs/index.md` linkage.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test --test clay_js_facade_layout --test clay_js_api_inventory --test rust_visibility_api_mapping`
 
 - [ ] Create or verify Clay configuration APIs
   - Acceptance Criteria:
