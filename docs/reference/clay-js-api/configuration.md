@@ -5,8 +5,10 @@ Clay configuration is JavaScript loaded from `~/.config/clay/init.js`. The confi
 ## Configuration Entry Point
 
 - Default file: `~/.config/clay/init.js`
-- The file is loaded by Clay's server-side JavaScript runtime when configuration support is implemented.
-- `init.js` may load other local configuration files so users can keep settings modular.
+- The file is loaded by Clay's server-side JavaScript runtime when configuration support is implemented in Phase 11.
+- Phase 8 defines the public API contract only; it does not evaluate `init.js`, read arbitrary user files, or execute JavaScript in the Rust client.
+- `init.js` may load other local configuration files through [`loadConfigurationModule`](configuration/load-configuration-module.md) so users can keep settings modular.
+- App/help/agent surfaces can inspect the documented entry point shape through [`getConfigurationState`](configuration/get-configuration-state.md) once runtime state exists.
 - Configuration code must use documented Clay JS APIs instead of raw ops or Rust internals.
 
 ## Configuration as Clay JS APIs
@@ -25,8 +27,11 @@ Each configuration option is exposed as a Clay JS API. That means it must have:
 
 ```js
 // ~/.config/clay/init.js
+import { loadConfigurationModule } from "clay:configuration";
 import { bindKey } from "clay:keybindings";
 import { clientSetCursorStyle } from "clay:editor";
+
+await loadConfigurationModule({ path: "./keys.js" });
 
 bindKey("Ctrl+I", "clay.editor.serverInsertText");
 
@@ -45,4 +50,4 @@ A future `clientSetCursorStyle` API would document custom properties such as:
 
 ## Security Boundary
 
-Configuration can customize documented Clay behavior through Clay JS APIs. It must not implicitly grant filesystem, network, shell, extension loading, AI mutation, or workspace authority. Permission-bearing APIs still require explicit documented permissions and server-side validation.
+Configuration can customize documented Clay behavior through Clay JS APIs. It must not implicitly grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority. Modular loading is constrained to local configuration semantics; it is not a package manager, extension loader, workspace scanner, network fetcher, shell runner, or client-side JavaScript execution hook. Permission-bearing APIs still require explicit documented permissions and server-side validation.

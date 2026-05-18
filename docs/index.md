@@ -15,6 +15,8 @@ The generated documentation registry must read this section as the explicit incl
 - [quit](reference/clay-js-api/application/quit.md) — `clay.application.quit`
 - [getActiveBehaviorManifest](reference/clay-js-api/behavior/get-active-behavior-manifest.md) — `clay.behavior.getActiveBehaviorManifest`
 - [listBehaviorRoutes](reference/clay-js-api/behavior/list-behavior-routes.md) — `clay.behavior.listBehaviorRoutes`
+- [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `clay.configuration.getConfigurationState`
+- [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `clay.configuration.loadConfigurationModule`
 - [serverGetDocumentLease](reference/clay-js-api/documents/server-get-document-lease.md) — `clay.documents.serverGetDocumentLease`
 - [serverGetDocumentSnapshot](reference/clay-js-api/documents/server-get-document-snapshot.md) — `clay.documents.serverGetDocumentSnapshot`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `clay.editor.clientMoveCursor`

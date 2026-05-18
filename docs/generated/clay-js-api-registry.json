@@ -84,6 +84,80 @@
       "async": true
     },
     {
+      "id": "clay.configuration.getConfigurationState",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/configuration/get-configuration-state.md",
+      "js_module": "clay:configuration",
+      "js_export": "getConfigurationState",
+      "js_facade": "runtime/js/configuration.ts::getConfigurationState",
+      "backing_rust": "src/server/configuration.rs::ConfigurationState",
+      "deno_op": "op_clay_configuration_get_state",
+      "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_get_state",
+      "name": "getConfigurationState",
+      "user_facing_name": "Get Configuration State",
+      "summary": "Inspect planned Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.",
+      "owner": "server",
+      "phase": "Phase 8",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "entryPoint",
+          "type": "string",
+          "default": "~/.config/clay/init.js",
+          "description": "User configuration entry point path reported by configuration state."
+        },
+        {
+          "name": "loadedModules",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Ordered local configuration module paths once runtime loading exists."
+        }
+      ],
+      "security": "Returns configuration metadata only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
+      "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "planned",
+      "async": false
+    },
+    {
+      "id": "clay.configuration.loadConfigurationModule",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/configuration/load-configuration-module.md",
+      "js_module": "clay:configuration",
+      "js_export": "loadConfigurationModule",
+      "js_facade": "runtime/js/configuration.ts::loadConfigurationModule",
+      "backing_rust": "src/server/configuration.rs::ConfigurationRuntime::load_module",
+      "deno_op": "op_clay_configuration_load_module",
+      "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_load_module",
+      "name": "loadConfigurationModule",
+      "user_facing_name": "Load Configuration Module",
+      "summary": "Load a local modular configuration file from the planned `~/.config/clay/init.js` server-side configuration runtime.",
+      "owner": "server",
+      "phase": "Phase 8",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": "none",
+          "description": "Local configuration module path relative to `~/.config/clay/init.js`."
+        }
+      ],
+      "security": "Local modular configuration contract only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
+      "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "planned",
+      "async": true
+    },
+    {
       "id": "clay.documents.serverGetDocumentLease",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-get-document-lease.md",
@@ -237,7 +311,7 @@
       "user_facing_name": "Set Cursor Style",
       "summary": "Set Cursor Style through the planned `clay:editor` Clay JavaScript facade.",
       "owner": "client",
-      "phase": "Phase 7",
+      "phase": "Phase 8",
       "visibility": "public",
       "permissions": [],
       "key_bindings": [],
@@ -246,22 +320,22 @@
           "name": "color",
           "type": "string",
           "default": "inherited",
-          "description": "Behavior-changing setting `color` for this API."
+          "description": "Cursor color as an inherited theme value or CSS-like color string such as #ffcc00; defaults to inherited."
         },
         {
           "name": "blinking",
           "type": "boolean",
           "default": "true",
-          "description": "Behavior-changing setting `blinking` for this API."
+          "description": "Whether the caret blinks; defaults to true and remains client-local UI metadata."
         },
         {
           "name": "type",
           "type": "enum",
           "default": "bar",
-          "description": "Behavior-changing setting `type` for this API."
+          "description": "Caret shape; allowed values are block, bar, and underline, and the default is bar."
         }
       ],
-      "security": "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "security": "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
       "agent_guidance": "Use `clay.editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["cursorstylecustomization", "editor", "js-api"],
       "app_visible": true,
@@ -328,7 +402,7 @@
           "description": "Behavior-changing setting `overscanLines` for this API."
         }
       ],
-      "security": "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "security": "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
       "agent_guidance": "Use `clay.editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "resizeviewport"],
       "app_visible": true,

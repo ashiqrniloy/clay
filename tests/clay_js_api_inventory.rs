@@ -139,6 +139,36 @@ fn inventory_custom_property_names(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn denied_configuration_authorities() -> [&'static str; 9] {
+    [
+        "filesystem",
+        "network",
+        "shell",
+        "extension loading",
+        "AI mutation",
+        "workspace",
+        "package",
+        "WASM",
+        "client-side JavaScript",
+    ]
+}
+
+fn is_configuration_security_relevant(entry: &InventoryEntry) -> bool {
+    entry.get("authority").contains("configuration")
+        || entry.get("category").contains("configuration")
+        || entry.get("category") == "key-binding-management"
+        || !parse_toml_string_list(entry.get("custom_properties")).is_empty()
+}
+
+fn contains_permission_validation_note(text: &str) -> bool {
+    text.contains("server-side validation")
+        || text.contains("server validation")
+        || text.contains("runtime permission checks")
+        || text.contains("required permissions are absent")
+        || text.contains("valid lease")
+        || text.contains("editable lease")
+}
+
 fn is_lower_camel_case(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(first) if first.is_ascii_lowercase())
@@ -248,6 +278,7 @@ fn api_inventory_classifies_current_editor_behavior() {
         "resize-viewport",
         "cursor-style-customization",
         "key-binding-management",
+        "configuration-entrypoint",
         "behavior-manifest-routing",
         "lease-read-only-state",
         "escape-quit-application-actions",
@@ -543,15 +574,7 @@ fn clay_js_api_names_follow_project_conventions() {
 
 #[test]
 fn public_api_docs_include_security_keybinding_and_custom_properties() {
-    let denied_authorities = [
-        "filesystem",
-        "network",
-        "shell",
-        "extension loading",
-        "AI mutation",
-        "workspace",
-        "client-side JavaScript",
-    ];
+    let denied_authorities = denied_configuration_authorities();
 
     for entry in public_inventory_entries() {
         let id = entry.get("id");
@@ -596,5 +619,76 @@ fn public_api_docs_include_security_keybinding_and_custom_properties() {
                 "{id} security metadata/body must explicitly say it does not grant {denied} authority"
             );
         }
+    }
+}
+
+#[test]
+fn configuration_docs_deny_implicit_external_authority() {
+    for entry in public_inventory_entries()
+        .into_iter()
+        .filter(is_configuration_security_relevant)
+    {
+        let id = entry.get("id");
+        let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(entry.get("documentation_path"));
+        let fields = markdown_frontmatter(&doc_path);
+        let doc_text = fs::read_to_string(&doc_path).expect("read API doc");
+        let frontmatter_security = fields
+            .get("security")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let inventory_security = entry.get("security_notes");
+
+        for denied in denied_configuration_authorities() {
+            assert!(
+                frontmatter_security.contains(denied),
+                "{id} {} frontmatter security is missing no-authority language for {denied}",
+                entry.get("documentation_path")
+            );
+            assert!(
+                inventory_security.contains(denied),
+                "{id} {} inventory security_notes is missing no-authority language for {denied}",
+                entry.get("documentation_path")
+            );
+            assert!(
+                doc_text.contains(denied),
+                "{id} {} body is missing no-authority language for {denied}",
+                entry.get("documentation_path")
+            );
+        }
+    }
+}
+
+#[test]
+fn permission_bearing_configuration_requires_validation_notes() {
+    for entry in public_inventory_entries()
+        .into_iter()
+        .filter(is_configuration_security_relevant)
+        .filter(|entry| !parse_toml_string_list(entry.get("permissions")).is_empty())
+    {
+        let id = entry.get("id");
+        let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(entry.get("documentation_path"));
+        let fields = markdown_frontmatter(&doc_path);
+        let doc_text = fs::read_to_string(&doc_path).expect("read API doc");
+        let frontmatter_security = fields
+            .get("security")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let combined_validation_notes = format!(
+            "{}\n{}\n{}",
+            entry.get("security_notes"),
+            frontmatter_security,
+            doc_text
+        );
+
+        assert!(
+            doc_text.contains("Requires:") || doc_text.contains("required permissions"),
+            "{id} {} must document explicit required permissions in the body",
+            entry.get("documentation_path")
+        );
+        assert!(
+            contains_permission_validation_note(&combined_validation_notes),
+            "{id} {} lists permissions but is missing server-side validation notes",
+            entry.get("documentation_path")
+        );
     }
 }

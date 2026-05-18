@@ -162,7 +162,7 @@ documentation_path = "docs/reference/clay-js-api/editor/client-set-viewport.md"
 key_bindings = []
 custom_properties = ["visibleLineCount:number", "overscanLines:number=4"]
 permissions = []
-security_notes = "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+security_notes = "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority."
 current_rust_owner = "src/editor/viewport.rs::Viewport; src/editor/buffer.rs::EditorBuffer::visible_snapshot"
 registry_public = true
 
@@ -185,7 +185,7 @@ documentation_path = "docs/reference/clay-js-api/editor/client-set-cursor-style.
 key_bindings = []
 custom_properties = ["color:string=inherited", "blinking:boolean=true", "type:enum=bar"]
 permissions = []
-security_notes = "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+security_notes = "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority."
 current_rust_owner = "src/editor/surface.rs::CARET_COLOR; src/editor/surface.rs::CARET_WIDTH"
 registry_public = true
 
@@ -256,6 +256,52 @@ custom_properties = ["scope:enum=all"]
 permissions = []
 security_notes = "Returns documented key binding metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/protocol/mod.rs::BehaviorManifest; src/protocol/mod.rs::KeyBindingRule"
+registry_public = true
+
+[[api]]
+id = "clay.configuration.loadConfigurationModule"
+category = "configuration-entrypoint"
+visibility = "public"
+status = "planned"
+js_module = "clay:configuration"
+js_export = "loadConfigurationModule"
+user_facing_name = "Load Configuration Module"
+authority = "configuration-api"
+runtime_path = "server-side-configuration-loader-planned"
+hot_path_policy = "Configuration module loading is server-side planned runtime work and must not run in ordinary keypress, rendering, Masonry paint/layout, or IPC frame hot paths."
+facade_path = "runtime/js/configuration.ts::loadConfigurationModule"
+backing_rust = "src/server/configuration.rs::ConfigurationRuntime::load_module"
+deno_op = "op_clay_configuration_load_module"
+deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_load_module"
+documentation_path = "docs/reference/clay-js-api/configuration/load-configuration-module.md"
+key_bindings = []
+custom_properties = ["path:string"]
+permissions = []
+security_notes = "Local modular configuration contract only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "runtime/js/configuration.ts::loadConfigurationModule"
+registry_public = true
+
+[[api]]
+id = "clay.configuration.getConfigurationState"
+category = "configuration-entrypoint"
+visibility = "public"
+status = "planned"
+js_module = "clay:configuration"
+js_export = "getConfigurationState"
+user_facing_name = "Get Configuration State"
+authority = "configuration-query-api"
+runtime_path = "server-side-configuration-query-planned"
+hot_path_policy = "Configuration state lookup is a background/help/configuration metadata query and is not part of ordinary input, rendering, or IPC hot paths."
+facade_path = "runtime/js/configuration.ts::getConfigurationState"
+backing_rust = "src/server/configuration.rs::ConfigurationState"
+deno_op = "op_clay_configuration_get_state"
+deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_get_state"
+documentation_path = "docs/reference/clay-js-api/configuration/get-configuration-state.md"
+key_bindings = []
+custom_properties = ["entryPoint:string=~/.config/clay/init.js", "loadedModules:string[]=[]"]
+permissions = []
+security_notes = "Returns configuration metadata only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "runtime/js/configuration.ts::getConfigurationState"
 registry_public = true
 
 [[api]]

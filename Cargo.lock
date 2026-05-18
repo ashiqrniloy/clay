@@ -737,6 +737,7 @@ dependencies = [
  "parley",
  "pollster",
  "rkyv",
+ "serde_json",
  "taffy",
  "tokio",
  "vello",

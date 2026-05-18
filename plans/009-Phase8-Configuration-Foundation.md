@@ -107,7 +107,7 @@
     - Updated the implementation wiki with `docs/wiki/modules/clay-js-doc-registry.md` and linked it from `docs/wiki/index.md`.
     - Verification run: `cargo fmt --check`, `cargo test`, and `cargo check` passed.
 
-- [ ] Expose documentation registry lookup APIs for app/help/agent discovery
+- [x] Expose documentation registry lookup APIs for app/help/agent discovery
   - Acceptance Criteria:
     - Functional: Generated registry data can be queried by stable ID, JS module/export, user-facing name, kind/owner, lookup tag, key binding, and custom property name, including configuration APIs.
     - Performance: Lookup operates on generated/static registry data and is suitable for app/help/agent queries without reading full source files or regenerating docs during normal use.
@@ -142,8 +142,14 @@
     - `lookup_finds_configuration_by_custom_property`: Finds cursor style APIs by `color`, `blinking`, and `type` custom properties.
     - `lookup_lists_empty_default_key_bindings`: Confirms APIs with no defaults still expose empty `key_bindings` lists.
     - `lookup_is_read_only`: Confirms lookup does not attempt to load `~/.config/clay/init.js` or execute JavaScript.
+  - Completion Notes:
+    - Added `ClayJsApiRegistry::from_generated` and `from_generated_json` so app/help/agent discovery can load the checked-in generated JSON artifact as typed registry entries without reading source Markdown or regenerating docs in normal lookup paths.
+    - Added read-only lookup helpers for stable ID, JS module/export, user-facing name, kind/owner, lookup tag, default key binding, and custom property name. Unique lookups return `Option<&RegistryEntry>` and multi-match lookups return `Vec<&RegistryEntry>` for clear empty states.
+    - Added generated-registry lookup tests covering ID/export/name/kind-owner/tag lookup, cursor custom property discovery for `color`, `blinking`, and `type`, empty default key-binding lists, default key-binding lookup, and metadata-only/no-execution behavior.
+    - Updated `docs/wiki/modules/clay-js-doc-registry.md` with the generated-data lookup flow, APIs, invariants, and tests.
+    - Verification run: `cargo fmt --check`, `cargo test --test clay_js_doc_registry`, `cargo check`, and full `cargo test` passed.
 
-- [ ] Finalize configuration entry point and modular loading API contract
+- [x] Finalize configuration entry point and modular loading API contract
   - Acceptance Criteria:
     - Functional: `~/.config/clay/init.js` is documented as the configuration entry point, modular local loading semantics are documented as Clay JS APIs, and facade/inventory/docs agree on API names and status.
     - Performance: Configuration loading remains server-side and outside ordinary input/rendering hot paths; Phase 8 does not introduce synchronous keypress-to-JavaScript behavior.
@@ -193,8 +199,15 @@
     - `configuration_entrypoint_is_documented_and_indexed`: Confirms docs mention `~/.config/clay/init.js` and are linked/generated.
     - `configuration_facade_exports_match_inventory`: Confirms configuration facade exports match public inventory/docs.
     - `configuration_module_loading_is_planned_no_authority`: Confirms docs/security notes state local modular semantics and no implicit filesystem/workspace/package authority.
+  - Completion Notes:
+    - Added public Phase 8 Clay JS API docs for `clay.configuration.loadConfigurationModule` and `clay.configuration.getConfigurationState`, linked them from `docs/index.md`, and regenerated `docs/generated/clay-js-api-registry.json`.
+    - Updated `docs/reference/clay-js-api/configuration.md` to document `~/.config/clay/init.js` as the configuration entry point, local modular loading through `loadConfigurationModule`, configuration-state lookup through `getConfigurationState`, and the Phase 8/Phase 11 runtime boundary.
+    - Added matching public inventory entries for both `clay:configuration` exports with stable IDs, facade paths, future op names, custom properties, empty key-binding metadata, hot-path policies, and no-authority security notes.
+    - Added registry and inventory test coverage for documented/indexed configuration entry point APIs, facade/inventory/docs consistency, generated lookup metadata, and planned local modular loading without implicit filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+    - Updated implementation wiki pages for the documentation registry and Clay JS facade skeleton to explain the new configuration entry point contract.
+    - Verification run: `cargo fmt --check`, `cargo check`, and full `cargo test` passed.
 
-- [ ] Create or verify initial key binding configuration APIs
+- [x] Create or verify initial key binding configuration APIs
   - Acceptance Criteria:
     - Functional: `bindKey`, `unbindKey`, and `listKeyBindings` are documented and generated as configuration APIs, including default key binding behavior, empty defaults where applicable, scopes, `when` conditions, and command/API ID validation expectations.
     - Performance: Key binding changes update future server-owned behavior manifests and never install arbitrary JavaScript into the Rust client keypress hot path.
@@ -236,8 +249,15 @@
     - `keybinding_configuration_apis_have_empty_defaults`: Confirms management APIs expose `key_bindings: []` in generated registry.
     - `keybinding_configuration_custom_properties_are_queryable`: Confirms `key`, `command`, `scope`, and `when` are generated and lookup-visible.
     - `keybinding_docs_reject_undocumented_authority`: Confirms docs/security notes do not imply permissions beyond documented command routing.
+  - Completion Notes:
+    - Verified `bindKey`, `unbindKey`, and `listKeyBindings` are documented/indexed/generated as planned `clay:keybindings` configuration/query APIs with empty default key-binding metadata, behavior-manifest routing boundaries, custom property metadata, no-authority security notes, and command/API ID validation expectations.
+    - Tightened the key binding API docs to describe Phase 8 configuration semantics, server-owned/inert behavior-manifest routing, `scope`/`when` handling, and documented/registered command ID requirements without introducing live manifest mutation or client-side JavaScript hooks.
+    - Updated `runtime/js/keybindings.ts` so `listKeyBindings` accepts the documented `"all" | "global" | "editor"` scope filter while preserving planned no-runtime-op facade behavior.
+    - Added generated-registry tests for empty key binding defaults, queryable `key`/`command`/`scope`/`when` custom properties, and static key binding authority denial/command-registration documentation.
+    - Updated implementation wiki pages for the documentation registry and Clay JS facade skeleton with the verified key binding configuration contract.
+    - Verification run: `cargo fmt --check`, `cargo test --test clay_js_doc_registry`, `cargo check`, and full `cargo test` passed.
 
-- [ ] Create or verify initial editor customization configuration APIs
+- [x] Create or verify initial editor customization configuration APIs
   - Acceptance Criteria:
     - Functional: Initial editor customization configuration APIs, starting with cursor style and any documented viewport/customization settings already in the inventory, have docs, registry entries, lookup coverage, and custom properties for every behavior-changing setting.
     - Performance: Customization changes remain UI metadata or manifest-delivered behavior and do not route ordinary typing through JavaScript or block paint/input on server work.
@@ -276,8 +296,16 @@
     - `cursor_style_custom_properties_are_complete`: Confirms `color`, `blinking`, and `type` include type/default/allowed-value metadata in docs and generated registry.
     - `editor_customization_has_no_external_authority`: Confirms generated security notes deny external authority and document client-local UI state.
     - `configuration_lookup_finds_cursor_customization`: Confirms lookup by custom property and tag returns `clay.editor.clientSetCursorStyle`.
+  - Completion Notes:
+    - Verified `runtime/js/editor.ts` already exposes `ClientSetCursorStyleOptions` with `color`, `blinking`, and `type` matching the documented cursor customization API; no facade runtime wiring was added.
+    - Tightened `docs/reference/clay-js-api/editor/client-set-cursor-style.md` with Phase 8 configuration/customization semantics, custom property descriptions with types/defaults/allowed cursor shape values, no blocking paint/input behavior, and denial of document mutation plus external authority.
+    - Verified `clientSetViewport` as a retained planned client-local viewport/layout API rather than user configuration from `~/.config/clay/init.js`, and tightened its no-authority/document-mutation security notes.
+    - Updated matching inventory security notes and regenerated `docs/generated/clay-js-api-registry.json` from Markdown.
+    - Added generated-registry tests for complete cursor custom property metadata, editor customization authority denial, and cursor customization lookup by tag and custom property.
+    - Updated implementation wiki pages for the documentation registry and Clay JS facade skeleton with the editor customization configuration contract.
+    - Verification run: `cargo fmt --check`, `cargo test --test clay_js_doc_registry`, `cargo test --test clay_js_api_inventory`, `cargo test --test clay_js_facade_layout`, and `cargo check` passed.
 
-- [ ] Add no-authority-by-default configuration security validation
+- [x] Add no-authority-by-default configuration security validation
   - Acceptance Criteria:
     - Functional: Tests fail when configuration APIs imply or omit authority boundaries for filesystem, network, shell, extension loading, AI mutation, workspace, package loading, WASM, or client-side JavaScript execution.
     - Performance: Security validation is static/test-time and adds no runtime cost to editing or rendering.
@@ -311,8 +339,14 @@
     - `configuration_docs_deny_implicit_external_authority`: Fails if a configuration API omits required no-authority language.
     - `permission_bearing_configuration_requires_validation_notes`: Fails if any configuration API lists permissions without server-side validation notes.
     - `generated_registry_security_matches_source_docs`: Confirms generated security metadata is not dropped.
+  - Completion Notes:
+    - Added shared static denied-authority validation in `tests/clay_js_api_inventory.rs` for configuration-relevant public APIs, including configuration entry points, key binding APIs, and APIs with behavior-changing custom properties. The validation now requires source Markdown frontmatter, Markdown body text, and inventory `security_notes` to deny filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, and client-side JavaScript authority with messages that name the API ID and docs path.
+    - Added permission-bearing configuration-relevant validation in `tests/clay_js_api_inventory.rs` so any API that lists explicit permissions must also document permission/server validation notes before remaining in the public registry.
+    - Added generated-registry security validation in `tests/clay_js_doc_registry.rs` to assert generated configuration-relevant entries retain the full denied-authority boundary and that generated security metadata matches source Markdown frontmatter exactly.
+    - Updated `docs/wiki/modules/clay-js-doc-registry.md` with the new no-authority-by-default validation coverage and tests.
+    - Verification run: `cargo fmt --check`, `cargo test --test clay_js_api_inventory --test clay_js_doc_registry`, `cargo check`, and full `cargo test` passed.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: The phase's configuration APIs are represented by stable Clay JS facade exports, future op wrapper mappings where applicable, Markdown docs, master-index links, generated registry entries, lookup coverage, and tests.
     - Performance: Configuration verification confirms no ordinary keypress/render path depends synchronously on configuration loading, registry generation, JavaScript evaluation, or server work.
@@ -348,8 +382,14 @@
   - Test Cases to Write:
     - Configuration verification suite: Run focused registry, inventory, facade, and security tests for configuration APIs.
     - Manual configuration API audit: Confirm no undocumented behavior-changing settings remain in public docs/inventory.
+  - Completion Notes:
+    - Audited configuration-relevant APIs across `runtime/js/**`, `docs/reference/clay-js-api/**`, `docs/index.md`, `docs/reference/clay-js-api/api-inventory.toml`, `docs/generated/clay-js-api-registry.json`, and the registry/inventory/facade tests.
+    - Confirmed the Phase 8 configuration surfaces are represented consistently: `clay:configuration` entry point APIs, `clay:keybindings` management/query APIs, `clay.editor.clientSetCursorStyle`, and public APIs with behavior-changing `custom_properties` all have stable IDs, facade exports, future op metadata where applicable, Markdown docs, master-index links, generated registry entries, lookup coverage, and security tests.
+    - Confirmed no ordinary keypress/render path depends synchronously on configuration loading, registry generation, JavaScript evaluation, or server work; configuration loading remains planned server-side metadata in Phase 8, and lookup uses checked-in generated registry data only.
+    - Confirmed raw Rust functions and raw `Deno.core.ops.op_*` calls remain implementation details behind planned Clay JS facades, and configuration remains no-authority-by-default with static validation for filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, and client-side JavaScript authority.
+    - Verification run: `cargo test --test clay_js_doc_registry --test clay_js_api_inventory --test clay_js_facade_layout`, `cargo fmt --check`, and `cargo check` passed.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Public programmatic surfaces introduced or changed by Phase 8, including generated registry lookup and configuration facade APIs, are exposed or planned through Clay JS APIs where user-facing, or are kept private/`pub(crate)` when internal.
     - Performance: New public API/documentation infrastructure does not add synchronous JavaScript, registry generation, full-document IPC, or blocking server work to ordinary editor hot paths.
@@ -386,8 +426,15 @@
   - Test Cases to Write:
     - `server_public_items_have_api_inventory_entries_or_are_allowlisted`: Extend existing visibility test for any new server/docs public Rust items.
     - API verification tests: Confirm any new public Clay JS APIs have docs, generated registry entries, and lookup coverage.
+  - Completion Notes:
+    - Audited Phase 8 public programmatic surfaces and confirmed the user-facing additions are represented through Clay JS API docs/inventory/facades/generated registry entries: `clay:configuration` entry point APIs, `clay:keybindings` configuration APIs, and editor customization metadata. No new raw Rust function or raw `Deno.core.ops.op_*` path was promoted as a user-facing JavaScript API.
+    - Kept `src/bin/update-doc-registry.rs` and `src/docs/registry.rs` generation/check/lookup helpers classified as internal documentation-registry infrastructure for developer tests, update commands, and future app/help/agent plumbing rather than public user-facing Clay JS APIs.
+    - Extended `tests/rust_visibility_api_mapping.rs` with `docs_public_items_are_internal_registry_infrastructure`, which fails if new public `src/docs` Rust items appear without explicit internal classification or promotion through Clay JS API docs/inventory/registry coverage. Existing server public-item mapping coverage remains in place.
+    - Confirmed the generated registry lookup path is read-only metadata, does not execute configuration or JavaScript, does not grant permissions, and does not add synchronous registry generation, JavaScript evaluation, full-document IPC, or blocking server work to editor hot paths.
+    - Updated `docs/wiki/modules/clay-js-doc-registry.md` to document the public Rust visibility classification and added visibility-test coverage.
+    - Verification run: `cargo fmt --check`, `cargo test --test clay_js_doc_registry --test clay_js_api_inventory --test clay_js_facade_layout --test rust_visibility_api_mapping`, and `cargo check` passed.
 
-- [ ] Run Phase 8 verification
+- [x] Run Phase 8 verification
   - Acceptance Criteria:
     - Functional: Phase 8 prerequisite reconciliation, generated registry artifacts, lookup APIs, configuration docs/facades/inventory, and security validation are complete and consistent.
     - Performance: Verification confirms no new runtime path causes ordinary typing, rendering, or manifest-declared client-first behavior to block on IPC, server work, JavaScript, AI, file IO, configuration loading, registry generation, or full-document serialization.
@@ -419,8 +466,15 @@
   - Test Cases to Write:
     - Full verification command set: `cargo fmt --check`, `cargo test`, and `cargo check` pass.
     - Manual phase-boundary review: Confirm Phase 8 did not implement arbitrary JavaScript execution, package loading, file/workspace authority, or client-side JS execution.
+  - Completion Notes:
+    - Ran the final Phase 8 verification command set: `cargo fmt --check`, `cargo test`, and `cargo check` all passed.
+    - Confirmed generated registry verification is active and current through `generated_registry_is_current`, with the actionable repair command `cargo run --bin update-doc-registry` covered by the registry tests rather than silent test-time mutation.
+    - Confirmed focused Phase 8 coverage passed inside the full suite: Clay JS API inventory/docs consistency and security tests, generated registry lookup/security tests, facade layout tests, and Rust visibility/API-boundary mapping tests.
+    - Confirmed performance boundary through existing passing hot-path tests including ordinary typing/client-first behavior without server or JavaScript waits, bounded edit queues, no full-document IPC for ordinary edits, and manifest routing tests.
+    - Confirmed security phase boundary: Phase 8 defines configuration contracts and metadata only; it does not introduce arbitrary JavaScript execution in the Rust client, package loading, filesystem/workspace/network/shell/WASM authority, extension loading, or AI mutation authority.
+    - Verification run: `cargo fmt --check`, `cargo test`, and `cargo check` passed.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
     - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
@@ -441,14 +495,26 @@
       ```
     - Files to Create/Edit:
       - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas.
-      - `docs/wiki/**`: Add or update implementation wiki pages for changed code.
+      - `docs/wiki/modules/clay-js-doc-registry.md`: Verify and update implementation details for generated registry, lookup, configuration metadata, security validation, visibility classification, and tests.
+      - `docs/wiki/modules/clay-js-facade-skeleton.md`: Verify and update Phase 8 configuration, key binding, and editor customization facade boundaries.
     - References:
       - `.agents/skills/project-wiki/SKILL.md`
   - Test Cases to Write:
     - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
+  - Completion Notes:
+    - Reviewed `docs/wiki/index.md`, `docs/wiki/modules/clay-js-doc-registry.md`, and `docs/wiki/modules/clay-js-facade-skeleton.md` after Phase 8 implementation and final verification.
+    - Confirmed the master wiki index links the relevant Phase 8 pages and describes the generated Clay JS documentation registry and facade skeleton for onboarding.
+    - Confirmed `docs/wiki/modules/clay-js-doc-registry.md` documents the generated registry source/test paths, deterministic generation and stale checks, read-only generated-data lookup APIs, configuration entry point metadata, key binding and cursor customization metadata, no-authority-by-default validation, Rust visibility classification, invariants, examples, and test coverage.
+    - Confirmed `docs/wiki/modules/clay-js-facade-skeleton.md` documents the Phase 8 `clay:configuration` entry point contract, key binding facade shape, cursor customization properties, planned-runtime boundary, hot-path/performance constraints, and denied external authority.
+    - Added links from both relevant wiki pages back to `plans/009-Phase8-Configuration-Foundation.md` for traceability.
+    - Manual wiki review passed, including a `python3` check that every `docs/wiki/**/*.md` page is linked from `docs/wiki/index.md`; no runtime verification was needed because only Markdown documentation and this plan were updated after the final `cargo fmt --check`, `cargo test`, and `cargo check` verification run.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Phase 8 intentionally defines configuration contracts, generated registry metadata, and validation infrastructure without evaluating `~/.config/clay/init.js` or executing modular configuration JavaScript. Runtime execution remains deferred to Phase 11 to preserve the no-authority-by-default boundary.
+- Generated registry lookup is implemented as internal Rust documentation infrastructure for future app/help/agent surfaces, not as a new public Clay JS API. This avoids exposing tooling internals before a product surface requires them.
+- Key binding and editor customization APIs remain planned facade contracts and metadata validation in Phase 8; live behavior-manifest mutation and broader theme/settings APIs are deferred until later runtime/product phases.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+- Phase 11 should implement server-side configuration JavaScript evaluation only after explicit permission, module-loading, and validation boundaries are designed and tested.
+- Future app/help/agent UI work should consume the generated registry lookup layer and decide whether any user-facing discovery API needs a formal Clay JS facade entry.
+- Later customization phases should add additional settings only when backed by docs, inventory metadata, generated registry coverage, no-authority security notes, and behavior/performance tests.

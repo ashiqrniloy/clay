@@ -2,9 +2,13 @@
 
 ## Current Status
 
-Clay has proven the native client foundation: Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and a local `crop` rope backs editable text state. The editor now supports minimally real local interaction: cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, resize, and Phase 2 manual GUI smoke testing.
+Clay has completed the native editor foundation and the initial server-authoritative architecture through Phase 8. Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and `crop` ropes back both local editor state and server-owned canonical document state. The editor supports local interaction including cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, and resize handling.
 
-The next architectural priority is to establish the client/server architecture before building Clay JS APIs on top of it: implement the IPC skeleton, versioned text synchronization and leases, and behavior manifest system first, then introduce the Clay JS API structure and configuration surfaces. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
+The client/server foundation is now in place: a Tokio Unix Domain Socket server exchanges length-prefixed `rkyv` protocol messages with the native client; the server owns canonical document versions, edit validation, editable leases, read-only observer state, stale-edit rejection, resync snapshots, and region-lock structures; the client keeps hot-path editing responsive with optimistic local edits and asynchronous acknowledgements. Server-issued inert behavior manifests provide client-executed hot-path behavior without arbitrary JavaScript execution in the Rust client.
+
+Clay also has the Phase 8 self-documenting configuration foundation: a planned Clay JS facade tree, a current functionality inventory, Markdown-authored Clay JS API references, generated registry artifacts, read-only registry lookup APIs, and documented configuration contracts for `~/.config/clay/init.js`, key binding APIs, and editor customization metadata. These APIs are currently documentation/facade contracts only; runtime JavaScript execution, `deno_core` op wiring, and actual configuration loading remain deferred to Phase 11.
+
+The next architectural priority is **Phase 9: File and Workspace Server**. Clay should now move from the in-memory document prototype to server-owned file loading, saving, workspace roots, dirty-state tracking, and file IO error handling while preserving the existing authority, documentation-as-code, configuration, and hot-path performance boundaries. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
 
 ## Architectural Decisions Now Locked
 
@@ -93,7 +97,7 @@ Expected outcome:
 - The client owns high-frequency local interaction state required for optimistic editing.
 - Local edits are represented as byte-offset/range operations suitable for protocol messages.
 
-## Phase 3: Self-Documenting Program Contract
+## Phase 3: Self-Documenting Program Contract — Foundation Complete
 
 Introduce documentation-as-code before Clay exposes large protocol, server, command, behavior, and extension surfaces.
 
@@ -121,7 +125,7 @@ Expected outcome:
 - Deferred registry, lookup, coverage, per-API documentation, configuration API, and wiki implementation tasks are explicitly waiting on the Phase 7 Clay JS API structure and current-functionality inventory.
 - Human Markdown docs remain the intended source of truth for future agent/app-readable registries.
 
-## Phase 4: IPC Client/Server Skeleton
+## Phase 4: IPC Client/Server Skeleton — Complete
 
 Introduce the Thick Client / Asynchronous Server architecture without solving full synchronization yet.
 
@@ -148,7 +152,7 @@ Expected outcome:
 - Any new server-side Rust public functions are either exposed through documented Clay JS APIs or made private/`pub(crate)`, and any new public programmatic capabilities preserve the Phase 3 documentation contract; concrete Clay JS facade/docs work can be completed in Phase 7 unless the API is intentionally introduced earlier.
 - Serialization remains isolated enough that Phase 5 synchronization work can evolve message semantics without broad UI/server rewrites.
 
-## Phase 5: Versioned Text Synchronization and Leases
+## Phase 5: Versioned Text Synchronization and Leases — Complete
 
 Implement the canonical/shadow text model described in `concept.md` and the approved authority decision.
 
@@ -171,7 +175,7 @@ Expected outcome:
 - Duplicate clients cannot edit the same file simultaneously.
 - The architecture can support future AI-driven edits safely.
 
-## Phase 6: Behavior Manifest System
+## Phase 6: Behavior Manifest System — Complete
 
 Make server-owned editor behavior executable on the client for hot-path latency without making the client authoritative.
 
@@ -190,7 +194,7 @@ Expected outcome:
 - Auto-indent, Enter, Tab, and simple mode-specific behavior can be immediate without janky correction in normal cases.
 - Server-first commands remain authoritative and safe.
 
-## Phase 7: Clay JS API Structure and Current Functionality Inventory
+## Phase 7: Clay JS API Structure and Current Functionality Inventory — Complete
 
 Introduce the Clay JS API module/facade structure after the IPC, synchronization, and behavior-manifest foundations exist. This phase creates the project shape and inventory needed for later documentation, configuration, extension, SDUI, AI, and package work.
 
@@ -212,7 +216,7 @@ Expected outcome:
 - Configuration, extension, SDUI, AI, and package phases have a shared list of public user-facing functionality to expose and validate.
 - Phase 3 deferred tasks can be reactivated against concrete API names, modules, docs paths, and authority classifications.
 
-## Phase 8: Configuration Foundation
+## Phase 8: Configuration Foundation — Complete
 
 Establish Clay's user configuration model on top of the Phase 3 self-documenting contract and Phase 7 Clay JS API structure/inventory after the IPC, synchronization, and behavior-manifest foundations exist.
 

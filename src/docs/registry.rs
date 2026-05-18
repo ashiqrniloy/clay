@@ -107,6 +107,116 @@ impl ClayJsApiRegistry {
         Ok(Self { entries })
     }
 
+    pub fn from_generated() -> RegistryResult<Self> {
+        Self::from_generated_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/docs/generated/clay-js-api-registry.json"
+        )))
+    }
+
+    pub fn from_generated_json(text: &str) -> RegistryResult<Self> {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|err| {
+            RegistryError::new(format!("parse generated Clay JS API registry JSON: {err}"))
+        })?;
+        let schema_version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                RegistryError::new("generated Clay JS API registry is missing schema_version")
+            })?;
+        if schema_version != 1 {
+            return Err(RegistryError::new(format!(
+                "unsupported Clay JS API registry schema_version {schema_version}"
+            )));
+        }
+
+        let entries_value = value
+            .get("entries")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                RegistryError::new("generated Clay JS API registry is missing entries array")
+            })?;
+        let mut entries = entries_value
+            .iter()
+            .enumerate()
+            .map(|(index, value)| registry_entry_from_json(value, index))
+            .collect::<RegistryResult<Vec<_>>>()?;
+        entries.sort_by(|left, right| left.id.cmp(&right.id));
+
+        let mut ids = BTreeSet::new();
+        for entry in &entries {
+            validate_entry(entry)?;
+            if !ids.insert(entry.id.clone()) {
+                return Err(RegistryError::new(format!(
+                    "duplicate Clay JS API registry id {} in generated registry",
+                    entry.id
+                )));
+            }
+        }
+
+        Ok(Self { entries })
+    }
+
+    pub fn by_id(&self, id: &str) -> Option<&RegistryEntry> {
+        self.entries.iter().find(|entry| entry.id == id)
+    }
+
+    pub fn by_js_export(&self, js_module: &str, js_export: &str) -> Option<&RegistryEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.js_module == js_module && entry.js_export == js_export)
+    }
+
+    pub fn by_user_facing_name(&self, user_facing_name: &str) -> Vec<&RegistryEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .user_facing_name
+                    .eq_ignore_ascii_case(user_facing_name)
+            })
+            .collect()
+    }
+
+    pub fn by_kind_owner(&self, kind: Option<&str>, owner: Option<&str>) -> Vec<&RegistryEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| kind.is_none_or(|kind| entry.kind == kind))
+            .filter(|entry| owner.is_none_or(|owner| entry.owner == owner))
+            .collect()
+    }
+
+    pub fn by_lookup_tag(&self, lookup_tag: &str) -> Vec<&RegistryEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.lookup_tags.iter().any(|tag| tag == lookup_tag))
+            .collect()
+    }
+
+    pub fn by_key_binding(&self, key_binding: &str) -> Vec<&RegistryEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .key_bindings
+                    .iter()
+                    .any(|binding| binding == key_binding)
+            })
+            .collect()
+    }
+
+    pub fn by_custom_property(&self, property_name: &str) -> Vec<&RegistryEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .custom_properties
+                    .iter()
+                    .any(|property| property.name == property_name)
+            })
+            .collect()
+    }
+
     pub fn to_generated_json(&self) -> String {
         let mut out = String::new();
         out.push_str("{\n");
@@ -209,6 +319,99 @@ pub fn registry_source_paths(root: &Path) -> RegistryResult<Vec<String>> {
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+fn registry_entry_from_json(
+    value: &serde_json::Value,
+    index: usize,
+) -> RegistryResult<RegistryEntry> {
+    let path = format!("generated registry entry #{index}");
+    let custom_properties = json_array(value, &path, "custom_properties")?
+        .iter()
+        .enumerate()
+        .map(|(property_index, property)| {
+            let property_path = format!("{path} custom_properties[{property_index}]");
+            Ok(CustomProperty {
+                name: json_string(property, &property_path, "name")?,
+                property_type: json_string(property, &property_path, "type")?,
+                default: json_string(property, &property_path, "default")?,
+                description: json_string(property, &property_path, "description")?,
+            })
+        })
+        .collect::<RegistryResult<Vec<_>>>()?;
+
+    Ok(RegistryEntry {
+        id: json_string(value, &path, "id")?,
+        kind: json_string(value, &path, "kind")?,
+        js_module: json_string(value, &path, "js_module")?,
+        js_export: json_string(value, &path, "js_export")?,
+        js_facade: json_string(value, &path, "js_facade")?,
+        backing_rust: json_string(value, &path, "backing_rust")?,
+        deno_op: json_string(value, &path, "deno_op")?,
+        deno_op_path: json_string(value, &path, "deno_op_path")?,
+        name: json_string(value, &path, "name")?,
+        user_facing_name: json_string(value, &path, "user_facing_name")?,
+        summary: json_string(value, &path, "summary")?,
+        owner: json_string(value, &path, "owner")?,
+        phase: json_string(value, &path, "phase")?,
+        visibility: json_string(value, &path, "visibility")?,
+        permissions: json_string_list(value, &path, "permissions")?,
+        key_bindings: json_string_list(value, &path, "key_bindings")?,
+        custom_properties,
+        security: json_string(value, &path, "security")?,
+        agent_guidance: json_string(value, &path, "agent_guidance")?,
+        lookup_tags: json_string_list(value, &path, "lookup_tags")?,
+        app_visible: json_bool(value, &path, "app_visible")?,
+        help_visible: json_bool(value, &path, "help_visible")?,
+        stability: json_string(value, &path, "stability")?,
+        is_async: json_bool(value, &path, "async")?,
+        documentation_path: json_string(value, &path, "documentation_path")?,
+    })
+}
+
+fn json_string(value: &serde_json::Value, path: &str, field: &str) -> RegistryResult<String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| {
+            RegistryError::new(format!("{path} is missing non-empty string field {field}"))
+        })
+}
+
+fn json_bool(value: &serde_json::Value, path: &str, field: &str) -> RegistryResult<bool> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| RegistryError::new(format!("{path} is missing boolean field {field}")))
+}
+
+fn json_array<'a>(
+    value: &'a serde_json::Value,
+    path: &str,
+    field: &str,
+) -> RegistryResult<&'a Vec<serde_json::Value>> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| RegistryError::new(format!("{path} is missing array field {field}")))
+}
+
+fn json_string_list(
+    value: &serde_json::Value,
+    path: &str,
+    field: &str,
+) -> RegistryResult<Vec<String>> {
+    json_array(value, path, field)?
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            item.as_str().map(ToString::to_string).ok_or_else(|| {
+                RegistryError::new(format!("{path} field {field}[{index}] must be a string"))
+            })
+        })
+        .collect()
 }
 
 fn parse_api_doc(root: &Path, documentation_path: &str) -> RegistryResult<RegistryEntry> {

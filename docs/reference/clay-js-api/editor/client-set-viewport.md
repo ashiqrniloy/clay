@@ -24,7 +24,7 @@ custom_properties:
     type: number
     default: 4
     description: Behavior-changing setting `overscanLines` for this API.
-security: Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+security: Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 agent_guidance: Use `clay.editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, resizeviewport]
 app_visible: true
@@ -43,7 +43,7 @@ Set Editor Viewport through the planned `clay:editor` Clay JavaScript facade.
 
 `clientSetViewport` is the planned public API for **Set Editor Viewport**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `client-local-ui-state`. Runtime path: `client-local-layout-paint`. Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC.
+Authority: `client-local-ui-state`. Runtime path: `client-local-layout-paint`. Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC. This entry is retained as a planned client-local viewport API, not as user configuration loaded from `~/.config/clay/init.js`.
 
 ## When to use
 
@@ -92,7 +92,7 @@ The planned runtime should fail if arguments are malformed, the referenced docum
 
 No additional permission is required beyond access to the running editor session.
 
-Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 

@@ -45,9 +45,9 @@ Unbind Key through the planned `clay:keybindings` Clay JavaScript facade.
 
 ## Description
 
-`unbindKey` is the planned public API for **Unbind Key**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`unbindKey` is the planned public Phase 8 configuration API for **Unbind Key**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `configuration-api`. Runtime path: `server-side-configuration-to-behavior-manifest`. Unbinding affects future manifest routing only and must not execute JavaScript in keypress handlers.
+Authority: `configuration-api`. Runtime path: `server-side-configuration-to-behavior-manifest`. Unbinding affects future manifest routing only and must not execute JavaScript in keypress handlers. The planned runtime validates key chords, scopes, and `when` conditions before publishing manifest changes.
 
 ## When to use
 
@@ -71,7 +71,7 @@ unbindKey("Ctrl+I", { scope: "editor" });
 
 - `key` (`string`): Key chord to remove.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
-- `when` (`string`): Optional condition expression identifying a specific binding.
+- `when` (`string`): Optional condition expression identifying a specific binding; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 
 ## Key bindings
 
@@ -87,7 +87,7 @@ No default key binding is assigned. Users may bind a key to `clay.keybindings.un
 
 Returns nothing after removing the planned key binding.
 
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current facade/runtime status is `planned`; this page defines the Phase 8 configuration contract before executable `deno_core` op wiring exists.
 
 ## Errors
 

@@ -37,9 +37,9 @@ List Key Bindings through the planned `clay:keybindings` Clay JavaScript facade.
 
 ## Description
 
-`listKeyBindings` is the planned public API for **List Key Bindings**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`listKeyBindings` is the planned public Phase 8 configuration query API for **List Key Bindings**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `configuration-query-api`. Runtime path: `server-side-query`. Listing key bindings is a background/help/configuration query and is not part of ordinary keypress handling.
+Authority: `configuration-query-api`. Runtime path: `server-side-query`. Listing key bindings is a background/help/configuration query and is not part of ordinary keypress handling. It returns documented manifest-routing metadata and never installs arbitrary JavaScript into the Rust client keypress path.
 
 ## When to use
 
@@ -75,7 +75,7 @@ No default key binding is assigned. Users may bind a key to `clay.keybindings.li
 
 Returns key binding records for help/configuration inspection.
 
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current facade/runtime status is `planned`; this page defines the Phase 8 configuration contract before executable `deno_core` op wiring exists.
 
 ## Errors
 

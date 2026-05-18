@@ -11,7 +11,7 @@ name: clientSetCursorStyle
 user_facing_name: Set Cursor Style
 summary: Set Cursor Style through the planned `clay:editor` Clay JavaScript facade.
 owner: client
-phase: Phase 7
+phase: Phase 8
 visibility: public
 permissions: []
 key_bindings: []
@@ -19,16 +19,16 @@ custom_properties:
   - name: color
     type: string
     default: inherited
-    description: Behavior-changing setting `color` for this API.
+    description: Cursor color as an inherited theme value or CSS-like color string such as #ffcc00; defaults to inherited.
   - name: blinking
     type: boolean
     default: true
-    description: Behavior-changing setting `blinking` for this API.
+    description: Whether the caret blinks; defaults to true and remains client-local UI metadata.
   - name: type
     type: enum
     default: bar
-    description: Behavior-changing setting `type` for this API.
-security: Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+    description: Caret shape; allowed values are block, bar, and underline, and the default is bar.
+security: Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 agent_guidance: Use `clay.editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [cursorstylecustomization, editor, js-api]
 app_visible: true
@@ -47,7 +47,7 @@ Set Cursor Style through the planned `clay:editor` Clay JavaScript facade.
 
 `clientSetCursorStyle` is the planned public API for **Set Cursor Style**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Cursor styling is paint-time UI metadata; changing it must not route ordinary keypresses through JavaScript.
+Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Cursor styling is paint-time UI metadata delivered as configuration/customization state; changing it must not route ordinary keypresses through JavaScript or block paint/input on server work.
 
 ## When to use
 
@@ -69,9 +69,9 @@ clientSetCursorStyle({ color: "#ffcc00", blinking: true, type: "bar" });
 
 ## Options
 
-- `color` (`string`): Optional CSS-like color value or inherited theme value.
-- `blinking` (`boolean`): Whether the caret blinks; defaults to `true`.
-- `type` (`"block" | "bar" | "underline"`): Caret shape; defaults to `"bar"`.
+- `color` (`string`): Optional inherited theme value or CSS-like color string such as `#ffcc00`; default `inherited`.
+- `blinking` (`boolean`): Whether the caret blinks; default `true`.
+- `type` (`"block" | "bar" | "underline"`): Caret shape; allowed values are `"block"`, `"bar"`, and `"underline"`; default `"bar"`.
 
 ## Key bindings
 
@@ -79,9 +79,9 @@ No default key binding is assigned. Users may bind a key to `clay.editor.clientS
 
 ## Custom properties
 
-- `color` (`string`, default `inherited`): Behavior-changing setting `color` for this API.
-- `blinking` (`boolean`, default `true`): Behavior-changing setting `blinking` for this API.
-- `type` (`enum`, default `bar`): Behavior-changing setting `type` for this API.
+- `color` (`string`, default `inherited`): Cursor color as an inherited theme value or CSS-like color string such as `#ffcc00`.
+- `blinking` (`boolean`, default `true`): Whether the caret blinks; remains client-local UI metadata.
+- `type` (`enum`, default `bar`): Caret shape; allowed values are `block`, `bar`, and `underline`.
 
 ## Return and async behavior
 
@@ -97,13 +97,13 @@ The planned runtime should fail if arguments are malformed, the referenced docum
 
 No additional permission is required beyond access to the running editor session.
 
-Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
 ## Agent guidance
 
-Use `clay.editor.clientSetCursorStyle` when the user asks for set cursor style through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `clay.editor.clientSetCursorStyle` when the user asks for set cursor style through the Clay JS API or `~/.config/clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 

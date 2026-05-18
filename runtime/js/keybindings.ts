@@ -5,6 +5,7 @@
 // install JavaScript into the Rust client keypress hot path.
 
 export type KeyBindingScope = "global" | "editor";
+export type KeyBindingScopeFilter = "all" | KeyBindingScope;
 
 export interface BindKeyOptions {
   key: string;
@@ -37,7 +38,7 @@ export function unbindKey(key: string, options: Pick<BindKeyOptions, "scope" | "
   plannedApi("clay.keybindings.unbindKey");
 }
 
-export function listKeyBindings(scope?: KeyBindingScope): KeyBindingRecord[] {
+export function listKeyBindings(scope?: KeyBindingScopeFilter): KeyBindingRecord[] {
   void scope;
   plannedApi("clay.keybindings.listKeyBindings");
 }

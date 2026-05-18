@@ -49,9 +49,9 @@ Bind Key through the planned `clay:keybindings` Clay JavaScript facade.
 
 ## Description
 
-`bindKey` is the planned public API for **Bind Key**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`bindKey` is the planned public Phase 8 configuration API for **Bind Key**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `configuration-api`. Runtime path: `server-side-configuration-to-behavior-manifest`. Binding keys updates future inert behavior manifests; the Rust client executes the resulting manifest without arbitrary JavaScript.
+Authority: `configuration-api`. Runtime path: `server-side-configuration-to-behavior-manifest`. Binding keys updates future inert behavior manifests; the Rust client executes the resulting manifest without arbitrary JavaScript. The planned runtime validates key chords, scopes, `when` conditions, and command/API IDs before publishing manifest changes.
 
 ## When to use
 
@@ -74,9 +74,9 @@ bindKey("Ctrl+I", "clay.editor.serverInsertText", { scope: "editor" });
 ## Options
 
 - `key` (`string`): Key chord, for example `"Ctrl+I"`.
-- `command` (`string`): Stable Clay command/API ID to invoke, for example `"clay.editor.serverInsertText"`.
+- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"clay.editor.serverInsertText"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
-- `when` (`string`): Optional future condition expression for context-sensitive bindings.
+- `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 
 ## Key bindings
 
@@ -93,7 +93,7 @@ No default key binding is assigned. Users may bind a key to `clay.keybindings.bi
 
 Returns the key binding record once configuration runtime wiring exists.
 
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current facade/runtime status is `planned`; this page defines the Phase 8 configuration contract before executable `deno_core` op wiring exists.
 
 ## Errors
 
