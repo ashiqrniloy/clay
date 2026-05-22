@@ -36,6 +36,7 @@ pub(crate) struct DocumentState {
     active_lease: Option<EditableLease>,
     next_lease_id: LeaseId,
     last_transaction_id: Option<TransactionId>,
+    dirty: bool,
     region_locks: Vec<RegionLock>,
     next_region_lock_id: RegionLockId,
 }
@@ -49,6 +50,7 @@ impl DocumentState {
             active_lease: None,
             next_lease_id: 1,
             last_transaction_id: None,
+            dirty: false,
             region_locks: Vec::new(),
             next_region_lock_id: 1,
         }
@@ -210,11 +212,34 @@ impl DocumentState {
         self.apply_operation(operation);
         self.version += 1;
         self.last_transaction_id = Some(transaction_id);
+        self.dirty = true;
         ServerMessage::EditAck {
             document_id: self.document_id,
             confirmed_version: self.version,
             transaction_id,
         }
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "dirty-state access is consumed by Phase 9 workspace save/reload integration"
+        )
+    )]
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "clean marking is consumed by Phase 9 workspace save/reload integration"
+        )
+    )]
+    pub(crate) fn mark_clean(&mut self) {
+        self.dirty = false;
     }
 
     fn apply_operation(&mut self, operation: EditOperation) {

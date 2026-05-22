@@ -15,7 +15,7 @@
 
 ## Tasks
 
-- [ ] Define Phase 9 authority, workspace, and file state model
+- [x] Define Phase 9 authority, workspace, and file state model
   - Acceptance Criteria:
     - Functional: The plan execution starts with a concrete model for workspace roots, canonical paths, open document identity, dirty state, save/reload transitions, and duplicate opens.
     - Performance: The model confirms ordinary typing/rendering never waits synchronously on file IO, workspace scans, JavaScript, AI, or full-document serialization.
@@ -42,17 +42,18 @@
     - Files to Create/Edit:
       - `src/server/workspace.rs`: New workspace root and open-document registry model.
       - `src/server/document.rs`: Add file/dirty metadata hooks while preserving edit validation responsibilities.
-      - `src/server/mod.rs`: Replace single default document field with workspace/open-document state.
+      - `src/server/mod.rs`: Register the workspace module; replacing the single default document field with workspace/open-document state remains for protocol/dispatch integration.
       - `docs/wiki/modules/server-file-workspace.md`: Document final implementation after execution.
+      - `docs/wiki/index.md`: Link the server file workspace model wiki page.
     - References:
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
       - `roadmap.md` Phase 9
   - Test Cases to Write:
-    - Workspace model unit tests: Opening the same canonical file twice returns the same document ID and preserves one editable lease/read-only observer behavior.
-    - Dirty-state transition design test: New file-backed documents start clean, accepted edits mark dirty, successful saves mark clean.
+    - `duplicate_open_reuses_document_and_preserves_lease_policy`: Opening the same canonical file twice returns the same document ID and preserves one editable lease/read-only observer behavior.
+    - `file_backed_document_dirty_state_tracks_accepted_edits_and_clean_marking`: New file-backed documents start clean, accepted edits mark dirty, and explicit clean marking is available for successful saves/reloads.
 
-- [ ] Implement server-side workspace root and path validation
+- [x] Implement server-side workspace root and path validation
   - Acceptance Criteria:
     - Functional: The server accepts configured workspace roots, canonicalizes ordinary file paths, rejects traversal outside allowed roots, rejects directories/special files for document opens, and reports actionable errors.
     - Performance: Path validation uses metadata/canonicalization only at open/save/reload boundaries and never runs inside Masonry paint/input handlers or ordinary edit application.
@@ -77,8 +78,10 @@
       ```
     - Files to Create/Edit:
       - `src/server/workspace.rs`: Root registration, path canonicalization, special-file rejection, workspace errors.
-      - `src/server/mod.rs`: Server config gains initial workspace roots or process working-directory fallback if approved during execution.
-      - `tests` or module tests in `src/server/workspace.rs`: Temporary-directory validation tests.
+      - `src/server/mod.rs`: Server config gained initial workspace roots plus startup validation through internal server construction.
+      - `src/server/workspace.rs`: Temporary-directory validation tests cover traversal, directory/special-file rejection, and symlink canonicalization.
+      - `docs/wiki/modules/server-file-workspace.md`: Updated server workspace validation notes and test references.
+      - `tests/rust_visibility_api_mapping.rs`: Allowlisted `IpcServer::try_new` as server infrastructure rather than a Clay JS API surface.
     - References:
       - Context7 `/websites/rs_tokio_1_49_0` `tokio::fs` docs.
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
@@ -87,7 +90,7 @@
     - `workspace_rejects_directory_and_special_file_open`: Directories and non-ordinary files return typed errors.
     - `workspace_canonicalizes_symlink_before_authorization`: Symlinks escaping the root are denied; symlinks staying in-root are handled consistently.
 
-- [ ] Implement file-backed open document registry and loading
+- [x] Implement file-backed open document registry and loading
   - Acceptance Criteria:
     - Functional: The server can open an existing UTF-8 text file, create a canonical `DocumentState` from its contents, assign/stabilize a document ID, and reuse the existing document entry for duplicate opens.
     - Performance: Initial open may read a full file, but ordinary edits continue to use deltas and do not trigger full-document IPC except initial load or resync.
@@ -111,17 +114,24 @@
       let document = DocumentState::new(document_id, text, DocumentAccess::ReadOnly);
       ```
     - Files to Create/Edit:
-      - `src/server/workspace.rs`: `OpenDocumentRegistry`, file-backed open/load logic, document metadata.
-      - `src/server/document.rs`: Expose internal clean snapshot/version hooks as `pub(crate)` only if needed.
-      - `src/server/connection.rs`: Route open-document requests to the registry once protocol messages exist.
-      - `src/protocol/mod.rs`: Add file/workspace open result metadata messages in a later task.
+      - `src/server/workspace.rs`: Added `WorkspaceState::open_existing_file`, async `tokio::fs::read` loading, duplicate-open reuse before disk re-read, invalid UTF-8 mapping, and registry-loading tests.
+      - `docs/wiki/modules/server-file-workspace.md`: Updated implementation notes for server-side file loading, duplicate-open read avoidance, invalid UTF-8 behavior, and test coverage.
+      - `src/server/document.rs`: No edit needed; existing `initial_document_message`, `is_dirty`, and lease hooks covered this task.
+      - `src/server/connection.rs`: Deferred to the protocol/dispatch task; no protocol messages exist yet.
+      - `src/protocol/mod.rs`: Deferred to the protocol/dispatch task; no message shape changes were needed for registry loading.
     - References:
       - Context7 `/websites/rs_tokio_1_49_0` `tokio::fs` docs.
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
   - Test Cases to Write:
     - `open_existing_file_loads_utf8_text`: Server registry returns a document snapshot with file contents and version 1.
-    - `duplicate_open_reuses_document_and_lease_policy`: Two opens for the same canonical file share document ID and enforce editable/read-only access.
+    - `duplicate_open_reuses_loaded_document_and_lease_policy`: Two opens for the same canonical file share document ID, enforce editable/read-only access, and do not re-read changed disk contents after the first open.
     - `open_invalid_utf8_reports_file_io_error_without_document_entry`: Invalid text is rejected clearly and does not poison the registry.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test workspace:: --lib`
+    - `cargo test server:: --lib`
+    - `cargo test --test rust_visibility_api_mapping`
+    - `cargo check`
 
 - [ ] Implement dirty-state tracking, save, and reload behavior
   - Acceptance Criteria:

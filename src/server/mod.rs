@@ -1,6 +1,7 @@
 mod behavior;
 mod connection;
 mod document;
+mod workspace;
 
 use std::{
     error::Error,
@@ -19,17 +20,20 @@ use crate::protocol::codec::Codec;
 
 use self::{
     behavior::ActiveBehaviorManifest, connection::handle_connection, document::DocumentState,
+    workspace::WorkspaceState,
 };
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub socket_path: PathBuf,
+    pub workspace_roots: Vec<PathBuf>,
 }
 
 impl ServerConfig {
     pub fn new(socket_path: impl Into<PathBuf>) -> Self {
         Self {
             socket_path: socket_path.into(),
+            workspace_roots: Vec::new(),
         }
     }
 }
@@ -40,18 +44,35 @@ pub struct IpcServer {
     codec: Codec,
     document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+    #[expect(
+        dead_code,
+        reason = "Phase 9 workspace state is validated at startup before protocol dispatch integration"
+    )]
+    workspace: Arc<Mutex<WorkspaceState>>,
     next_client_id: AtomicU64,
 }
 
 impl IpcServer {
     pub fn new(config: ServerConfig) -> Self {
-        Self {
+        Self::try_new(config).expect("configured workspace roots must be valid")
+    }
+
+    pub fn try_new(config: ServerConfig) -> Result<Self, ServerError> {
+        let mut workspace = WorkspaceState::new();
+        for root in &config.workspace_roots {
+            workspace
+                .add_root(root)
+                .map_err(|error| ServerError::InvalidWorkspaceRoot(error.to_string()))?;
+        }
+
+        Ok(Self {
             config,
             codec: Codec::default(),
             document: Arc::new(Mutex::new(DocumentState::default())),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            workspace: Arc::new(Mutex::new(workspace)),
             next_client_id: AtomicU64::new(1),
-        }
+        })
     }
 
     pub async fn run(self) -> Result<(), ServerError> {
@@ -137,6 +158,7 @@ pub enum ServerError {
     RemoveStaleSocket(io::Error),
     Bind(io::Error),
     Accept(io::Error),
+    InvalidWorkspaceRoot(String),
 }
 
 impl fmt::Display for ServerError {
@@ -154,6 +176,9 @@ impl fmt::Display for ServerError {
                 formatter,
                 "failed to accept Unix socket connection: {error}"
             ),
+            Self::InvalidWorkspaceRoot(message) => {
+                write!(formatter, "invalid workspace root: {message}")
+            }
         }
     }
 }
@@ -165,7 +190,7 @@ impl Error for ServerError {
             | Self::RemoveStaleSocket(error)
             | Self::Bind(error)
             | Self::Accept(error) => Some(error),
-            Self::InvalidSocketPath(_) => None,
+            Self::InvalidSocketPath(_) | Self::InvalidWorkspaceRoot(_) => None,
         }
     }
 }
@@ -205,6 +230,7 @@ mod tests {
             codec: Codec::default(),
             document: Arc::new(Mutex::new(document)),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            workspace: Arc::new(Mutex::new(crate::server::workspace::WorkspaceState::new())),
             next_client_id: AtomicU64::new(1),
         }
     }
@@ -287,6 +313,28 @@ mod tests {
 
         server_task.abort();
         let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[test]
+    fn server_accepts_configured_workspace_roots_and_reports_invalid_roots() {
+        let socket_path = unique_socket_path("configured-workspace");
+        let root = socket_path.parent().unwrap().join("workspace");
+        fs::create_dir(&root).unwrap();
+
+        let mut config = ServerConfig::new(&socket_path);
+        config.workspace_roots = vec![root.clone()];
+        let server = IpcServer::try_new(config).unwrap();
+        assert_eq!(server.config.workspace_roots, vec![root]);
+
+        let missing_root = socket_path.parent().unwrap().join("missing");
+        let mut invalid_config = ServerConfig::new(&socket_path);
+        invalid_config.workspace_roots = vec![missing_root];
+        let error = IpcServer::try_new(invalid_config).unwrap_err();
+        assert!(matches!(error, super::ServerError::InvalidWorkspaceRoot(_)));
+        assert!(error.to_string().contains("invalid workspace root"));
+
+        let _ = fs::remove_dir(server.config.workspace_roots[0].clone());
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 

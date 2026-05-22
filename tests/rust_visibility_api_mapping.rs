@@ -152,6 +152,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
     let inventory_text = inventory_rust_mapping_text();
     let allowlisted_infrastructure: BTreeSet<&str> = [
         "src/server/mod.rs::IpcServer::new",
+        "src/server/mod.rs::IpcServer::try_new",
         "src/server/mod.rs::IpcServer::run",
         "src/server/mod.rs::ServerConfig::new",
     ]
