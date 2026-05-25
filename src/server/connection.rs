@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use tokio::{net::UnixStream, sync::Mutex};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::Mutex,
+};
 
 use crate::protocol::{
     ClientMessage, PROTOCOL_VERSION, ProtocolErrorCode, ServerMessage,
@@ -9,13 +12,16 @@ use crate::protocol::{
 
 use super::{behavior::ActiveBehaviorManifest, document::DocumentState};
 
-pub(crate) async fn handle_connection(
-    mut stream: UnixStream,
+pub(crate) async fn handle_connection<S>(
+    mut stream: S,
     client_id: u64,
     document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     codec: Codec,
-) -> Result<(), CodecError> {
+) -> Result<(), CodecError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let first_message = codec.read_client_message(&mut stream).await?;
     match first_message {
         ClientMessage::Hello {
@@ -168,13 +174,16 @@ pub(crate) async fn handle_connection(
     }
 }
 
-async fn send_welcome_snapshot_and_manifest(
-    stream: &mut UnixStream,
+async fn send_welcome_snapshot_and_manifest<S>(
+    stream: &mut S,
     client_id: u64,
     document: &Arc<Mutex<DocumentState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     codec: Codec,
-) -> Result<(), CodecError> {
+) -> Result<(), CodecError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     codec
         .write_server_message(
             stream,
@@ -202,7 +211,7 @@ async fn send_welcome_snapshot_and_manifest(
 mod tests {
     use std::sync::Arc;
 
-    use tokio::{net::UnixStream, sync::Mutex};
+    use tokio::{io::duplex, sync::Mutex};
 
     use super::handle_connection;
     use crate::{
@@ -215,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_accepts_hello_and_sends_snapshot() {
-        let (client, server) = UnixStream::pair().unwrap();
+        let (client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -261,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_sends_minimal_behavior_manifest() {
-        let (client, server) = UnixStream::pair().unwrap();
+        let (client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
@@ -292,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_acknowledges_insert_edit() {
-        let (client, server) = UnixStream::pair().unwrap();
+        let (client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -351,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_rejects_edit_with_stale_behavior_version_without_mutating_document() {
-        let (client, server) = UnixStream::pair().unwrap();
+        let (client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -447,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_sends_resync_snapshot_after_request() {
-        let (client, server) = UnixStream::pair().unwrap();
+        let (client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -501,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_rejects_invalid_frame_without_panic() {
-        let (mut client, server) = UnixStream::pair().unwrap();
+        let (mut client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));

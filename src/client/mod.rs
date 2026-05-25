@@ -15,7 +15,10 @@ use crate::protocol::{
     codec::{Codec, CodecError},
 };
 
-use tokio::sync::mpsc;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::mpsc,
+};
 
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -339,19 +342,23 @@ pub async fn load_initial_state(
     Ok(connect(socket_path).await?.initial_state)
 }
 
-#[cfg(unix)]
-pub async fn load_initial_state_from_stream(
-    stream: UnixStream,
+pub async fn load_initial_state_from_stream<S>(
+    stream: S,
     codec: Codec,
-) -> Result<ClientInitialState, ClientBootstrapError> {
+) -> Result<ClientInitialState, ClientBootstrapError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     Ok(connect_from_stream(stream, codec).await?.initial_state)
 }
 
-#[cfg(unix)]
-pub async fn connect_from_stream(
-    mut stream: UnixStream,
+pub async fn connect_from_stream<S>(
+    mut stream: S,
     codec: Codec,
-) -> Result<ClientSession, ClientBootstrapError> {
+) -> Result<ClientSession, ClientBootstrapError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let initial_state = handshake_initial_state(&mut stream, codec).await?;
     let (edit_queue, outgoing_edits) = ClientEditQueue::bounded(EDIT_QUEUE_CAPACITY);
     let edit_queue = edit_queue
@@ -380,11 +387,13 @@ pub async fn connect_from_stream(
     })
 }
 
-#[cfg(unix)]
-async fn handshake_initial_state(
-    stream: &mut UnixStream,
+async fn handshake_initial_state<S>(
+    stream: &mut S,
     codec: Codec,
-) -> Result<ClientInitialState, ClientBootstrapError> {
+) -> Result<ClientInitialState, ClientBootstrapError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     codec
         .write_client_message(
             &mut *stream,
@@ -463,17 +472,18 @@ fn rejection_requests_resync(reason: &EditRejection) -> bool {
     )
 }
 
-#[cfg(unix)]
-async fn run_connection(
-    stream: UnixStream,
+async fn run_connection<S>(
+    stream: S,
     codec: Codec,
     mut outgoing_edits: mpsc::Receiver<ClientMessage>,
     events: mpsc::Sender<ClientConnectionEvent>,
     sync_state: Arc<Mutex<ClientSyncState>>,
     behavior_state: Arc<Mutex<behavior::ClientBehaviorState>>,
     client_id: ClientId,
-) {
-    let (mut reader, mut writer) = stream.into_split();
+) where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (mut reader, mut writer) = tokio::io::split(stream);
 
     loop {
         tokio::select! {
@@ -572,21 +582,29 @@ async fn run_connection(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::{fs, time::SystemTime};
 
+    use tokio::io::duplex;
+    #[cfg(unix)]
     use tokio::net::UnixStream;
 
     use super::{
-        ClientConnectionEvent, ClientEditQueue, ClientSession, connect, connect_from_stream,
-        load_initial_state_from_stream,
+        ClientConnectionEvent, ClientEditQueue, connect_from_stream, load_initial_state_from_stream,
     };
+    #[cfg(unix)]
+    use super::{ClientSession, connect};
     use crate::editor::EditorEditEvent;
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess, EditOperation,
-        EditRejection, PROTOCOL_VERSION, ServerMessage, codec::Codec,
+        PROTOCOL_VERSION, ServerMessage, codec::Codec,
     };
+    #[cfg(unix)]
+    use crate::protocol::EditRejection;
+    #[cfg(unix)]
     use crate::server::{IpcServer, ServerConfig};
 
+    #[cfg(unix)]
     fn unique_socket_path(name: &str) -> std::path::PathBuf {
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -600,6 +618,7 @@ mod tests {
         dir.join("clay.sock")
     }
 
+    #[cfg(unix)]
     async fn connect_with_retry(socket_path: &std::path::Path) -> ClientSession {
         let mut last_error = None;
         for _ in 0..50 {
@@ -614,6 +633,7 @@ mod tests {
         panic!("failed to connect to test socket: {:?}", last_error);
     }
 
+    #[cfg(unix)]
     async fn connect_stream_with_retry(socket_path: &std::path::Path) -> UnixStream {
         let mut last_error = None;
         for _ in 0..50 {
@@ -630,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_handles_initial_document_message() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -819,7 +839,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_ack_advances_confirmed_version() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -901,7 +921,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_requests_resync_after_stale_rejection() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -990,7 +1010,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_applies_resync_snapshot_and_clears_pending_edits() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -1093,7 +1113,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_installs_minimal_behavior_manifest() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -1138,7 +1158,7 @@ mod tests {
 
     #[tokio::test]
     async fn end_to_end_client_receives_initial_snapshot() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -1184,7 +1204,7 @@ mod tests {
 
     #[tokio::test]
     async fn end_to_end_client_receives_behavior_manifest() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -1228,7 +1248,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_installs_behavior_manifest_replacement_event() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -1285,7 +1305,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_rejects_invalid_behavior_manifest_replacement_event() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();
@@ -1341,6 +1361,7 @@ mod tests {
         server_task.await.unwrap();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn end_to_end_second_client_is_read_only() {
         let socket_path = unique_socket_path("read-only");
@@ -1363,6 +1384,7 @@ mod tests {
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn real_server_end_to_end_edit_gets_acknowledged() {
         let socket_path = unique_socket_path("ack");
@@ -1400,6 +1422,7 @@ mod tests {
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
         let socket_path = unique_socket_path("stale-resync");
@@ -1500,7 +1523,7 @@ mod tests {
 
     #[tokio::test]
     async fn end_to_end_edit_gets_acknowledged() {
-        let (client, mut server) = UnixStream::pair().unwrap();
+        let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(async move {
             let _hello = codec.read_client_message(&mut server).await.unwrap();

@@ -17,14 +17,14 @@ The client keeps the IPC connection open after the initial snapshot handshake. L
 - `client::connect` opens the Unix socket, performs the `Hello` / `Welcome` / `InitialDocument` / `BehaviorManifest` handshake, and returns a `ClientSession`.
 - `ClientSession` contains the initial editor state, a `ClientEditQueue` for outgoing edits, and an event receiver for acknowledgements/errors.
 - `ClientEditQueue` owns shared synchronization metadata: confirmed server version, optimistic local version, and pending transactions.
-- The background client task owns the socket after startup, serializes outgoing `ClientMessage::Edit` values, receives `ServerMessage::EditAck`, `EditRejected`, `ResyncSnapshot`, `EditTransaction`, and `Error` messages, and sends `RequestResync` after recoverable synchronization rejections.
+- The background client task owns the connected async stream after startup, serializes outgoing `ClientMessage::Edit` values, receives `ServerMessage::EditAck`, `EditRejected`, `ResyncSnapshot`, `EditTransaction`, and `Error` messages, and sends `RequestResync` after recoverable synchronization rejections.
 - The server connection task validates each edit/intent `behavior_version` against the server-owned active behavior manifest before mutating the canonical document.
-- `src/main.rs` parses `clay server`, `clay client`, and bare `clay` modes. It keeps a multi-thread Tokio runtime alive while Masonry runs, logs client IPC events to stderr for Phase 4 observability, and keeps send/receive work off the GUI input and paint paths.
+- `src/main.rs` parses `clay server`, `clay client`, and bare `clay` modes into an `IpcEndpoint` from `src/ipc.rs`. It keeps a multi-thread Tokio runtime alive while Masonry runs, logs client IPC events to stderr for Phase 4 observability, and keeps send/receive work off the GUI input and paint paths.
 - `EditorWidget` optionally forwards edit events to the queue, still renders local edits immediately, and exposes a narrow `apply_connection_event` boundary that applies real resync snapshots with `EditorSurface::load_snapshot`.
 
 ## How It Works
 
-Startup uses a shared default Unix socket path from `src/ipc.rs`: `$XDG_RUNTIME_DIR/clay.sock` when available, otherwise a stable per-user temp socket. `clay server` starts the foreground server on that socket unless a path is supplied. `clay client` opens a client and attaches to that socket when a server is already running. Bare `clay` first tries to attach; if no server is reachable, it spawns the same executable as a separate background `clay server` process and then opens the client against it. Because that server is a separate process, closing the auto-opened client does not stop the server; it must be killed explicitly.
+Startup uses a shared endpoint abstraction from `src/ipc.rs`. On Unix, the default endpoint is a Unix socket path: `$XDG_RUNTIME_DIR/clay.sock` when available, otherwise a stable per-user temp socket. On Windows, the default endpoint is a local named pipe name like `\\.\pipe\clay-<user>`; Windows clients and servers still return the temporary unsupported-IPC error until the named-pipe transport task is implemented. `clay server` starts the foreground server on the default endpoint unless one is supplied. `clay client` opens a client and attaches to that endpoint when a server is already running. Bare `clay` first tries to attach; if no server is reachable, it spawns the same executable as a separate background `clay server` process with the endpoint passed as a direct child-process argument and then opens the client against it. Because that server is a separate process, closing the auto-opened client does not stop the server; it must be killed explicitly.
 
 `IpcServer` owns an `ActiveBehaviorManifest` alongside the canonical `DocumentState`. The handshake sends the active manifest after `Welcome` and `InitialDocument`. The manifest is not reconstructed per connection, so future server-side hot reload can validate and publish one replacement state that all connections observe.
 
@@ -32,11 +32,11 @@ Client startup calls `client::connect`. The handshake is bounded by the existing
 
 1. A bounded outgoing edit channel used by `ClientEditQueue`.
 2. A bounded connection event channel used for acknowledgements and recoverable connection state.
-3. A background Tokio task that owns the connected `UnixStream`.
+3. A background Tokio task that owns the connected stream selected by the platform transport and splits it with `tokio::io::split`.
 
 `ClientEditQueue::enqueue_edit_event` reserves the current optimistic version as the outgoing edit's `base_version`, records the transaction in the pending queue, advances the optimistic version locally, and then uses bounded `try_send`. If the queue has no editable lease, or if the channel is full, the reservation is rolled back and the UI remains responsive. This allows multiple local edits to be sent without waiting for the previous acknowledgement while preserving per-document base-version ordering for editable clients only.
 
-The background task splits the stream and uses `tokio::select!` to handle either an outgoing edit or an incoming server frame. Outgoing edits are encoded through the shared `Codec`. Incoming `EditAck` frames update confirmed-version state, remove the pending transaction, and become `ClientConnectionEvent::EditAck`. Incoming `EditRejected` frames remove the rejected pending transaction and become `ClientConnectionEvent::EditRejected`. Stale/future version, invalid behavior version, lease, read-only, and region-lock rejections immediately send a `ClientMessage::RequestResync` with the client's last confirmed version. Incoming `ResyncSnapshot` frames replace the client synchronization snapshot, set confirmed and optimistic versions to the server version, clear all pending edits, and become `ClientConnectionEvent::ResyncSnapshot`. Server errors and decode/I/O failures become non-panicking events.
+The background task splits any connected `AsyncRead + AsyncWrite` stream and uses `tokio::select!` to handle either an outgoing edit or an incoming server frame. Outgoing edits are encoded through the shared `Codec`. Incoming `EditAck` frames update confirmed-version state, remove the pending transaction, and become `ClientConnectionEvent::EditAck`. Incoming `EditRejected` frames remove the rejected pending transaction and become `ClientConnectionEvent::EditRejected`. Stale/future version, invalid behavior version, lease, read-only, and region-lock rejections immediately send a `ClientMessage::RequestResync` with the client's last confirmed version. Incoming `ResyncSnapshot` frames replace the client synchronization snapshot, set confirmed and optimistic versions to the server version, clear all pending edits, and become `ClientConnectionEvent::ResyncSnapshot`. Server errors and decode/I/O failures become non-panicking events.
 
 `src/main.rs` passes both the server-provided initial state and edit queue into `EditorWidget`, and spawns a small event logger that prints `ClientConnectionEvent` values such as `EditAck` to stderr. The widget assigns client transaction IDs and calls `try_send` through `ClientEditQueue`. If the queue is missing or full, the local edit has already happened and the UI remains responsive. `EditorWidget::apply_connection_event` is the UI-safe resync boundary: it ignores non-resync events and applies a real `ResyncSnapshot` through `EditorSurface::load_snapshot`, which resets caret, selection, viewport, and local document metadata.
 
@@ -65,6 +65,7 @@ cargo run
 - Behavior-version enforcement is a server-owned manifest metadata check before document mutation; rejected behavior versions do not advance the canonical document version.
 - IPC input is still decoded and validated through the shared length-prefixed `rkyv` codec.
 - No JavaScript execution, file/workspace authority, remote listener, extension loading, or AI mutation authority is added by this flow.
+- Current endpoint connect/listen code is explicitly Unix-gated, but shared client and server protocol loops are generic over Tokio async streams; endpoint modeling already represents Windows support as local named pipes rather than TCP or shell-mediated IPC.
 
 ## Tests
 
@@ -82,7 +83,7 @@ cargo run
 - `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflict metadata across the real Unix socket server path.
 - `src/server/connection.rs`: `server_rejects_edit_with_stale_behavior_version_without_mutating_document` validates behavior-version mismatch rejection before canonical mutation.
 - `src/server/behavior.rs`: replacement publishing tests validate deterministic manifest version advancement and invalid replacement rollback.
-- `src/main.rs`: CLI parser tests validate `server`, `client`, and bare auto modes.
+- `src/main.rs`: CLI parser tests validate `server`, `client`, bare auto modes, and platform endpoint argument parsing.
 - Relevant commands: `cargo test client --quiet`, `cargo test server --quiet`, `cargo test --quiet`.
 
 ## Related

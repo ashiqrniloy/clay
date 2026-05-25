@@ -1,7 +1,7 @@
+use std::{error::Error, ffi::OsString};
+#[cfg(unix)]
 use std::{
-    error::Error,
-    ffi::OsString,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
     time::Duration,
 };
@@ -13,9 +13,11 @@ use masonry_winit::winit::dpi::LogicalSize;
 use masonry_winit::winit::event_loop::EventLoop;
 use masonry_winit::winit::window::Window;
 
+#[cfg(unix)]
 use clay::client;
-use clay::ipc::default_socket_path;
+use clay::ipc::{IpcEndpoint, default_endpoint};
 use clay::masonry_editor::{EditorAction, EditorWidget};
+#[cfg(unix)]
 use clay::server::{IpcServer, ServerConfig};
 
 const WINDOW_TITLE: &str = "Clay Phase 4";
@@ -48,16 +50,16 @@ impl AppDriver for Driver {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClayCommand {
-    Auto { socket_path: PathBuf },
-    Client { socket_path: PathBuf },
-    Server { socket_path: PathBuf },
+    Auto { endpoint: IpcEndpoint },
+    Client { endpoint: IpcEndpoint },
+    Server { endpoint: IpcEndpoint },
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     match parse_command(std::env::args_os().skip(1).collect()) {
-        ClayCommand::Server { socket_path } => run_server(socket_path),
-        ClayCommand::Client { socket_path } => run_client(socket_path, false),
-        ClayCommand::Auto { socket_path } => run_client(socket_path, true),
+        ClayCommand::Server { endpoint } => run_server(endpoint),
+        ClayCommand::Client { endpoint } => run_client(endpoint, false),
+        ClayCommand::Auto { endpoint } => run_client(endpoint, true),
     }
 }
 
@@ -65,57 +67,66 @@ fn parse_command(args: Vec<OsString>) -> ClayCommand {
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
         return ClayCommand::Auto {
-            socket_path: default_socket_path(),
+            endpoint: default_endpoint(),
         };
     };
 
     match first.to_string_lossy().as_ref() {
         "server" | "--server" => ClayCommand::Server {
-            socket_path: args
+            endpoint: args
                 .next()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_socket_path),
+                .map(IpcEndpoint::from_argument)
+                .unwrap_or_else(default_endpoint),
         },
         "client" | "--client" => ClayCommand::Client {
-            socket_path: args
+            endpoint: args
                 .next()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_socket_path),
+                .map(IpcEndpoint::from_argument)
+                .unwrap_or_else(default_endpoint),
         },
         _ => ClayCommand::Client {
-            socket_path: PathBuf::from(first),
+            endpoint: IpcEndpoint::from_argument(first),
         },
     }
 }
 
-fn run_server(socket_path: PathBuf) -> Result<(), Box<dyn Error>> {
-    eprintln!("clay server listening on {}", socket_path.display());
+#[cfg(unix)]
+fn run_server(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    eprintln!("clay server listening on {endpoint}");
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(IpcServer::new(ServerConfig::new(socket_path)).run())?;
+        .block_on(IpcServer::new(ServerConfig::new(endpoint.as_unix_socket_path())).run())?;
     Ok(())
 }
 
-fn run_client(socket_path: PathBuf, start_server_if_missing: bool) -> Result<(), Box<dyn Error>> {
+#[cfg(not(unix))]
+fn run_server(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    Err(format!(
+        "Clay server IPC is currently implemented only for Unix sockets; unsupported endpoint {endpoint}"
+    )
+    .into())
+}
+
+#[cfg(unix)]
+fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<(), Box<dyn Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
-    let client_session = match runtime.block_on(client::connect(&socket_path)) {
+    let socket_path = endpoint.as_unix_socket_path();
+    let client_session = match runtime.block_on(client::connect(socket_path)) {
         Ok(session) => Some(session),
         Err(connect_error) if start_server_if_missing => {
             eprintln!(
-                "no Clay server available at {}; starting a background server: {connect_error}",
-                socket_path.display()
+                "no Clay server available at {endpoint}; starting a background server: {connect_error}"
             );
-            start_background_server(&socket_path)?;
-            Some(runtime.block_on(connect_with_retry(&socket_path))?)
+            start_background_server(&endpoint)?;
+            Some(runtime.block_on(connect_with_retry(socket_path))?)
         }
         Err(connect_error) => {
             eprintln!(
-                "failed to connect to Clay server at {}; starting local empty client: {connect_error}",
-                socket_path.display()
+                "failed to connect to Clay server at {endpoint}; starting local empty client: {connect_error}"
             );
             None
         }
@@ -140,11 +151,20 @@ fn run_client(socket_path: PathBuf, start_server_if_missing: bool) -> Result<(),
     run_editor(editor_widget)
 }
 
-fn start_background_server(socket_path: &Path) -> Result<(), Box<dyn Error>> {
+#[cfg(not(unix))]
+fn run_client(endpoint: IpcEndpoint, _start_server_if_missing: bool) -> Result<(), Box<dyn Error>> {
+    Err(format!(
+        "Clay client IPC is currently implemented only for Unix sockets; unsupported endpoint {endpoint}"
+    )
+    .into())
+}
+
+#[cfg(unix)]
+fn start_background_server(endpoint: &IpcEndpoint) -> Result<(), Box<dyn Error>> {
     let executable = std::env::current_exe()?;
     Command::new(executable)
         .arg("server")
-        .arg(socket_path)
+        .arg(endpoint.as_child_arg())
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -152,6 +172,7 @@ fn start_background_server(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn connect_with_retry(
     socket_path: &Path,
 ) -> Result<client::ClientSession, client::ClientBootstrapError> {
@@ -188,6 +209,8 @@ fn run_editor(editor_widget: EditorWidget) -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     use super::{ClayCommand, parse_command};
     use clay::editor::{EditorSurface, is_printable_text};
 
@@ -210,6 +233,25 @@ mod tests {
     #[test]
     fn parses_no_args_as_auto() {
         assert!(matches!(parse_command(vec![]), ClayCommand::Auto { .. }));
+    }
+
+    #[test]
+    fn cli_parses_platform_endpoint() {
+        let endpoint = "clay-test-endpoint";
+
+        match parse_command(vec!["server".into(), endpoint.into()]) {
+            ClayCommand::Server { endpoint: parsed } => {
+                assert_eq!(parsed.as_child_arg(), OsString::from(endpoint));
+            }
+            command => panic!("expected server command, got {command:?}"),
+        }
+
+        match parse_command(vec!["client".into(), endpoint.into()]) {
+            ClayCommand::Client { endpoint: parsed } => {
+                assert_eq!(parsed.as_child_arg(), OsString::from(endpoint));
+            }
+            command => panic!("expected client command, got {command:?}"),
+        }
     }
 
     #[test]
