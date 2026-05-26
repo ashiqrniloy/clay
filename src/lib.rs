@@ -6,5 +6,5 @@ pub mod ipc;
 pub mod masonry_editor;
 pub mod protocol;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub mod server;

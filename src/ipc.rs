@@ -12,6 +12,27 @@ pub enum IpcEndpoint {
     Unsupported(String),
 }
 
+#[cfg(unix)]
+impl From<PathBuf> for IpcEndpoint {
+    fn from(path: PathBuf) -> Self {
+        Self::UnixSocket(path)
+    }
+}
+
+#[cfg(unix)]
+impl From<&std::path::Path> for IpcEndpoint {
+    fn from(path: &std::path::Path) -> Self {
+        Self::UnixSocket(path.to_path_buf())
+    }
+}
+
+#[cfg(unix)]
+impl From<&PathBuf> for IpcEndpoint {
+    fn from(path: &PathBuf) -> Self {
+        Self::UnixSocket(path.clone())
+    }
+}
+
 impl IpcEndpoint {
     pub fn from_argument(argument: impl Into<OsString>) -> Self {
         let argument = argument.into();
@@ -52,6 +73,20 @@ impl IpcEndpoint {
         match self {
             Self::WindowsNamedPipe(name) => name.as_str(),
         }
+    }
+
+    #[cfg(windows)]
+    pub fn validate_windows_named_pipe(&self) -> Result<(), String> {
+        let name = self.as_windows_named_pipe();
+        if name.is_empty() {
+            return Err("named pipe name must not be empty".to_string());
+        }
+        if !name.starts_with(r"\\.\pipe\") {
+            return Err(format!(
+                "named pipe name must use the local \\\\.\\pipe\\ prefix: {name}"
+            ));
+        }
+        Ok(())
     }
 }
 

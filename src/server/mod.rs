@@ -5,34 +5,44 @@ mod workspace;
 
 use std::{
     error::Error,
-    fmt, fs, io,
-    os::unix::fs::FileTypeExt,
-    path::{Path, PathBuf},
+    fmt, io,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
 
-use tokio::{net::UnixListener, sync::Mutex, task::JoinSet};
+#[cfg(unix)]
+use std::{fs, os::unix::fs::FileTypeExt, path::Path};
 
-use crate::protocol::codec::Codec;
+use tokio::{sync::Mutex, task::JoinSet};
+
+#[cfg(unix)]
+use tokio::net::UnixListener;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+
+use crate::{ipc::IpcEndpoint, protocol::codec::Codec};
 
 use self::{
     behavior::ActiveBehaviorManifest, connection::handle_connection, document::DocumentState,
     workspace::WorkspaceState,
 };
 
+#[cfg(windows)]
+const ERROR_PIPE_CONNECTED: i32 = 535;
+
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    pub socket_path: PathBuf,
+    pub endpoint: IpcEndpoint,
     pub workspace_roots: Vec<PathBuf>,
 }
 
 impl ServerConfig {
-    pub fn new(socket_path: impl Into<PathBuf>) -> Self {
+    pub fn new(endpoint: impl Into<IpcEndpoint>) -> Self {
         Self {
-            socket_path: socket_path.into(),
+            endpoint: endpoint.into(),
             workspace_roots: Vec::new(),
         }
     }
@@ -75,26 +85,20 @@ impl IpcServer {
         })
     }
 
+    #[cfg(unix)]
     pub async fn run(self) -> Result<(), ServerError> {
-        let listener = bind_unix_listener(&self.config.socket_path)?;
-        self.accept_loop(listener).await
+        let listener = bind_unix_listener(self.config.endpoint.as_unix_socket_path())?;
+        self.accept_unix_loop(listener).await
     }
 
-    async fn accept_loop(self, listener: UnixListener) -> Result<(), ServerError> {
+    #[cfg(unix)]
+    async fn accept_unix_loop(self, listener: UnixListener) -> Result<(), ServerError> {
         let mut connections = JoinSet::new();
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
                     let (stream, _address) = accepted.map_err(ServerError::Accept)?;
-                    let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
-                    let document = Arc::clone(&self.document);
-                    let behavior = Arc::clone(&self.behavior);
-                    let codec = self.codec;
-                    connections.spawn(async move {
-                        if let Err(error) = handle_connection(stream, client_id, document, behavior, codec).await {
-                            eprintln!("clay server connection {client_id} closed with error: {error}");
-                        }
-                    });
+                    self.spawn_connection(stream, &mut connections);
                 }
                 Some(joined) = connections.join_next() => {
                     if let Err(error) = joined {
@@ -104,29 +108,79 @@ impl IpcServer {
             }
         }
     }
+
+    #[cfg(windows)]
+    pub async fn run(self) -> Result<(), ServerError> {
+        self.config
+            .endpoint
+            .validate_windows_named_pipe()
+            .map_err(ServerError::InvalidEndpoint)?;
+        let mut connections = JoinSet::new();
+        loop {
+            let pipe = create_named_pipe_server(self.config.endpoint.as_windows_named_pipe())?;
+            tokio::select! {
+                connected = connect_named_pipe_server(pipe) => {
+                    let stream = connected.map_err(ServerError::Accept)?;
+                    self.spawn_connection(stream, &mut connections);
+                }
+                Some(joined) = connections.join_next() => {
+                    if let Err(error) = joined {
+                        eprintln!("clay server connection task failed: {error}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    pub async fn run(self) -> Result<(), ServerError> {
+        Err(ServerError::InvalidEndpoint(format!(
+            "Clay IPC is unsupported on this platform: {}",
+            self.config.endpoint
+        )))
+    }
+
+    fn spawn_connection<S>(&self, stream: S, connections: &mut JoinSet<()>)
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+        let document = Arc::clone(&self.document);
+        let behavior = Arc::clone(&self.behavior);
+        let codec = self.codec;
+        connections.spawn(async move {
+            if let Err(error) =
+                handle_connection(stream, client_id, document, behavior, codec).await
+            {
+                eprintln!("clay server connection {client_id} closed with error: {error}");
+            }
+        });
+    }
 }
 
+#[cfg(unix)]
 fn bind_unix_listener(socket_path: &Path) -> Result<UnixListener, ServerError> {
     validate_socket_path(socket_path)?;
     remove_stale_socket(socket_path)?;
     UnixListener::bind(socket_path).map_err(ServerError::Bind)
 }
 
+#[cfg(unix)]
 fn validate_socket_path(socket_path: &Path) -> Result<(), ServerError> {
     if socket_path.as_os_str().is_empty() {
-        return Err(ServerError::InvalidSocketPath(
+        return Err(ServerError::InvalidEndpoint(
             "socket path must not be empty".to_string(),
         ));
     }
 
     let Some(parent) = socket_path.parent() else {
-        return Err(ServerError::InvalidSocketPath(
+        return Err(ServerError::InvalidEndpoint(
             "socket path must have a parent directory".to_string(),
         ));
     };
-    let metadata = fs::metadata(parent).map_err(ServerError::SocketDirectory)?;
+    let metadata = fs::metadata(parent).map_err(ServerError::EndpointDirectory)?;
     if !metadata.is_dir() {
-        return Err(ServerError::InvalidSocketPath(format!(
+        return Err(ServerError::InvalidEndpoint(format!(
             "socket parent {} is not a directory",
             parent.display()
         )));
@@ -135,6 +189,7 @@ fn validate_socket_path(socket_path: &Path) -> Result<(), ServerError> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn remove_stale_socket(socket_path: &Path) -> Result<(), ServerError> {
     let Ok(metadata) = fs::symlink_metadata(socket_path) else {
         return Ok(());
@@ -145,16 +200,32 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), ServerError> {
         return Ok(());
     }
 
-    Err(ServerError::InvalidSocketPath(format!(
+    Err(ServerError::InvalidEndpoint(format!(
         "refusing to replace non-socket path {}",
         socket_path.display()
     )))
 }
 
+#[cfg(windows)]
+fn create_named_pipe_server(pipe_name: &str) -> Result<NamedPipeServer, ServerError> {
+    ServerOptions::new()
+        .create(pipe_name)
+        .map_err(ServerError::Bind)
+}
+
+#[cfg(windows)]
+async fn connect_named_pipe_server(pipe: NamedPipeServer) -> io::Result<NamedPipeServer> {
+    match pipe.connect().await {
+        Ok(()) => Ok(pipe),
+        Err(error) if error.raw_os_error() == Some(ERROR_PIPE_CONNECTED) => Ok(pipe),
+        Err(error) => Err(error),
+    }
+}
+
 #[derive(Debug)]
 pub enum ServerError {
-    InvalidSocketPath(String),
-    SocketDirectory(io::Error),
+    InvalidEndpoint(String),
+    EndpointDirectory(io::Error),
     RemoveStaleSocket(io::Error),
     Bind(io::Error),
     Accept(io::Error),
@@ -164,18 +235,18 @@ pub enum ServerError {
 impl fmt::Display for ServerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidSocketPath(message) => write!(formatter, "invalid socket path: {message}"),
-            Self::SocketDirectory(error) => {
-                write!(formatter, "failed to inspect socket directory: {error}")
+            Self::InvalidEndpoint(message) => write!(formatter, "invalid IPC endpoint: {message}"),
+            Self::EndpointDirectory(error) => {
+                write!(
+                    formatter,
+                    "failed to inspect IPC endpoint directory: {error}"
+                )
             }
             Self::RemoveStaleSocket(error) => {
                 write!(formatter, "failed to remove stale socket: {error}")
             }
-            Self::Bind(error) => write!(formatter, "failed to bind Unix socket: {error}"),
-            Self::Accept(error) => write!(
-                formatter,
-                "failed to accept Unix socket connection: {error}"
-            ),
+            Self::Bind(error) => write!(formatter, "failed to bind IPC endpoint: {error}"),
+            Self::Accept(error) => write!(formatter, "failed to accept IPC connection: {error}"),
             Self::InvalidWorkspaceRoot(message) => {
                 write!(formatter, "invalid workspace root: {message}")
             }
@@ -186,16 +257,16 @@ impl fmt::Display for ServerError {
 impl Error for ServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::SocketDirectory(error)
+            Self::EndpointDirectory(error)
             | Self::RemoveStaleSocket(error)
             | Self::Bind(error)
             | Self::Accept(error) => Some(error),
-            Self::InvalidSocketPath(_) | Self::InvalidWorkspaceRoot(_) => None,
+            Self::InvalidEndpoint(_) | Self::InvalidWorkspaceRoot(_) => None,
         }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::{
         fs,

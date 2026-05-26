@@ -176,7 +176,7 @@
     - `mise x rust@latest -- cargo check --target x86_64-pc-windows-msvc --all-targets`: passed with the same pre-existing warnings.
     - `mise x rust@latest -- cargo test --lib server_accepts_hello_and_sends_snapshot --quiet` and `mise x rust@latest -- cargo test --lib server_rejects_invalid_frame_without_panic --quiet`: reported 0 tests on this Windows host because `clay::server` remains Unix-gated until the transport implementation task; the server connection tests were refactored to generic `tokio::io::duplex` streams for Unix builds.
 
-- [ ] Add Unix and Windows transport implementations
+- [x] Add Unix and Windows transport implementations
   - Acceptance Criteria:
     - Functional: Unix uses existing Unix domain socket behavior; Windows creates and accepts Tokio named pipe server instances and connects clients with busy-pipe retry handling.
     - Performance: Listener accept/connect loops use async Tokio APIs and do not block the GUI thread or serialize unrelated client connections globally beyond current server state constraints.
@@ -205,10 +205,18 @@
       let client = ClientOptions::new().open(r"\\.\pipe\clay-user")?;
       ```
     - Files to Create/Edit:
-      - `Cargo.toml`: Add Windows-only `windows-sys` dependency if needed for `ERROR_PIPE_BUSY`.
-      - `src/server/mod.rs`: Route `IpcServer::run` through platform transport.
-      - `src/client/mod.rs`: Route `connect` and `load_initial_state` through platform transport.
-      - `src/ipc.rs`: Validate/normalize platform endpoints.
+      - `Cargo.toml`: Reviewed; no `windows-sys` dependency was needed because the transport uses local raw OS error constants for `ERROR_PIPE_BUSY` and the already-connected pipe race.
+      - `src/lib.rs`: Exposes the server module on Unix and Windows.
+      - `src/server/mod.rs`: Routes `IpcServer::run` through Unix socket or Windows named-pipe transport, keeps Unix stale-socket cleanup, spawns shared connection handling for accepted streams, and validates local Windows pipe prefixes.
+      - `src/client/mod.rs`: Routes `connect` and `load_initial_state` through `IpcEndpoint`, opens Unix sockets or Windows named-pipe clients, retries busy named pipes, and adds Windows named-pipe integration tests.
+      - `src/ipc.rs`: Added endpoint conversions for Unix server tests/callers and validates Windows local named-pipe endpoints.
+      - `src/main.rs`: Uses endpoint-based client/server calls now that both Unix and Windows transports are available.
+      - `src/bin/clay-server.rs`: Uses endpoint-based `ServerConfig` on Unix and Windows.
+      - `src/server/workspace.rs`: Keeps Unix-only special-file/symlink tests explicitly cfg-gated now that `clay::server` compiles on Windows.
+      - `docs/wiki/index.md`: Updated navigation summaries for platform IPC.
+      - `docs/wiki/modules/server-ipc-skeleton.md`: Documented Unix and Windows server transport behavior.
+      - `docs/wiki/modules/client-snapshot-bootstrap.md`: Documented endpoint-based client transport and named-pipe busy retry.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Documented transport-aware startup and unchanged generic protocol loop.
     - References:
       - Context7 Tokio named pipe docs for `ServerOptions`, `ClientOptions`, and busy-pipe retries.
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
@@ -218,8 +226,17 @@
     - `windows_named_pipe_edit_gets_acknowledged`: Client sends an edit over the named pipe and receives `EditAck`.
     - `windows_second_client_is_read_only`: Second Windows client receives observer/read-only access, matching Unix semantics.
     - `unix_socket_transport_regression`: Existing Unix real-socket end-to-end tests still pass.
+  - Verification Results:
+    - `mise x rust@latest -- cargo fmt --check`: passed after formatting the changed Rust files.
+    - `mise x rust@latest -- cargo check --all-targets`: passed on the Windows host.
+    - `mise x rust@latest -- cargo check --target x86_64-pc-windows-msvc --all-targets`: passed.
+    - `mise x rust@latest -- cargo test --lib client --quiet`: passed; includes the Windows named-pipe integration tests on this Windows host plus generic client protocol coverage.
+    - `mise x rust@latest -- cargo test --lib windows_named_pipe --quiet`: passed; covers initial snapshot and edit acknowledgement over a real named pipe.
+    - `mise x rust@latest -- cargo test --lib windows_second_client_is_read_only --quiet`: passed.
+    - `mise x rust@latest -- cargo test --test rust_visibility_api_mapping --quiet`: passed.
+    - Note: `mise x rust@latest -- cargo test rust_visibility_api_mapping --quiet` still attempts to execute the `update-doc-registry` binary test on Windows and fails before running it with elevation required (`os error 740`), so the targeted `--test rust_visibility_api_mapping` command was used.
 
-- [ ] Make binaries and background server startup platform-aware
+- [x] Make binaries and background server startup platform-aware
   - Acceptance Criteria:
     - Functional: `clay`, `clay server`, `clay client`, and `clay-server` compile and run on Windows MSVC and existing Unix targets.
     - Performance: Auto-start retry remains bounded and asynchronous; startup does not block Masonry input/rendering after the editor opens.
@@ -242,9 +259,9 @@
       cargo run
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Use platform endpoint abstraction in parser, connect retry, and background startup.
-      - `src/bin/clay-server.rs`: Use platform endpoint abstraction.
-      - `src/ipc.rs`: Provide endpoint argument conversion for child process startup.
+      - `src/main.rs`: Uses platform endpoint abstraction in parser, connect retry, and background startup; added a testable shell-free background server `Command` builder.
+      - `src/bin/clay-server.rs`: Verified existing platform endpoint abstraction is used for foreground server startup.
+      - `src/ipc.rs`: Verified endpoint argument conversion is used for child process startup.
     - References:
       - `src/main.rs`
       - `src/bin/clay-server.rs`
@@ -253,8 +270,16 @@
     - `parses_no_args_as_auto`: Existing parser behavior remains stable with endpoint abstraction.
     - `parses_server_subcommand`: Server mode carries a valid platform endpoint.
     - `auto_start_uses_current_exe_without_shell`: Command construction remains shell-free and passes endpoint argument directly.
+  - Verification Results:
+    - `mise x rust@latest -- cargo fmt --check`: passed.
+    - `mise x rust@latest -- cargo test --bin clay auto_start_uses_current_exe_without_shell --quiet`: passed.
+    - `mise x rust@latest -- cargo test --bin clay parses_no_args_as_auto --quiet`: passed.
+    - `mise x rust@latest -- cargo test --bin clay parses_server_subcommand --quiet`: passed.
+    - `mise x rust@latest -- cargo test --bin clay cli_parses_platform_endpoint --quiet`: passed.
+    - `mise x rust@latest -- cargo check --all-targets`: passed on the Windows host.
+    - `mise x rust@latest -- cargo check --target x86_64-pc-windows-msvc --all-targets`: passed.
 
-- [ ] Add Windows MSVC setup and validation documentation
+- [x] Add Windows MSVC setup and validation documentation
   - Acceptance Criteria:
     - Functional: Developers can follow repository documentation to install/use the MSVC Rust toolchain and run Windows validation commands.
     - Performance: Documentation includes expected validation scope without adding runtime features.
@@ -279,18 +304,21 @@
       cargo test --target x86_64-pc-windows-msvc
       ```
     - Files to Create/Edit:
-      - `docs/windows.md` or `docs/development/windows.md`: Windows setup and validation instructions.
-      - `docs/index.md`: Link Windows platform documentation if a new doc is created.
-      - `docs/wiki/**`: Implementation documentation deferred to final wiki task.
+      - `docs/development/windows.md`: Added Windows MSVC prerequisites, rustup setup commands, symlink permission note, local named-pipe IPC explanation, validation commands, and manual startup smoke tests.
+      - `docs/index.md`: Added a Developer Guides link to the Windows MSVC documentation outside the Clay JS API registry source section.
+      - `docs/wiki/**`: No edit in this task; linked existing implementation wiki pages for platform IPC details.
     - References:
       - Context7 Rustup Windows/MSVC docs.
-      - Context7 Tokio named pipe docs.
+      - Existing wiki implementation pages for server IPC, client bootstrap, and client/server edit acknowledgement.
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
   - Test Cases to Write:
     - Documentation link review: Confirm any new Windows setup doc is linked from `docs/index.md`.
     - Command review: Confirm documented commands match actual package targets and platform support.
+  - Verification Results:
+    - `test -f docs/development/windows.md && rg -n -F "Windows MSVC Development" docs/index.md docs/development/windows.md && rg -n -F "development/windows.md" docs/index.md && rg -n -F "\\\\.\\pipe" docs/development/windows.md && rg -n -F "cargo check --target x86_64-pc-windows-msvc" docs/development/windows.md && rg -n -F "remote TCP" docs/development/windows.md && rg -n -F "shell-mediated IPC" docs/development/windows.md && rg -n -F "windows_named_pipe" docs/development/windows.md && rg -n -F "rust_visibility_api_mapping" docs/development/windows.md && rg -n -F "cargo test --all-targets" docs/development/windows.md`: passed after correcting an initial `rg` regex escaping error by switching to fixed-string checks.
+    - Manual command review: documented validation commands match commands already used by completed Windows transport tasks (`cargo check --target x86_64-pc-windows-msvc --all-targets`, targeted Windows named-pipe tests, and `cargo test --test rust_visibility_api_mapping --quiet`).
 
-- [ ] Verify cross-platform build and IPC behavior
+- [x] Verify cross-platform build and IPC behavior
   - Acceptance Criteria:
     - Functional: Unix and Windows builds/tests validate client/server bootstrap, edit ack, read-only second client behavior, and stale/resync behavior where platform transport supports it.
     - Performance: Tests include or preserve coverage proving the editor hot path uses bounded `try_send` and does not await IPC queue capacity.
@@ -313,10 +341,16 @@
       cargo check --target x86_64-pc-windows-msvc --all-targets
       ```
     - Files to Create/Edit:
-      - `src/client/mod.rs`: Add/gate transport integration tests.
-      - `src/server/mod.rs`: Add/gate listener tests.
-      - `src/server/connection.rs`: Keep shared protocol tests transport-neutral where practical.
-      - `.github/workflows/*` or equivalent CI files if present: Optionally add Windows MSVC job; create only if the project already uses CI or the user approves.
+      - `src/client/mod.rs`: Added a Windows named-pipe stale-edit rejection plus explicit resync recovery integration test, reusing cfg-gated Windows endpoint helpers and the shared codec.
+      - `src/server/mod.rs`: Verified existing Unix listener tests remain cfg-gated under `#[cfg(all(test, unix))]`; no additional listener code was needed for this verification task.
+      - `src/server/connection.rs`: Verified shared generic protocol tests cover handshake, edit ack, resync response, and invalid-frame handling over in-memory async streams; no additional edit was needed.
+      - `src/docs/registry.rs`: Made Clay JS API frontmatter parsing accept CRLF opening delimiters so Windows `cargo test --all-targets` can validate docs generated on Windows checkouts.
+      - `build.rs`: Added a Windows-only link argument for the `update-doc-registry` binary/test binary manifest.
+      - `windows/no-uac.manifest`: Added an `asInvoker` manifest for `update-doc-registry` so Windows does not require elevation for the `update-*` executable during all-target test runs.
+      - `docs/generated/clay-js-api-registry.json`: Regenerated with `cargo run --bin update-doc-registry` after the CRLF parser fix.
+      - `docs/wiki/modules/client-snapshot-bootstrap.md`, `docs/wiki/flows/client-server-edit-ack.md`, `docs/wiki/modules/server-ipc-skeleton.md`: Documented the Windows named-pipe stale/resync test coverage.
+      - `docs/wiki/modules/clay-js-doc-registry.md`: Documented the CRLF parser tolerance and Windows no-UAC registry update binary manifest.
+      - `.github/workflows/*` or equivalent CI files if present: Not edited; no existing CI workflow was found or required for this local verification task.
     - References:
       - `src/client/mod.rs`
       - `src/server/mod.rs`
@@ -327,8 +361,20 @@
     - `cargo test --all-targets`: Native target tests pass.
     - `cargo check --target x86_64-pc-windows-msvc --all-targets`: Windows MSVC compilation passes.
     - Manual GUI smoke test: On Windows, run `cargo run`, type text, observe no IPC panic and server event logging.
+  - Verification Results:
+    - `mise x rust@latest -- cargo fmt --check`: passed.
+    - `mise x rust@latest -- cargo test --lib windows_named_pipe --quiet`: passed; covers named-pipe initial snapshot, edit acknowledgement, and read-only second-client behavior on Windows.
+    - `mise x rust@latest -- cargo test --lib windows_named_pipe_stale_edit_rejected_then_resynced --quiet`: passed; validates stale-version rejection and explicit resync recovery over a real Windows named pipe.
+    - `mise x rust@latest -- cargo test --lib client_hot_path_does_not_await_full_ipc_queue --quiet`: passed; preserves bounded `try_send` hot-path coverage.
+    - `mise x rust@latest -- cargo test --lib server_rejects_invalid_frame_without_panic --quiet`: passed; validates malformed IPC input handling without panics.
+    - `mise x rust@latest -- cargo test --lib codec_rejects_oversized_phase5_frame --quiet`: passed; validates bounded frame rejection before protocol dispatch.
+    - `mise x rust@latest -- cargo test --test clay_js_doc_registry --quiet`: passed after adding CRLF frontmatter tolerance and regenerating the registry artifact.
+    - `mise x rust@latest -- cargo test --all-targets`: passed on the Windows host after embedding an `asInvoker` manifest for the `update-doc-registry` test binary; this fixed Windows UAC executable-name heuristics that previously returned elevation required (`os error 740`).
+    - `mise x rust@latest -- cargo check --target x86_64-pc-windows-msvc --all-targets`: passed.
+    - `mise x rust@latest -- cargo check --all-targets`: passed.
+    - Manual GUI smoke test: not executed in this non-interactive agent run; automated Windows named-pipe IPC tests cover bootstrap, edit ack, read-only observer access, stale/resync, invalid-frame, and non-blocking queue behavior without opening remote network listeners.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: The implementation is reviewed for new user-visible behavior or behavior-changing settings, and any configurable IPC/platform behavior is represented as documented Clay JS APIs or explicitly kept internal.
     - Performance: Configuration review does not add runtime configuration loading to editor input, rendering, Masonry paint/layout, or IPC frame hot paths.
@@ -350,19 +396,29 @@
       // configureIpc({ endpoint: "platform-default" });
       ```
     - Files to Create/Edit:
-      - `docs/reference/clay-js-api/**`: Add/update docs only if public configuration APIs are introduced.
-      - `docs/index.md`: Link any new public API docs.
-      - `runtime/js/**`: Add facade stubs only if public configuration APIs are introduced.
-      - `src/server/**` and `src/client/**`: Keep non-public helpers private or `pub(crate)` where possible.
+      - `docs/reference/clay-js-api/**`: Reviewed; no Windows IPC/platform configuration API docs were needed because no new user configuration surface was introduced.
+      - `docs/index.md`: Reviewed; existing configuration docs remain linked and no new Windows IPC configuration doc link was needed.
+      - `runtime/js/**`: Reviewed; existing planned configuration facade remains unchanged.
+      - `src/server/**` and `src/client/**`: Reviewed Windows transport configuration surface; endpoint selection remains internal/CLI-driven and transport helpers are not exposed as Clay JS configuration APIs.
+      - `src/ipc.rs`: Reviewed default endpoint/environment usage; `XDG_RUNTIME_DIR`, `USER`, and `USERNAME` are platform default derivation inputs, not behavior-changing Clay configuration keys.
+    - Review Results:
+      - No new Clay JS configuration API was introduced for Windows IPC. The named-pipe/socket endpoint remains selected by platform defaults or explicit CLI endpoint arguments (`clay server <endpoint>`, `clay client <endpoint>`), not by `~/.config/clay/init.js` settings.
+      - No undocumented behavior-changing configuration key or Clay-specific environment variable was added. The only environment reads in the Windows-port IPC path are OS/user-default helpers for endpoint naming.
+      - Existing planned configuration APIs (`clay.configuration.loadConfigurationModule` and `clay.configuration.getConfigurationState`) already remain documented, indexed, and registry-backed.
     - References:
       - `.agents/skills/create-plan/references/clay.md`
+      - `.agents/skills/project-patterns/references/configuration-system.md`
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
       - `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`
   - Test Cases to Write:
     - Configuration API coverage review: If new configuration APIs are added, tests fail when docs/index/registry/custom properties are missing.
     - No-new-config review: If no configuration API is added, verify no undocumented behavior-changing config key or env var was introduced.
+  - Verification Results:
+    - `rg -n "std::env::var|std::env::var_os|env::var|env::var_os|CLAY_|XDG_RUNTIME_DIR|USERNAME|USER|init\\.js|configuration" src runtime/js docs/reference/clay-js-api docs/index.md`: passed; confirmed no Clay-specific undocumented configuration key was introduced and existing configuration docs/facades remain the documented surface.
+    - `mise x rust@latest -- cargo test --test clay_js_doc_registry --quiet`: passed; existing configuration API docs and generated registry remain current.
+    - `mise x rust@latest -- cargo test --test rust_visibility_api_mapping --quiet`: passed; no new configuration API exposure was required by changed Rust visibility.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: All server-side Rust public functions introduced or changed by the Windows port are inventoried and either exposed through documented Clay JS APIs when they are public capabilities or made private/`pub(crate)` when internal.
     - Performance: API review does not add JavaScript or IPC round trips to ordinary typing, rendering, or transport frame handling.
@@ -384,12 +440,17 @@
       cargo test clay_js_api_inventory clay_js_doc_registry clay_js_facade_layout rust_visibility_api_mapping
       ```
     - Files to Create/Edit:
-      - `src/ipc.rs`: Review visibility of new endpoint helpers.
-      - `src/client/mod.rs`: Review visibility of transport helpers.
-      - `src/server/mod.rs`: Review visibility of transport helpers.
-      - `docs/reference/clay-js-api/**`: Add/update only for new public Clay JS APIs.
-      - `docs/index.md`: Link any new Clay JS API docs.
-      - `docs/reference/clay-js-api/api-inventory.toml`: Update via registry command if docs change.
+      - `src/ipc.rs`: Reviewed visibility of new endpoint helpers; public items are package-local Rust infrastructure used by binaries and not Clay JS APIs.
+      - `src/client/mod.rs`: Reviewed visibility of transport helpers; transport-specific connect helpers remain private, while existing client session/bootstrap types remain Rust client infrastructure rather than Clay JS surfaces.
+      - `src/server/mod.rs`: Reviewed visibility of transport helpers; Windows named-pipe creation/connection helpers remain private, and public `ServerConfig`, `IpcServer`, and `ServerError` remain non-JS server process infrastructure.
+      - `docs/reference/clay-js-api/**`: No new public Clay JS API Markdown docs were added because the Windows port introduced no public programmatic Clay JS capability.
+      - `docs/index.md`: Reviewed; no new Clay JS API docs required linking because no public Clay JS API was introduced.
+      - `docs/reference/clay-js-api/api-inventory.toml`: Updated the internal `internal.server.ipcRuntime` classification to cover platform-local IPC endpoint/runtime ownership, including `src/ipc.rs` and Windows named pipes, while keeping `registry_public = false`.
+    - Review Results:
+      - No Windows IPC transport helper is exposed through Clay JS. Endpoint derivation, Unix socket binding, named-pipe creation, busy retry, and connection spawning remain Rust process infrastructure.
+      - No raw `Deno.core.ops.op_*` calls were added or made user-facing. Existing runtime JS facade stubs still document that future ops must sit behind stable Clay JS facade exports.
+      - No new public Clay JS docs or generated registry update were needed; the only documentation-source change was the internal inventory classification for platform IPC runtime ownership.
+      - Existing server Rust public items remain either allowlisted non-JS infrastructure (`ServerConfig::new`, `IpcServer::{new,try_new,run}`) or mapped/classified by the inventory (`ServerConfig`, `IpcServer`, `ServerError`).
     - References:
       - `.agents/skills/create-plan/references/clay.md`
       - `.agents/skills/project-patterns/references/documentation-as-code.md`
@@ -400,8 +461,15 @@
     - `cargo test clay_js_api_inventory`: Clay JS inventory remains complete if APIs are added.
     - `cargo test clay_js_doc_registry`: Generated registry remains current if docs change.
     - `cargo test clay_js_facade_layout`: Facade layout remains valid if runtime JS files change.
+  - Verification Results:
+    - `rg -n "pub(\\([^)]*\\))?\\s+(async\\s+)?(fn|struct|enum|type|mod|trait|const|static)" src/ipc.rs src/client/mod.rs src/server/mod.rs src/server/connection.rs`: passed; reviewed public endpoint, client, and server Rust surfaces touched by the Windows port.
+    - `rg -n "Deno\\.core\\.ops|op_" runtime/js docs/reference/clay-js-api src | head -200`: passed; occurrences are documentation/schema/future-op metadata or existing comments, not new user-facing raw op calls.
+    - `mise x rust@latest -- cargo test --test rust_visibility_api_mapping --quiet`: passed; public server Rust items remain mapped or explicitly allowlisted as non-JS infrastructure.
+    - `mise x rust@latest -- cargo test --test clay_js_api_inventory --quiet`: passed; inventory metadata, internal/public classification, and raw-op facade constraints remain valid.
+    - `mise x rust@latest -- cargo test --test clay_js_doc_registry --quiet`: passed; public Clay JS docs and generated registry remain current.
+    - `mise x rust@latest -- cargo test --test clay_js_facade_layout --quiet`: passed; runtime JS facade layout remains valid.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
     - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
@@ -428,13 +496,34 @@
       - `docs/wiki/**`: Add additional implementation pages if transport modules are split out.
     - References:
       - `.agents/skills/project-wiki/SKILL.md`
+      - `docs/wiki/index.md`
       - `docs/wiki/modules/server-ipc-skeleton.md`
+      - `docs/wiki/modules/client-snapshot-bootstrap.md`
       - `docs/wiki/flows/client-server-edit-ack.md`
+      - `docs/wiki/modules/clay-js-doc-registry.md`
+    - Review Results:
+      - The code wiki was already updated by the completed implementation and verification tasks, so no additional wiki page edits were required in this final pass.
+      - `docs/wiki/index.md` links every discoverable page under `docs/wiki/` and summarizes the Windows named-pipe/platform IPC implementation areas.
+      - `docs/wiki/modules/server-ipc-skeleton.md` documents `src/ipc.rs`, Unix socket stale-node protection, Windows local named-pipe validation/rotation, generic async-stream connection dispatch, security boundaries, and IPC tests.
+      - `docs/wiki/modules/client-snapshot-bootstrap.md` documents endpoint-based bootstrap, Windows pipe busy retry, generic handshake/background stream handling, source paths, and Windows named-pipe tests.
+      - `docs/wiki/flows/client-server-edit-ack.md` documents endpoint-aware CLI startup/auto-start, shell-free background server launch, unchanged bounded `try_send` hot path, resync behavior, and Unix/Windows transport coverage.
+      - `docs/wiki/modules/clay-js-doc-registry.md` documents Windows-specific registry validation support: CRLF frontmatter tolerance and the `windows/no-uac.manifest` as-invoker manifest for `update-doc-registry` test binaries.
   - Test Cases to Write:
     - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
+  - Verification Results:
+    - `node - <<'JS' ... JS`: passed; confirmed all 13 non-index Markdown pages under `docs/wiki/` are linked from `docs/wiki/index.md`.
+    - `rg -n -F "Windows named pipes" docs/wiki/index.md docs/wiki/modules/server-ipc-skeleton.md docs/wiki/modules/client-snapshot-bootstrap.md docs/wiki/flows/client-server-edit-ack.md`: passed; confirmed platform IPC is documented in the master index and implementation pages.
+    - `rg -n -F "src/ipc.rs" docs/wiki/modules/server-ipc-skeleton.md docs/wiki/modules/client-snapshot-bootstrap.md docs/wiki/flows/client-server-edit-ack.md`: passed; confirmed the endpoint abstraction source path is documented on relevant pages.
+    - `rg -n -F "windows_named_pipe_stale_edit_rejected_then_resynced" docs/wiki/modules/server-ipc-skeleton.md docs/wiki/modules/client-snapshot-bootstrap.md docs/wiki/flows/client-server-edit-ack.md`: passed; confirmed Windows stale/resync transport coverage is documented.
+    - `rg -n -F "windows/no-uac.manifest" docs/wiki/modules/clay-js-doc-registry.md`: passed; confirmed Windows registry-update test manifest behavior is documented.
+    - Note: An initial `python` helper for the index-link check could not run because Python is not installed in this environment; the equivalent Node.js check above was used successfully.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Manual GUI smoke testing was not executed in this non-interactive agent run; automated Windows named-pipe IPC tests cover bootstrap, edit acknowledgement, read-only observer access, stale/resync recovery, invalid-frame handling, and non-blocking queue behavior.
+- No CI workflow was added because no existing CI workflow was found during the verification task; Windows validation remains documented as deterministic local commands.
+- No new Clay JS configuration or public programmatic API was introduced for Windows IPC; endpoint selection remains platform-default or CLI-driven process infrastructure.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+- Priority 1: Add CI coverage for `cargo fmt --check`, native `cargo test --all-targets`, and Windows MSVC `cargo check --target x86_64-pc-windows-msvc --all-targets` when project CI is introduced.
+- Priority 2: Run and record a manual Windows GUI smoke test (`cargo run`, type text, observe no IPC panic/server event logging) in an interactive environment.
+- Priority 3: Revisit whether endpoint selection needs an intentional Clay JS API only if user-facing configuration requirements emerge.

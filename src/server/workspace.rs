@@ -326,7 +326,9 @@ impl Error for WorkspaceError {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::net::UnixListener, path::PathBuf, time::SystemTime};
+    #[cfg(unix)]
+    use std::os::unix::net::UnixListener;
+    use std::{fs, path::PathBuf, time::SystemTime};
 
     use crate::protocol::{DocumentAccess, EditOperation, ServerMessage};
 
@@ -492,6 +494,7 @@ mod tests {
         let _ = fs::remove_dir(parent);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn workspace_rejects_directory_and_special_file_open() {
         let root = temp_workspace("special-files");
@@ -520,6 +523,7 @@ mod tests {
         let _ = fs::remove_dir(root);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn workspace_canonicalizes_symlink_before_authorization() {
         let parent = temp_workspace("symlink-parent");

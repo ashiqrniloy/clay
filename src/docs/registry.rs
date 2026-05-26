@@ -455,11 +455,14 @@ fn parse_api_doc(root: &Path, documentation_path: &str) -> RegistryResult<Regist
 }
 
 fn frontmatter_text<'a>(text: &'a str, documentation_path: &str) -> RegistryResult<&'a str> {
-    let rest = text.strip_prefix("---\n").ok_or_else(|| {
-        RegistryError::new(format!(
-            "{documentation_path} must start with YAML frontmatter"
-        ))
-    })?;
+    let rest = text
+        .strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"))
+        .ok_or_else(|| {
+            RegistryError::new(format!(
+                "{documentation_path} must start with YAML frontmatter"
+            ))
+        })?;
     rest.split_once("\n---")
         .map(|(frontmatter, _)| frontmatter)
         .ok_or_else(|| {

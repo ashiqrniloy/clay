@@ -1,13 +1,12 @@
 pub(crate) mod behavior;
 
-#[cfg(unix)]
-use std::path::Path;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
 };
 
 use crate::editor::EditorEditEvent;
+use crate::ipc::IpcEndpoint;
 use crate::protocol::{
     BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, DocumentAccess, DocumentId,
     DocumentVersion, EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode,
@@ -18,17 +17,23 @@ use crate::protocol::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc,
+    time::{Duration, timeout},
 };
 
 #[cfg(unix)]
 use tokio::net::UnixStream;
-#[cfg(unix)]
-use tokio::time::{Duration, timeout};
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::ClientOptions;
 
 const CLIENT_NAME: &str = "clay-client";
 const EDIT_QUEUE_CAPACITY: usize = 256;
-#[cfg(unix)]
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(windows)]
+const PIPE_BUSY_RETRY_DELAY: Duration = Duration::from_millis(20);
+#[cfg(windows)]
+const PIPE_BUSY_RETRY_ATTEMPTS: usize = 50;
+#[cfg(windows)]
+const ERROR_PIPE_BUSY: i32 = 231;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientInitialState {
@@ -322,11 +327,8 @@ impl std::error::Error for ClientBootstrapError {
     }
 }
 
-#[cfg(unix)]
-pub async fn connect(socket_path: impl AsRef<Path>) -> Result<ClientSession, ClientBootstrapError> {
-    let stream = UnixStream::connect(socket_path)
-        .await
-        .map_err(CodecError::Io)?;
+pub async fn connect(endpoint: &IpcEndpoint) -> Result<ClientSession, ClientBootstrapError> {
+    let stream = connect_transport(endpoint).await.map_err(CodecError::Io)?;
     timeout(
         SNAPSHOT_TIMEOUT,
         connect_from_stream(stream, Codec::default()),
@@ -335,11 +337,47 @@ pub async fn connect(socket_path: impl AsRef<Path>) -> Result<ClientSession, Cli
     .map_err(|_| ClientBootstrapError::Timeout)?
 }
 
-#[cfg(unix)]
 pub async fn load_initial_state(
-    socket_path: impl AsRef<Path>,
+    endpoint: &IpcEndpoint,
 ) -> Result<ClientInitialState, ClientBootstrapError> {
-    Ok(connect(socket_path).await?.initial_state)
+    Ok(connect(endpoint).await?.initial_state)
+}
+
+#[cfg(unix)]
+async fn connect_transport(endpoint: &IpcEndpoint) -> std::io::Result<UnixStream> {
+    UnixStream::connect(endpoint.as_unix_socket_path()).await
+}
+
+#[cfg(windows)]
+async fn connect_transport(
+    endpoint: &IpcEndpoint,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    endpoint
+        .validate_windows_named_pipe()
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+    let pipe_name = endpoint.as_windows_named_pipe();
+    let mut last_busy = None;
+
+    for _ in 0..PIPE_BUSY_RETRY_ATTEMPTS {
+        match ClientOptions::new().open(pipe_name) {
+            Ok(client) => return Ok(client),
+            Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                last_busy = Some(error);
+                tokio::time::sleep(PIPE_BUSY_RETRY_DELAY).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_busy.expect("pipe-busy retry loop records the last busy error"))
+}
+
+#[cfg(not(any(unix, windows)))]
+async fn connect_transport(_endpoint: &IpcEndpoint) -> std::io::Result<tokio::io::DuplexStream> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Clay IPC is unsupported on this platform",
+    ))
 }
 
 pub async fn load_initial_state_from_stream<S>(
@@ -583,25 +621,31 @@ async fn run_connection<S>(
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
-    use std::{fs, time::SystemTime};
+    use std::fs;
+    #[cfg(any(unix, windows))]
+    use std::time::SystemTime;
 
     use tokio::io::duplex;
     #[cfg(unix)]
     use tokio::net::UnixStream;
 
+    #[cfg(windows)]
+    use super::connect_transport;
     use super::{
         ClientConnectionEvent, ClientEditQueue, connect_from_stream, load_initial_state_from_stream,
     };
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use super::{ClientSession, connect};
     use crate::editor::EditorEditEvent;
+    #[cfg(any(unix, windows))]
+    use crate::ipc::IpcEndpoint;
+    #[cfg(any(unix, windows))]
+    use crate::protocol::EditRejection;
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess, EditOperation,
         PROTOCOL_VERSION, ServerMessage, codec::Codec,
     };
-    #[cfg(unix)]
-    use crate::protocol::EditRejection;
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use crate::server::{IpcServer, ServerConfig};
 
     #[cfg(unix)]
@@ -622,7 +666,7 @@ mod tests {
     async fn connect_with_retry(socket_path: &std::path::Path) -> ClientSession {
         let mut last_error = None;
         for _ in 0..50 {
-            match connect(socket_path).await {
+            match connect(&IpcEndpoint::from(socket_path)).await {
                 Ok(session) => return session,
                 Err(error) => {
                     last_error = Some(error.to_string());
@@ -646,6 +690,33 @@ mod tests {
             }
         }
         panic!("failed to connect to test socket: {:?}", last_error);
+    }
+
+    #[cfg(windows)]
+    fn unique_named_pipe(name: &str) -> IpcEndpoint {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        IpcEndpoint::WindowsNamedPipe(format!(
+            r"\\.\pipe\clay-client-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(windows)]
+    async fn connect_with_retry(endpoint: &IpcEndpoint) -> ClientSession {
+        let mut last_error = None;
+        for _ in 0..50 {
+            match connect(endpoint).await {
+                Ok(session) => return session,
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
+        panic!("failed to connect to test named pipe: {:?}", last_error);
     }
 
     #[tokio::test]
@@ -1420,6 +1491,196 @@ mod tests {
         server_task.abort();
         let _ = fs::remove_file(&socket_path);
         let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_client_receives_initial_snapshot() {
+        let endpoint = unique_named_pipe("snapshot");
+        let server = IpcServer::new(ServerConfig::new(endpoint.clone()));
+        let server_task = tokio::spawn(server.run());
+
+        let session = connect_with_retry(&endpoint).await;
+
+        assert_eq!(
+            session.initial_state.text,
+            "Welcome to Clay's Phase 4 IPC server.\n"
+        );
+        assert!(matches!(
+            session.initial_state.access,
+            DocumentAccess::Editable { lease_id: 1 }
+        ));
+        assert_eq!(session.initial_state.behavior_manifest.behavior_version, 1);
+
+        server_task.abort();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_edit_gets_acknowledged() {
+        let endpoint = unique_named_pipe("ack");
+        let server = IpcServer::new(ServerConfig::new(endpoint.clone()));
+        let server_task = tokio::spawn(server.run());
+
+        let mut session = connect_with_retry(&endpoint).await;
+        session
+            .edit_queue
+            .enqueue_edit_event(
+                EditorEditEvent {
+                    document_id: session.initial_state.document_id,
+                    base_version: session.initial_state.document_version,
+                    behavior_version: session.initial_state.behavior_manifest.behavior_version,
+                    operation: EditOperation::Insert {
+                        byte_offset: session.initial_state.text.len() as u64,
+                        text: "pipe".to_string(),
+                    },
+                },
+                88,
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::EditAck {
+                document_id: session.initial_state.document_id,
+                version: session.initial_state.document_version + 1,
+                transaction_id: 88,
+            }
+        );
+
+        server_task.abort();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_second_client_is_read_only() {
+        let endpoint = unique_named_pipe("read-only");
+        let server = IpcServer::new(ServerConfig::new(endpoint.clone()));
+        let server_task = tokio::spawn(server.run());
+
+        let first = connect_with_retry(&endpoint).await;
+        let second = connect_with_retry(&endpoint).await;
+
+        assert!(matches!(
+            first.initial_state.access,
+            DocumentAccess::Editable { lease_id: 1 }
+        ));
+        assert_eq!(second.initial_state.access, DocumentAccess::ReadOnly);
+
+        server_task.abort();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_stale_edit_rejected_then_resynced() {
+        let endpoint = unique_named_pipe("stale-resync");
+        let server = IpcServer::new(ServerConfig::new(endpoint.clone()));
+        let server_task = tokio::spawn(server.run());
+
+        let mut stream = {
+            let mut last_error = None;
+            let mut stream = None;
+            for _ in 0..50 {
+                match connect_transport(&endpoint).await {
+                    Ok(connected) => {
+                        stream = Some(connected);
+                        break;
+                    }
+                    Err(error) => {
+                        last_error = Some(error);
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                }
+            }
+            stream.unwrap_or_else(|| panic!("failed to connect to test named pipe: {last_error:?}"))
+        };
+        let codec = Codec::default();
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "stale-test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let client_id = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::Welcome { client_id, .. } => client_id,
+            message => panic!("expected Welcome, got {message:?}"),
+        };
+        let (document_id, version, text, lease_id) =
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::InitialDocument {
+                    document_id,
+                    version,
+                    text,
+                    access: DocumentAccess::Editable { lease_id },
+                    lease_id: Some(snapshot_lease_id),
+                } => {
+                    assert_eq!(lease_id, snapshot_lease_id);
+                    (document_id, version, text, lease_id)
+                }
+                message => panic!("expected editable InitialDocument, got {message:?}"),
+            };
+        let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::Edit {
+                    document_id,
+                    client_id,
+                    lease_id: Some(lease_id),
+                    base_version: version - 1,
+                    behavior_version: 1,
+                    transaction_id: 99,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "stale".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut stream).await.unwrap(),
+            ServerMessage::EditRejected {
+                document_id,
+                transaction_id: 99,
+                reason: EditRejection::StaleVersion {
+                    client_base_version: version - 1,
+                    server_version: version,
+                },
+            }
+        );
+
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::RequestResync {
+                    document_id,
+                    client_id,
+                    known_version: version - 1,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut stream).await.unwrap(),
+            ServerMessage::ResyncSnapshot {
+                document_id,
+                version,
+                text,
+                access: DocumentAccess::Editable { lease_id },
+                lease_id: Some(lease_id),
+            }
+        );
+
+        server_task.abort();
     }
 
     #[cfg(unix)]

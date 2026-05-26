@@ -4,10 +4,10 @@
 
 - [Behavior Manifests](modules/behavior-manifests.md): Server-issued inert behavior schema, routing policies, validation rules, editor declarations, and tests.
 - [Protocol Codec](modules/protocol-codec.md): IPC protocol messages, `rkyv` serialization, length-prefixed framing, validation, and tests.
-- [Server IPC Skeleton](modules/server-ipc-skeleton.md): Tokio Unix Domain Socket server lifecycle, connection handshake, shared document state, versioned edit dispatch, resync responses, and tests.
+- [Server IPC Skeleton](modules/server-ipc-skeleton.md): Tokio local IPC server lifecycle across Unix sockets and Windows named pipes, connection handshake, shared document state, versioned edit dispatch, resync responses, and tests.
 - [Server Document State](modules/server-document-state.md): Server-owned canonical `crop::Rope` text, version enforcement, lease validation, region-lock enforcement, dirty-state hooks, acknowledgement/resync generation, and tests.
 - [Server File Workspace Model](modules/server-file-workspace.md): Workspace roots, canonical path registry, duplicate-open identity, file-backed dirty state, and server/client authority boundaries.
-- [Client Snapshot Bootstrap](modules/client-snapshot-bootstrap.md): Native app client bootstrap, server snapshot loading, editable/read-only access storage, behavior manifest storage, editor state reset, and tests.
+- [Client Snapshot Bootstrap](modules/client-snapshot-bootstrap.md): Native app client bootstrap over platform IPC, server snapshot loading, editable/read-only access storage, behavior manifest storage, editor state reset, and tests.
 - [Clay JS Facade Skeleton](modules/clay-js-facade-skeleton.md): Planned Clay JavaScript/TypeScript facade source tree, domain modules, typed planned stubs, authority boundaries, and validation tests.
 - [Clay JS Documentation Registry](modules/clay-js-doc-registry.md): Markdown-derived generated Clay JS API registry artifacts, stale checks, update command, validation rules, and tests.
 

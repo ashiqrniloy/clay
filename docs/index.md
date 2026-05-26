@@ -8,6 +8,10 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Clay Configuration System](reference/clay-js-api/configuration.md) — `~/.config/clay/init.js`, modular user configuration, key bindings, and configuration as documented Clay JS APIs.
 - [Clay JS API Current Functionality Inventory](reference/clay-js-api/inventory.md) — Phase 7 public/internal API authority and runtime-path classifications.
 
+## Developer Guides
+
+- [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
+
 ## Clay JS API Registry Source Files
 
 The generated documentation registry must read this section as the explicit inclusion list for public Clay JS API documentation. Add every public API Markdown file here before updating the generated registry.
