@@ -1,6 +1,6 @@
 # Windows MSVC Development
 
-This guide describes the supported Windows development setup for Clay and the validation commands used by the Windows platform support plan.
+This guide describes the supported Windows development setup for Clay and the validation commands used by the Windows platform support plan. For the cross-platform command-first launch checklist, see [Launch and GUI Smoke Validation](launch-and-gui-smoke.md).
 
 ## Supported Toolchain
 
@@ -73,24 +73,29 @@ If a broad test command tries to execute a helper binary and Windows reports `os
 
 ## Manual Smoke Test
 
-After the checks pass, verify the command-first startup paths:
+After the checks pass, verify the command-first startup paths documented in [Launch and GUI Smoke Validation](launch-and-gui-smoke.md):
 
 ```powershell
 cargo run
+cargo run -- smoke-gui
 cargo run -- server
 cargo run -- client
-cargo run -- smoke-gui
+cargo run -- client
 ```
 
-Expected behavior:
+Windows-specific expected behavior:
 
-- Bare `cargo run` connects to the default local named pipe, starts a background `clay server` process if needed with direct child-process arguments, and opens a GUI client.
+- All normal startup paths use local named pipes and do not require copying or typing a `\\.\pipe\...` value.
+- Bare `cargo run` connects to the default local named pipe, starts a background `clay server` process if needed with direct child-process arguments, and opens a GUI client with `Connected — Editable` status when the server lease is available.
+- `cargo run -- smoke-gui` creates an isolated local named-pipe endpoint, starts a managed child `clay server <endpoint>` with direct process arguments, waits for readiness with bounded client handshake retries, opens the GUI client, and terminates the child server when the GUI exits.
 - `cargo run -- server` starts a foreground server on the default local named pipe and prints the listening endpoint or an actionable bind/listen error.
-- `cargo run -- client` connects to an already-running default server, or opens a local fallback GUI and reports the connection error if no server is available.
-- `cargo run -- smoke-gui` is the app-managed GUI smoke launch mode. During the first implementation step it follows the same local-only startup path as the default GUI command; later smoke lifecycle work makes the endpoint isolated and cleans up the managed child server automatically.
-- typing in the editor should not panic the IPC task; edit acknowledgements may be logged to stderr during current development phases.
+- The first `cargo run -- client` connects to the foreground default server and should show `Connected — Editable` in the GUI status line.
+- A second `cargo run -- client` uses that same default local named pipe without any endpoint argument and should show `Connected — Read-only Observer` in the GUI status line.
+- If no server is available, `cargo run -- client` opens a local fallback GUI and reports the connection error.
+- Startup diagnostics identify common readiness states: server starting, no server found/background start, local fallback, endpoint validation or bind failure, child server exit before readiness, handshake/protocol failure, and successful client connection.
+- Typing in the editor is local/optimistic and does not wait for IPC acknowledgements; edit acknowledgements may be logged to stderr during current development phases.
 
-Advanced endpoint arguments are optional debugging aids only. Normal validation should not require copying or typing a `\\.\pipe\...` named-pipe value:
+Advanced endpoint arguments are optional debugging aids only, for example when reproducing a custom named-pipe bind/listen issue:
 
 ```powershell
 cargo run -- server \\.\pipe\clay-debug

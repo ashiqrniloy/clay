@@ -1,21 +1,121 @@
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, KeyboardEvent, LayoutCtx,
-    PaintCtx, PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
-    RegisterCtx, ScrollDelta, TextEvent, Widget,
+    AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, KeyboardEvent,
+    LayoutCtx, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut,
+    PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, render_text,
 };
-use masonry::kurbo::Size;
-use masonry::peniko::Fill;
+use masonry::kurbo::{Affine, Size};
+use masonry::parley::style::{LineHeight, StyleProperty};
+use masonry::peniko::{Color, Fill};
 use masonry::vello::Scene;
 
 use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
 use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, background_color};
-use crate::protocol::{BehaviorManifest, KeyCode, KeyModifiers, KeyStroke};
+use crate::protocol::{
+    BehaviorManifest, DocumentAccess, DocumentId, DocumentVersion, KeyCode, KeyModifiers, KeyStroke,
+};
 
-#[derive(Debug)]
+const STATUS_BAR_HEIGHT: f64 = 28.0;
+const STATUS_TEXT_SIZE: f32 = 12.0;
+const STATUS_BACKGROUND: Color = Color::from_rgb8(0x18, 0x18, 0x1f);
+const STATUS_TEXT_COLOR: Color = Color::from_rgb8(0xd7, 0xd2, 0xe8);
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum EditorAction {
     ExitRequested,
+    ClientConnection(ClientConnectionEvent),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorConnectionStatus {
+    Connecting,
+    Connected,
+    LocalFallback,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorStatus {
+    connection: EditorConnectionStatus,
+    document_id: Option<DocumentId>,
+    version: Option<DocumentVersion>,
+    access: Option<DocumentAccess>,
+}
+
+impl EditorStatus {
+    pub fn connecting() -> Self {
+        Self {
+            connection: EditorConnectionStatus::Connecting,
+            document_id: None,
+            version: None,
+            access: None,
+        }
+    }
+
+    pub fn connected(
+        document_id: DocumentId,
+        version: DocumentVersion,
+        access: DocumentAccess,
+    ) -> Self {
+        Self {
+            connection: EditorConnectionStatus::Connected,
+            document_id: Some(document_id),
+            version: Some(version),
+            access: Some(access),
+        }
+    }
+
+    pub fn local_fallback() -> Self {
+        Self {
+            connection: EditorConnectionStatus::LocalFallback,
+            document_id: None,
+            version: None,
+            access: None,
+        }
+    }
+
+    fn with_document_values(
+        mut self,
+        document_id: DocumentId,
+        version: DocumentVersion,
+        access: DocumentAccess,
+    ) -> Self {
+        self.document_id = Some(document_id);
+        self.version = Some(version);
+        self.access = Some(access);
+        self
+    }
+
+    fn text(&self) -> String {
+        let connection = match self.connection {
+            EditorConnectionStatus::Connecting => "Connecting",
+            EditorConnectionStatus::Connected => "Connected",
+            EditorConnectionStatus::LocalFallback => "Local Fallback",
+            EditorConnectionStatus::Disconnected => "Disconnected",
+        };
+        let access = match &self.access {
+            Some(DocumentAccess::Editable { .. }) => "Editable",
+            Some(DocumentAccess::ReadOnly) => "Read-only Observer",
+            None => "No Server",
+        };
+        let version = self
+            .version
+            .map(|version| format!("v{version}"))
+            .unwrap_or_else(|| "version unknown".to_string());
+        let document = self
+            .document_id
+            .map(|document_id| format!("doc {document_id}"))
+            .unwrap_or_else(|| "local document".to_string());
+
+        format!("Clay — {connection} — {access} — {document} — {version}")
+    }
+}
+
+impl Default for EditorStatus {
+    fn default() -> Self {
+        Self::local_fallback()
+    }
 }
 
 #[derive(Debug)]
@@ -23,16 +123,23 @@ pub struct EditorWidget {
     editor: EditorSurface,
     edit_queue: Option<ClientEditQueue>,
     next_transaction_id: u64,
+    status: EditorStatus,
 }
 
 impl Default for EditorWidget {
     fn default() -> Self {
         let mut editor = EditorSurface::default();
         editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(0));
+        let status = EditorStatus::local_fallback().with_document_values(
+            editor.document_state().document_id,
+            editor.document_state().document_version,
+            editor.document_state().access.clone(),
+        );
         Self {
             editor,
             edit_queue: None,
             next_transaction_id: 1,
+            status,
         }
     }
 }
@@ -44,14 +151,25 @@ impl EditorWidget {
             initial_state.document_id,
             initial_state.document_version,
             initial_state.text,
-            initial_state.access,
+            initial_state.access.clone(),
         );
         editor.install_behavior_manifest(initial_state.behavior_manifest);
+        let status = EditorStatus::connected(
+            initial_state.document_id,
+            initial_state.document_version,
+            initial_state.access,
+        );
         Self {
             editor,
             edit_queue: None,
             next_transaction_id: 1,
+            status,
         }
+    }
+
+    pub fn with_status(mut self, status: EditorStatus) -> Self {
+        self.status = status;
+        self
     }
 
     pub fn with_edit_queue(mut self, edit_queue: ClientEditQueue) -> Self {
@@ -61,21 +179,63 @@ impl EditorWidget {
 
     pub fn apply_connection_event(&mut self, event: ClientConnectionEvent) -> bool {
         match event {
+            ClientConnectionEvent::EditAck {
+                document_id,
+                version,
+                ..
+            } => {
+                let version_changed = self.editor.note_confirmed_version(document_id, version);
+                let next_status = EditorStatus::connected(
+                    document_id,
+                    version,
+                    self.editor.document_state().access.clone(),
+                );
+                let status_changed = self.set_status(next_status);
+                version_changed || status_changed
+            }
             ClientConnectionEvent::ResyncSnapshot(snapshot) => {
                 self.editor.load_snapshot(
                     snapshot.document_id,
                     snapshot.version,
                     snapshot.text,
-                    snapshot.access,
+                    snapshot.access.clone(),
                 );
+                self.set_status(EditorStatus::connected(
+                    snapshot.document_id,
+                    snapshot.version,
+                    snapshot.access,
+                ));
                 true
             }
             ClientConnectionEvent::BehaviorManifestInstalled { manifest, .. } => {
                 self.editor.install_behavior_manifest(manifest);
                 false
             }
+            ClientConnectionEvent::Disconnected | ClientConnectionEvent::ConnectionError(_) => {
+                let next_status = EditorStatus {
+                    connection: EditorConnectionStatus::Disconnected,
+                    ..self.status.clone().with_document_values(
+                        self.editor.document_state().document_id,
+                        self.editor.document_state().document_version,
+                        self.editor.document_state().access.clone(),
+                    )
+                };
+                self.set_status(next_status)
+            }
             _ => false,
         }
+    }
+
+    pub fn status_text(&self) -> String {
+        self.status.text()
+    }
+
+    fn set_status(&mut self, status: EditorStatus) -> bool {
+        if self.status == status {
+            return false;
+        }
+        self.status = status;
+        true
     }
 
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
@@ -118,12 +278,43 @@ impl EditorWidget {
     }
 
     fn accessibility_label(&self) -> String {
+        let status = self.status_text();
         let text = self.editor.visible_text();
         if text.is_empty() {
-            "Clay native text canvas".to_string()
+            format!("Clay native text canvas. {status}")
         } else {
-            text
+            format!("{status}. {text}")
         }
+    }
+
+    fn paint_status_line(&self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        let size = ctx.size();
+        let y0 = (size.height - STATUS_BAR_HEIGHT).max(0.0);
+        let rect = masonry::kurbo::Rect::new(0.0, y0, size.width.max(0.0), size.height.max(y0));
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            STATUS_BACKGROUND,
+            None,
+            &rect,
+        );
+
+        let status = self.status_text();
+        let max_width = (size.width - 24.0).max(1.0) as f32;
+        let (font_context, layout_context) = ctx.text_contexts();
+        let mut builder = layout_context.ranged_builder(font_context, &status, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(STATUS_TEXT_SIZE));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.2)));
+        builder.push_default(StyleProperty::Brush(BrushIndex(0)));
+        let mut layout = builder.build(&status);
+        layout.break_all_lines(Some(max_width));
+        render_text(
+            scene,
+            Affine::translate((12.0, y0 + 7.0)),
+            &layout,
+            &[STATUS_TEXT_COLOR.into()],
+            true,
+        );
     }
 }
 
@@ -306,6 +497,7 @@ impl Widget for EditorWidget {
             &rect,
         );
         self.editor.paint(ctx, scene);
+        self.paint_status_line(ctx, scene);
     }
 
     fn accessibility_role(&self) -> Role {
@@ -336,16 +528,31 @@ impl Widget for EditorWidget {
 
 #[cfg(test)]
 mod tests {
-    use super::EditorWidget;
-    use crate::client::{ClientConnectionEvent, ClientResyncSnapshot};
+    use super::{EditorStatus, EditorWidget};
+    use crate::client::{ClientConnectionEvent, ClientInitialState, ClientResyncSnapshot};
     use crate::editor::EditorCommand;
-    use crate::protocol::DocumentAccess;
+    use crate::protocol::{BehaviorManifest, DocumentAccess};
+
+    fn initial_state(access: DocumentAccess, version: u64) -> ClientInitialState {
+        ClientInitialState {
+            client_id: 11,
+            document_id: 7,
+            document_version: version,
+            text: "server text".to_string(),
+            access,
+            behavior_manifest: BehaviorManifest::minimal_text_editing(3),
+        }
+    }
 
     #[test]
     fn accessibility_label_uses_placeholder_for_empty_editor() {
         let widget = EditorWidget::default();
 
-        assert_eq!(widget.accessibility_label(), "Clay native text canvas");
+        assert!(
+            widget
+                .accessibility_label()
+                .starts_with("Clay native text canvas. Clay — Local Fallback")
+        );
     }
 
     #[test]
@@ -355,7 +562,72 @@ mod tests {
         widget.editor.command(EditorCommand::MoveLeft);
         widget.editor.command(EditorCommand::Insert("X"));
 
-        assert_eq!(widget.accessibility_label(), "abXc");
+        assert!(widget.accessibility_label().ends_with(". abXc"));
+    }
+
+    #[test]
+    fn status_reflects_connecting_state() {
+        let widget = EditorWidget::default().with_status(EditorStatus::connecting());
+
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connecting — No Server — local document — version unknown"
+        );
+    }
+
+    #[test]
+    fn status_reflects_connected_editable_initial_state() {
+        let widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connected — Editable — doc 7 — v12"
+        );
+    }
+
+    #[test]
+    fn status_reflects_read_only_observer() {
+        let widget = EditorWidget::with_initial_state(initial_state(DocumentAccess::ReadOnly, 12));
+
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connected — Read-only Observer — doc 7 — v12"
+        );
+    }
+
+    #[test]
+    fn status_reflects_local_fallback_when_no_server() {
+        let widget = EditorWidget::default().with_status(EditorStatus::local_fallback());
+
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Local Fallback — No Server — local document — version unknown"
+        );
+    }
+
+    #[test]
+    fn status_updates_after_edit_ack_or_resync() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::EditAck {
+                document_id: 7,
+                version: 13,
+                transaction_id: 1,
+            })
+        );
+
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connected — Editable — doc 7 — v13"
+        );
+        assert_eq!(widget.editor.document_state().document_version, 13);
     }
 
     #[test]

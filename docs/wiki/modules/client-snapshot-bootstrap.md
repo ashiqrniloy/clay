@@ -25,7 +25,7 @@ The native app starts as a client unit that initializes the Masonry editor from 
 
 ## How It Works
 
-`src/main.rs` parses CLI endpoint arguments through `IpcEndpoint`; `client::connect` opens a `tokio::net::UnixStream` on Unix or a Tokio `NamedPipeClient` on Windows and wraps the handshake in a five-second timeout. Windows named-pipe clients use `ClientOptions::open` and retry `ERROR_PIPE_BUSY` briefly so an auto-started or saturated server can rotate a pipe instance. Once a connected stream exists, `connect_from_stream`, `handshake_initial_state`, and the background `run_connection` loop are transport-neutral over Tokio async read/write traits and use `tokio::io::split` for independent read/write halves. All wire messages still go through the shared `Codec`, so length-prefix bounds and `rkyv` validation remain centralized.
+`src/main.rs` parses CLI endpoint arguments through `IpcEndpoint`; `client::connect` opens a `tokio::net::UnixStream` on Unix or a Tokio `NamedPipeClient` on Windows and wraps the handshake in a five-second timeout. Windows named-pipe clients use `ClientOptions::open` and retry `ERROR_PIPE_BUSY` briefly so an auto-started or saturated server can rotate a pipe instance. `ClientBootstrapError::kind` categorizes transport, endpoint-validation, protocol, handshake, server rejection, and timeout failures so launch code can print actionable startup diagnostics without string matching on error text. Once a connected stream exists, `connect_from_stream`, `handshake_initial_state`, and the background `run_connection` loop are transport-neutral over Tokio async read/write traits and use `tokio::io::split` for independent read/write halves. All wire messages still go through the shared `Codec`, so length-prefix bounds and `rkyv` validation remain centralized.
 
 The bootstrap expects messages in this order:
 
@@ -53,12 +53,13 @@ let widget = clay::masonry_editor::EditorWidget::with_initial_state(state);
 - Startup and resync snapshots may be full documents; ordinary edits remain delta-based.
 - Snapshot loading replaces the buffer and resets local UI state; paint still extracts only the visible range through `EditorBuffer::visible_snapshot`.
 - Behavior manifests are stored as inert declarations only. They do not execute JavaScript, WASM, extensions, shell commands, filesystem operations, network operations, or AI actions.
-- Client bootstrap connects only to the configured local IPC endpoint: Unix sockets on Unix and local named pipes on Windows. Failed decodes, unexpected messages, server errors, connection failures, and timeouts are returned as `ClientBootstrapError` values instead of panicking.
+- Client bootstrap connects only to the configured local IPC endpoint: Unix sockets on Unix and local named pipes on Windows. Failed decodes, unexpected messages, server errors, connection failures, endpoint validation errors, and timeouts are returned as categorized `ClientBootstrapError` values instead of panicking.
 - Editable/read-only access from the server is authoritative. Read-only snapshots allow navigation/selection but block local text mutation and edit queue emission.
 
 ## Tests
 
 - `src/client/mod.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState` with version and access metadata over a generic in-memory async stream.
+- `src/main.rs`: `connect_retry_reports_last_error` verifies bounded startup retry returns an actionable readiness error with the last categorized connection failure, and `client_mode_falls_back_with_status_when_server_missing` verifies fallback diagnostics include endpoint and error category.
 - `src/client/mod.rs`: behavior-manifest tests verify manifest version/access data is preserved.
 - `src/editor/surface.rs`: `editor_load_snapshot_replaces_text_and_resets_caret` verifies snapshot text, metadata, caret, selection, and scroll reset.
 - `src/editor/surface.rs`: `editor_installs_minimal_behavior_manifest` verifies behavior manifest storage without execution.

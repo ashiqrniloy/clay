@@ -10,6 +10,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 
 ## Developer Guides
 
+- [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, `smoke-gui`, foreground server/client, GUI status, and local IPC smoke validation.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
 
 ## Clay JS API Registry Source Files

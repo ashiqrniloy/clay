@@ -66,7 +66,7 @@
     - `cargo fmt --check`
     - `cargo test --bin clay --quiet`
 
-- [ ] Add managed smoke endpoint generation and child server lifecycle
+- [x] Add managed smoke endpoint generation and child server lifecycle
   - Acceptance Criteria:
     - Functional: The smoke/dev command creates a unique local endpoint, launches a child `clay server <endpoint>`, waits for readiness, opens the GUI client, and terminates the child server when the GUI exits.
     - Performance: Readiness waiting is bounded and asynchronous around startup only; no per-key or per-frame work is added.
@@ -82,13 +82,13 @@
       - Generate an isolated endpoint per smoke run: avoids collisions and makes cleanup/diagnostics deterministic.
       - Add a separate external test harness binary: useful later, but the requested UX is direct `cargo run` commands.
     - Chosen Approach:
-      - Add an internal smoke endpoint helper using process ID plus a short monotonic/atomic suffix where needed. Start a managed child server with that endpoint and hold the child handle for shutdown after `run_editor` returns.
+      - Add an internal smoke endpoint helper using process ID plus a short monotonic/atomic suffix. Start a managed child server with that endpoint and hold the child handle for shutdown after `run_editor` returns. The implemented `smoke-gui` command owns endpoint selection and rejects manual endpoint arguments so smoke runs are isolated by default; shutdown also removes the managed Unix socket path when present.
     - API Notes and Examples:
       ```rust
-      let endpoint = IpcEndpoint::smoke_test_endpoint("gui")?;
-      let mut server = ManagedServer::spawn(std::env::current_exe()?, &endpoint)?;
-      wait_for_server_ready(&endpoint).await?;
-      run_editor(editor_widget)?;
+      let endpoint = smoke_endpoint("gui");
+      let mut server = ManagedServer::spawn(std::env::current_exe()?.into_os_string(), &endpoint)?;
+      let session = runtime.block_on(connect_with_retry(&endpoint))?;
+      run_editor(editor_widget_from_session(session, &runtime))?;
       server.shutdown();
       ```
     - Files to Create/Edit:
@@ -102,9 +102,13 @@
   - Test Cases to Write:
     - `smoke_endpoint_is_platform_local_and_unique`: Windows endpoints use `\\.\pipe\...`; Unix endpoints use socket paths under an appropriate temp/runtime directory.
     - `managed_server_command_uses_current_exe_without_shell`: Smoke startup builds a direct child-process command.
-    - `managed_server_shutdown_is_called_on_gui_exit`: Lifecycle cleanup is exercised with a test double or isolated helper where practical.
+    - `managed_server_shutdown_is_called_on_gui_exit`: Lifecycle cleanup is covered by `ManagedServer::shutdown` and its `Drop` implementation; no fake `std::process::Child` test hook was added because command construction and endpoint isolation are deterministic unit tests.
+  - Verification:
+    - `cargo fmt` (via `/c/Users/ashiq/.cargo/bin/cargo fmt` because `cargo` is not on PATH in this shell)
+    - `cargo test --bin clay --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay --quiet`): 13 passed
+    - `cargo test --lib smoke_endpoint_is_platform_local_and_unique --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --lib smoke_endpoint_is_platform_local_and_unique --quiet`): 1 passed
 
-- [ ] Improve server readiness, connection diagnostics, and default launch reliability
+- [x] Improve server readiness, connection diagnostics, and default launch reliability
   - Acceptance Criteria:
     - Functional: Auto and smoke launch modes report clear diagnostics for server not found, server starting, endpoint already occupied, endpoint validation failure, child process exit, and handshake failure.
     - Performance: Startup retry remains bounded; ordinary editor interaction continues to use bounded queues and no blocking IPC in UI handlers.
@@ -120,7 +124,7 @@
       - Add a full health-check protocol message: robust but larger than needed before workspace/file features are complete.
       - Improve bounded connect/handshake readiness and error categories first: minimal and fits existing protocol.
     - Chosen Approach:
-      - Keep readiness as a bounded `client::connect` retry for now, but wrap startup paths in clearer `LaunchError`/diagnostic messages and detect child early-exit in smoke mode.
+      - Keep readiness as a bounded `client::connect` retry for now, but wrap startup paths in clearer `LaunchError`/diagnostic messages and detect child early-exit in smoke mode. The implemented launch path now reports categorized client bootstrap failures, bounded readiness exhaustion, local fallback, successful connection, server bind/start failures, and managed child exit before readiness without parsing error strings in high-level launch code.
     - API Notes and Examples:
       ```rust
       match connect_with_retry(&endpoint).await {
@@ -130,8 +134,11 @@
       ```
     - Files to Create/Edit:
       - `src/main.rs`: Add launch diagnostics, child early-exit checks, and tests.
-      - `src/client/mod.rs`: Refine bootstrap error variants only if necessary for launch diagnostics.
+      - `src/client/mod.rs`: Add bootstrap error categorization for launch diagnostics.
       - `docs/development/windows.md`: Document expected messages for default and smoke launches.
+      - `docs/wiki/modules/client-snapshot-bootstrap.md`: Document bootstrap error categories and readiness tests.
+      - `docs/wiki/modules/server-ipc-skeleton.md`: Document managed launch diagnostics and early-exit readiness handling.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Document bounded readiness/fallback diagnostics in the launch flow.
     - References:
       - `src/client/mod.rs`
       - `src/server/mod.rs`
@@ -141,8 +148,13 @@
     - `connect_retry_reports_last_error`: Bounded retry returns actionable final error.
     - `client_mode_falls_back_with_status_when_server_missing`: Client mode can still open a local editor while reporting fallback.
     - `smoke_mode_fails_if_child_server_exits_before_ready`: Smoke command does not silently open an unconnected GUI when managed server startup fails.
+  - Verification:
+    - `cargo fmt --check` (via `/c/Users/ashiq/.cargo/bin/cargo fmt --check`)
+    - `cargo test --bin clay --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay --quiet`): 16 passed
+    - `cargo test --lib --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --lib --quiet`): 169 passed
+    - `cargo test --all-targets --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --all-targets --quiet`): all native target suites passed
 
-- [ ] Route client connection events into the GUI event loop
+- [x] Route client connection events into the GUI event loop
   - Acceptance Criteria:
     - Functional: `ClientConnectionEvent` values that affect UI state are delivered to the Masonry application and applied to `EditorWidget` while the GUI is running, not only printed to stderr.
     - Performance: Background IPC tasks send bounded or coalesced UI notifications and never mutate widgets directly from Tokio tasks.
@@ -158,7 +170,7 @@
       - Poll a channel from paint/layout handlers: violates UI hot-path constraints.
       - Use Masonry/winit user events or action forwarding: aligns with the event-loop model and keeps background tasks from touching widgets directly.
     - Chosen Approach:
-      - Create an app-level event/action bridge. Prefer sending a typed app action through `masonry_winit::event_loop_runner::MasonryUserEvent::Action` if public API access is sufficient; otherwise introduce a narrow custom runner/wrapper or driver-owned channel that is drained only from event-loop callbacks.
+      - Create an app-level event/action bridge using `masonry_winit::app::MasonryUserEvent::Action`. `run_editor` now creates an explicit `WindowId`, stores the editor `WidgetId`, spawns a Tokio bridge task for the bounded client event receiver, and sends typed `EditorAction::ClientConnection` values through an `EventLoopProxy`. `Driver::on_action` handles the action on the GUI event loop, downcasts the editor widget, applies `EditorWidget::apply_connection_event`, and requests render/accessibility updates only when widget state changed.
     - API Notes and Examples:
       ```rust
       #[derive(Debug)]
@@ -170,10 +182,11 @@
       // Driver applies the event to EditorWidget/Editor app state on the GUI thread.
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Create event bridge, store app/window/widget identifiers, and dispatch connection events to GUI state.
-      - `src/masonry_editor.rs`: Expose a small action/state update path if direct widget mutation through driver context requires it.
-      - `src/client/mod.rs`: No protocol changes expected; event receiver usage moves from stderr-only logging to GUI dispatch.
-      - `docs/wiki/flows/client-server-edit-ack.md`: Document live GUI event routing.
+      - `src/main.rs`: Created the EventLoopProxy bridge, stored app/window/widget identifiers, and dispatches connection events to GUI state from `Driver::on_action`.
+      - `src/masonry_editor.rs`: Added `EditorAction::ClientConnection(ClientConnectionEvent)` as the typed action path for GUI-thread event application.
+      - `src/client/mod.rs`: No protocol changes were needed; event receiver usage moved from stderr-only logging to GUI dispatch plus diagnostics logging.
+      - `docs/wiki/index.md`: Updated flow navigation to mention EventLoopProxy GUI event routing.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Documented live GUI event routing.
     - References:
       - Context7 `/rust-windowing/winit` EventLoopProxy docs.
       - Local `masonry_winit` 0.4.0 `event_loop_runner.rs` and `app_driver.rs`.
@@ -181,9 +194,14 @@
   - Test Cases to Write:
     - `resync_event_replaces_editor_snapshot`: Existing widget-level test remains passing.
     - `connection_event_action_is_dispatched_to_driver`: App bridge forwards a connection event into the driver path.
-    - `background_event_bridge_does_not_block_on_full_gui_queue`: If a bounded queue is used, full-queue behavior remains non-blocking or coalesced.
+    - `background_event_bridge_does_not_block_on_full_gui_queue`: No additional bounded GUI queue was introduced; the bridge uses non-blocking `EventLoopProxy::send_event` and stops if the event loop is closed.
+  - Verification:
+    - `cargo fmt --check` (via `/c/Users/ashiq/.cargo/bin/cargo fmt --check`)
+    - `cargo test --bin clay --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay --quiet`): 17 passed
+    - `cargo test --lib resync_event_replaces_editor_snapshot --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --lib resync_event_replaces_editor_snapshot --quiet`): 1 passed
+    - `cargo test --all-targets --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --all-targets --quiet`): all native target suites passed
 
-- [ ] Add visible connection, access, and synchronization status to the GUI
+- [x] Add visible connection, access, and synchronization status to the GUI
   - Acceptance Criteria:
     - Functional: The window title, status line, or editor chrome visibly communicates Local Fallback, Connecting, Connected Editable, Connected Read-only, Disconnected, and latest known document/version state.
     - Performance: Status rendering is cheap and piggybacks on normal render requests; it does not force full-document layout or IPC round trips.
@@ -200,6 +218,7 @@
       - Add a simple in-window status overlay/line plus optional title update: visible, testable, and useful for screenshots.
     - Chosen Approach:
       - Add a minimal status model to the editor widget/app driver and render it as a small status line. Include document access and latest confirmed/server version where available.
+      - Implemented `EditorStatus` on `EditorWidget` as state separate from the text rope. Connected initial state, local fallback, edit acknowledgements, resync snapshots, and disconnect/error events now update a bottom status line plus the accessibility label.
     - API Notes and Examples:
       ```text
       Clay — Connected — Editable — v12
@@ -208,21 +227,28 @@
       Clay — Disconnected
       ```
     - Files to Create/Edit:
-      - `src/masonry_editor.rs`: Add status state, update methods, painting/accessibility text, and tests.
-      - `src/editor/surface.rs`: Expose document version/access read-only data if needed.
-      - `src/main.rs`: Initialize status based on launch mode and update it from connection events.
-      - `docs/wiki/flows/client-server-edit-ack.md`: Document visible status states.
+      - `src/masonry_editor.rs`: Added `EditorStatus`, status text rendering, accessibility status text, connection event status updates, and unit tests.
+      - `src/editor/surface.rs`: Added `note_confirmed_version` so edit acknowledgements can update latest known document version without touching rope text.
+      - `src/main.rs`: Initializes local fallback GUI state explicitly through `EditorStatus::local_fallback`; connected GUI state comes from the client initial snapshot.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Documented visible status states.
+      - `docs/wiki/index.md`: Updated flow summary to mention visible status.
     - References:
       - `src/masonry_editor.rs`
       - `src/editor/surface.rs`
       - `src/protocol/mod.rs` `DocumentAccess`
   - Test Cases to Write:
+    - `status_reflects_connecting_state`: Connecting state has visible status text.
     - `status_reflects_connected_editable_initial_state`: Initial connected client displays editable/access state.
     - `status_reflects_read_only_observer`: Second client/read-only snapshot displays observer state.
     - `status_updates_after_edit_ack_or_resync`: Version/status changes when relevant connection events are applied.
     - `status_reflects_local_fallback_when_no_server`: Missing server fallback is visible in GUI state.
+  - Verification:
+    - `cargo fmt --check` (via `/c/Users/ashiq/.cargo/bin/cargo fmt --check`)
+    - `cargo test --lib --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --lib --quiet`): 174 passed
+    - `cargo test --bin clay --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay --quiet`): 17 passed
+    - `cargo test --all-targets --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --all-targets --quiet`): all native target suites passed
 
-- [ ] Make second-client and default-command GUI smoke testing endpoint-free
+- [x] Make second-client and default-command GUI smoke testing endpoint-free
   - Acceptance Criteria:
     - Functional: A developer can run one default foreground server and two default clients without specifying an endpoint; the first client is editable and the second is read-only/observer in the GUI.
     - Performance: Multiple clients do not serialize unrelated GUI work beyond existing server document lease constraints.
@@ -239,6 +265,7 @@
       - Make default server/client paths robust and visibly state lease status: best matches desired developer workflow.
     - Chosen Approach:
       - Ensure no code path requires endpoint arguments for the second-client scenario and update status UI/docs so read-only observer behavior is obvious.
+      - Implemented a parser regression test proving bare auto, default foreground server, and default clients all derive the same platform-local `default_endpoint()`, while `smoke-gui` keeps its isolated managed endpoint. Updated Windows developer instructions and the code wiki to make the second-client observer smoke path command-only.
     - API Notes and Examples:
       ```powershell
       cargo run -- server
@@ -246,9 +273,10 @@
       cargo run -- client
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Adjust default client/server diagnostics if necessary.
-      - `src/masonry_editor.rs`: Display read-only observer status.
-      - `docs/development/windows.md`: Replace custom-pipe second-client instructions with default commands.
+      - `src/main.rs`: Added `default_server_and_clients_use_same_platform_endpoint` parser/default endpoint regression coverage.
+      - `src/masonry_editor.rs`: Existing `Read-only Observer` status and `status_reflects_read_only_observer` coverage verified; no code change needed.
+      - `docs/development/windows.md`: Replaced second-client smoke validation with default command instructions and expected GUI status.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Documented endpoint-free second-client smoke commands and default endpoint invariant.
     - References:
       - `src/server/document.rs`
       - `src/client/mod.rs`
@@ -257,8 +285,15 @@
     - `default_server_and_clients_use_same_platform_endpoint`: Parser/default endpoint behavior is stable.
     - `read_only_status_applies_from_initial_snapshot`: Read-only access from server appears in widget status.
     - Manual smoke checklist: Run default server plus two default clients and verify first editable/second read-only with no endpoint argument.
+  - Verification:
+    - `cargo fmt` (via `/c/Users/ashiq/.cargo/bin/cargo fmt`)
+    - `cargo fmt --check` (via `/c/Users/ashiq/.cargo/bin/cargo fmt --check`)
+    - `cargo test --bin clay default_server_and_clients_use_same_platform_endpoint --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay default_server_and_clients_use_same_platform_endpoint --quiet`): 1 passed
+    - `cargo test --lib status_reflects_read_only_observer --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --lib status_reflects_read_only_observer --quiet`): 1 passed
+    - `cargo test --bin clay --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay --quiet`): 18 passed
+    - Manual GUI smoke was not run in this non-interactive shell; `docs/development/windows.md` now lists the endpoint-free default server plus two-client checklist.
 
-- [ ] Update developer documentation for command-first GUI smoke validation
+- [x] Update developer documentation for command-first GUI smoke validation
   - Acceptance Criteria:
     - Functional: Windows and general development docs explain the simple launch commands, expected GUI status states, and when advanced endpoint arguments are only needed for debugging.
     - Performance: Documentation preserves the expectation that GUI typing is local/optimistic and does not wait on IPC acknowledgements.
@@ -273,7 +308,7 @@
       - Add only a short note to the Windows doc: quick but insufficient once new launch mode exists.
       - Update the Windows doc, docs index, and wiki links together: keeps public/developer and internal docs aligned.
     - Chosen Approach:
-      - Rewrite the manual smoke section around command-first validation and move explicit pipe/socket usage into an advanced debugging note.
+      - Added a cross-platform command-first launch and GUI smoke guide, rewrote the Windows manual smoke section around that checklist, and moved explicit pipe/socket usage into an advanced debugging note.
     - API Notes and Examples:
       ```powershell
       cargo run
@@ -282,9 +317,10 @@
       cargo run -- client
       ```
     - Files to Create/Edit:
-      - `docs/development/windows.md`: Update validation and manual GUI smoke sections.
-      - `docs/index.md`: Update link text if needed.
-      - `docs/wiki/flows/client-server-edit-ack.md`: Link from docs to implementation details.
+      - `docs/development/launch-and-gui-smoke.md`: Added cross-platform command-first GUI smoke validation commands, expected status states, local/optimistic typing expectations, security boundaries, and implementation links.
+      - `docs/development/windows.md`: Updated validation and manual GUI smoke sections to point at the cross-platform checklist and keep Windows named-pipe endpoint examples debug-only.
+      - `docs/index.md`: Added the new developer guide link.
+      - `docs/wiki/flows/client-server-edit-ack.md`: Linked back to developer launch/smoke documentation.
     - References:
       - `docs/development/windows.md`
       - `docs/index.md`
@@ -292,8 +328,14 @@
   - Test Cases to Write:
     - `rg` documentation check: docs contain command-first smoke instructions and no longer require manual `\\.\pipe` examples for normal smoke testing.
     - Manual doc review: Advanced endpoint usage is clearly marked optional/debug-only.
+  - Verification:
+    - `rg -n -F "Use these command-first launch paths" docs/development/launch-and-gui-smoke.md`: command-first guide exists.
+    - `rg -n -F "cargo run -- smoke-gui" docs/development/launch-and-gui-smoke.md docs/development/windows.md docs/wiki/flows/client-server-edit-ack.md`: smoke command is documented in developer and implementation docs.
+    - `rg -n -F "Advanced endpoint arguments are optional debugging aids only" docs/development/launch-and-gui-smoke.md docs/development/windows.md`: endpoint arguments are debug-only.
+    - `rg -n -F "Normal GUI smoke validation does not open a remote TCP listener" docs/development/launch-and-gui-smoke.md`: security boundary is documented.
+    - `rg -n -F "should not require copying" docs/development docs/index.md docs/wiki/flows/client-server-edit-ack.md || true` and `rg -n -F "Normal validation should not require" docs/development docs/index.md docs/wiki/flows/client-server-edit-ack.md || true`: no stale normal-smoke/manual-endpoint wording remains.
 
-- [ ] Verify launch, GUI smoke, IPC, and regression behavior
+- [x] Verify launch, GUI smoke, IPC, and regression behavior
   - Acceptance Criteria:
     - Functional: Automated checks and manual GUI smoke cover default auto-start, managed smoke, foreground server/client, second-client read-only behavior, edit acknowledgement, and local fallback.
     - Performance: Existing hot-path tests still prove editor input does not await IPC queue capacity or server acknowledgements.
@@ -309,7 +351,7 @@
       - Add only unit tests: misses command UX and visible GUI expectations.
       - Combine targeted unit/integration tests with a documented manual smoke checklist: practical for native GUI behavior.
     - Chosen Approach:
-      - Add deterministic parser/lifecycle/status/bridge tests and keep manual GUI smoke as the final interactive validation step.
+      - Reused the deterministic parser/lifecycle/status/bridge, IPC, hot-path, shell-free startup, and platform-gated Windows transport tests added by earlier tasks; kept manual GUI smoke as the final interactive checklist because this shell cannot perform GUI typing/observation.
     - API Notes and Examples:
       ```powershell
       cargo fmt --check
@@ -318,10 +360,10 @@
       cargo run -- smoke-gui
       ```
     - Files to Create/Edit:
-      - `src/main.rs`: Parser, command construction, readiness, and bridge tests.
-      - `src/masonry_editor.rs`: Status and event-application tests.
-      - `src/client/mod.rs`: Existing IPC tests reused; add tests only if error categorization changes.
-      - `docs/development/windows.md`: Manual smoke checklist updated after implementation.
+      - `src/main.rs`: Verified parser, command construction, readiness, shell-free startup, fallback, and bridge tests.
+      - `src/masonry_editor.rs`: Verified status and event-application tests through `cargo test --all-targets`.
+      - `src/client/mod.rs`: Reused existing IPC, edit acknowledgement, second-client read-only, Windows named-pipe, and hot-path tests.
+      - `docs/development/windows.md`: Manual smoke checklist was already updated; no additional doc edits were needed for this verification task.
     - References:
       - `plans/011-Windows-Platform-Support.md`
       - `docs/development/windows.md`
@@ -334,8 +376,14 @@
     - `cargo test --bin clay smoke`: CLI/lifecycle smoke-related tests pass.
     - Manual GUI smoke: Run `cargo run -- smoke-gui`, type text, observe Connected/Editable status and edit acknowledgements/status updates without manual endpoint input.
     - Manual default commands: Run `cargo run -- server`, `cargo run -- client`, and a second `cargo run -- client`; verify first editable and second read-only.
+  - Verification:
+    - `cargo fmt --check` (via `/c/Users/ashiq/.cargo/bin/cargo fmt --check`): passed.
+    - `cargo test --all-targets` (via `/c/Users/ashiq/.cargo/bin/cargo test --all-targets`): all native target suites passed; lib 174 passed, bin `clay` 18 passed, `clay-server`/`update-doc-registry` 0-test binaries passed, and integration tests passed.
+    - `cargo check --target x86_64-pc-windows-msvc --all-targets` (via `/c/Users/ashiq/.cargo/bin/cargo check --target x86_64-pc-windows-msvc --all-targets`): passed.
+    - `cargo test --bin clay smoke` (via `/c/Users/ashiq/.cargo/bin/cargo test --bin clay smoke`): 2 passed.
+    - Manual GUI smoke and default multi-client GUI checks were not run because this is a non-interactive shell; the command-first checklist remains documented in `docs/development/launch-and-gui-smoke.md` and `docs/development/windows.md` for local interactive validation.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: The implementation is reviewed for new behavior-changing settings or launch customization, and any intentional user-configurable behavior is exposed through documented Clay JS configuration APIs or explicitly kept CLI/internal.
     - Performance: Configuration review does not add runtime config loading to text input, rendering, Masonry paint/layout, or IPC frame hot paths.
@@ -369,8 +417,15 @@
   - Test Cases to Write:
     - Configuration API coverage review: If configuration APIs are added, tests fail when docs/index/registry/custom properties are missing.
     - No-new-config review: If no configuration API is added, verify no undocumented Clay-specific env var or config key was introduced.
+  - Verification:
+    - Reviewed `src/main.rs`, `src/ipc.rs`, `src/masonry_editor.rs`, `runtime/js/**`, `docs/reference/clay-js-api/**`, and `docs/index.md` for new behavior-changing settings.
+    - No new user-configurable launch or endpoint setting was introduced; `smoke-gui` endpoint naming and lifecycle remain CLI/internal behavior.
+    - `rg -n "CLAY_|std::env::var|env::var|var_os" src runtime tests docs/development docs/wiki -S`: only standard local endpoint derivation variables remain (`XDG_RUNTIME_DIR`, `USER`, `USERNAME`); no Clay-specific undocumented env var or config key was introduced.
+    - `cargo test --test clay_js_api_inventory --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --test clay_js_api_inventory --quiet`): 12 passed.
+    - `cargo test --test clay_js_doc_registry --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --test clay_js_doc_registry --quiet`): 17 passed.
+    - No Clay JS configuration API docs, registry entries, runtime facades, or generated artifacts needed changes for this launch/smoke implementation.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: All Rust public functions/types introduced or changed by this launch/smoke implementation are inventoried and either exposed through documented Clay JS APIs when they are public capabilities or kept private/`pub(crate)` when internal.
     - Performance: API review does not add JavaScript or IPC round trips to ordinary typing, rendering, launch readiness, or connection event dispatch.
@@ -409,8 +464,16 @@
     - `cargo test --test clay_js_api_inventory --quiet`: Clay JS inventory remains complete if APIs are added.
     - `cargo test --test clay_js_doc_registry --quiet`: Generated registry remains current if docs change.
     - `cargo test --test clay_js_facade_layout --quiet`: Runtime JS facade layout remains valid.
+  - Verification:
+    - Reviewed introduced/changed Rust visibility in `src/main.rs`, `src/ipc.rs`, and `src/masonry_editor.rs`; launch lifecycle helpers in `src/main.rs` remain private, smoke endpoint generation is an IPC helper, and GUI status/event types are native client UI surfaces rather than server-side Clay JS capabilities.
+    - No new public Clay JS capability, raw `Deno.core.ops.op_*` user-facing API, filesystem/network/shell/extension/AI/workspace/WASM authority, or remote listener capability was introduced.
+    - `cargo test --test rust_visibility_api_mapping --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --test rust_visibility_api_mapping --quiet`): 2 passed.
+    - `cargo test --test clay_js_api_inventory --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --test clay_js_api_inventory --quiet`): 12 passed.
+    - `cargo test --test clay_js_doc_registry --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --test clay_js_doc_registry --quiet`): 17 passed.
+    - `cargo test --test clay_js_facade_layout --quiet` (via `/c/Users/ashiq/.cargo/bin/cargo test --test clay_js_facade_layout --quiet`): 2 passed.
+    - No `docs/reference/clay-js-api/**`, inventory, generated registry, or runtime JS facade changes were required by this review.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
     - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
@@ -443,9 +506,17 @@
   - Test Cases to Write:
     - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
     - Wiki index check: Confirm any new wiki pages are linked from `docs/wiki/index.md`.
+  - Verification:
+    - Reviewed `docs/wiki/index.md`, `docs/wiki/flows/client-server-edit-ack.md`, `docs/wiki/modules/client-snapshot-bootstrap.md`, and `docs/wiki/modules/server-ipc-skeleton.md` after the implementation tasks.
+    - Verified the wiki already documents command-first launch modes, `smoke-gui` managed child lifecycle, platform default endpoints, categorized bootstrap diagnostics, EventLoopProxy GUI event routing, visible connection/access/version status, second-client read-only behavior, local-only IPC, and shell-free startup.
+    - Wiki index check (`find docs/wiki -type f -name '*.md' ... rg -F`): every wiki page under `docs/wiki/` is linked from `docs/wiki/index.md`; no missing pages were reported.
+    - `rg -n "smoke-gui|Local Fallback|Connected Editable|Read-only|EventLoopProxy|managed|default endpoint" docs/wiki docs/development/launch-and-gui-smoke.md docs/development/windows.md`: relevant launch/status/event-routing terms are present in wiki and developer docs.
+    - No additional wiki files were needed because the implementation details changed by this plan were already covered and indexed.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Manual interactive GUI smoke checks (`cargo run -- smoke-gui`, default foreground server plus two GUI clients, typing/status observation) were not run in this non-interactive shell; the endpoint-free checklist is documented for local interactive validation.
+- No new Clay JS configuration or programmatic APIs were added because launch/smoke endpoint generation and managed child lifecycle are CLI/internal process behavior, not intentional user-configurable or JavaScript-facing capabilities.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+- Priority High: Run the documented interactive GUI smoke checklist on a Windows desktop and a Unix desktop to observe `Connected Editable`, `Connected Read-only Observer`, `Local Fallback`, disconnection, and edit acknowledgement/version status in real windows.
+- Priority Medium: Consider adding an automated headless/window-driver smoke harness once Masonry/winit testing support can observe status text without a human-operated desktop session.

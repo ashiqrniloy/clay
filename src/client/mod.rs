@@ -297,6 +297,33 @@ pub enum ClientBootstrapError {
     Timeout,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientBootstrapErrorKind {
+    TransportUnavailable,
+    EndpointInvalid,
+    HandshakeFailed,
+    ServerRejected,
+    TimedOut,
+    ProtocolInvalid,
+}
+
+impl ClientBootstrapError {
+    pub fn kind(&self) -> ClientBootstrapErrorKind {
+        match self {
+            Self::Codec(CodecError::Io(error))
+                if error.kind() == std::io::ErrorKind::InvalidInput =>
+            {
+                ClientBootstrapErrorKind::EndpointInvalid
+            }
+            Self::Codec(CodecError::Io(_)) => ClientBootstrapErrorKind::TransportUnavailable,
+            Self::Codec(_) => ClientBootstrapErrorKind::ProtocolInvalid,
+            Self::UnexpectedMessage(_) => ClientBootstrapErrorKind::HandshakeFailed,
+            Self::ServerError { .. } => ClientBootstrapErrorKind::ServerRejected,
+            Self::Timeout => ClientBootstrapErrorKind::TimedOut,
+        }
+    }
+}
+
 impl From<CodecError> for ClientBootstrapError {
     fn from(error: CodecError) -> Self {
         Self::Codec(error)

@@ -203,6 +203,19 @@ impl EditorSurface {
         &self.document
     }
 
+    pub fn note_confirmed_version(
+        &mut self,
+        document_id: DocumentId,
+        version: DocumentVersion,
+    ) -> bool {
+        if self.document.document_id != document_id || self.document.document_version == version {
+            return false;
+        }
+
+        self.document.document_version = version;
+        true
+    }
+
     pub fn command(&mut self, command: EditorCommand<'_>) -> bool {
         self.command_with_event(command).changed
     }

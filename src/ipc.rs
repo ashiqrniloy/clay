@@ -1,6 +1,12 @@
 #[cfg(unix)]
 use std::path::PathBuf;
-use std::{ffi::OsString, fmt};
+use std::{
+    ffi::OsString,
+    fmt,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+static SMOKE_ENDPOINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IpcEndpoint {
@@ -118,6 +124,31 @@ pub fn default_endpoint() -> IpcEndpoint {
     }
 }
 
+pub fn smoke_endpoint(label: &str) -> IpcEndpoint {
+    let suffix = unique_endpoint_suffix(label);
+    #[cfg(unix)]
+    {
+        IpcEndpoint::UnixSocket(std::env::temp_dir().join(format!("clay-{suffix}.sock")))
+    }
+    #[cfg(windows)]
+    {
+        IpcEndpoint::WindowsNamedPipe(format!(r"\\.\pipe\clay-{suffix}"))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        IpcEndpoint::Unsupported(format!("clay-{suffix}"))
+    }
+}
+
+fn unique_endpoint_suffix(label: &str) -> String {
+    let sequence = SMOKE_ENDPOINT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "smoke-{}-{}-{sequence}",
+        sanitize_endpoint_suffix(label),
+        std::process::id()
+    )
+}
+
 #[cfg(unix)]
 pub fn default_socket_path() -> PathBuf {
     if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
@@ -160,7 +191,7 @@ fn sanitize_endpoint_suffix(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{IpcEndpoint, default_endpoint};
+    use super::{IpcEndpoint, default_endpoint, smoke_endpoint};
 
     #[test]
     fn default_endpoint_is_platform_valid() {
@@ -181,5 +212,37 @@ mod tests {
     fn endpoint_display_does_not_panic() {
         let endpoint = default_endpoint();
         assert!(!endpoint.to_string().is_empty());
+    }
+
+    #[test]
+    fn smoke_endpoint_is_platform_local_and_unique() {
+        let first = smoke_endpoint("gui");
+        let second = smoke_endpoint("gui");
+
+        assert_ne!(first, second);
+
+        #[cfg(unix)]
+        {
+            let IpcEndpoint::UnixSocket(first_path) = first;
+            let IpcEndpoint::UnixSocket(second_path) = second;
+            assert!(first_path.starts_with(std::env::temp_dir()));
+            assert!(second_path.starts_with(std::env::temp_dir()));
+            assert_eq!(
+                first_path.extension().and_then(|value| value.to_str()),
+                Some("sock")
+            );
+            assert_eq!(
+                second_path.extension().and_then(|value| value.to_str()),
+                Some("sock")
+            );
+        }
+
+        #[cfg(windows)]
+        {
+            let IpcEndpoint::WindowsNamedPipe(first_name) = first;
+            let IpcEndpoint::WindowsNamedPipe(second_name) = second;
+            assert!(first_name.starts_with(r"\\.\pipe\clay-smoke-gui-"));
+            assert!(second_name.starts_with(r"\\.\pipe\clay-smoke-gui-"));
+        }
     }
 }
