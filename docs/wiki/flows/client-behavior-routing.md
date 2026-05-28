@@ -25,7 +25,7 @@ The client handshake validates the initial `ServerMessage::BehaviorManifest` bef
 
 `EditorSurface::route_key_with_event` builds a router from the installed manifest and routes key strokes. Client-first predictable routing invokes local rule execution and produces `EditorEditEvent` values with the active behavior version. Enter preserves leading whitespace and continues simple line comments from manifest declarations, Tab inserts the manifest-configured tab text, and bracket/quote pair rules insert both sides at the caret or wrap the selected range. Server-first routing returns a `ServerIntentRoute` without changing local text.
 
-`EditorWidget::on_text_event` uses manifest routing for ordinary character insertion, Enter, and Tab. Autocomplete trigger declarations are classified by `ClientBehaviorState` as inert UI-reactive triggers for later completion work; this classification does not run completion logic or mutate the document. Local mutations still enqueue edit transactions through `ClientEditQueue::try_send`, so input handling does not await IPC, server work, JavaScript, file IO, AI, or full-document serialization.
+`EditorWidget::on_text_event` uses manifest routing for ordinary character insertion, Enter, and Tab. Printable character input is still treated as text when Shift is the only modifier, so shifted letters and symbols insert the already-resolved character text while Ctrl/Alt/Super combinations remain available for shortcuts or platform input behavior. Autocomplete trigger declarations are classified by `ClientBehaviorState` as inert UI-reactive triggers for later completion work; this classification does not run completion logic or mutate the document. Local mutations still enqueue edit transactions through `ClientEditQueue::try_send`, so input handling does not await IPC, server work, JavaScript, file IO, AI, or full-document serialization.
 
 ## Invariants and Constraints
 
@@ -42,6 +42,8 @@ The client handshake validates the initial `ServerMessage::BehaviorManifest` bef
   - `client_installs_valid_manifest_atomically`
   - `client_keeps_previous_manifest_when_replacement_invalid`
   - `client_routes_client_first_key_without_ipc_wait`
+  - `client_routes_shifted_printable_key_as_text_input`
+  - `client_does_not_route_control_character_as_text_input`
   - `client_routes_tab_from_manifest_rules`
   - `autocomplete_trigger_declared_without_client_side_side_effect`
   - `client_routes_server_first_command_as_intent`

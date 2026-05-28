@@ -100,7 +100,7 @@ impl ClientBehaviorState {
 
     fn route_unbound_key(&self, key: &KeyStroke) -> RoutedBehavior {
         let _autocomplete_trigger = self.autocomplete_trigger_for_key(key);
-        if key.modifiers == KeyModifiers::NONE {
+        if !key.modifiers.control && !key.modifiers.alt && !key.modifiers.super_key {
             if let KeyCode::Character(text) = &key.key {
                 if self
                     .active
@@ -160,7 +160,7 @@ mod tests {
     };
     use crate::protocol::{
         BehaviorManifest, CommandDeclaration, KeyBindingContext, KeyBindingRule, KeyCode,
-        KeyStroke, RoutingPolicy, TabMode,
+        KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
     };
 
     #[test]
@@ -201,6 +201,41 @@ mod tests {
             routed,
             RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("x".to_string()))
         );
+    }
+
+    #[test]
+    fn client_routes_shifted_printable_key_as_text_input() {
+        let state = ClientBehaviorState::new(BehaviorManifest::minimal_text_editing(1)).unwrap();
+        let shifted_a = KeyStroke {
+            key: KeyCode::Character("A".to_string()),
+            modifiers: KeyModifiers {
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        };
+
+        let routed = state.route_key(&shifted_a);
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("A".to_string()))
+        );
+    }
+
+    #[test]
+    fn client_does_not_route_control_character_as_text_input() {
+        let state = ClientBehaviorState::new(BehaviorManifest::minimal_text_editing(1)).unwrap();
+        let control_a = KeyStroke {
+            key: KeyCode::Character("a".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        };
+
+        let routed = state.route_key(&control_a);
+
+        assert_eq!(routed, RoutedBehavior::Unhandled);
     }
 
     #[test]
