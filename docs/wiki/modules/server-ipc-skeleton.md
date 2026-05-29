@@ -11,7 +11,7 @@
 
 ## Overview
 
-The server skeleton is a Tokio local-IPC server with platform transports for Unix Domain Sockets and Windows named pipes, plus a platform-neutral endpoint model in `src/ipc.rs` for Unix socket paths and Windows local named pipe names. It proves the local IPC/process seam and now dispatches Phase 5 versioned edits, editable/read-only lease snapshots, explicit resync requests, and region-lock rejections without adding file workspace authority, extension execution, SDUI, remote listeners, shell/network access, or AI mutation privileges.
+The server skeleton is a Tokio local-IPC server with platform transports for Unix Domain Sockets and Windows named pipes, plus a platform-neutral endpoint model in `src/ipc.rs` for Unix socket paths and Windows local named pipe names. It proves the local IPC/process seam and now dispatches Phase 5 versioned edits, editable/read-only lease snapshots, explicit resync requests, region-lock rejections, and Phase 9 file/workspace commands without adding client filesystem authority, extension execution, SDUI, remote listeners, shell/network access, or AI mutation privileges.
 
 ## How It Works
 
@@ -23,9 +23,11 @@ Each connection must send `ClientMessage::Hello` first. The server responds with
 2. `ServerMessage::InitialDocument`
 3. `ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))`
 
-During the handshake, `DocumentState::acquire_access` grants the first connected client an editable lease and returns later clients as read-only observers. After the handshake, edit messages and editor intents are translated into `EditOperation`s and applied to the shared `DocumentState`. The document state owns the canonical Phase 5 `crop::Rope`, validates document IDs, base versions, lease authority, region locks, byte ranges, and UTF-8 boundaries before mutating, then returns `EditAck` only for accepted mutations.
+During the handshake, `DocumentState::acquire_access` grants the first connected client an editable lease and returns later clients as read-only observers. After the handshake, edit messages and editor intents are translated into `EditOperation`s and applied to the target `DocumentState`. Workspace-backed document IDs are resolved through `WorkspaceState::document_handle`; otherwise the connection uses the bootstrap scratch document. The document state owns the canonical Phase 5 `crop::Rope`, validates document IDs, base versions, lease authority, region locks, byte ranges, and UTF-8 boundaries before mutating, then returns `EditAck` only for accepted mutations.
 
-`ClientMessage::RequestResync` is handled by extracting a bounded recovery snapshot from the canonical rope through `DocumentState::resync_snapshot_message_for_client`. The snapshot preserves the requesting client's current access state and lease metadata. Connection shutdown releases the editable lease only when the disconnected client is the active lease holder.
+`ClientMessage::RequestResync` is handled by extracting a bounded recovery snapshot from the canonical rope through `DocumentState::resync_snapshot_message_for_client`. The snapshot preserves the requesting client's current access state and lease metadata.
+
+Phase 9 file/workspace dispatch keeps filesystem operations behind the server workspace lock. `OpenDocument` calls `WorkspaceState::open_existing_file`, returns `DocumentOpened` with a full initial snapshot plus metadata, and then publishes the current behavior manifest for the opened document. `SaveDocument` and `ReloadDocument` call the workspace save/reload state machine; reload returns a snapshot, while save returns version/dirty metadata only. `GetDocumentStatus` and `ListDocuments` return `DocumentMetadata` without full text. Workspace errors are mapped to `FileOperationFailed` with stable `FileErrorCode` values and sanitized messages for outside-root paths. Connection shutdown releases the editable lease from both the bootstrap document and all workspace documents held by that client.
 
 ## Invariants and Constraints
 
@@ -36,12 +38,12 @@ During the handshake, `DocumentState::acquire_access` grants the first connected
 - Default and smoke child servers are launched through `std::process::Command` with direct `server <endpoint>` arguments, inherited/controlled stdio, and no shell. Smoke readiness fails if the managed child exits before the client handshake succeeds.
 - Stale socket cleanup is Unix-only, removes only filesystem socket nodes, and refuses to replace normal files.
 - Windows endpoint defaults and transport bindings are local named pipe names, not TCP or remote listeners.
-- Ordinary accepted edit responses are metadata acknowledgements; full text snapshots are reserved for initial load and explicit resync recovery.
+- Ordinary accepted edit responses are metadata acknowledgements; full text snapshots are reserved for initial load, file open, file reload, and explicit resync recovery.
 - Version fields are enforced by `DocumentState` before mutation; stale/future edits are rejected and can trigger client resync.
 
 ## Tests
 
-- `src/server/connection.rs`: handshake, initial document, behavior manifest, editable/read-only access, edit acknowledgement, resync response, and malformed-frame handling over generic in-memory async streams.
+- `src/server/connection.rs`: handshake, initial document, behavior manifest, editable/read-only access, edit acknowledgement, resync response, file/workspace open/status dispatch, typed file IO failures, and malformed-frame handling over generic in-memory async streams.
 - `src/server/document.rs`: canonical rope edit application, base-version enforcement, lease validation, region-lock rejection, and UTF-8 boundary rejection.
 - `src/ipc.rs`: endpoint tests verify platform-valid default endpoint selection, isolated smoke endpoints, and printable diagnostics.
 - `src/main.rs`: launch tests verify direct child-process command construction, bounded readiness retry diagnostics, local-fallback messages, and early child-exit handling for smoke mode.

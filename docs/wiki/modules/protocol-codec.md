@@ -13,6 +13,7 @@ The protocol module defines the shared client/server IPC message contract. It us
 
 - Represent handshake messages: `Hello`, `Welcome`, `InitialDocument`, inert behavior manifests, document access, edit deltas/intents, acknowledgements, transactions, and errors.
 - Represent Phase 5 synchronization metadata: client IDs, editable lease IDs, base document versions, behavior versions, confirmed server versions, stale-edit/read-only/lease/region-lock rejections, and resync snapshots.
+- Represent Phase 9 file/workspace commands and results: open, save, reload, status, list, document metadata, and typed file-operation failures.
 - Encode and decode messages as `rkyv` payloads with a big-endian 4-byte length prefix.
 - Reject oversized, incomplete, mismatched, or invalid frames before callers receive a protocol message.
 - Avoid adding executable behavior, extension authority, file workspace authority, SDUI, or AI mutation privileges.
@@ -22,6 +23,8 @@ The protocol module defines the shared client/server IPC message contract. It us
 `src/protocol/mod.rs` contains owned message enums and IDs. Ordinary text edits are represented as deltas (`Insert`, `Delete`, `Replace`) with byte ranges and inserted text rather than full-document payloads. Phase 5 edit messages include `document_id`, `client_id`, optional `lease_id`, `base_version`, `behavior_version`, and `transaction_id` so the server can validate authority and ordering before mutation. `ServerMessage::EditAck` returns a server-confirmed version, while `EditRejected` carries recoverable sync reasons such as stale/future versions, lease failure, read-only access, invalid ranges, or region-lock conflicts. Full document text is carried by `InitialDocument` and `ResyncSnapshot` only.
 
 `DocumentAccess::Editable { lease_id }` records the editable lease in the access state, while read-only observers use `DocumentAccess::ReadOnly`. Region-lock conflicts are described by `RegionLockConflict` and `LockOwner` metadata so later UI/AI phases can explain why an overlapping edit was rejected without granting AI, extension, file, shell, or network authority.
+
+Phase 9 adds server-first file/workspace variants. `ClientMessage::OpenDocument`, `SaveDocument`, `ReloadDocument`, `GetDocumentStatus`, and `ListDocuments` carry client/document/workspace IDs and relative paths for server validation. `ServerMessage::DocumentOpened` and `DocumentReloaded` are the only file/workspace success responses that carry full text snapshots; `DocumentSaved`, `DocumentStatus`, and `DocumentList` carry metadata only. `ServerMessage::FileOperationFailed` uses `FileErrorCode` so callers can branch on stable errors such as `NotFound`, `OutsideRoot`, `InvalidUtf8`, `PermissionDenied`, `UnsupportedFileType`, `DirtyDocument`, and `StaleFileMetadata` without string matching.
 
 `BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, key bindings, command declarations, routing policies, and editor rules; it is data, not script code.
 
@@ -46,10 +49,11 @@ let message = codec.decode_client_message(&frame)?;
 - `DEFAULT_MAX_FRAME_SIZE` is 1 MiB to prevent accidental unbounded allocation from malformed IPC frames.
 - The 4-byte frame prefix is not part of the archived payload, so decode realigns payload bytes before validation.
 - Behavior manifests are inert declarations of built-in behavior and do not execute JavaScript, WASM, extensions, commands, or filesystem/network operations.
+- File/workspace protocol messages carry workspace-relative display paths and typed error codes; server-side workspace validation remains the authority for canonical host paths.
 
 ## Tests
 
-- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, and region-lock rejection metadata.
+- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, region-lock rejection metadata, file/workspace commands, workspace result messages, and typed file-operation failures.
 - `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, and invalid server/manifest archived bytes.
 - Relevant command: `cargo test protocol`.
 

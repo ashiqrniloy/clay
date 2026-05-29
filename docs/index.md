@@ -24,6 +24,11 @@ The generated documentation registry must read this section as the explicit incl
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `clay.configuration.loadConfigurationModule`
 - [serverGetDocumentLease](reference/clay-js-api/documents/server-get-document-lease.md) — `clay.documents.serverGetDocumentLease`
 - [serverGetDocumentSnapshot](reference/clay-js-api/documents/server-get-document-snapshot.md) — `clay.documents.serverGetDocumentSnapshot`
+- [serverGetDocumentStatus](reference/clay-js-api/documents/server-get-document-status.md) — `clay.documents.serverGetDocumentStatus`
+- [serverListDocuments](reference/clay-js-api/documents/server-list-documents.md) — `clay.documents.serverListDocuments`
+- [serverOpenDocument](reference/clay-js-api/documents/server-open-document.md) — `clay.documents.serverOpenDocument`
+- [serverReloadDocument](reference/clay-js-api/documents/server-reload-document.md) — `clay.documents.serverReloadDocument`
+- [serverSaveDocument](reference/clay-js-api/documents/server-save-document.md) — `clay.documents.serverSaveDocument`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `clay.editor.clientMoveCursor`
 - [clientScrollTo](reference/clay-js-api/editor/client-scroll-to.md) — `clay.editor.clientScrollTo`
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `clay.editor.clientSetCursorStyle`
@@ -35,6 +40,7 @@ The generated documentation registry must read this section as the explicit incl
 - [bindKey](reference/clay-js-api/keybindings/bind-key.md) — `clay.keybindings.bindKey`
 - [listKeyBindings](reference/clay-js-api/keybindings/list-key-bindings.md) — `clay.keybindings.listKeyBindings`
 - [unbindKey](reference/clay-js-api/keybindings/unbind-key.md) — `clay.keybindings.unbindKey`
+- [serverListWorkspaceRoots](reference/clay-js-api/workspace/server-list-workspace-roots.md) — `clay.workspace.serverListWorkspaceRoots`
 
 ## Registry Rules
 

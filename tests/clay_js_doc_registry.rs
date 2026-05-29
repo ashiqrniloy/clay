@@ -125,6 +125,62 @@ fn generated_registry_preserves_configuration_metadata() {
 }
 
 #[test]
+fn generated_registry_contains_phase9_file_workspace_apis() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let expected = [
+        (
+            "clay.documents.serverOpenDocument",
+            "clay:documents",
+            "serverOpenDocument",
+        ),
+        (
+            "clay.documents.serverSaveDocument",
+            "clay:documents",
+            "serverSaveDocument",
+        ),
+        (
+            "clay.documents.serverReloadDocument",
+            "clay:documents",
+            "serverReloadDocument",
+        ),
+        (
+            "clay.documents.serverGetDocumentStatus",
+            "clay:documents",
+            "serverGetDocumentStatus",
+        ),
+        (
+            "clay.documents.serverListDocuments",
+            "clay:documents",
+            "serverListDocuments",
+        ),
+        (
+            "clay.workspace.serverListWorkspaceRoots",
+            "clay:workspace",
+            "serverListWorkspaceRoots",
+        ),
+    ];
+
+    for (id, js_module, js_export) in expected {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing {id}"));
+        assert_eq!(entry.js_module, js_module);
+        assert_eq!(entry.js_export, js_export);
+        assert!(entry.lookup_tags.iter().any(|tag| tag == "workspace"));
+        assert!(entry.security.contains("path traversal rejection"));
+        assert!(entry.security.contains("does not grant filesystem"));
+    }
+
+    assert!(
+        registry
+            .by_lookup_tag("dirty-state")
+            .iter()
+            .any(|entry| entry.id == "clay.documents.serverSaveDocument"),
+        "dirty-state lookup should find Phase 9 save/status/reload APIs"
+    );
+}
+
+#[test]
 fn lookup_finds_api_by_stable_id_and_export() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 

@@ -4,6 +4,7 @@
 // user imports separate from Rust internals and future op wrapper names.
 
 export type DocumentId = string;
+export type WorkspaceRootId = string;
 
 export interface DocumentSnapshot {
   documentId: DocumentId;
@@ -16,6 +17,48 @@ export interface DocumentLease {
   documentId: DocumentId;
   leaseId: string;
   readOnly: boolean;
+}
+
+export interface DocumentMetadata {
+  documentId: DocumentId;
+  version: number;
+  readOnly: boolean;
+  leaseId?: string;
+  dirty: boolean;
+  workspaceRootId: WorkspaceRootId;
+  path: string;
+}
+
+export interface OpenDocumentOptions {
+  workspaceRootId: WorkspaceRootId;
+  path: string;
+}
+
+export interface OpenDocumentResult {
+  metadata: DocumentMetadata;
+  text: string;
+}
+
+export interface SaveDocumentOptions {
+  documentId: DocumentId;
+  knownVersion?: number;
+}
+
+export interface SaveDocumentResult {
+  documentId: DocumentId;
+  version: number;
+  dirty: boolean;
+}
+
+export interface ReloadDocumentOptions {
+  documentId: DocumentId;
+  knownVersion?: number;
+  force?: boolean;
+}
+
+export interface ReloadDocumentResult {
+  metadata: DocumentMetadata;
+  text: string;
 }
 
 function plannedApi(name: string): never {
@@ -32,6 +75,26 @@ export async function serverGetDocumentLease(documentId: DocumentId): Promise<Do
   plannedApi("clay.documents.serverGetDocumentLease");
 }
 
-export async function serverListDocuments(): Promise<DocumentId[]> {
+export async function serverOpenDocument(options: OpenDocumentOptions): Promise<OpenDocumentResult> {
+  void options;
+  plannedApi("clay.documents.serverOpenDocument");
+}
+
+export async function serverSaveDocument(options: SaveDocumentOptions): Promise<SaveDocumentResult> {
+  void options;
+  plannedApi("clay.documents.serverSaveDocument");
+}
+
+export async function serverReloadDocument(options: ReloadDocumentOptions): Promise<ReloadDocumentResult> {
+  void options;
+  plannedApi("clay.documents.serverReloadDocument");
+}
+
+export async function serverGetDocumentStatus(documentId: DocumentId): Promise<DocumentMetadata> {
+  void documentId;
+  plannedApi("clay.documents.serverGetDocumentStatus");
+}
+
+export async function serverListDocuments(): Promise<DocumentMetadata[]> {
   plannedApi("clay.documents.serverListDocuments");
 }

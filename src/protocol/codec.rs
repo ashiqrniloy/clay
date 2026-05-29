@@ -240,8 +240,9 @@ impl Error for CodecError {
 mod tests {
     use super::{Codec, CodecError};
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
-        PROTOCOL_VERSION, RegionLockConflict, ServerMessage,
+        BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
+        EditRejection, FileErrorCode, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
+        ServerMessage,
     };
 
     #[test]
@@ -396,6 +397,80 @@ mod tests {
         let decoded = codec.decode_server_message(&frame).unwrap();
 
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn protocol_round_trips_open_save_reload_messages() {
+        let codec = Codec::default();
+        let open = ClientMessage::OpenDocument {
+            client_id: 9,
+            workspace_root_id: 2,
+            path: "src/main.rs".to_string(),
+        };
+        let save = ClientMessage::SaveDocument {
+            client_id: 9,
+            document_id: 7,
+            known_version: 3,
+        };
+        let reload = ClientMessage::ReloadDocument {
+            client_id: 9,
+            document_id: 7,
+            known_version: 3,
+            force: true,
+        };
+
+        for message in [open, save, reload] {
+            let frame = codec.encode_client_message(&message).unwrap();
+            let decoded = codec.decode_client_message(&frame).unwrap();
+            assert_eq!(decoded, message);
+        }
+    }
+
+    #[test]
+    fn protocol_round_trips_workspace_results_and_errors() {
+        let codec = Codec::default();
+        let metadata = DocumentMetadata {
+            document_id: 7,
+            version: 3,
+            access: DocumentAccess::Editable { lease_id: 4 },
+            lease_id: Some(4),
+            dirty: true,
+            workspace_root_id: 2,
+            path: "src/main.rs".to_string(),
+        };
+        let messages = [
+            ServerMessage::DocumentOpened {
+                metadata: metadata.clone(),
+                text: "fn main() {}\n".to_string(),
+            },
+            ServerMessage::DocumentSaved {
+                document_id: 7,
+                version: 4,
+                dirty: false,
+            },
+            ServerMessage::DocumentReloaded {
+                metadata: metadata.clone(),
+                text: "reloaded\n".to_string(),
+            },
+            ServerMessage::DocumentStatus {
+                metadata: metadata.clone(),
+            },
+            ServerMessage::DocumentList {
+                documents: vec![metadata],
+            },
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::InvalidUtf8,
+                message: "workspace file is not valid UTF-8 text".to_string(),
+                workspace_root_id: Some(2),
+                document_id: None,
+            },
+        ];
+
+        for message in messages {
+            let frame = codec.encode_server_message(&message).unwrap();
+            let decoded = codec.decode_server_message(&frame).unwrap();
+            assert_eq!(decoded, message);
+        }
     }
 
     #[test]

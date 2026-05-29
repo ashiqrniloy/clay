@@ -7,5 +7,6 @@ export * as editor from "./editor.ts";
 export * as keybindings from "./keybindings.ts";
 export * as configuration from "./configuration.ts";
 export * as documents from "./documents.ts";
+export * as workspace from "./workspace.ts";
 export * as behavior from "./behavior.ts";
 export * as application from "./application.ts";

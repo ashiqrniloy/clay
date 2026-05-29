@@ -420,6 +420,144 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::on_text_event; src/ma
 registry_public = true
 
 [[api]]
+id = "clay.documents.serverOpenDocument"
+category = "file-workspace-document-lifecycle"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverOpenDocument"
+user_facing_name = "Open Document"
+authority = "server-authoritative-file-open"
+runtime_path = "server-first-file-io"
+hot_path_policy = "Opening a file is an explicit server command that may read a full UTF-8 snapshot once; ordinary keypress-to-paint editing remains asynchronous and does not call JavaScript, workspace validation, or file IO."
+facade_path = "runtime/js/documents.ts::serverOpenDocument"
+backing_rust = "src/server/workspace.rs::WorkspaceState::open_existing_file"
+deno_op = "op_clay_documents_open_document"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_open_document"
+documentation_path = "docs/reference/clay-js-api/documents/server-open-document.md"
+key_bindings = []
+custom_properties = []
+permissions = ["workspace-read", "document-read"]
+security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
+id = "clay.documents.serverSaveDocument"
+category = "file-workspace-document-lifecycle"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverSaveDocument"
+user_facing_name = "Save Document"
+authority = "server-authoritative-file-save"
+runtime_path = "server-first-file-io"
+hot_path_policy = "Saving is an explicit server file IO command and is never part of ordinary keypress-to-paint latency."
+facade_path = "runtime/js/documents.ts::serverSaveDocument"
+backing_rust = "src/server/workspace.rs::WorkspaceState::save_document"
+deno_op = "op_clay_documents_save_document"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_save_document"
+documentation_path = "docs/reference/clay-js-api/documents/server-save-document.md"
+key_bindings = []
+custom_properties = []
+permissions = ["workspace-write", "document-read"]
+security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
+id = "clay.documents.serverReloadDocument"
+category = "file-workspace-document-lifecycle"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverReloadDocument"
+user_facing_name = "Reload Document"
+authority = "server-authoritative-file-reload"
+runtime_path = "server-first-file-io"
+hot_path_policy = "Reloading is an explicit server file IO command and is not on ordinary edit acknowledgement, rendering, or input hot paths."
+facade_path = "runtime/js/documents.ts::serverReloadDocument"
+backing_rust = "src/server/workspace.rs::WorkspaceState::reload_document"
+deno_op = "op_clay_documents_reload_document"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_reload_document"
+documentation_path = "docs/reference/clay-js-api/documents/server-reload-document.md"
+key_bindings = []
+custom_properties = []
+permissions = ["workspace-read", "document-read"]
+security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
+id = "clay.documents.serverGetDocumentStatus"
+category = "file-workspace-document-metadata"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverGetDocumentStatus"
+user_facing_name = "Get Document Status"
+authority = "server-authoritative-document-query"
+runtime_path = "server-first-query"
+hot_path_policy = "Status queries are background/help/programmatic metadata queries and are not needed for ordinary local paint or edit hot paths."
+facade_path = "runtime/js/documents.ts::serverGetDocumentStatus"
+backing_rust = "src/server/workspace.rs::WorkspaceState::document_metadata"
+deno_op = "op_clay_documents_get_document_status"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_get_document_status"
+documentation_path = "docs/reference/clay-js-api/documents/server-get-document-status.md"
+key_bindings = []
+custom_properties = []
+permissions = ["document-read"]
+security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
+id = "clay.documents.serverListDocuments"
+category = "file-workspace-document-metadata"
+visibility = "public"
+status = "planned"
+js_module = "clay:documents"
+js_export = "serverListDocuments"
+user_facing_name = "List Open Documents"
+authority = "server-authoritative-document-query"
+runtime_path = "server-first-query"
+hot_path_policy = "Listing documents is an explicit metadata query and does not serialize full document text or participate in ordinary typing/rendering latency."
+facade_path = "runtime/js/documents.ts::serverListDocuments"
+backing_rust = "src/server/workspace.rs::WorkspaceState::list_documents"
+deno_op = "op_clay_documents_list_documents"
+deno_op_path = "src/server/ops/documents.rs::op_clay_documents_list_documents"
+documentation_path = "docs/reference/clay-js-api/documents/server-list-documents.md"
+key_bindings = []
+custom_properties = []
+permissions = ["document-read"]
+security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
+id = "clay.workspace.serverListWorkspaceRoots"
+category = "file-workspace-root-metadata"
+visibility = "public"
+status = "planned"
+js_module = "clay:workspace"
+js_export = "serverListWorkspaceRoots"
+user_facing_name = "List Workspace Roots"
+authority = "server-authoritative-workspace-query"
+runtime_path = "server-first-query"
+hot_path_policy = "Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, Masonry paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/workspace.ts::serverListWorkspaceRoots"
+backing_rust = "src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root"
+deno_op = "op_clay_workspace_list_roots"
+deno_op_path = "src/server/ops/workspace.rs::op_clay_workspace_list_roots"
+documentation_path = "docs/reference/clay-js-api/workspace/server-list-workspace-roots.md"
+key_bindings = []
+custom_properties = []
+permissions = ["workspace-read"]
+security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
 id = "internal.editor.buffer"
 category = "internal-only-implementation-detail"
 visibility = "internal"

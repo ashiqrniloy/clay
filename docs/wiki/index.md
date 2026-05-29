@@ -3,13 +3,14 @@
 ## Modules
 
 - [Behavior Manifests](modules/behavior-manifests.md): Server-issued inert behavior schema, routing policies, validation rules, editor declarations, and tests.
-- [Protocol Codec](modules/protocol-codec.md): IPC protocol messages, `rkyv` serialization, length-prefixed framing, validation, and tests.
-- [Server IPC Skeleton](modules/server-ipc-skeleton.md): Tokio local IPC server lifecycle across Unix sockets and Windows named pipes, connection handshake, shared document state, versioned edit dispatch, resync responses, and tests.
+- [Protocol Codec](modules/protocol-codec.md): IPC protocol messages, file/workspace command variants and typed failures, `rkyv` serialization, length-prefixed framing, validation, and tests.
+- [Server-Driven UI Protocol Schema](modules/server-driven-ui.md): Inert SDUI tree schema, stable node IDs, editor document bindings, server-routed action intents, update operations, and authority boundaries.
+- [Server IPC Skeleton](modules/server-ipc-skeleton.md): Tokio local IPC server lifecycle across Unix sockets and Windows named pipes, connection handshake, shared/workspace document dispatch, versioned edit dispatch, resync responses, file/workspace commands, and tests.
 - [Server Document State](modules/server-document-state.md): Server-owned canonical `crop::Rope` text, version enforcement, lease validation, region-lock enforcement, dirty-state hooks, acknowledgement/resync generation, and tests.
-- [Server File Workspace Model](modules/server-file-workspace.md): Workspace roots, canonical path registry, duplicate-open identity, file-backed dirty state, and server/client authority boundaries.
+- [Server File Workspace Model](modules/server-file-workspace.md): Workspace roots, canonical path registry, duplicate-open identity, file-backed dirty state, protocol dispatch metadata, container-friendly diagnostics, typed errors, and server/client authority boundaries.
 - [Client Snapshot Bootstrap](modules/client-snapshot-bootstrap.md): Native app client bootstrap over platform IPC, server snapshot loading, editable/read-only access storage, behavior manifest storage, editor state reset, and tests.
-- [Clay JS Facade Skeleton](modules/clay-js-facade-skeleton.md): Planned Clay JavaScript/TypeScript facade source tree, domain modules, typed planned stubs, authority boundaries, and validation tests.
-- [Clay JS Documentation Registry](modules/clay-js-doc-registry.md): Markdown-derived generated Clay JS API registry artifacts, stale checks, update command, validation rules, and tests.
+- [Clay JS Facade Skeleton](modules/clay-js-facade-skeleton.md): Planned Clay JavaScript/TypeScript facade source tree, domain modules, typed planned stubs, Phase 9 file/workspace facade APIs, authority boundaries, and validation tests.
+- [Clay JS Documentation Registry](modules/clay-js-doc-registry.md): Markdown-derived generated Clay JS API registry artifacts, Phase 9 file/workspace API lookup entries, stale checks, update command, validation rules, and tests.
 
 ## Flows
 

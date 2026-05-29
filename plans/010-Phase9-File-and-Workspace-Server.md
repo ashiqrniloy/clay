@@ -133,7 +133,7 @@
     - `cargo test --test rust_visibility_api_mapping`
     - `cargo check`
 
-- [ ] Implement dirty-state tracking, save, and reload behavior
+- [x] Implement dirty-state tracking, save, and reload behavior
   - Acceptance Criteria:
     - Functional: Accepted edits mark file-backed documents dirty; successful saves write the current canonical text and mark clean; reload can refresh a clean document from disk and rejects or requires force for dirty documents.
     - Performance: Save/reload run on server-side async file IO boundaries and never block ordinary typing, rendering, or edit acknowledgement paths longer than the specific server-first command requires.
@@ -158,10 +158,12 @@
       }
       ```
     - Files to Create/Edit:
-      - `src/server/workspace.rs`: Save/reload operations and dirty-state metadata.
-      - `src/server/document.rs`: Dirty flag updates after accepted edits and clean marking after save/reload.
-      - `src/protocol/mod.rs`: Add save/reload request/result/error messages or command intents.
-      - `src/server/connection.rs`: Dispatch save/reload as server-first operations.
+      - `src/server/workspace.rs`: Added save/reload operations, last-known file metadata, stale-save conflict detection, save/reload path reauthorization, typed errors, and workspace tests for clean/dirty transitions, missing files, and stale metadata.
+      - `src/server/document.rs`: Added canonical text/version accessors, version-guarded clean marking after save, and storage reload replacement that advances document version only when disk text differs.
+      - `docs/wiki/modules/server-file-workspace.md`: Updated implementation notes for save/reload state transitions, stale metadata, reauthorization, and tests.
+      - `docs/wiki/modules/server-document-state.md`: Documented dirty-state and save/reload hooks owned by `DocumentState`.
+      - `src/protocol/mod.rs`: Deferred to the dedicated protocol/dispatch task below; this task completed server-side workspace state-machine behavior without adding wire variants.
+      - `src/server/connection.rs`: Deferred to the dedicated protocol/dispatch task below; no connection dispatch exists for save/reload yet.
     - References:
       - Context7 `/websites/rs_tokio_1_49_0` `tokio::fs` docs.
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
@@ -169,9 +171,17 @@
     - `accepted_edit_marks_file_document_dirty_and_save_marks_clean`: Dirty flag changes only on accepted edits and successful save.
     - `save_writes_canonical_rope_text_to_disk`: Disk content matches server canonical text after save.
     - `reload_dirty_document_requires_force_or_rejects`: Dirty documents are not silently overwritten by disk contents.
-    - `save_permission_error_returns_typed_protocol_error`: IO failures are visible and leave the document dirty.
+    - `reload_clean_document_refreshes_disk_text_and_marks_clean`: Clean documents can be refreshed from disk and remain clean after reload.
+    - `save_missing_file_returns_typed_error_and_keeps_dirty`: Missing-file IO failures are visible and leave the document dirty.
+    - `save_stale_metadata_returns_typed_error_and_keeps_dirty`: External disk changes are reported as stale metadata and do not clear dirty state.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test workspace:: --lib`
+    - `cargo test server:: --lib`
+    - `cargo test --test rust_visibility_api_mapping`
+    - `cargo check`
 
-- [ ] Extend IPC protocol and connection dispatch for file/workspace commands and errors
+- [x] Extend IPC protocol and connection dispatch for file/workspace commands and errors
   - Acceptance Criteria:
     - Functional: Clients can request workspace open, document save, document reload, document metadata/dirty state, and document list through versioned protocol messages; responses include document IDs, versions, access/lease metadata, dirty state, workspace-relative display paths, and typed errors.
     - Performance: Protocol messages avoid full-document payloads except initial open snapshots and explicit resync/reload snapshots; edit acknowledgements remain per-document ordered.
@@ -196,19 +206,31 @@
       ServerMessage::FileOperationFailed { code, message, document_id }
       ```
     - Files to Create/Edit:
-      - `src/protocol/mod.rs`: Add file/workspace request/result/error structs and enums.
-      - `src/protocol/codec.rs`: Add round-trip and invalid-frame tests if needed for new variants.
-      - `src/server/connection.rs`: Dispatch new messages to workspace state.
-      - `src/client/**` or `src/main.rs`: Minimal client wiring only if needed to open an initial file through protocol.
+      - `src/protocol/mod.rs`: Added `WorkspaceRootId`, `DocumentMetadata`, `FileErrorCode`, file/workspace request variants, file/workspace response variants, and typed file-operation failure responses.
+      - `src/protocol/codec.rs`: Added `rkyv` round-trip coverage for open/save/reload commands, workspace metadata responses, document lists, and typed file-operation failures.
+      - `src/server/connection.rs`: Dispatches open/save/reload/status/list messages to `WorkspaceState`, routes edits/resync to workspace-backed documents when present, maps workspace errors to typed protocol failures, publishes a manifest after file open snapshots, and releases workspace leases on disconnect.
+      - `src/server/workspace.rs`: Added protocol-dispatch support methods for document handles, metadata, document lists, client lease release, display paths, and stable error-code mapping.
+      - `src/server/document.rs`: Exposed client-specific access metadata for workspace document status/list responses.
+      - `src/server/mod.rs`: Passes shared workspace state into connection dispatch and reserves workspace document IDs away from the bootstrap scratch document.
+      - `docs/wiki/index.md`, `docs/wiki/modules/protocol-codec.md`, `docs/wiki/modules/server-ipc-skeleton.md`, `docs/wiki/modules/server-file-workspace.md`: Updated implementation wiki notes for file/workspace protocol dispatch.
+      - `src/client/**` or `src/main.rs`: No edit needed; this task adds server protocol/dispatch support without native client UI wiring.
     - References:
       - Context7 `/websites/rs_rkyv` validation docs.
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
   - Test Cases to Write:
     - `protocol_round_trips_open_save_reload_messages`: New message variants encode/decode safely.
+    - `protocol_round_trips_workspace_results_and_errors`: Workspace result and typed failure messages encode/decode safely.
     - `connection_open_document_sends_snapshot_and_manifest_without_full_document_on_edit_ack`: Open uses snapshot; edits continue as edit acks/transactions.
-    - `file_io_errors_are_typed_protocol_failures`: Not-found/access-denied/invalid-UTF8 errors map to stable protocol codes.
+    - `file_io_errors_are_typed_protocol_failures`: Not-found and invalid-UTF-8 workspace errors map to stable protocol codes.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test protocol --quiet`
+    - `cargo test connection --lib --quiet`
+    - `cargo test server:: --lib --quiet`
+    - `cargo test --quiet`
+    - `cargo check --quiet`
 
-- [ ] Add container/toolbox/distrobox-friendly workspace diagnostics
+- [x] Add container/toolbox/distrobox-friendly workspace diagnostics
   - Acceptance Criteria:
     - Functional: Startup/open errors distinguish missing workspace roots, inaccessible mounts, permission denied, outside-root paths, and unsupported special files with messages suitable for host-client/container-server workflows.
     - Performance: Diagnostics run on workspace/open/save boundaries and do not add background scanning or blocking client startup beyond explicit server initialization checks.
@@ -230,17 +252,25 @@
       Workspace root is not accessible from the Clay server process. If the server runs in toolbox/distrobox, mount or choose a root visible inside that environment.
       ```
     - Files to Create/Edit:
-      - `src/server/workspace.rs`: Diagnostic/error types and display-path sanitization.
-      - `src/server/mod.rs`: Startup workspace-root validation errors.
-      - `docs/wiki/modules/server-file-workspace.md`: Document container/root assumptions after implementation.
+      - `src/server/workspace.rs`: Added centralized `WorkspaceDiagnostic`, IO-kind to `FileErrorCode` mapping, container/toolbox/distrobox hints, sanitized display paths, and diagnostics tests.
+      - `src/server/mod.rs`: Startup workspace-root validation now uses the same diagnostic rendering for invalid configured roots.
+      - `src/server/connection.rs`: Protocol file-operation failures now reuse centralized diagnostics for typed codes and user-facing messages.
+      - `docs/wiki/modules/server-file-workspace.md`: Documented container/root assumptions, diagnostics behavior, sanitization, and tests.
+      - `docs/wiki/index.md`: Updated server file workspace entry to mention container-friendly diagnostics.
     - References:
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
   - Test Cases to Write:
     - `workspace_diagnostic_for_missing_root_is_actionable`: Missing root returns a stable code and helpful hint.
     - `workspace_diagnostic_sanitizes_unauthorized_paths`: Outside-root errors do not reveal extra path details.
     - `workspace_permission_denied_keeps_document_dirty`: Failed save reports permission denied and preserves dirty state.
+  - Verification:
+    - `cargo fmt --check`
+    - `cargo test workspace:: --lib --quiet`
+    - `cargo test server:: --lib --quiet`
+    - `cargo test connection --lib --quiet`
+    - `cargo check --quiet`
 
-- [ ] Run Phase 9 implementation verification
+- [x] Run Phase 9 implementation verification
   - Acceptance Criteria:
     - Functional: Workspace roots, open registry, file load/save/reload, dirty state, protocol messages, and diagnostics are complete and consistent.
     - Performance: Verification confirms no ordinary typing/rendering path synchronously waits on file IO, workspace validation, registry generation, JavaScript, AI, or full-document IPC.
@@ -270,8 +300,13 @@
   - Test Cases to Write:
     - Full verification command set: `cargo fmt --check`, `cargo test`, and `cargo check` pass.
     - Manual phase-boundary review: Confirm file/workspace side effects are server-first and client hot-path editing remains client-first/asynchronous.
+  - Verification:
+    - `cargo fmt --check`: Passed.
+    - `cargo test`: Passed; 188 library tests, 18 binary tests, 4 test binaries, and doc tests passed.
+    - `cargo check`: Passed.
+    - Manual phase-boundary review: Confirmed Phase 9 file/workspace side effects are routed through server workspace/connection code, client/editor hot paths contain no file IO for ordinary editing, snapshots are limited to open/reload/resync paths, and no client filesystem authority or client-side JavaScript execution was introduced.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Any Phase 9 behavior-changing or user-configurable workspace/file settings are represented as Clay JS APIs with docs, index links, generated registry entries, lookup coverage, and tests; if no runtime configuration is introduced, this is explicitly verified.
     - Performance: Configuration verification confirms workspace/file configuration is not loaded or executed synchronously in editor input/rendering hot paths.
@@ -287,26 +322,31 @@
       - Defer all workspace configuration to process/server launch flags: acceptable for Phase 9 if documented as server startup authority, not user `init.js` runtime configuration.
       - Add planned documented workspace configuration APIs now: useful if Phase 9 introduces stable user-facing settings.
     - Chosen Approach:
-      - Audit implementation. If workspace roots, default open behavior, save/reload prompts, or path display settings are user-configurable, add/verify documented Clay JS APIs; otherwise record that Phase 9 uses server startup/workspace authority only and no new `init.js` configuration authority.
+      - Audited implementation. Phase 9 workspace roots are server startup authority on `ServerConfig::workspace_roots` and are validated by `WorkspaceState::add_root`; open/save/reload/status/list behavior is exposed through protocol messages and server state, not through `~/.config/clay/init.js` runtime configuration. No save/reload prompts, path-display settings, default-open behavior, or other behavior-changing file/workspace settings are loaded from Clay JS configuration in Phase 9, so no new configuration API docs, facades, registry entries, or generated artifacts were required for this task.
     - API Notes and Examples:
       ```text
       Verify each configuration-relevant API:
       stable ID -> JS module/export -> docs path -> docs/index.md link -> generated registry entry -> lookup by ID/tag/custom property -> tests.
       ```
     - Files to Create/Edit:
-      - `runtime/js/workspace.ts` or `runtime/js/documents.ts`: Add planned configuration-related facades only if needed.
-      - `docs/reference/clay-js-api/workspace/**` or `documents/**`: Add docs only for actual public configuration surfaces.
-      - `docs/index.md`: Link new API docs when added.
-      - `docs/generated/clay-js-api-registry.json`: Regenerate after docs changes.
-      - `tests/clay_js_doc_registry.rs`, `tests/clay_js_api_inventory.rs`, `tests/clay_js_facade_layout.rs`: Add coverage for any new configuration APIs.
+      - No configuration API files required changes for this task because Phase 9 introduced no new Clay JS configuration authority.
+      - `runtime/js/configuration.ts`: Existing planned configuration facades remain sufficient and do not load files or grant workspace/filesystem authority.
+      - `docs/reference/clay-js-api/configuration.md`, `docs/reference/clay-js-api/configuration/*.md`, `docs/index.md`, `docs/generated/clay-js-api-registry.json`: Existing configuration docs/index/registry coverage remain current; no regeneration required.
+      - `tests/clay_js_doc_registry.rs`, `tests/clay_js_api_inventory.rs`, `tests/clay_js_facade_layout.rs`: Existing coverage verifies configuration no-authority language, registry entries, facade layout, key bindings, and custom properties.
     - References:
       - `.agents/skills/create-plan/references/clay.md`
       - `.agents/skills/project-patterns/references/configuration-system.md`
   - Test Cases to Write:
     - Configuration API audit: Confirm no undocumented Phase 9 behavior-changing settings exist.
     - No-authority validation: Any workspace/file configuration docs deny implicit filesystem/workspace expansion beyond explicit server-side validation.
+  - Verification:
+    - Implementation audit passed: `rg -n "workspace_roots|ServerConfig|CLAY|env::|std::env|config|init\\.js|loadConfiguration|workspace root|workspace_root" src runtime docs/reference tests docs/index.md Cargo.toml` found Phase 9 workspace roots only in server/process infrastructure, protocol metadata, docs/tests, and existing planned configuration surfaces; no Phase 9 `init.js` loader, undocumented environment variable, or ad hoc user configuration key was introduced.
+    - Existing configuration API docs were verified: `docs/reference/clay-js-api/configuration.md`, `docs/reference/clay-js-api/configuration/get-configuration-state.md`, and `docs/reference/clay-js-api/configuration/load-configuration-module.md` continue to deny implicit filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, and client-side JavaScript authority.
+    - `cargo test configuration --quiet`: Passed; no filtered configuration unit tests failed.
+    - `cargo test clay_js_api_inventory --test clay_js_api_inventory --quiet`: Passed; 8 selected inventory tests passed, including configuration no-authority and permission-validation coverage.
+    - `cargo test clay_js_doc_registry --test clay_js_doc_registry --quiet`: Passed; selected registry tests passed, including generated configuration security coverage.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Public Phase 9 programmatic surfaces such as opening, saving, reloading, listing documents, querying dirty state, and workspace metadata are exposed or planned through stable Clay JS/TS facades, explicit future op names, Markdown docs, index links, generated registry entries, and lookup tests.
     - Performance: Clay JS API verification confirms file/workspace operations are server-first and never part of ordinary keypress-to-paint latency.
@@ -324,7 +364,7 @@
       - Add a new `clay:workspace` module for roots and workspace metadata while keeping document lifecycle in `clay:documents`: clearer domain split.
       - Keep APIs internal until `deno_core` runtime exists: safe but hurts discoverability and violates documentation-as-code for public behavior.
     - Chosen Approach:
-      - Document planned Phase 9 APIs even before runtime op wiring, likely `serverOpenDocument`, `serverSaveDocument`, `serverReloadDocument`, `serverListDocuments`, `serverGetDocumentStatus`, and workspace-root metadata APIs if user-facing. Keep actual Rust implementation internal unless exposed through future op wrappers.
+      - Added planned Phase 9 APIs before runtime op wiring: `clay:documents` exports `serverOpenDocument`, `serverSaveDocument`, `serverReloadDocument`, `serverGetDocumentStatus`, and `serverListDocuments`; `clay:workspace` exports `serverListWorkspaceRoots`. Runtime stubs throw planned-runtime errors and do not call raw `Deno.core.ops`; actual Rust implementation remains internal/private or `pub(crate)` unless represented by documented future op wrappers.
     - API Notes and Examples:
       ```ts
       import { serverOpenDocument, serverSaveDocument } from "clay:documents";
@@ -333,14 +373,15 @@
       await serverSaveDocument({ documentId: doc.documentId });
       ```
     - Files to Create/Edit:
-      - `runtime/js/documents.ts`: Add/verify planned document lifecycle exports and types.
-      - `runtime/js/workspace.ts` and `runtime/js/mod.ts`: Add workspace facade if workspace metadata is public.
-      - `docs/reference/clay-js-api/documents/*.md`: Add docs for open/save/reload/status/list APIs.
-      - `docs/reference/clay-js-api/workspace/*.md`: Add docs for workspace APIs if introduced.
-      - `docs/reference/clay-js-api/api-inventory.toml`: Add Phase 9 API metadata.
-      - `docs/index.md`: Link all new API docs.
-      - `docs/generated/clay-js-api-registry.json`: Regenerate after docs changes.
-      - `tests/rust_visibility_api_mapping.rs`: Update internal allowlist or API mapping for new Rust public items.
+      - `runtime/js/documents.ts`: Added planned document lifecycle exports, option/result types, dirty-state metadata, and file-backed document metadata.
+      - `runtime/js/workspace.ts` and `runtime/js/mod.ts`: Added planned workspace facade and aggregate export for workspace-root metadata.
+      - `runtime/js/README.md`: Documented the `clay:workspace` module specifier.
+      - `docs/reference/clay-js-api/documents/server-open-document.md`, `server-save-document.md`, `server-reload-document.md`, `server-get-document-status.md`, `server-list-documents.md`: Added public API docs for Phase 9 document lifecycle and metadata APIs.
+      - `docs/reference/clay-js-api/workspace/server-list-workspace-roots.md`: Added public API docs for workspace-root metadata discovery.
+      - `docs/reference/clay-js-api/api-inventory.toml`: Added Phase 9 API metadata, future op names, Rust backing paths, permissions, hot-path notes, and security notes.
+      - `docs/index.md`: Linked all new API docs from the registry source list.
+      - `docs/generated/clay-js-api-registry.json`: Regenerated with `cargo run --bin update-doc-registry`.
+      - `tests/clay_js_facade_layout.rs`, `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/rust_visibility_api_mapping.rs`: Updated/verified facade, inventory, registry lookup, security, and Rust visibility coverage.
     - References:
       - `.agents/skills/create-plan/references/clay.md`
       - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
@@ -349,8 +390,14 @@
     - `phase9_file_workspace_apis_are_documented_indexed_and_generated`: New public APIs have Markdown docs, index links, registry entries, and lookup coverage.
     - `server_public_items_have_api_inventory_entries_or_are_internal`: New Rust public items are either mapped to Clay JS APIs or made private/`pub(crate)`.
     - `file_workspace_api_security_notes_cover_permissions_and_path_validation`: Docs include workspace authorization, path traversal rejection, and no client filesystem authority.
+  - Verification:
+    - `cargo run --bin update-doc-registry`: Regenerated the checked-in Clay JS API registry.
+    - `cargo test --test clay_js_facade_layout --test clay_js_api_inventory --test clay_js_doc_registry --test rust_visibility_api_mapping --quiet`: Passed; 13 facade/inventory tests, 18 registry tests, and both visibility test binaries passed.
+    - `cargo fmt --check`: Passed after formatting.
+    - `cargo test --quiet`: Passed; 188 library tests, 18 binary tests, 4 integration-test binaries, and doctests passed.
+    - `cargo check --quiet`: Passed.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
     - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
@@ -371,16 +418,26 @@
       docs/wiki/flows/file-open-save-reload.md
       ```
     - Files to Create/Edit:
-      - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas.
-      - `docs/wiki/modules/server-file-workspace.md`: Explain workspace roots, open-document registry, file IO, dirty state, errors, and authority boundaries.
-      - `docs/wiki/flows/file-open-save-reload.md`: Explain open/save/reload protocol and state transitions if useful after implementation.
+      - `docs/wiki/index.md`: Updated navigation summaries for the Clay JS facade and documentation registry pages.
+      - `docs/wiki/modules/clay-js-facade-skeleton.md`: Documented Phase 9 file/workspace facade exports, metadata shapes, hot-path constraints, and validation tests.
+      - `docs/wiki/modules/clay-js-doc-registry.md`: Documented Phase 9 generated registry entries, lookup coverage, security notes, and tests.
+      - `docs/wiki/modules/server-file-workspace.md`: Already covered workspace roots, open-document registry, file IO, dirty state, errors, diagnostics, and authority boundaries from earlier Phase 9 tasks; no additional edit was required for this API-doc-only task.
+      - `docs/wiki/flows/file-open-save-reload.md`: Not created; the existing module/registry wiki pages and protocol/server wiki pages cover the flow sufficiently for this task.
     - References:
       - `.agents/skills/project-wiki/SKILL.md`
   - Test Cases to Write:
     - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
+  - Verification:
+    - Manual wiki review passed: `docs/wiki/index.md` links the updated Clay JS facade and documentation registry pages; those pages explain the Phase 9 facade/registry changes, source paths, hot-path constraints, authority boundaries, and tests.
+    - `cargo fmt --check`: Passed.
+    - `cargo test --quiet`: Passed.
+    - `cargo check --quiet`: Passed.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- Phase 9 Clay JS APIs remain planned typed facade stubs until future `deno_core` runtime/op-wrapper work. This preserves the public API contract, documentation registry, and lookup coverage without prematurely granting runtime filesystem/workspace authority. Included in `roadmap.md` under Current Status, Phase 9, and Phase 13.
+- Workspace-root metadata has a planned `clay:workspace` API and documentation, but the Phase 9 wire protocol currently exposes roots through server configuration/open-document flows rather than a dedicated root-list protocol message. Included in `roadmap.md` under Current Status, Phase 9, and Phase 16.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+- Priority: Medium — Implement the future `deno_core` op wrappers for the documented Phase 9 file/workspace facades when Clay JS runtime execution is introduced. Included in `roadmap.md` under Phase 13.
+- Priority: Medium — Add a dedicated protocol/server method for workspace-root metadata if UI/help surfaces need live root listing before general Clay JS runtime wiring. Included in `roadmap.md` under Phase 9 and Phase 16.
+- Priority: Low — Consider a dedicated `docs/wiki/flows/file-open-save-reload.md` page if future save-as, watchers, autosave, or conflict-resolution flows make the module-level wiki too dense. Included in `roadmap.md` under Phase 9 and Phase 18.

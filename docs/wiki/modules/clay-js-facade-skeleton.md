@@ -21,15 +21,16 @@
 
 The Clay JS facade skeleton defines the planned user-facing JavaScript/TypeScript source tree for future Clay runtime work. It gives each public domain a stable source file and typed planned exports while keeping raw Rust functions and future `deno_core` op wrappers out of the public API.
 
-The Phase 7 inventory adds a machine-readable classification of current editor, protocol, behavior, key binding, configuration, document/lease, and application functionality. Phase 8 extends that contract with `clay:configuration` entry point APIs for `~/.config/clay/init.js`: `loadConfigurationModule` for local modular configuration and `getConfigurationState` for read-only configuration metadata. It also verifies the initial editor customization contract for `clientSetCursorStyle` and keeps `clientSetViewport` classified as client-local viewport metadata rather than user configuration. It records which capabilities are planned public Clay JS APIs, which runtime path they use, and which implementation details are intentionally internal.
+The Phase 7 inventory adds a machine-readable classification of current editor, protocol, behavior, key binding, configuration, document/lease, and application functionality. Phase 8 extends that contract with `clay:configuration` entry point APIs for `~/.config/clay/init.js`: `loadConfigurationModule` for local modular configuration and `getConfigurationState` for read-only configuration metadata. Phase 9 adds planned file/workspace facades for server-owned document open/save/reload/status/list behavior plus workspace-root metadata discovery: `serverOpenDocument`, `serverSaveDocument`, `serverReloadDocument`, `serverGetDocumentStatus`, `serverListDocuments`, and `serverListWorkspaceRoots`. It also verifies the initial editor customization contract for `clientSetCursorStyle` and keeps `clientSetViewport` classified as client-local viewport metadata rather than user configuration. It records which capabilities are planned public Clay JS APIs, which runtime path they use, and which implementation details are intentionally internal.
 
 The Phase 7 reference docs add one Markdown page for each public planned inventory API and link those pages from `docs/index.md` under **Clay JS API Registry Source Files**. Those Markdown pages are the public source of truth for generated app/help/agent registry work; this wiki page explains the implementation structure behind them instead of duplicating the full public API reference.
 
 ## Responsibilities
 
-- Define stable domain module files for `clay:editor`, `clay:keybindings`, `clay:configuration`, `clay:documents`, `clay:behavior`, and `clay:application`.
+- Define stable domain module files for `clay:editor`, `clay:keybindings`, `clay:configuration`, `clay:documents`, `clay:workspace`, `clay:behavior`, and `clay:application`.
 - Keep `clay:configuration` as a planned facade for entry point/module metadata only in Phase 8; it must not load files, evaluate JavaScript, or grant filesystem/package/extension/workspace/network/shell authority.
 - Keep editor customization APIs as planned facade metadata: `clientSetCursorStyle` exposes `color`, `blinking`, and `type` customization properties, while `clientSetViewport` remains client-local layout/paint metadata.
+- Keep Phase 9 file/workspace APIs server-first: `clay:documents` owns document lifecycle and dirty-state metadata facades, while `clay:workspace` owns workspace-root metadata facades. These stubs do not read or write files; future op wrappers must route through server workspace validation.
 - Provide typed planned stubs that document function shapes without performing runtime work.
 - Preserve the boundary that raw `op_*` wrappers and Rust paths are implementation details behind Clay JS facades.
 - Avoid loading configuration, executing arbitrary JavaScript in the Rust client, or adding work to editor input/paint hot paths.
@@ -38,7 +39,7 @@ The Phase 7 reference docs add one Markdown page for each public planned invento
 
 ## How It Works
 
-Each facade file exports TypeScript option/result types and planned functions for its domain. The functions currently discard their arguments and call a local `plannedApi` helper that throws a clear planned-runtime error. This makes the source tree concrete for inventory, docs, and validation tasks without wiring `deno_core` or granting authority. In `runtime/js/keybindings.ts`, `bindKey` and `unbindKey` accept `global`/`editor` scopes while `listKeyBindings` accepts an additional `all` scope filter to match the documented configuration query default.
+Each facade file exports TypeScript option/result types and planned functions for its domain. The functions currently discard their arguments and call a local `plannedApi` helper that throws a clear planned-runtime error. This makes the source tree concrete for inventory, docs, and validation tasks without wiring `deno_core` or granting authority. In `runtime/js/documents.ts`, Phase 9 document metadata mirrors the protocol's document id, version, access/lease, dirty flag, workspace root id, and workspace-relative path while open/reload results are the only planned file/workspace calls that return full text snapshots. In `runtime/js/keybindings.ts`, `bindKey` and `unbindKey` accept `global`/`editor` scopes while `listKeyBindings` accepts an additional `all` scope filter to match the documented configuration query default.
 
 `runtime/js/mod.ts` re-exports the domain files as namespaces for source-tree organization and tests. Runtime import-map work can later map the individual files to Clay-owned module specifiers such as `clay:editor`, `clay:keybindings`, and `clay:application`.
 
@@ -62,6 +63,7 @@ These calls are planned examples. In the checked-in skeleton they throw until fu
 - Facade exports must use concise lower-camel-case Clay JS names, not Rust or op names.
 - Editor-core state APIs use `server*` or `client*` prefixes when authority matters.
 - Facade files must not call raw `Deno.core.ops` functions.
+- File/workspace facade calls are planned server-first APIs and must stay out of ordinary keypress-to-paint, Masonry layout/paint, and edit acknowledgement hot paths.
 - Inventory entries must classify hot-path client-first behavior separately from server-first/background work and explicitly preserve asynchronous ordinary typing.
 - Internal implementation records in the inventory must not be treated as public registry source files.
 - The skeleton grants no filesystem, network, shell, extension loading, AI mutation, workspace, package, document mutation from UI customization, or client-side JavaScript execution authority.
@@ -69,7 +71,7 @@ These calls are planned examples. In the checked-in skeleton they throw until fu
 
 ## Tests
 
-- `tests/clay_js_facade_layout.rs`: verifies expected domain files and planned exports exist, rejects raw op-shaped exports, rejects redundant names, and checks facade files do not call raw `Deno.core.ops`.
+- `tests/clay_js_facade_layout.rs`: verifies expected domain files and planned exports exist, including Phase 9 `clay:documents` file lifecycle APIs and `clay:workspace` root metadata, rejects raw op-shaped exports, rejects redundant names, and checks facade files do not call raw `Deno.core.ops`.
 - `tests/clay_js_api_inventory.rs`: parses the inventory, checks required fields and duplicate IDs, verifies required Phase 7 functionality categories, confirms hot-path async notes, ensures internal-only records are not public registry APIs, validates per-API Markdown frontmatter/body sections, checks `docs/index.md` exactly matches public inventory docs, confirms docs match inventory IDs/modules/exports/facade paths/Rust/op metadata, verifies facade paths export the named functions, enforces Clay JS naming/authority-marker conventions, and validates security, key binding, and custom property metadata.
 - Relevant commands: `cargo test clay_js_facade --test clay_js_facade_layout` and `cargo test --test clay_js_api_inventory`.
 - Full verification used when adding the skeleton: `cargo fmt --check`, `cargo test`, and `cargo check`.

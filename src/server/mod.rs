@@ -54,10 +54,6 @@ pub struct IpcServer {
     codec: Codec,
     document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
-    #[expect(
-        dead_code,
-        reason = "Phase 9 workspace state is validated at startup before protocol dispatch integration"
-    )]
     workspace: Arc<Mutex<WorkspaceState>>,
     next_client_id: AtomicU64,
 }
@@ -70,10 +66,11 @@ impl IpcServer {
     pub fn try_new(config: ServerConfig) -> Result<Self, ServerError> {
         let mut workspace = WorkspaceState::new();
         for root in &config.workspace_roots {
-            workspace
-                .add_root(root)
-                .map_err(|error| ServerError::InvalidWorkspaceRoot(error.to_string()))?;
+            workspace.add_root(root).map_err(|error| {
+                ServerError::InvalidWorkspaceRoot(error.diagnostic().to_string())
+            })?;
         }
+        workspace.reserve_document_ids_from(2);
 
         Ok(Self {
             config,
@@ -147,10 +144,11 @@ impl IpcServer {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
         let document = Arc::clone(&self.document);
         let behavior = Arc::clone(&self.behavior);
+        let workspace = Arc::clone(&self.workspace);
         let codec = self.codec;
         connections.spawn(async move {
             if let Err(error) =
-                handle_connection(stream, client_id, document, behavior, codec).await
+                handle_connection(stream, client_id, document, behavior, workspace, codec).await
             {
                 eprintln!("clay server connection {client_id} closed with error: {error}");
             }
@@ -301,7 +299,11 @@ mod tests {
             codec: Codec::default(),
             document: Arc::new(Mutex::new(document)),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
-            workspace: Arc::new(Mutex::new(crate::server::workspace::WorkspaceState::new())),
+            workspace: {
+                let mut workspace = crate::server::workspace::WorkspaceState::new();
+                workspace.reserve_document_ids_from(2);
+                Arc::new(Mutex::new(workspace))
+            },
             next_client_id: AtomicU64::new(1),
         }
     }

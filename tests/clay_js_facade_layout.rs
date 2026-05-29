@@ -28,9 +28,14 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         &[
             "serverGetDocumentSnapshot",
             "serverGetDocumentLease",
+            "serverOpenDocument",
+            "serverSaveDocument",
+            "serverReloadDocument",
+            "serverGetDocumentStatus",
             "serverListDocuments",
         ],
     ),
+    ("runtime/js/workspace.ts", &["serverListWorkspaceRoots"]),
     (
         "runtime/js/behavior.ts",
         &["getActiveBehaviorManifest", "listBehaviorRoutes"],

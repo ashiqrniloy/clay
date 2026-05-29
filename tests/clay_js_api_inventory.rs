@@ -659,6 +659,57 @@ fn configuration_docs_deny_implicit_external_authority() {
 }
 
 #[test]
+fn phase9_file_workspace_apis_are_documented_indexed_and_security_scoped() {
+    let expected = [
+        "clay.documents.serverOpenDocument",
+        "clay.documents.serverSaveDocument",
+        "clay.documents.serverReloadDocument",
+        "clay.documents.serverGetDocumentStatus",
+        "clay.documents.serverListDocuments",
+        "clay.workspace.serverListWorkspaceRoots",
+    ];
+    let entries = public_inventory_entries();
+    let linked_paths = docs_index_registry_links();
+
+    for expected_id in expected {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("id") == expected_id)
+            .unwrap_or_else(|| panic!("missing Phase 9 file/workspace API {expected_id}"));
+        let doc_path = entry.get("documentation_path");
+        assert!(
+            linked_paths.contains(doc_path),
+            "{expected_id} must be linked from docs/index.md"
+        );
+        assert!(
+            facade_exports_function(entry.get("facade_path"), entry.get("js_export")),
+            "{expected_id} facade export is missing"
+        );
+
+        let full_doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(doc_path);
+        let doc_text = fs::read_to_string(&full_doc_path).expect("read Phase 9 API doc");
+        for required in [
+            "server-side validation",
+            "workspace root authorization",
+            "path traversal",
+            "typed file errors",
+            "do not receive raw host filesystem authority",
+        ] {
+            assert!(
+                doc_text.contains(required),
+                "{expected_id} documentation must include security note {required:?}"
+            );
+        }
+        assert!(
+            entry.get("hot_path_policy").contains("not")
+                || entry.get("hot_path_policy").contains("never")
+                || entry.get("hot_path_policy").contains("asynchronous"),
+            "{expected_id} must document that file/workspace API use is outside ordinary hot paths"
+        );
+    }
+}
+
+#[test]
 fn permission_bearing_configuration_requires_validation_notes() {
     for entry in public_inventory_entries()
         .into_iter()

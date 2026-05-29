@@ -2,13 +2,15 @@
 
 ## Current Status
 
-Clay has completed the native editor foundation and the initial server-authoritative architecture through Phase 8. Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and `crop` ropes back both local editor state and server-owned canonical document state. The editor supports local interaction including cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, and resize handling.
+Clay has completed the native editor foundation and the initial server-authoritative architecture through Phase 8, plus the later cross-platform launch work recorded as Phases 10 and 11. Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and `crop` ropes back both local editor state and server-owned canonical document state. The editor supports local interaction including cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, and resize handling.
 
-The client/server foundation is now in place: a Tokio Unix Domain Socket server exchanges length-prefixed `rkyv` protocol messages with the native client; the server owns canonical document versions, edit validation, editable leases, read-only observer state, stale-edit rejection, resync snapshots, and region-lock structures; the client keeps hot-path editing responsive with optimistic local edits and asynchronous acknowledgements. Server-issued inert behavior manifests provide client-executed hot-path behavior without arbitrary JavaScript execution in the Rust client.
+The client/server foundation is now in place across Unix and Windows: the native client exchanges length-prefixed `rkyv` protocol messages with a Tokio server over Unix Domain Sockets on Unix and local named pipes on Windows. The server owns canonical document versions, edit validation, editable leases, read-only observer state, stale-edit rejection, resync snapshots, and region-lock structures; the client keeps hot-path editing responsive with optimistic local edits and asynchronous acknowledgements. Server-issued inert behavior manifests provide client-executed hot-path behavior without arbitrary JavaScript execution in the Rust client.
 
-Clay also has the Phase 8 self-documenting configuration foundation: a planned Clay JS facade tree, a current functionality inventory, Markdown-authored Clay JS API references, generated registry artifacts, read-only registry lookup APIs, and documented configuration contracts for `~/.config/clay/init.js`, key binding APIs, and editor customization metadata. These APIs are currently documentation/facade contracts only; runtime JavaScript execution, `deno_core` op wiring, and actual configuration loading remain deferred to Phase 11.
+Clay also has the Phase 8 self-documenting configuration foundation and Phase 9 file/workspace API documentation: a planned Clay JS facade tree, a current functionality inventory, Markdown-authored Clay JS API references, generated registry artifacts, read-only registry lookup APIs, and documented configuration contracts for `~/.config/clay/init.js`, key binding APIs, editor customization metadata, and file/workspace document lifecycle APIs. These APIs are currently documentation/facade contracts only; runtime JavaScript execution, `deno_core` op wiring, and actual configuration loading remain deferred to Phase 13.
 
-The next architectural priority is **Phase 9: File and Workspace Server**. Clay should now move from the in-memory document prototype to server-owned file loading, saving, workspace roots, dirty-state tracking, and file IO error handling while preserving the existing authority, documentation-as-code, configuration, and hot-path performance boundaries. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
+Phase 9 is complete for the server-side file/workspace foundation: the server owns workspace roots, path validation, file-backed open-document loading, duplicate-open registry behavior, dirty-state tracking, save/reload transitions, file/workspace IPC commands and typed errors, container/toolbox/distrobox diagnostics, and required Clay JS API/configuration/wiki verification. The remaining Phase 9 compromises are explicitly carried forward: documented file/workspace Clay JS APIs stay as planned typed facade stubs until Phase 13 `deno_core` runtime/op-wrapper work, workspace-root metadata has a documented `clay:workspace` facade but no dedicated root-list protocol message yet, and a dedicated file-open/save/reload flow wiki page is deferred until later workflow complexity warrants it. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
+
+Phases 10 and 11 were implemented before Phase 9 was finished because cross-platform local IPC and developer-friendly launch/smoke workflows became immediate validation needs. Clay now builds and runs against the Windows MSVC target, supports Unix sockets and Windows named pipes behind a shared endpoint/transport abstraction, and offers command-first launch paths such as `cargo run`, `cargo run -- server`, `cargo run -- client`, and `cargo run -- smoke-gui` with visible GUI connection/access/synchronization status.
 
 ## Architectural Decisions Now Locked
 
@@ -240,28 +242,80 @@ Expected outcome:
 - Configuration APIs are validated by the same Markdown/registry/lookup coverage gates as other Clay JS APIs once the deferred Phase 3 registry and lookup tasks are resumed against the Phase 7 API inventory.
 - Runtime configuration execution can be implemented later by the server-side JavaScript runtime without changing the public configuration contract.
 
-## Phase 9: File and Workspace Server
+## Phase 9: File and Workspace Server — Complete
 
 Make Clay edit real files through the authoritative server model.
 
-Focus areas:
+Completed focus areas:
 
-- Server-side file loading and saving.
-- Workspace root handling.
-- Open document registry.
-- Dirty state tracking.
-- Save/reload behavior.
-- Clear errors for file IO failures.
-- Container/toolbox/distrobox-friendly environment and permission handling.
+- Server-side workspace authority model for workspace roots, canonical paths, open document identity, dirty state, save/reload transitions, and duplicate opens.
+- Workspace root and path validation that canonicalizes authorized paths, rejects traversal outside configured roots, rejects directories/special files for document opens, and keeps filesystem authority server-side.
+- File-backed open-document registry and loading for existing UTF-8 text files, including stable document IDs, duplicate-open reuse, invalid UTF-8 errors, and preservation of existing lease/read-only observer behavior.
+- Dirty state tracking after accepted edits, explicit save/reload behavior, stale metadata detection, and typed file IO failures that preserve dirty state when persistence fails.
+- File/workspace IPC commands and typed protocol errors for open, save, reload, status, and document listing without full-document IPC on ordinary edits.
+- Container/toolbox/distrobox-friendly environment and permission diagnostics with sanitized paths and no shell probing or extra authority.
+- Clay JS API, configuration, generated registry, lookup, and code-wiki verification for public file/workspace behavior.
 - No direct client filesystem authority.
+
+Carried-forward compromises and follow-up actions:
+
+- The Phase 9 file/workspace Clay JS APIs are documented typed facade stubs until the Phase 13 server-side JavaScript runtime can provide explicit `deno_core` op wrappers.
+- The documented `clay:workspace` root metadata surface currently does not have a dedicated root-list protocol/server message; add one if UI/help surfaces need live root discovery before general Clay JS runtime wiring.
+- A dedicated `docs/wiki/flows/file-open-save-reload.md` page remains optional until save-as, file watchers, autosave, or richer conflict-resolution flows make the module-level wiki too dense.
 
 Expected outcome:
 
-- Clay can open, edit, and save files through the server.
+- Clay can open, edit, save, and reload files through the server.
+- Workspace roots are validated server-side, open documents are keyed by stable document IDs and canonicalized paths, and duplicate opens share the existing lease/read-only observer behavior.
+- Dirty state reflects accepted edits and successful saves/reloads; file IO failures return clear protocol/app errors without panics or silent data loss.
 - The client remains a canvas/view/input layer.
 - The server is the only component that needs workspace filesystem permissions.
 
-## Phase 10: Server-Driven UI
+## Phase 10: Windows Platform Support — Complete
+
+Port Clay so it compiles and runs on Windows while preserving the existing Unix behavior and server-authoritative architecture.
+
+Focus areas:
+
+- Audit and gate Unix-only code paths.
+- Introduce a platform-neutral IPC endpoint model.
+- Refactor shared client/server protocol handling to generic Tokio async streams.
+- Add Unix and Windows transport implementations using Unix Domain Sockets and Windows named pipes.
+- Make binaries and background server startup platform-aware.
+- Add Windows MSVC setup and validation documentation.
+- Verify cross-platform build and IPC behavior.
+
+Expected outcome:
+
+- `cargo check --all-targets` succeeds on the native development target and the `x86_64-pc-windows-msvc` target when Windows prerequisites are installed.
+- Bare `clay`, `clay server`, and `clay client` use platform-default local endpoints.
+- Unix builds continue to use Unix domain sockets with stale-socket protections.
+- Windows builds use per-user local named pipe endpoints with busy-pipe retry behavior.
+- Shared client/server protocol handling remains transport-agnostic and continues to use the bounded `rkyv` codec.
+
+## Phase 11: Developer-Friendly Launch and GUI Smoke Testing — Complete
+
+Make Clay's developer launch paths usable without manually choosing IPC endpoints, and make GUI connection/synchronization state visible during smoke validation.
+
+Focus areas:
+
+- Define supported launch modes for `cargo run`, `cargo run -- server`, `cargo run -- client`, and `cargo run -- smoke-gui`.
+- Add managed smoke endpoint generation and child server lifecycle cleanup.
+- Improve server readiness, connection diagnostics, and default launch reliability.
+- Route client connection events into the GUI event loop.
+- Add visible connection, access, and synchronization status to the GUI.
+- Make second-client and default-command GUI smoke testing endpoint-free.
+- Update developer documentation for command-first GUI smoke validation.
+
+Expected outcome:
+
+- A developer can validate the current app with simple commands and no manual socket/named-pipe selection.
+- Bare `cargo run` starts or reuses the platform default local server and opens a connected GUI client when possible, with local fallback status when not.
+- `cargo run -- smoke-gui` creates an isolated local endpoint, starts a managed child server, waits for readiness, opens the GUI client, and cleans up when the GUI exits.
+- GUI chrome/status communicates local fallback, connecting, connected editable, connected read-only, disconnected, and latest known document/version state.
+- Windows named pipes and Unix sockets remain local IPC transports; no remote TCP listener, shell-mediated startup, or user-managed endpoint is required for normal smoke testing.
+
+## Phase 12: Server-Driven UI
 
 Evolve Clay beyond a text editor into a programmable native canvas.
 
@@ -280,7 +334,7 @@ Expected outcome:
 - Clay can host multiple native panels/views.
 - UI capabilities are inspectable by users and AI agents through generated documentation.
 
-## Phase 11: Embedded JavaScript Runtime
+## Phase 13: Embedded JavaScript Runtime
 
 Add the `deno_core` extension brain after the client/server/document/manifest architecture is stable.
 
@@ -288,7 +342,7 @@ Focus areas:
 
 - Embed `deno_core` on an isolated server-side runtime thread/task boundary.
 - Evaluate `~/.config/clay/init.js` and allow it to load modular local configuration files.
-- Expose stable Clay JS/TS facade APIs backed by explicit `deno_core` ops: create panel, open document, register command, register behavior manifest entries, mutate SDUI tree, configure documented settings, bind keys, and prepare package runtime/load-time entry point support.
+- Expose stable Clay JS/TS facade APIs backed by explicit `deno_core` ops: create panel; wire the documented Phase 9 file/workspace facades for opening, saving, reloading, listing, and querying documents plus workspace-root metadata; register commands; register behavior manifest entries; mutate SDUI tree; configure documented settings; bind keys; and prepare package runtime/load-time entry point support.
 - Compile JavaScript extension registrations into behavior manifest updates.
 - Add permissions before exposing filesystem, network, shell, AI, or workspace mutation APIs.
 - Report runtime errors in the Clay UI.
@@ -297,10 +351,11 @@ Focus areas:
 Expected outcome:
 
 - Clay can be configured and extended through `~/.config/clay/init.js` and modular configuration files.
+- The documented Phase 9 file/workspace Clay JS APIs move from planned typed facade stubs to runtime-backed, permissioned server-side operations without granting direct client filesystem authority.
 - Extensions can create native UI through SDUI and define hot-path behavior through manifests.
 - Extension/package APIs are constrained, permissioned, documented as Clay JS APIs in Markdown, and available through generated registry lookup for users and AI agents.
 
-## Phase 12: Hot Reload and Behavior Update Semantics
+## Phase 14: Hot Reload and Behavior Update Semantics
 
 Make runtime behavior changes safe and non-janky.
 
@@ -320,7 +375,7 @@ Expected outcome:
 - Clients do not apply half-updated editing rules.
 - Behavior changes are visible, documented, versioned, and reversible or recoverable.
 
-## Phase 13: AI-Safe Mutation and Region Locks
+## Phase 15: AI-Safe Mutation and Region Locks
 
 Support AI-generated edits without corrupting user state.
 
@@ -340,7 +395,7 @@ Expected outcome:
 - User edits and agent edits have explicit conflict boundaries.
 - AI-visible tools and mutation capabilities are documented and inspectable.
 
-## Phase 14: Remote, Container, and Multi-Client Hardening
+## Phase 16: Remote, Container, and Multi-Client Hardening
 
 Make the server/client split useful beyond local IPC.
 
@@ -348,6 +403,7 @@ Focus areas:
 
 - Remote server connection over secure transport.
 - Container/toolbox/distrobox server startup and discovery.
+- Live workspace-root discovery for UI/help surfaces, including a dedicated root-list protocol/server method if this is still needed before or beyond general Clay JS runtime wiring.
 - SSL/TLS or SSH/tunnel strategy.
 - Multiple clients connected to one server.
 - Multiple documents open concurrently.
@@ -359,7 +415,7 @@ Expected outcome:
 - A host client can connect to a server running in a target development environment.
 - Clay can support local, container, and remote editing without changing the client authority model.
 
-## Phase 15: Package System
+## Phase 17: Package System
 
 Make Clay extensible through installable packages that use documented Clay JS APIs.
 
@@ -389,13 +445,14 @@ Expected outcome:
 - Users and AI agents can inspect installed packages, modes, commands, key bindings, configuration options, permissions, and behavior contributions through generated documentation and app lookup.
 - The package repository/distribution model is defined well enough for future package publishing and installation work.
 
-## Phase 16: Product Hardening
+## Phase 18: Product Hardening
 
 Move from architectural prototype toward a daily-usable application.
 
 Focus areas:
 
 - Large-file benchmarks.
+- Dedicated file-open/save/reload workflow documentation if save-as, file watchers, autosave, or conflict-resolution flows outgrow the Phase 9 module-level wiki.
 - Incremental Parley layout improvements.
 - Viewport virtualization refinements.
 - GPU/render profiling.

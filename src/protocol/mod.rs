@@ -1,4 +1,7 @@
 pub mod codec;
+pub mod sdui;
+
+pub use sdui::*;
 
 /// Current wire protocol version for the local Clay IPC boundary.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -10,6 +13,34 @@ pub type BehaviorVersion = u64;
 pub type TransactionId = u64;
 pub type LeaseId = u64;
 pub type RegionLockId = u64;
+pub type WorkspaceRootId = u64;
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DocumentMetadata {
+    pub document_id: DocumentId,
+    pub version: DocumentVersion,
+    pub access: DocumentAccess,
+    pub lease_id: Option<LeaseId>,
+    pub dirty: bool,
+    pub workspace_root_id: WorkspaceRootId,
+    pub path: String,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum FileErrorCode {
+    UnknownWorkspaceRoot,
+    UnknownDocument,
+    NotFound,
+    AccessDenied,
+    OutsideRoot,
+    InvalidUtf8,
+    PermissionDenied,
+    UnsupportedFileType,
+    DirectoryOpen,
+    DirtyDocument,
+    StaleFileMetadata,
+    InternalError,
+}
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum DocumentAccess {
@@ -408,6 +439,29 @@ pub enum ClientMessage {
         client_id: ClientId,
         known_version: DocumentVersion,
     },
+    OpenDocument {
+        client_id: ClientId,
+        workspace_root_id: WorkspaceRootId,
+        path: String,
+    },
+    SaveDocument {
+        client_id: ClientId,
+        document_id: DocumentId,
+        known_version: DocumentVersion,
+    },
+    ReloadDocument {
+        client_id: ClientId,
+        document_id: DocumentId,
+        known_version: DocumentVersion,
+        force: bool,
+    },
+    GetDocumentStatus {
+        client_id: ClientId,
+        document_id: DocumentId,
+    },
+    ListDocuments {
+        client_id: ClientId,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -446,6 +500,31 @@ pub enum ServerMessage {
         text: String,
         access: DocumentAccess,
         lease_id: Option<LeaseId>,
+    },
+    DocumentOpened {
+        metadata: DocumentMetadata,
+        text: String,
+    },
+    DocumentSaved {
+        document_id: DocumentId,
+        version: DocumentVersion,
+        dirty: bool,
+    },
+    DocumentReloaded {
+        metadata: DocumentMetadata,
+        text: String,
+    },
+    DocumentStatus {
+        metadata: DocumentMetadata,
+    },
+    DocumentList {
+        documents: Vec<DocumentMetadata>,
+    },
+    FileOperationFailed {
+        code: FileErrorCode,
+        message: String,
+        workspace_root_id: Option<WorkspaceRootId>,
+        document_id: Option<DocumentId>,
     },
     Error {
         code: ProtocolErrorCode,

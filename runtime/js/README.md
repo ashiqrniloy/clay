@@ -10,6 +10,7 @@ Future import-map/runtime wiring should expose these files with Clay-owned modul
 - `clay:keybindings` -> `runtime/js/keybindings.ts`
 - `clay:configuration` -> `runtime/js/configuration.ts`
 - `clay:documents` -> `runtime/js/documents.ts`
+- `clay:workspace` -> `runtime/js/workspace.ts`
 - `clay:behavior` -> `runtime/js/behavior.ts`
 
 `runtime/js/mod.ts` is an aggregate source-tree entry point for organization and deterministic checks. User code should import domain modules rather than raw Rust functions or raw op names.

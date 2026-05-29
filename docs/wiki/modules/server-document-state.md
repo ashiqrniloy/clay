@@ -16,8 +16,9 @@ The module proves the server-authoritative text model: client edit deltas cross 
 ## Responsibilities
 
 - Own the canonical server text as a `crop::Rope`.
-- Track the document ID, server document version, current editable lease holder, next lease ID, active in-memory region locks, and most recent accepted transaction ID.
+- Track the document ID, server document version, current editable lease holder, next lease ID, active in-memory region locks, most recent accepted transaction ID, and dirty state for file-backed persistence.
 - Produce `ServerMessage::InitialDocument` snapshots for handshake and `ServerMessage::ResyncSnapshot` snapshots for explicit resync requests with client-specific editable/read-only access metadata.
+- Expose internal save/reload hooks: `text`, `version`, `mark_clean_if_version`, and `replace_text_from_storage` let `WorkspaceState` persist or refresh file-backed documents without moving filesystem authority into `DocumentState`.
 - Validate incoming edit operations against document ID, base document version, document access, byte ranges, active region locks, and UTF-8 character boundaries before calling panicking `crop` mutation APIs.
 - Reject stale or future client base versions before mutation and return explicit synchronization outcomes.
 - Grant exactly one editable lease per document. The first connected client gets `DocumentAccess::Editable { lease_id }`; later clients get `DocumentAccess::ReadOnly` until the lease holder disconnects.
@@ -53,7 +54,7 @@ self.text.delete(start..end);
 self.text.replace(start..end, text);
 ```
 
-On success, `version` increments once, `last_transaction_id` records the accepted transaction, and the server returns:
+On success, `version` increments once, `last_transaction_id` records the accepted transaction, `dirty` becomes true for file-backed save/reload tracking, and the server returns:
 
 ```rust
 ServerMessage::EditAck {
@@ -85,6 +86,8 @@ let response = document.apply_edit(
 
 The response is an `EditAck` with confirmed version `2`, and the canonical rope contains `Hello Clay 🌎`.
 
+`WorkspaceState::save_document` reads `DocumentState::text()` and remembers `DocumentState::version()` before writing; it only clears dirty state with `mark_clean_if_version` if the same document version is still current after the file write. `WorkspaceState::reload_document` calls `replace_text_from_storage`, which replaces the rope, advances the version when disk text differs, and marks the document clean.
+
 ## Invariants and Constraints
 
 - The server is authoritative for canonical text and document version increments.
@@ -96,12 +99,12 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - Region locks are in-memory server metadata. They block overlapping user edits after lease validation and before rope mutation.
 - Region lock ranges are non-empty, in-bounds, and UTF-8 boundary aligned.
 - Disconnecting the current lease holder releases the lease. Existing observers stay read-only until they reconnect or later explicit transfer UI exists.
-- Initial/resync snapshots extract full text from the rope; ordinary edit acknowledgements do not send full-document text.
+- Initial/resync snapshots, saves, and reloads extract or replace full text at explicit server-side boundaries; ordinary edit acknowledgements do not send full-document text.
 - The server version is authoritative; clients cannot advance it by sending forged future base versions.
 - Version checks are constant-time metadata comparisons before any text mutation.
 - Document state is protected by a Tokio mutex, so connection tasks do not mutate the canonical rope concurrently.
 - Region-lock owner metadata can name server/client/extension/AI owners for future phases, but this module does not introduce extension execution or AI mutation authority.
-- There is no file-system persistence, extension execution, SDUI command handling, remote listener, shell/network access, or AI mutation authority in this module.
+- File-system persistence is orchestrated by `WorkspaceState`; `DocumentState` only exposes canonical text/version/dirty hooks and does not own paths, workspace roots, extension execution, SDUI command handling, remote listeners, shell/network access, or AI mutation authority.
 
 ## Tests
 

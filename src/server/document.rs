@@ -132,7 +132,7 @@ impl DocumentState {
             };
         }
 
-        let access = self.access_for_client(Some(client_id));
+        let access = self.access_for_client(client_id);
         let (document_id, version, text, lease_id) = self.snapshot_parts(&access);
         ServerMessage::ResyncSnapshot {
             document_id,
@@ -220,13 +220,6 @@ impl DocumentState {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "dirty-state access is consumed by Phase 9 workspace save/reload integration"
-        )
-    )]
     pub(crate) fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -239,6 +232,31 @@ impl DocumentState {
         )
     )]
     pub(crate) fn mark_clean(&mut self) {
+        self.dirty = false;
+    }
+
+    pub(crate) fn version(&self) -> DocumentVersion {
+        self.version
+    }
+
+    pub(crate) fn text(&self) -> String {
+        self.text.to_string()
+    }
+
+    pub(crate) fn mark_clean_if_version(&mut self, version: DocumentVersion) -> bool {
+        if self.version == version {
+            self.dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn replace_text_from_storage(&mut self, text: String) {
+        if self.text.to_string() != text {
+            self.text = Rope::from(text);
+            self.version = self.version.saturating_add(1);
+        }
         self.dirty = false;
     }
 
@@ -301,8 +319,8 @@ impl DocumentState {
             .map(RegionLock::conflict)
     }
 
-    fn access_for_client(&self, client_id: Option<ClientId>) -> DocumentAccess {
-        match (self.active_lease, client_id) {
+    pub(crate) fn access_for_client(&self, client_id: ClientId) -> DocumentAccess {
+        match (self.active_lease, Some(client_id)) {
             (Some(lease), Some(client_id)) if lease.client_id == client_id => {
                 DocumentAccess::Editable {
                     lease_id: lease.lease_id,

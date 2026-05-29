@@ -14,7 +14,11 @@ Phase 9 introduces a server-owned workspace/open-document model alongside the ex
 - `WorkspaceState` owns workspace roots, canonical path-to-document mapping, document ID allocation, path validation, file type checks, and per-document `Arc<Mutex<DocumentState>>` handles.
 - `DocumentState` still owns canonical rope text, versions, edit validation, leases, region locks, and now the dirty flag for accepted edits.
 - `ServerConfig::workspace_roots` records server startup workspace roots; `IpcServer::try_new` validates them into `WorkspaceState` before protocol dispatch integration.
-- `WorkspaceState::open_existing_file` performs server-side UTF-8 file loading through Tokio async file IO and registers loaded files in the open-document registry. Save/reload protocol dispatch and writes remain later Phase 9 work.
+- `WorkspaceState::open_existing_file` performs server-side UTF-8 file loading through Tokio async file IO and registers loaded files in the open-document registry.
+- `WorkspaceState::save_document` writes the current canonical document text to the authorized file path, checks stale on-disk metadata before overwriting, and marks the document clean only after a successful save.
+- `WorkspaceState::reload_document` refreshes clean documents from disk, rejects dirty reloads unless forced, updates canonical text/version state, and keeps reload authorization server-side.
+- `WorkspaceState::document_metadata`, `list_documents`, `document_handle`, and `release_client_access` provide the minimal connection-dispatch surface for protocol open/save/reload/status/list messages without exposing canonical host paths to clients.
+- `WorkspaceError::diagnostic` centralizes typed file/workspace diagnostics for protocol failures, server startup validation, logs, and future UI surfaces. Diagnostics distinguish missing roots, inaccessible container mounts, permission denied, outside-root paths, directories, special files, UTF-8 failures, dirty reload conflicts, and stale-save conflicts.
 
 ## How It Works
 
@@ -22,11 +26,15 @@ Phase 9 introduces a server-owned workspace/open-document model alongside the ex
 2. `open_existing_file` and `register_loaded_file` canonicalize a requested relative or absolute path after joining relative paths to the authorized root. Canonicalization resolves `..` segments and symlinks before authorization.
 3. The canonical file must still start with the canonical root. Escaping traversal and symlinks return `WorkspaceError::OutsideRoot` before a document entry exists.
 4. The canonical path must be a regular file. Directories return `WorkspaceError::DirectoryOpen`; sockets and other non-ordinary file types return `WorkspaceError::UnsupportedFileType`.
-5. Valid paths build `FileDocumentState` metadata with the root ID, canonical path, and workspace-relative display path.
+5. Valid paths build `FileDocumentState` metadata with the root ID, canonical path, workspace-relative display path, and last-known file metadata for stale-save checks.
 6. If the canonical path is already open, the registry returns the existing document ID and document handle without re-reading disk. The existing `DocumentState::acquire_access` lease rules decide whether the caller receives editable or read-only access.
 7. If the path is not open, `open_existing_file` reads the file with `tokio::fs::read`, rejects invalid UTF-8 as `WorkspaceError::InvalidUtf8`, and only then registers a clean version-1 `DocumentState`.
 8. `register_loaded_file` keeps the test/protocol-ready path for callers that have already obtained trusted UTF-8 text after the same canonical path validation.
-9. Accepted edits in `DocumentState::apply_edit` increment the document version and mark the document dirty. Later save/reload tasks will clear dirty state only after successful persistence or clean reload transitions.
+9. Accepted edits in `DocumentState::apply_edit` increment the document version and mark the document dirty.
+10. `save_document` reauthorizes the canonical file path, compares current file metadata with the last-known metadata, rejects stale external changes with `WorkspaceError::StaleFileMetadata`, writes `DocumentState::text()` through `tokio::fs::write`, updates last-known metadata, and clears dirty state only if no newer in-memory edit changed the document version during the save.
+11. `reload_document` rejects dirty documents with `WorkspaceError::DirtyDocument` unless `force` is true. It reauthorizes the file path, reads UTF-8 text from disk, replaces the canonical rope through `DocumentState::replace_text_from_storage`, increments the document version when disk text differs, marks the document clean, and updates last-known metadata.
+12. Connection dispatch maps workspace operations to protocol messages: open/reload return full snapshots, save/status/list return metadata only, and `WorkspaceError::diagnostic` maps failures to stable `FileErrorCode` values plus user-facing messages and container/toolbox/distrobox hints.
+13. Startup root validation in `IpcServer::try_new` uses the same diagnostics, so a missing or inaccessible configured root reports that the path is not visible to the Clay server process and suggests mounting or choosing a root inside the server environment.
 
 ## Code Examples
 
@@ -36,6 +44,9 @@ let root_id = workspace.add_root("/workspace/project")?;
 let opened = workspace
     .open_existing_file(root_id, "src/main.rs", client_id)
     .await?;
+workspace.save_document(opened.document_id).await?;
+let status = workspace.document_metadata(opened.document_id, client_id).await?;
+let reloaded = workspace.reload_document(opened.document_id, false).await?;
 ```
 
 ## Invariants and Constraints
@@ -47,6 +58,12 @@ let opened = workspace
 - Symlinks are authorized by their canonical target, not their link location, so an in-root symlink to an outside file is denied and an in-root symlink to an in-root file maps to the target's canonical relative path.
 - Directory, special-file, read, and UTF-8 validation failures happen only at open/register boundaries, never during ordinary edit application or client painting/input.
 - Invalid UTF-8 files do not create or poison registry entries; a later valid open can still use the same canonical path.
+- Save and reload reauthorize the stored canonical path before file IO so deleted/replaced/symlinked paths cannot bypass workspace-root authorization.
+- Dirty reloads are rejected unless explicitly forced, preventing silent loss of accepted in-memory edits.
+- Stale on-disk metadata is a save conflict, not an implicit overwrite; the in-memory document stays dirty so the caller can decide whether to reload, force a later operation, or surface a conflict.
+- Workspace protocol errors are typed for programmatic handling and sanitize outside-root failures to avoid disclosing unauthorized host paths.
+- Absolute paths from failed unauthorized requests are rendered as `<requested path>` in diagnostics unless they are server-authorized workspace roots. This keeps host path discovery out of client-visible messages while preserving actionable relative workspace paths.
+- Container/toolbox/distrobox diagnostics are passive mappings of known IO failures. They do not run shell probes, scan mounts, access the network, or expand workspace authority.
 
 ## Tests
 
@@ -58,7 +75,18 @@ let opened = workspace
 - `src/server/workspace.rs`: `workspace_rejects_directory_and_special_file_open` verifies directories and Unix socket files are rejected as document opens.
 - `src/server/workspace.rs`: `workspace_canonicalizes_symlink_before_authorization` verifies escaping symlinks are denied and in-root symlinks canonicalize consistently.
 - `src/server/workspace.rs`: `file_backed_document_dirty_state_tracks_accepted_edits_and_clean_marking` verifies loaded files start clean, accepted edits mark dirty, and clean marking is explicit.
+- `src/server/workspace.rs`: `accepted_edit_marks_file_document_dirty_and_save_marks_clean` verifies accepted edits dirty file-backed documents and successful saves clear dirty state.
+- `src/server/workspace.rs`: `save_writes_canonical_rope_text_to_disk` verifies saves persist the server canonical rope text, including UTF-8 text.
+- `src/server/workspace.rs`: `reload_dirty_document_requires_force_or_rejects` verifies dirty reloads are rejected unless forced and forced reloads replace canonical text.
+- `src/server/workspace.rs`: `reload_clean_document_refreshes_disk_text_and_marks_clean` verifies clean reloads refresh from disk and stay clean.
+- `src/server/workspace.rs`: `save_missing_file_returns_typed_error_and_keeps_dirty` verifies missing files produce typed errors without clearing dirty state.
+- `src/server/workspace.rs`: `save_stale_metadata_returns_typed_error_and_keeps_dirty` verifies external on-disk changes are stale-save conflicts and preserve unsaved edits.
+- `src/server/workspace.rs`: `workspace_diagnostic_for_missing_root_is_actionable` verifies missing root diagnostics include a stable code and container/toolbox/distrobox hint.
+- `src/server/workspace.rs`: `workspace_diagnostic_sanitizes_unauthorized_paths` verifies outside-root diagnostics avoid leaking the unauthorized path.
+- `src/server/workspace.rs`: `workspace_permission_denied_keeps_document_dirty` verifies permission-denied saves report a stable diagnostic and preserve dirty in-memory state.
 - `src/server/mod.rs`: `server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies startup root configuration is validated and invalid roots produce a typed server error.
+- `src/server/connection.rs`: `connection_open_document_sends_snapshot_and_manifest_without_full_document_on_edit_ack` verifies open dispatch returns the initial file snapshot and manifest while later edit acknowledgements remain metadata-only.
+- `src/server/connection.rs`: `file_io_errors_are_typed_protocol_failures` verifies workspace IO failures map to stable protocol error codes.
 - Relevant commands: `cargo test workspace:: --lib`, `cargo test server:: --lib`, `cargo test`.
 
 ## Related
