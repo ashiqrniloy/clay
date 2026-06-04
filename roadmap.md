@@ -2,15 +2,29 @@
 
 ## Current Status
 
-Clay has completed the native editor foundation and the initial server-authoritative architecture through Phase 8, plus the later cross-platform launch work recorded as Phases 10 and 11. Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and `crop` ropes back both local editor state and server-owned canonical document state. The editor supports local interaction including cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, and resize handling.
+Clay has completed the native editor foundation and the initial server-authoritative architecture through Phase 13, plus the cross-platform launch work recorded as Phases 10 and 11. Masonry owns the native window/widget boundary, Vello renders the scene, Parley lays out text, and `crop` ropes back both local editor state and server-owned canonical document state. The editor supports local interaction including cursor movement, click-to-place caret, drag selection, selected-range editing, Unicode-safe scalar movement, viewport-bounded extraction, layout caching, scrolling, resize handling, optimistic local editing, server acknowledgements, visible connection/access/version status, and managed GUI smoke launch paths.
 
-The client/server foundation is now in place across Unix and Windows: the native client exchanges length-prefixed `rkyv` protocol messages with a Tokio server over Unix Domain Sockets on Unix and local named pipes on Windows. The server owns canonical document versions, edit validation, editable leases, read-only observer state, stale-edit rejection, resync snapshots, and region-lock structures; the client keeps hot-path editing responsive with optimistic local edits and asynchronous acknowledgements. Server-issued inert behavior manifests provide client-executed hot-path behavior without arbitrary JavaScript execution in the Rust client.
+The client/server foundation is in place across Unix and Windows: the native client exchanges length-prefixed `rkyv` protocol messages with a Tokio server over Unix Domain Sockets on Unix and local named pipes on Windows. The server owns canonical document versions, edit validation, editable leases, read-only observer state, stale-edit rejection, resync snapshots, region-lock structures, workspace/file authority, dirty-state tracking, and save/reload behavior; the client keeps hot-path editing responsive with optimistic local edits and asynchronous acknowledgements. Server-issued inert behavior manifests provide client-executed hot-path behavior without arbitrary JavaScript execution in the Rust client.
 
-Clay also has the Phase 8 self-documenting configuration foundation and Phase 9 file/workspace API documentation: a planned Clay JS facade tree, a current functionality inventory, Markdown-authored Clay JS API references, generated registry artifacts, read-only registry lookup APIs, and documented configuration contracts for `~/.config/clay/init.js`, key binding APIs, editor customization metadata, and file/workspace document lifecycle APIs. These APIs are currently documentation/facade contracts only; runtime JavaScript execution, `deno_core` op wiring, and actual configuration loading remain deferred to Phase 13.
+Clay now has the self-documenting configuration and Clay JS API foundation: a facade tree, API inventory, Markdown-authored Clay JS API references, generated registry artifacts, read-only registry lookup APIs, and validation coverage for documentation, inventory, registry freshness, and Rust visibility mapping. Public programmatic behavior is expected to flow through Clay JS APIs rather than raw Rust functions or raw `Deno.core.ops`.
 
-Phase 9 is complete for the server-side file/workspace foundation: the server owns workspace roots, path validation, file-backed open-document loading, duplicate-open registry behavior, dirty-state tracking, save/reload transitions, file/workspace IPC commands and typed errors, container/toolbox/distrobox diagnostics, and required Clay JS API/configuration/wiki verification. The remaining Phase 9 compromises are explicitly carried forward: documented file/workspace Clay JS APIs stay as planned typed facade stubs until Phase 13 `deno_core` runtime/op-wrapper work, workspace-root metadata has a documented `clay:workspace` facade but no dedicated root-list protocol message yet, and a dedicated file-open/save/reload flow wiki page is deferred until later workflow complexity warrants it. The approved document/behavior authority decision is recorded in `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
+Phase 9 is complete for the server-side file/workspace foundation. Phase 13 moved the previously planned file/workspace, configuration, key binding, behavior, and SDUI facade stubs into a constrained server-side `deno_core` runtime where in scope. The server can evaluate `~/.config/clay/init.js` or controlled test fixtures, import curated `clay:*` facade modules, publish JavaScript-generated SDUI through server validation, compile key binding registrations into inert behavior manifests, expose selected file/workspace ops, and report sanitized runtime diagnostics through server/client UI state. JavaScript execution remains server-side and off the ordinary typing/rendering hot path.
 
-Phases 10 and 11 were implemented before Phase 9 was finished because cross-platform local IPC and developer-friendly launch/smoke workflows became immediate validation needs. Clay now builds and runs against the Windows MSVC target, supports Unix sockets and Windows named pipes behind a shared endpoint/transport abstraction, and offers command-first launch paths such as `cargo run`, `cargo run -- server`, `cargo run -- client`, and `cargo run -- smoke-gui` with visible GUI connection/access/synchronization status.
+Phases 10 and 11 were implemented before Phase 9 was finished because cross-platform local IPC and developer-friendly launch/smoke workflows became immediate validation needs. Clay now builds and runs against the Windows MSVC target, supports Unix sockets and Windows named pipes behind a shared endpoint/transport abstraction, and offers command-first launch paths such as `cargo run`, `cargo run -- server`, `cargo run -- client`, `cargo run -- smoke-gui`, and `cargo run -- smoke-gui --config-fixture runtime-sdui` with visible GUI connection/access/synchronization/runtime diagnostic status.
+
+## Carried-Forward Follow-Up Consolidation
+
+The following items consolidate the compromises and further actions from completed plan documents so future roadmap phases cover them explicitly instead of leaving them scattered across `plans/`:
+
+- **Manual GUI validation:** Several completed phases relied on automated tests or bounded launch observations because the agent shell was non-interactive. Future hardening phases must include repeatable interactive smoke coverage for launch, typing, selection, multi-client read-only observer behavior, runtime SDUI, Windows GUI behavior, and Unix GUI behavior.
+- **Performance and scaling:** Early full-buffer prototype compromises were mostly replaced by viewport-bounded extraction and layout caching, but rigorous large-file benchmarks, layout/render profiling, pixel-accurate scrolling refinements, and memory/latency budgets remain future product-hardening work. Phase 14 established baseline Criterion benchmarks, typed budget constants in `src/perf/budgets.rs`, deterministic hard guards for payload ceilings and queue/viewport invariants, and advisory latency/memory targets. Advisory Criterion thresholds are not yet enforced as hard CI failures because a stable CI runner does not yet exist; promotion to hard thresholds is deferred to Phase 21. If the developer-only profiling activation (`CLAY_PERF_PROFILE=1`, `--profile-perf`) is ever promoted to a stable user-facing diagnostic surface, a `clay:diagnostics` Clay JS API must be introduced with Markdown docs, inventory entry, and registry coverage before the hooks are exposed publicly; this is deferred to Phase 21 or a dedicated hardening phase.
+- **Synchronization recovery:** Phase 5 uses snapshot-based resync that can discard unacknowledged optimistic edits. Richer correction transactions, pending-edit replay, user-visible pending/error reporting, and recovery UX remain future synchronization/product-hardening work.
+- **Leases, locks, and collaboration:** Collaboration is currently a single-writer lease model with read-only observers. Lease transfer/steal/renewal UX, first-class region-lock ownership APIs, persistence, UI, AI/extension lock workflows, and multi-document/multi-client scaling remain future work.
+- **Behavior manifests and modes:** Phase 6 installed one default manifest and whole-manifest replacement. Per-document/per-mode/package-selected manifests, richer language-specific rules such as Markdown list continuation, manifest diffs, hot reload, conflict policy, stale-version recovery, and command side-effect routing remain central to the upcoming mode/package phases.
+- **Server-driven UI:** Phase 12 intentionally started with static Rust-generated SDUI, Phase 13 added JavaScript-generated SDUI, and Phase 15 added deterministic structural SDUI regression/observability coverage. Pixel-buffer/GPU snapshots remain deferred until Masonry/winit offers deterministic CI-friendly offscreen rendering. Public `clay:sdui.queryUiState` observability and user-facing SDUI layout/panel visibility configuration APIs remain deferred until package-owned UI, agent introspection, or workspace panel settings create real requirements.
+- **Runtime and package iteration:** Phase 13 proves server-side JavaScript configuration and SDUI publication, and Phase 17 establishes package loading, mode ownership, deterministic conflict handling, a pnpm-delegated package-manager boundary, server-side package runtime facades, decoration transport, and parse-coordinator handoff foundations. Long-run follow-up remains for provider-facing decoration/parse Clay JS APIs, persistent shared package enable/disable state, live reload semantics, and a Markdown mode proof of concept. Phase 17 deliberately promoted `clay.packages.serverLoadPackage` while keeping decoration/parse provider APIs planned/unavailable until their public op/facade contracts are finalized.
+- **Docs and CI:** API docs/registry/wiki coverage exists, but future phases should add CI for formatting, native all-target tests, Windows MSVC checks, generated registry freshness, package docs, wiki navigation, and user-facing feature coverage. A Markdown/wiki lint command should automate index-link and source-reference checks once documentation volume grows.
+- **Daily editing basics:** Clipboard, undo/redo, IME/composition, themes, accessibility polish, cross-platform UI polish, and richer file workflows such as save-as/watchers/autosave/conflict resolution remain product-hardening work.
 
 ## Architectural Decisions Now Locked
 
@@ -315,18 +329,24 @@ Expected outcome:
 - GUI chrome/status communicates local fallback, connecting, connected editable, connected read-only, disconnected, and latest known document/version state.
 - Windows named pipes and Unix sockets remain local IPC transports; no remote TCP listener, shell-mediated startup, or user-managed endpoint is required for normal smoke testing.
 
-## Phase 12: Server-Driven UI
+## Phase 12: Server-Driven UI - Complete
 
 Evolve Clay beyond a text editor into a programmable native canvas.
 
-Focus areas:
+Completed focus areas:
 
-- Define an initial SDUI schema for panels, labels, buttons, lists, editor views, and layout containers.
+- Defined an initial SDUI schema for panels, labels, buttons, lists, editor views, and layout containers.
 - Let the server send declarative UI tree updates.
-- Map SDUI payloads to native Masonry widgets.
-- Start with static Rust-generated SDUI before introducing JavaScript-generated SDUI.
-- Decide where `rkyv` becomes necessary based on measured payload costs.
-- Integrate SDUI schema helpers into Clay JS API documentation and generated registry lookup where they are exposed programmatically.
+- Mapped SDUI payloads to native Masonry state/widgets.
+- Started with static Rust-generated SDUI before JavaScript-generated SDUI.
+- Measured representative `rkyv` payload costs and established initial snapshot/update budgets.
+- Integrated SDUI schema helpers into Clay JS API documentation and generated registry lookup where exposed programmatically.
+
+Carried-forward items:
+
+- Automated visual/layout regression coverage was picked up by Phase 15 as deterministic structural SDUI observability; pixel-buffer/GPU snapshots remain deferred until deterministic offscreen rendering is available.
+- SDUI update compression or specialized payload shaping should be revisited only if representative snapshots exceed 4 KiB, simple panel updates exceed 1 KiB, or updates stop being materially smaller than equivalent snapshots.
+- Documented SDUI layout/panel visibility configuration APIs should be introduced only when real user-facing layout or panel settings exist, with the go/no-go decision now assigned to Phase 16/17 package UI work.
 
 Expected outcome:
 
@@ -334,68 +354,235 @@ Expected outcome:
 - Clay can host multiple native panels/views.
 - UI capabilities are inspectable by users and AI agents through generated documentation.
 
-## Phase 13: Embedded JavaScript Runtime
+## Phase 13: Embedded JavaScript Runtime - Complete
 
-Add the `deno_core` extension brain after the client/server/document/manifest architecture is stable.
+Add the `deno_core` extension brain after the client/server/document/manifest/SDUI architecture is stable.
 
-Focus areas:
+Completed focus areas:
 
-- Embed `deno_core` on an isolated server-side runtime thread/task boundary.
-- Evaluate `~/.config/clay/init.js` and allow it to load modular local configuration files.
-- Expose stable Clay JS/TS facade APIs backed by explicit `deno_core` ops: create panel; wire the documented Phase 9 file/workspace facades for opening, saving, reloading, listing, and querying documents plus workspace-root metadata; register commands; register behavior manifest entries; mutate SDUI tree; configure documented settings; bind keys; and prepare package runtime/load-time entry point support.
-- Compile JavaScript extension registrations into behavior manifest updates.
-- Add permissions before exposing filesystem, network, shell, AI, or workspace mutation APIs.
-- Report runtime errors in the Clay UI.
-- Keep JavaScript out of the ordinary typing critical path.
+- Embedded `deno_core` on an isolated server-side runtime boundary.
+- Evaluated `~/.config/clay/init.js` and allowed constrained local modular configuration loading.
+- Exposed stable Clay JS/TS facade APIs backed by explicit `deno_core` ops for configuration, SDUI publication, selected file/workspace operations, key bindings, behavior queries/registration, and runtime diagnostics.
+- Runtime-backed the Phase 12 `clay:sdui` helpers so a real configuration fixture can construct a panel/editor UI, publish it through server validation, and deliver it to the client as a typed `SduiSnapshot`.
+- Compiled JavaScript key binding/configuration registrations into behavior manifest updates; client keypress routing remains manifest-based and never calls JavaScript synchronously.
+- Reported runtime errors, validation failures, and permission denials in server diagnostics and the Clay UI where practical.
+- Kept JavaScript out of the ordinary typing critical path.
+
+Carried-forward items:
+
+- Runtime SDUI visual smoke remains a documented manual observation step; automated coverage validates launch wiring, event routing, protocol publication, and fixture evaluation.
+- Package identity, package install/enable/disable, mode ownership, primitive registries, live reload semantics, and richer package-controlled rendering remain future work.
 
 Expected outcome:
 
 - Clay can be configured and extended through `~/.config/clay/init.js` and modular configuration files.
 - The documented Phase 9 file/workspace Clay JS APIs move from planned typed facade stubs to runtime-backed, permissioned server-side operations without granting direct client filesystem authority.
+- A test configuration can import `clay:sdui`, construct validated native UI, publish it through the server, and prove the client receives the resulting SDUI without executing JavaScript in the Rust client.
 - Extensions can create native UI through SDUI and define hot-path behavior through manifests.
 - Extension/package APIs are constrained, permissioned, documented as Clay JS APIs in Markdown, and available through generated registry lookup for users and AI agents.
 
-## Phase 14: Hot Reload and Behavior Update Semantics
+## Phase 14: Performance Profiling and Benchmark Foundation
 
-Make runtime behavior changes safe and non-janky.
+Install the measurement foundation before implementing package-controlled modes so performance is a design constraint from the start, not a retrospective hardening task.
 
 Focus areas:
 
-- Watch or trigger extension reloads.
+- Add large-file benchmarks for the current plain-text editor/server-client path before package-controlled rendering exists.
+- Add repeatable large-file open/generate workflows for manual and automated validation.
+- Measure keypress-to-local-paint latency, edit acknowledgement latency, scroll latency, layout time, render time, memory, client edit queue behavior, and IPC payload sizes.
+- Add profiling hooks or trace points around editor input handling, visible extraction, Parley layout/cache invalidation, Vello/GPU rendering, SDUI application, client send queues, server edit acknowledgement, and runtime/configuration evaluation.
+- Improve incremental Parley layout, viewport virtualization, pixel-accurate scrolling, and layout cache invalidation where baseline benchmarks already show regressions.
+- Define performance budgets that future package/mode primitives must satisfy: no synchronous JavaScript in keypress/paint paths, bounded declarations, incremental updates, viewport-bounded rendering, and no full-document IPC for ordinary edits.
+- Add CI-friendly performance guards where deterministic enough, and documented local benchmark commands where machine variance makes CI thresholds unreliable.
+- Establish typed budget constants that future package, primitive, and mode implementation phases can evaluate against.
+- Define the pathway for promoting developer-only profiling hooks to a stable `clay:diagnostics` Clay JS API if user-facing observability is needed in a future phase.
+
+Expected outcome:
+
+- Clay has baseline performance profiles before package and mode work begins.
+- Future primitive, package, and Markdown-mode implementation can be evaluated against concrete latency, memory, payload, and rendering budgets.
+- Performance regressions become measurable and actionable while package APIs are still being designed.
+
+Carried-forward items:
+
+- Advisory Criterion latency/memory thresholds (`KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`, `EDIT_ACK_P95_BUDGET_MS`, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS`, `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS`, `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB`) are documented and constant/doc-aligned but are not hard CI failures. Promoting them requires a stable CI runner; deferred to Phase 21.
+- `cargo bench --no-run` is validated locally but not yet wired into an automated CI pipeline; deferred to Phase 21.
+- Developer-only profiling hooks (`CLAY_PERF_PROFILE=1`, `--profile-perf`) must remain internal until a future hardening phase explicitly introduces a `clay:diagnostics` Clay JS API with Markdown docs, inventory entry, and registry coverage.
+
+## Phase 15: SDUI, Visual Regression, and UI Observability Foundation
+
+Add visual/layout regression and UI observability before packages start contributing mode-specific panels and rendering declarations.
+
+Focus areas:
+
+- Add automated visual/layout regression coverage for the current native SDUI editor/sidebar composition.
+- Add headless or window-driver smoke coverage when Masonry/winit support makes status/layout observation practical.
+- Improve accessibility labels/roles for editor, SDUI panels, diagnostics, and status text so tests and assistive tools can inspect UI state.
+- Add structured UI observability for SDUI snapshots/updates, status text, panel identity, editor-view identity, and runtime diagnostics.
+- Revisit SDUI update compression or specialized payload shaping if payload thresholds are exceeded by current or near-term test trees. Use the Phase 14 budget constants `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` (4 096 B) and `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` (1 024 B) in `src/perf/budgets.rs` as the explicit thresholds; if representative SDUI trees routinely exceed these, introduce compression or diff shaping before Phase 17 package-owned UI multiplies the payload surface.
+- Keep documented SDUI layout/panel visibility configuration APIs deferred until real user-facing package or workspace panel settings exist.
+
+Expected outcome:
+
+- Server-driven UI has automated regression coverage before package-owned UI increases complexity.
+- The Markdown/package proof of concept can validate UI behavior with observable status/layout signals instead of relying only on manual inspection.
+
+Carried-forward items:
+
+- **Pixel-buffer / GPU snapshot testing:** Structural `SduiObservableSnapshot` assertions are used instead of pixel-buffer snapshots because Masonry 0.4.0 has no headless render surface. If a future Masonry/winit version adds a headless render target, promote the structural regression tests to pixel-accurate snapshot tests and add a `cargo test` fixture for each shipped SDUI composition. Until then, the structural approach is the approved regression strategy.
+- **`clay:sdui.queryUiState` Clay JS API:** `SduiObservableSnapshot` and `SduiStatusObservation` are `pub(crate)` test infrastructure in Phase 15 and are not exposed as Clay JS APIs. If a future agent-introspection, package-tooling, or help-system phase needs programmatic SDUI state querying, introduce a dedicated `clay:sdui.queryUiState` API with full Markdown docs, a stable registry ID, key binding metadata, custom properties, `docs/index.md` link, and generated registry coverage before exposing the type publicly.
+- **SDUI layout/panel visibility configuration APIs:** These remain deferred until a real user-facing package or workspace panel settings surface exists. When a package or workspace panel setting is introduced, add a Clay JS configuration API with Markdown docs, `user_facing_name`, key bindings, custom properties, `docs/index.md` link, and generated registry entry in the same change.
+
+## Phase 16: Mode and Package Primitive Architecture Analysis
+
+Define the architecture needed to implement editor modes as JavaScript packages without hard-coding mode-specific behavior or rendering logic into the Rust app. This phase uses the Phase 14/15 performance and visual observability foundation to design primitives with measurable budgets from the start.
+
+Focus areas:
+
+- Analyze the primitive categories packages need to control editor behavior and rendering: document classification, major/minor mode activation, key routing, text transforms, incremental parsing, decoration ranges, semantic spans, folding, diagnostics, completion triggers, commands, SDUI panels, status items, and package-owned configuration.
+- Explicitly decide whether package tooling, agent introspection, help surfaces, or command-palette workflows need a public `clay:sdui.queryUiState` API; if they do, define the Clay JS API shape, authority boundary, privacy constraints, Markdown documentation, registry metadata, and tests before any Phase 15 `pub(crate)` observability type becomes public.
+- Explicitly decide which package-owned or workspace-owned panel settings justify SDUI layout/panel visibility configuration APIs, and record their Clay JS configuration API requirements instead of adding ad hoc settings.
+- Define the first version of an exhaustive-but-iterative **Clay primitive registry**: every primitive should have an owner, authority boundary, hot-path policy, Clay JS API shape, documentation metadata, test expectations, performance budget, and whether it is client-first manifest data, server-first command, SDUI state, or renderer/decorator data.
+- Define how rendering customization works without arbitrary client-side JavaScript: packages produce inert declarations such as syntax/decorator spans, layout hints, block/inline render intents, or SDUI nodes; the Rust client renders validated declarations locally.
+- Decide the Markdown mode POC requirements: Markdown syntax highlighting/rendering target, list continuation, heading emphasis, code block behavior, preview/decorated editor behavior, command/key binding set, and minimum file-extension/mode detection rules.
+- Identify which primitives already exist through behavior manifests, SDUI, configuration, file/workspace APIs, and Phase 14/15 observability, and which primitives must be added before the Markdown POC.
+- Define package-controlled rendering and parsing update strategies: bounded decoration payloads, incremental parse/update units, cancellable background parsing, viewport-prioritized results, and fallback behavior when package work lags behind local edits.
+- Define security and provenance requirements for package-provided primitives: package prefix, permissions, no raw ops, no client JS, no shell/network/filesystem authority unless explicitly documented and validated.
+
+Expected outcome:
+
+- Clay has a concrete package/mode primitive architecture that makes Markdown mode implementable as a package instead of hard-coded Rust logic.
+- The roadmap has a prioritized primitive backlog for mode behavior and rendering customization, including explicit go/no-go outcomes for public SDUI state querying and SDUI panel/layout configuration APIs.
+- Future packages can extend Clay by registering documented primitives while preserving client hot-path performance, visual observability, and server authority.
+- Phase 17 must not start from analysis-only primitive definitions: the Phase-17-required primitive rows in `docs/reference/primitives/backlog.md` must be implemented, documented, and test-covered by the new Phase 16.5 gate below.
+
+Carried-forward items:
+
+- Phase 16 produced architecture analysis, reference documents, planned API inventory stubs, advisory budget constants, and wiki coverage only. Later implementation phases must convert those stubs into real Clay JS facades, `deno_core` op wrappers, server validators, protocol/manifest extensions, generated registry entries, Markdown docs, and tests before relying on the primitives at runtime.
+- Runtime package loading, package install/enable state, parse coordination, decoration transport, client decoration rendering hooks, and Markdown package behavior are intentionally deferred from Phase 16 and are assigned to Phase 16.5, Phase 17, and Phase 18 below.
+- Phase 16 wiki pages intentionally link to canonical `docs/reference/primitives/` documents instead of duplicating every table. Later phases that change primitive implementation details must keep the canonical reference docs and wiki navigation aligned.
+- Advisory primitive budgets (`DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `MODE_ACTIVATION_P95_BUDGET_MS`, and related package/mode payload limits) must become enforceable guard tests only after Phase 17/18 introduce representative protocol messages, fixtures, and benchmarks; the hardening target is Phase 21 unless an earlier implementation phase has enough stable data.
+
+## Phase 16.5: Primitive Implementation Gate for Package and Mode Loading
+
+Implement the package/mode primitives identified by Phase 16 before the package system phase begins. This is a mandatory gate between primitive architecture analysis and package loading work.
+
+Focus areas:
+
+- Implement the Phase-17-required primitive rows from `docs/reference/primitives/backlog.md`: `DocumentClassification`, `MajorModeActivation`, `CommandDeclaration`, `PackagePermissionDeclaration`, package-owned `KeyRoutingOverride`, package-owned `TextTransform`, package-owned `SduiPanelStatusContribution`, and `PackageOwnedConfiguration`.
+- Promote the Phase 16 planned API inventory stubs for Phase-17-required primitives into real Clay JS facades, `deno_core` op wrappers, server validators, protocol or manifest extensions, permissions, Markdown documentation, generated registry coverage, and tests so those primitives are implementation surfaces rather than analysis-only entries.
+- Implement static file-extension/MIME mode classification, one-active-major-mode state, atomic per-document behavior manifest selection, package-prefixed command registration, permission validation, deterministic conflict diagnostics, and package provenance metadata.
+- Extend existing behavior manifest and SDUI paths only with inert, server-validated package contribution data; do not add client-side JavaScript or synchronous JavaScript work to keypress, paint, layout, scroll, or text-event handlers.
+- Keep `DecorationRange` and `IncrementalParseUpdate` out of this gate unless they are needed for package loading itself; they are mandatory Phase 17 exit criteria before Phase 18 starts.
+
+Expected outcome:
+
+- Phase 17 can focus on package install/enable/load workflows because the primitives needed to express package modes, commands, behavior manifests, permissions, configuration, and SDUI contributions already exist.
+- `cargo test` fails if Phase-17-required primitives lack Clay JS API inventory entries, documentation/index/registry coverage, permission checks, package provenance, or deterministic conflict handling.
+- The Phase 17 plan starts with implemented primitives instead of re-discovering or designing primitive shapes.
+
+## Phase 17: Package System and Mode Loading Foundation
+
+Make Clay load installable or local JavaScript packages that contribute documented modes, commands, configuration, SDUI, and behavior manifests through the primitive registry.
+
+A package is a small JavaScript program, with TypeScript support possible later, that interacts with Clay only through Clay JS APIs. Package runtime behavior executes on the server-side JavaScript runtime; hot-path client behavior is delivered through validated behavior manifests and renderer/decorator declarations.
+
+Focus areas:
+
+- Define the package manifest format, package identity/prefix, package entry points, package metadata, permissions, documented Clay JS API dependencies, primitive contributions, and generated documentation/lookup requirements.
+- Use the approved npm-compatible package distribution direction: Clay delegates fetching, dependency resolution, lockfiles, integrity, caching, and registry access to an existing package manager; Clay owns validation, permissions, metadata, primitive registration, and execution boundaries. The Phase 17 implementation delegates actual fetch/remove operations to pnpm through a typed process boundary rather than embedding an npm client, so future package-store work must preserve install/enable/runtime separation while handling package-manager environment diagnostics.
+- Separate install, enable/load, runtime execution, and load-time behavior contribution. Installing downloads and records a package; enabling validates Clay metadata, permissions, docs, compatibility, modes, conflicts, and primitive declarations before server-side execution.
+- Support package-provided major modes and minor modes. A document has at most one active major mode; minor modes declare compatible major modes and cannot silently override major-mode behavior.
+- Add per-document/per-mode behavior manifest selection and package provenance metadata.
+- Add deterministic conflict handling for key bindings, commands, modes, configuration APIs, SDUI regions, decorations/render primitives, and behavior manifest entries.
+- When package-owned SDUI regions make panel visibility/layout user-facing, add documented Clay JS configuration APIs with `user_facing_name`, key binding metadata, custom properties, `docs/index.md` links, generated registry entries, and coverage tests; if Phase 17 still has no real user-facing setting, record that deferral explicitly.
+- If package management, package tooling, app/help, or agent workflows need to inspect live SDUI state, introduce a dedicated `clay:sdui.queryUiState` Clay JS API rather than widening Phase 15 internal snapshot structs directly; otherwise keep `SduiObservableSnapshot` and `SduiStatusObservation` internal and covered by inventory tests.
+- Integrate package APIs, modes, commands, key bindings, configuration options, permissions, primitive contributions, and docs into the Clay JS API Markdown docs, generated registry, and app/help/agent lookup.
+- Add tests that fail when packages omit required manifest fields, permission declarations, mode declarations, runtime/load-time separation, docs, registry entries, primitive metadata, performance metadata, or conflict metadata.
+- Persist and share package enable/disable state beyond the current in-memory service so the CLI, future in-app UI, and server runtime can observe the same package store state across processes.
+- Before Phase 17 is considered complete, implement the Phase-18-required primitive rows from `docs/reference/primitives/backlog.md`: `DecorationRange` and `IncrementalParseUpdate` as mandatory Markdown foundations, plus `FoldingRange` only if the Markdown POC scope promotes folding from optional/stretch to required.
+- Add the bounded decoration protocol/client render hook and server-side background parse coordinator needed by Markdown mode before Phase 18 starts. These must preserve `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, viewport-prioritized delivery, stale-version rejection, cancellation, package provenance, and no package JavaScript in client paint/text-event handlers.
+
+Expected outcome:
+
+- Clay can load validated packages as documented JavaScript extensions that interact only through Clay JS APIs.
+- Package-provided modes can be selected per document without hard-coded app logic.
+- Users and AI agents can inspect installed packages, modes, commands, key bindings, configuration options, permissions, performance expectations, primitive contributions, and any approved SDUI panel/query surfaces through generated documentation and app lookup.
+- Phase 18 must not start until package loading plus the required Markdown rendering/parsing primitives are implemented, documented, registered, and test-covered.
+
+## Phase 18: Markdown Mode Package Proof of Concept
+
+Use a real Markdown mode package as the first end-to-end proof that package-controlled editing and rendering can customize Clay without compromising performance.
+
+Entry gate:
+
+- Do not start Phase 18 until Phase 16.5 has implemented all Phase-17-required primitives and Phase 17 has implemented package loading plus the required Markdown POC primitives from `docs/reference/primitives/backlog.md`: mode classification/activation, command registration, permission/provenance validation, package-owned behavior/SDUI/configuration contributions, `DecorationRange`, and `IncrementalParseUpdate`.
+- Treat Phase 17's Rust decoration transport and parse coordinator as handoff foundations, not final provider-facing public APIs. Promote `clay.decorations.serverPublishDecorations` and `clay.parse.serverRegisterParseHandler` only after their public op/facade contracts are finalized, then update `docs/reference/clay-js-api/api-inventory.toml`, generated registry artifacts, Markdown docs, docs index links, and wiki pages in the same change.
+- If any prerequisite primitive is still analysis-only, Phase 18 must first move that primitive back into Phase 17 completion work or create a separate implementation gate; Markdown mode must not hard-code missing primitive behavior in Rust to bypass the package architecture.
+
+Focus areas:
+
+- Create a first-party Markdown package that declares a package prefix, major mode, supported file patterns, commands, key bindings, configuration APIs, permissions, documentation, primitive contributions, and performance expectations.
+- Implement Markdown editing behavior through manifests and primitives rather than hard-coded editor logic: heading/list continuation, code block indentation behavior, pair handling where relevant, and Markdown-specific command routing.
+- Implement Markdown rendering customization through package-produced inert declarations: syntax/decorator spans, heading/code/list styling, and a minimal preview/decorated editor behavior that the Rust client renders without executing package JavaScript in paint/text handlers.
+- Drive the primitive registry iteratively: every missing primitive required by Markdown mode must be added as a documented Clay JS API or explicitly deferred with rationale.
+- Add a fixture/workspace workflow that opens Markdown content and activates the Markdown major mode through package metadata or explicit command.
+- Use Phase 14/15 instrumentation to measure large Markdown documents under package mode: startup parse cost, incremental edit cost, decoration payload size, scroll/render latency, memory use, server/client queue behavior, and visual/layout stability. Criterion baselines should be saved with `cargo bench --benches -- --save-baseline phase14-baseline` before Markdown mode work begins and compared with `--baseline-lenient phase14-baseline` after to detect regressions against the Phase 14 baseline. Measure all paths against the typed budget constants in `src/perf/budgets.rs`.
+- Add Markdown-mode SDUI/decorated-editor structural regression fixtures using the Phase 15 observability path, and promote them to GPU-backed pixel snapshots in this phase if the current Masonry/winit stack supports deterministic CI-friendly offscreen captures.
+- Add automated and manual smoke coverage for Markdown mode package activation, rendering, editing, server acknowledgements, reload/restart behavior, docs/registry lookup, and fallback when the package is disabled or invalid.
+
+Expected outcome:
+
+- Clay proves that a non-trivial editor mode can be implemented as a JavaScript package rather than hard-coded Rust.
+- Markdown behavior and rendering are customized through documented primitives while ordinary typing and rendering remain responsive against measured budgets.
+- The primitive registry gains real coverage from a mode POC and becomes the basis for additional modes.
+- Markdown-mode UI coverage either includes deterministic pixel snapshots or records that the Phase 15 structural snapshot approach remains the supported regression strategy until the rendering stack can provide CI-friendly offscreen captures.
+
+## Phase 19: Hot Reload and Behavior Update Semantics
+
+Make runtime package and mode behavior changes safe and non-janky after the first package/mode path exists.
+
+Focus areas:
+
+- Watch or trigger package/configuration reloads.
 - Re-evaluate JavaScript on the server.
-- Produce a new behavior manifest version.
-- Send manifest diffs or snapshots to affected clients.
-- Atomically install behavior versions on clients.
-- Define grace, rejection, or lock semantics for edits made under stale behavior versions.
-- Add behavior/range/document/workspace locks for AI or extension-driven behavior changes.
+- Produce new behavior manifest versions and renderer/decorator primitive versions.
+- Send manifest/decorator/SDUI diffs or snapshots to affected clients.
+- Atomically install behavior and rendering versions on clients.
+- Define grace, rejection, correction, or resync semantics for edits made under stale behavior/rendering versions.
+- Add behavior/range/document/workspace locks for package reloads, AI, or extension-driven behavior changes.
+- Preserve user-visible diagnostics and rollback/fallback behavior when a package reload fails.
+- Reuse Phase 14/15 instrumentation to verify reloads do not block ordinary typing/rendering and do not produce visual half-states.
 
 Expected outcome:
 
-- Users and AI agents can modify behavior at runtime.
-- Clients do not apply half-updated editing rules.
-- Behavior changes are visible, documented, versioned, and reversible or recoverable.
+- Users and AI agents can modify configuration/package behavior at runtime.
+- Clients do not apply half-updated editing or rendering rules.
+- Behavior and rendering changes are visible, documented, versioned, measurable, and reversible or recoverable.
 
-## Phase 15: AI-Safe Mutation and Region Locks
+## Phase 20: Daily Editing Product Hardening
 
-Support AI-generated edits without corrupting user state.
+Add the core editor capabilities needed for daily use after the package/mode path proves customizable editing and rendering.
 
 Focus areas:
 
-- Make region locks first-class.
-- Require AI edit sessions to carry explicit document versions, behavior versions, ranges, and permission scopes.
-- Add preview/apply/reject flows.
-- Add conflict explanations.
-- Consider transaction logs.
-- Separate extension/agent permissions from direct user input.
-- Lock only the needed scope: range, document, behavior, or workspace.
+- Clipboard support.
+- Undo/redo.
+- IME/composition support.
+- Theme system.
+- Accessibility improvements.
+- Cross-platform UI polish.
+- Revisit Phase 15's deferred pixel-buffer/GPU snapshot coverage during UI hardening; if Masonry/winit now supports deterministic offscreen rendering, add pixel-accurate snapshots for shipped editor, SDUI, and mode/package compositions while keeping structural observability tests as fast headless coverage.
+- Multi-document behavior, including per-document mode selection, per-document status, dirty state, leases, and package manifest versions.
+- Dedicated file-open/save/reload workflow documentation if save-as, file watchers, autosave, or conflict-resolution flows outgrow the Phase 9 module-level wiki.
+- User-visible pending-edit/error reporting, reconnect/resync prompts, and richer recovery UX.
 
 Expected outcome:
 
-- AI agents can propose or apply changes safely.
-- User edits and agent edits have explicit conflict boundaries.
-- AI-visible tools and mutation capabilities are documented and inspectable.
+- Clay becomes usable for real editing sessions, not only architecture validation.
+- Daily-use features integrate with package modes and server authority instead of bypassing them.
 
-## Phase 16: Remote, Container, and Multi-Client Hardening
+## Phase 21: Remote, Container, and Multi-Client Hardening
 
 Make the server/client split useful beyond local IPC.
 
@@ -406,67 +593,51 @@ Focus areas:
 - Live workspace-root discovery for UI/help surfaces, including a dedicated root-list protocol/server method if this is still needed before or beyond general Clay JS runtime wiring.
 - SSL/TLS or SSH/tunnel strategy.
 - Multiple clients connected to one server.
-- Multiple documents open concurrently.
+- Multiple documents open concurrently at scale.
 - Read-only observer behavior for duplicate opens.
 - Server concurrency and per-document actor scaling.
+- CI coverage for `cargo fmt --check`, native `cargo test --all-targets`, Windows MSVC checks, generated registry freshness, package docs, and wiki navigation.
+- Add `cargo bench --no-run` to CI to verify all Criterion benchmark targets compile on every push without running machine-variant timing loops.
+- Promote Phase 14 advisory latency budget constants (`KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`, `EDIT_ACK_P95_BUDGET_MS`, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS`, `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS`) and Phase 16 primitive/package budget constants (`DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `MODE_ACTIVATION_P95_BUDGET_MS`, completion/folding payload budgets, and package/mode validation payload ceilings) to hard CI thresholds only after verifying stability across at least one consistent CI runner and representative Phase 17/18 fixtures; document the promoted values and remove the advisory-only qualifier from `docs/development/performance.md` and primitive reference docs.
+- If developer-only profiling hooks have been promoted to a stable user-facing feature by this phase, verify the `clay:diagnostics` Clay JS API exists with Markdown docs, inventory entry, generated registry entry, and lookup coverage; otherwise confirm the `no_public_configuration_needed_for_internal_perf_hooks` guard test remains active.
 
 Expected outcome:
 
 - A host client can connect to a server running in a target development environment.
 - Clay can support local, container, and remote editing without changing the client authority model.
 
-## Phase 17: Package System
+## Phase 22: AI-Safe Mutation and Region Locks
 
-Make Clay extensible through installable packages that use documented Clay JS APIs.
-
-A package is a small pure JavaScript program, with TypeScript support possible later, that interacts with Clay through Clay JS APIs. Installed packages should become available to the user immediately after being added to the Clay app, subject to permission checks and behavior manifest updates.
+Support AI-generated edits without corrupting user state.
 
 Focus areas:
 
-- Define the package manifest format, package entry points, package metadata, permissions, documented Clay JS API dependencies, and generated documentation/lookup requirements.
-- Run package JavaScript with server-side `deno_core` at runtime; do not execute arbitrary package JavaScript in the Rust client.
-- Separate package code into runtime entry points and load-time behavior entry points. Runtime code handles package behavior through Clay JS APIs; load-time code contributes behavior manifest changes during package loading, not installation.
-- Require each package to explicitly declare which code runs at runtime and which code runs during loading to update client/server behavior manifests.
-- Support package-provided behavior through major modes and minor modes, similar to Emacs.
-- Require packages that define minor modes to declare the major mode they apply to; a minor mode is active only when its declared major mode is operational.
-- Allow a package-provided major mode to take over behavior on top of the default mode.
-- Enforce that two major modes cannot be active simultaneously for the same document/context.
-- Define deterministic conflict handling so one package cannot silently override another package's behavior manifest entries, key bindings, commands, or configuration APIs.
-- Integrate package APIs, modes, commands, key bindings, configuration options, permissions, and behavior manifest contributions into the Clay JS API Markdown docs, generated registry, and app/help/agent lookup.
-- Define how packages are installed, loaded, enabled, disabled, upgraded, and removed without corrupting user configuration or active documents.
-- Consider and define the package repository and distribution system during implementation, including package identity, versioning, trust, signatures or integrity checks, publishing workflow, dependency resolution, offline/local packages, and registry metadata.
-- Add tests that fail when packages omit required manifest fields, permission declarations, mode declarations, runtime/load-time separation, docs, registry entries, or conflict metadata.
+- Make region locks first-class.
+- Require AI edit sessions to carry explicit document versions, behavior versions, mode/package primitive versions, ranges, and permission scopes.
+- Add preview/apply/reject flows.
+- Add conflict explanations.
+- Consider transaction logs and richer correction transactions.
+- Separate extension/agent permissions from direct user input.
+- Lock only the needed scope: range, document, behavior, mode, rendering primitive, or workspace.
 
 Expected outcome:
 
-- Clay can load packages as documented JavaScript extensions that interact only through Clay JS APIs.
-- Package runtime behavior executes on the server-side JavaScript runtime, while hot-path client behavior is delivered through validated behavior manifests.
-- Major/minor mode rules prevent packages from silently overriding incompatible behavior.
-- Users and AI agents can inspect installed packages, modes, commands, key bindings, configuration options, permissions, and behavior contributions through generated documentation and app lookup.
-- The package repository/distribution model is defined well enough for future package publishing and installation work.
+- AI agents can propose or apply changes safely.
+- User edits and agent edits have explicit conflict boundaries.
+- AI-visible tools and mutation capabilities are documented and inspectable.
 
-## Phase 18: Product Hardening
+## Phase 23: Ecosystem and Repository Hardening
 
-Move from architectural prototype toward a daily-usable application.
+Prepare Clay packages and primitive APIs for a broader ecosystem after first-party package/mode proof points exist.
 
 Focus areas:
 
-- Large-file benchmarks.
-- Dedicated file-open/save/reload workflow documentation if save-as, file watchers, autosave, or conflict-resolution flows outgrow the Phase 9 module-level wiki.
-- Incremental Parley layout improvements.
-- Viewport virtualization refinements.
-- GPU/render profiling.
-- Multi-document behavior.
-- Accessibility improvements.
-- IME/composition support.
-- Clipboard support.
-- Undo/redo.
-- Theme system.
-- Cross-platform polish.
-- Documentation coverage gates for Clay JS APIs, packages, generated registries, code wiki navigation, and user-facing features.
+- Package repository policy, package publishing workflow, trust, signatures or integrity checks beyond delegated package-manager integrity, offline/local packages, registry metadata, upgrades, removal, compatibility policy, package-manager environment diagnostics, and persistent shared package enable/disable state across CLI, in-app UI, and server runtime processes.
+- Documentation coverage gates for Clay JS APIs, packages, generated registries, code wiki navigation, package-provided user-facing features, primitive contributions, and mode behavior.
+- User/developer package UI for install, enable, disable, upgrade, remove, inspect permissions, inspect primitive contributions, and diagnose conflicts.
+- Additional first-party package/mode examples beyond Markdown, using the primitive registry to expose missing capabilities iteratively.
 
 Expected outcome:
 
-- Clay becomes a robust native programmable editor environment rather than only a proof of architecture.
-- Performance remains bounded by available machine resources rather than avoidable architecture bottlenecks.
-- Clay remains inspectable by users and AI agents as it grows.
+- Clay has a sustainable package ecosystem path after proving package-controlled editing/rendering locally.
+- The primitive registry grows through real modes while remaining inspectable and performance-safe.

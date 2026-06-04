@@ -17,7 +17,7 @@ Phase 9 introduces a server-owned workspace/open-document model alongside the ex
 - `WorkspaceState::open_existing_file` performs server-side UTF-8 file loading through Tokio async file IO and registers loaded files in the open-document registry.
 - `WorkspaceState::save_document` writes the current canonical document text to the authorized file path, checks stale on-disk metadata before overwriting, and marks the document clean only after a successful save.
 - `WorkspaceState::reload_document` refreshes clean documents from disk, rejects dirty reloads unless forced, updates canonical text/version state, and keeps reload authorization server-side.
-- `WorkspaceState::document_metadata`, `list_documents`, `document_handle`, and `release_client_access` provide the minimal connection-dispatch surface for protocol open/save/reload/status/list messages without exposing canonical host paths to clients.
+- `WorkspaceState::document_metadata`, `list_documents`, `list_root_metadata`, `document_handle`, and `release_client_access` provide the minimal connection-dispatch and runtime-op surface for protocol open/save/reload/status/list messages and Clay JS document/workspace facade calls without exposing canonical host paths to clients.
 - `WorkspaceError::diagnostic` centralizes typed file/workspace diagnostics for protocol failures, server startup validation, logs, and future UI surfaces. Diagnostics distinguish missing roots, inaccessible container mounts, permission denied, outside-root paths, directories, special files, UTF-8 failures, dirty reload conflicts, and stale-save conflicts.
 
 ## How It Works
@@ -34,7 +34,8 @@ Phase 9 introduces a server-owned workspace/open-document model alongside the ex
 10. `save_document` reauthorizes the canonical file path, compares current file metadata with the last-known metadata, rejects stale external changes with `WorkspaceError::StaleFileMetadata`, writes `DocumentState::text()` through `tokio::fs::write`, updates last-known metadata, and clears dirty state only if no newer in-memory edit changed the document version during the save.
 11. `reload_document` rejects dirty documents with `WorkspaceError::DirtyDocument` unless `force` is true. It reauthorizes the file path, reads UTF-8 text from disk, replaces the canonical rope through `DocumentState::replace_text_from_storage`, increments the document version when disk text differs, marks the document clean, and updates last-known metadata.
 12. Connection dispatch maps workspace operations to protocol messages: open/reload return full snapshots, save/status/list return metadata only, and `WorkspaceError::diagnostic` maps failures to stable `FileErrorCode` values plus user-facing messages and container/toolbox/distrobox hints.
-13. Startup root validation in `IpcServer::try_new` uses the same diagnostics, so a missing or inaccessible configured root reports that the path is not visible to the Clay server process and suggests mounting or choosing a root inside the server environment.
+13. Phase 13 runtime ops in `src/server/ops/documents.rs` and `src/server/ops/workspace.rs` reuse the same `WorkspaceState` helpers for `clay:documents` and `clay:workspace` configuration calls. They serialize facade results as JSON, expose IDs as strings for the Clay JS API, and convert workspace diagnostics into JavaScript errors without exposing raw op names as the public API.
+14. Startup root validation in `IpcServer::try_new` uses the same diagnostics, so a missing or inaccessible configured root reports that the path is not visible to the Clay server process and suggests mounting or choosing a root inside the server environment.
 
 ## Code Examples
 
@@ -61,7 +62,7 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - Save and reload reauthorize the stored canonical path before file IO so deleted/replaced/symlinked paths cannot bypass workspace-root authorization.
 - Dirty reloads are rejected unless explicitly forced, preventing silent loss of accepted in-memory edits.
 - Stale on-disk metadata is a save conflict, not an implicit overwrite; the in-memory document stays dirty so the caller can decide whether to reload, force a later operation, or surface a conflict.
-- Workspace protocol errors are typed for programmatic handling and sanitize outside-root failures to avoid disclosing unauthorized host paths.
+- Workspace protocol and runtime-op errors are typed for programmatic handling and sanitize outside-root failures to avoid disclosing unauthorized host paths.
 - Absolute paths from failed unauthorized requests are rendered as `<requested path>` in diagnostics unless they are server-authorized workspace roots. This keeps host path discovery out of client-visible messages while preserving actionable relative workspace paths.
 - Container/toolbox/distrobox diagnostics are passive mappings of known IO failures. They do not run shell probes, scan mounts, access the network, or expand workspace authority.
 
@@ -87,6 +88,7 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - `src/server/mod.rs`: `server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies startup root configuration is validated and invalid roots produce a typed server error.
 - `src/server/connection.rs`: `connection_open_document_sends_snapshot_and_manifest_without_full_document_on_edit_ack` verifies open dispatch returns the initial file snapshot and manifest while later edit acknowledgements remain metadata-only.
 - `src/server/connection.rs`: `file_io_errors_are_typed_protocol_failures` verifies workspace IO failures map to stable protocol error codes.
+- `src/server/js_runtime.rs`: `document_facade_open_status_list_round_trip`, `workspace_roots_facade_reports_authorized_roots`, and `document_facade_rejects_unauthorized_paths` verify the runtime-backed `clay:documents`/`clay:workspace` subset reuses server workspace validation.
 - Relevant commands: `cargo test workspace:: --lib`, `cargo test server:: --lib`, `cargo test`.
 
 ## Related

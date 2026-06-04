@@ -193,12 +193,12 @@ registry_public = true
 id = "clay.keybindings.bindKey"
 category = "key-binding-management"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:keybindings"
 js_export = "bindKey"
 user_facing_name = "Bind Key"
 authority = "configuration-api"
-runtime_path = "server-side-configuration-to-behavior-manifest"
+runtime_path = "server-side-configuration-to-behavior-manifest-runtime"
 hot_path_policy = "Binding keys updates future inert behavior manifests; the Rust client executes the resulting manifest without arbitrary JavaScript."
 facade_path = "runtime/js/keybindings.ts::bindKey"
 backing_rust = "src/protocol/mod.rs::KeyBindingRule"
@@ -216,12 +216,12 @@ registry_public = true
 id = "clay.keybindings.unbindKey"
 category = "key-binding-management"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:keybindings"
 js_export = "unbindKey"
 user_facing_name = "Unbind Key"
 authority = "configuration-api"
-runtime_path = "server-side-configuration-to-behavior-manifest"
+runtime_path = "server-side-configuration-to-behavior-manifest-runtime"
 hot_path_policy = "Unbinding affects future manifest routing only and must not execute JavaScript in keypress handlers."
 facade_path = "runtime/js/keybindings.ts::unbindKey"
 backing_rust = "src/protocol/mod.rs::KeyBindingRule"
@@ -239,17 +239,17 @@ registry_public = true
 id = "clay.keybindings.listKeyBindings"
 category = "key-binding-management"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:keybindings"
 js_export = "listKeyBindings"
 user_facing_name = "List Key Bindings"
 authority = "configuration-query-api"
-runtime_path = "server-side-query"
+runtime_path = "server-side-query-runtime"
 hot_path_policy = "Listing key bindings is a background/help/configuration query and is not part of ordinary keypress handling."
 facade_path = "runtime/js/keybindings.ts::listKeyBindings"
 backing_rust = "src/protocol/mod.rs::BehaviorManifest::minimal_text_editing"
-deno_op = "op_clay_keybindings_list_keybindings"
-deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_list_keybindings"
+deno_op = "op_clay_keybindings_list_key_bindings"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_list_key_bindings"
 documentation_path = "docs/reference/clay-js-api/keybindings/list-key-bindings.md"
 key_bindings = []
 custom_properties = ["scope:enum=all"]
@@ -262,13 +262,13 @@ registry_public = true
 id = "clay.configuration.loadConfigurationModule"
 category = "configuration-entrypoint"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:configuration"
 js_export = "loadConfigurationModule"
 user_facing_name = "Load Configuration Module"
 authority = "configuration-api"
-runtime_path = "server-side-configuration-loader-planned"
-hot_path_policy = "Configuration module loading is server-side planned runtime work and must not run in ordinary keypress, rendering, Masonry paint/layout, or IPC frame hot paths."
+runtime_path = "server-side-configuration-loader-runtime"
+hot_path_policy = "Configuration module loading is server-side runtime work and must not run in ordinary keypress, rendering, Masonry paint/layout, or IPC frame hot paths."
 facade_path = "runtime/js/configuration.ts::loadConfigurationModule"
 backing_rust = "src/server/configuration.rs::ConfigurationRuntime::load_module"
 deno_op = "op_clay_configuration_load_module"
@@ -277,7 +277,7 @@ documentation_path = "docs/reference/clay-js-api/configuration/load-configuratio
 key_bindings = []
 custom_properties = ["path:string"]
 permissions = []
-security_notes = "Local modular configuration contract only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+security_notes = "Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "runtime/js/configuration.ts::loadConfigurationModule"
 registry_public = true
 
@@ -285,12 +285,12 @@ registry_public = true
 id = "clay.configuration.getConfigurationState"
 category = "configuration-entrypoint"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:configuration"
 js_export = "getConfigurationState"
 user_facing_name = "Get Configuration State"
 authority = "configuration-query-api"
-runtime_path = "server-side-configuration-query-planned"
+runtime_path = "server-side-configuration-query-runtime"
 hot_path_policy = "Configuration state lookup is a background/help/configuration metadata query and is not part of ordinary input, rendering, or IPC hot paths."
 facade_path = "runtime/js/configuration.ts::getConfigurationState"
 backing_rust = "src/server/configuration.rs::ConfigurationState"
@@ -300,7 +300,7 @@ documentation_path = "docs/reference/clay-js-api/configuration/get-configuration
 key_bindings = []
 custom_properties = ["entryPoint:string=~/.config/clay/init.js", "loadedModules:string[]=[]"]
 permissions = []
-security_notes = "Returns configuration metadata only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+security_notes = "Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "runtime/js/configuration.ts::getConfigurationState"
 registry_public = true
 
@@ -308,12 +308,12 @@ registry_public = true
 id = "clay.behavior.getActiveBehaviorManifest"
 category = "behavior-manifest-routing"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:behavior"
 js_export = "getActiveBehaviorManifest"
 user_facing_name = "Get Active Behavior Manifest"
 authority = "server-owned-behavior-query"
-runtime_path = "background-query"
+runtime_path = "server-side-behavior-query-runtime"
 hot_path_policy = "Queries manifest metadata for help/agents/configuration; hot-path routing uses the already-installed inert manifest locally."
 facade_path = "runtime/js/behavior.ts::getActiveBehaviorManifest"
 backing_rust = "src/client/behavior.rs::ClientBehaviorState::active_manifest"
@@ -331,12 +331,12 @@ registry_public = true
 id = "clay.behavior.listBehaviorRoutes"
 category = "behavior-manifest-routing"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:behavior"
 js_export = "listBehaviorRoutes"
 user_facing_name = "List Behavior Routes"
 authority = "server-owned-behavior-query"
-runtime_path = "background-query"
+runtime_path = "server-side-behavior-query-runtime"
 hot_path_policy = "Route inspection is a background query; actual route decisions for keypresses remain local manifest evaluation."
 facade_path = "runtime/js/behavior.ts::listBehaviorRoutes"
 backing_rust = "src/client/behavior.rs::ClientBehaviorState::route_key"
@@ -423,12 +423,12 @@ registry_public = true
 id = "clay.documents.serverOpenDocument"
 category = "file-workspace-document-lifecycle"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:documents"
 js_export = "serverOpenDocument"
 user_facing_name = "Open Document"
 authority = "server-authoritative-file-open"
-runtime_path = "server-first-file-io"
+runtime_path = "server-first-file-io-runtime"
 hot_path_policy = "Opening a file is an explicit server command that may read a full UTF-8 snapshot once; ordinary keypress-to-paint editing remains asynchronous and does not call JavaScript, workspace validation, or file IO."
 facade_path = "runtime/js/documents.ts::serverOpenDocument"
 backing_rust = "src/server/workspace.rs::WorkspaceState::open_existing_file"
@@ -446,12 +446,12 @@ registry_public = true
 id = "clay.documents.serverSaveDocument"
 category = "file-workspace-document-lifecycle"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:documents"
 js_export = "serverSaveDocument"
 user_facing_name = "Save Document"
 authority = "server-authoritative-file-save"
-runtime_path = "server-first-file-io"
+runtime_path = "server-first-file-io-runtime"
 hot_path_policy = "Saving is an explicit server file IO command and is never part of ordinary keypress-to-paint latency."
 facade_path = "runtime/js/documents.ts::serverSaveDocument"
 backing_rust = "src/server/workspace.rs::WorkspaceState::save_document"
@@ -469,12 +469,12 @@ registry_public = true
 id = "clay.documents.serverReloadDocument"
 category = "file-workspace-document-lifecycle"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:documents"
 js_export = "serverReloadDocument"
 user_facing_name = "Reload Document"
 authority = "server-authoritative-file-reload"
-runtime_path = "server-first-file-io"
+runtime_path = "server-first-file-io-runtime"
 hot_path_policy = "Reloading is an explicit server file IO command and is not on ordinary edit acknowledgement, rendering, or input hot paths."
 facade_path = "runtime/js/documents.ts::serverReloadDocument"
 backing_rust = "src/server/workspace.rs::WorkspaceState::reload_document"
@@ -492,12 +492,12 @@ registry_public = true
 id = "clay.documents.serverGetDocumentStatus"
 category = "file-workspace-document-metadata"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:documents"
 js_export = "serverGetDocumentStatus"
 user_facing_name = "Get Document Status"
 authority = "server-authoritative-document-query"
-runtime_path = "server-first-query"
+runtime_path = "server-first-query-runtime"
 hot_path_policy = "Status queries are background/help/programmatic metadata queries and are not needed for ordinary local paint or edit hot paths."
 facade_path = "runtime/js/documents.ts::serverGetDocumentStatus"
 backing_rust = "src/server/workspace.rs::WorkspaceState::document_metadata"
@@ -515,12 +515,12 @@ registry_public = true
 id = "clay.documents.serverListDocuments"
 category = "file-workspace-document-metadata"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:documents"
 js_export = "serverListDocuments"
 user_facing_name = "List Open Documents"
 authority = "server-authoritative-document-query"
-runtime_path = "server-first-query"
+runtime_path = "server-first-query-runtime"
 hot_path_policy = "Listing documents is an explicit metadata query and does not serialize full document text or participate in ordinary typing/rendering latency."
 facade_path = "runtime/js/documents.ts::serverListDocuments"
 backing_rust = "src/server/workspace.rs::WorkspaceState::list_documents"
@@ -538,12 +538,12 @@ registry_public = true
 id = "clay.workspace.serverListWorkspaceRoots"
 category = "file-workspace-root-metadata"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:workspace"
 js_export = "serverListWorkspaceRoots"
 user_facing_name = "List Workspace Roots"
 authority = "server-authoritative-workspace-query"
-runtime_path = "server-first-query"
+runtime_path = "server-first-query-runtime"
 hot_path_policy = "Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, Masonry paint/layout, or ordinary edit acknowledgement hot paths."
 facade_path = "runtime/js/workspace.ts::serverListWorkspaceRoots"
 backing_rust = "src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root"
@@ -555,6 +555,190 @@ custom_properties = []
 permissions = ["workspace-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.definePanel"
+category = "sdui-panel"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "definePanel"
+user_facing_name = "Define Panel"
+authority = "server-owned-sdui-schema-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines inert SDUI panel metadata outside editor input, Masonry paint/layout, and IPC frame hot paths."
+facade_path = "runtime/js/sdui.ts::definePanel"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::Panel"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-panel.md"
+key_bindings = []
+custom_properties = ["title:string=required,children:SduiNodeDefinition[]=[],id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiNodeKind; src/server/sdui.rs::default_document_tree"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.defineLabel"
+category = "sdui-label"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "defineLabel"
+user_facing_name = "Define Label"
+authority = "server-owned-sdui-schema-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines inert SDUI label metadata outside editor input, Masonry paint/layout, and IPC frame hot paths."
+facade_path = "runtime/js/sdui.ts::defineLabel"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::Label"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-label.md"
+key_bindings = []
+custom_properties = ["text:string=required,id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiNodeKind; src/server/sdui.rs::default_document_tree"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.defineButton"
+category = "sdui-button-action-intent"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "defineButton"
+user_facing_name = "Define Button"
+authority = "server-owned-sdui-action-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines inert SDUI button/action metadata outside editor input, Masonry paint/layout, and IPC frame hot paths."
+facade_path = "runtime/js/sdui.ts::defineButton"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::Button"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-button.md"
+key_bindings = []
+custom_properties = ["label:string=required,action:SduiActionIntent=required,id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiActionIntent; src/server/sdui.rs::StaticSduiState::validate_action"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.defineList"
+category = "sdui-list"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "defineList"
+user_facing_name = "Define List"
+authority = "server-owned-sdui-schema-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines inert SDUI list metadata outside editor input, Masonry paint/layout, and IPC frame hot paths."
+facade_path = "runtime/js/sdui.ts::defineList"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::List"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-list.md"
+key_bindings = []
+custom_properties = ["items:SduiListItemDefinition[]=[],id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiListItem; src/server/sdui.rs::default_document_tree"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.defineEditorView"
+category = "sdui-editor-view"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "defineEditorView"
+user_facing_name = "Define Editor View"
+authority = "server-owned-sdui-editor-binding-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines document-bound editor view metadata outside editor input, Masonry paint/layout, and IPC frame hot paths; it never serializes full document text."
+facade_path = "runtime/js/sdui.ts::defineEditorView"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::EditorView"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-editor-view.md"
+key_bindings = []
+custom_properties = ["documentId:string|number=current,expectedVersion:number|null=null,id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiEditorBinding; src/server/sdui.rs::validate_editor_binding"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.defineFlex"
+category = "sdui-layout"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "defineFlex"
+user_facing_name = "Define Flex Layout"
+authority = "server-owned-sdui-layout-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines inert SDUI flex layout metadata outside editor input, Masonry paint/layout, and IPC frame hot paths."
+facade_path = "runtime/js/sdui.ts::defineFlex"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::Flex"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-flex.md"
+key_bindings = []
+custom_properties = ["direction:enum=row,children:SduiNodeDefinition[]=[],id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiFlexDirection; src/masonry_sdui.rs::SduiNativeState"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.defineStack"
+category = "sdui-layout"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "defineStack"
+user_facing_name = "Define Stack Layout"
+authority = "server-owned-sdui-layout-helper"
+runtime_path = "runtime-backed-schema-helper"
+hot_path_policy = "Defines inert SDUI stack layout metadata outside editor input, Masonry paint/layout, and IPC frame hot paths."
+facade_path = "runtime/js/sdui.ts::defineStack"
+backing_rust = "src/protocol/sdui.rs::SduiNodeKind::Stack"
+deno_op = "op_clay_sdui_define_node"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_define_node"
+documentation_path = "docs/reference/clay-js-api/sdui/define-stack.md"
+key_bindings = []
+custom_properties = ["children:SduiNodeDefinition[]=[],id:string|number=optional"]
+permissions = []
+security_notes = "Creates inert declarative UI metadata only and requires server validation before publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/protocol/sdui.rs::SduiNodeKind; src/masonry_sdui.rs::SduiNativeState"
+registry_public = true
+
+[[api]]
+id = "clay.sdui.publishTree"
+category = "sdui-publication"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:sdui"
+js_export = "publishTree"
+user_facing_name = "Publish SDUI Tree"
+authority = "server-owned-sdui-publication"
+runtime_path = "runtime-backed-publication-op"
+hot_path_policy = "Publishes validated inert SDUI during startup/configuration or explicit update work; ordinary editor input and Masonry paint/layout never call JavaScript."
+facade_path = "runtime/js/sdui.ts::publishTree"
+backing_rust = "src/server/sdui.rs::validate_runtime_tree"
+deno_op = "op_clay_sdui_publish_tree"
+deno_op_path = "src/server/ops/sdui.rs::op_clay_sdui_publish_tree"
+documentation_path = "docs/reference/clay-js-api/sdui/publish-tree.md"
+key_bindings = []
+custom_properties = ["tree:SduiNodeDefinition=required"]
+permissions = []
+security_notes = "Publishes inert declarative UI metadata only after server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/sdui.rs::runtime_tree_from_json; src/server/sdui.rs::validate_runtime_tree"
 registry_public = true
 
 [[api]]
@@ -647,4 +831,381 @@ custom_properties = []
 permissions = []
 security_notes = "Internal local IPC runtime only; it uses Unix sockets or local Windows named pipes and grants no Clay JS authority, remote listener authority, filesystem authority, network authority, or shell authority."
 current_rust_owner = "src/ipc.rs::IpcEndpoint; src/ipc.rs::default_endpoint; src/ipc.rs::default_socket_path; src/ipc.rs::default_named_pipe_name; src/server/mod.rs::ServerConfig; src/server/mod.rs::IpcServer; src/server/mod.rs::ServerError"
+registry_public = false
+
+# Phase 16.5 primitive gate API surfaces. Package, mode, and command
+# validation/registration APIs are runtime-backed through stable Clay JS facades
+# and explicit deno_core op wrappers. Package loading and Phase 18 rendering,
+# parse, and folding provider APIs remain planned/unavailable stubs.
+
+[[api]]
+id = "clay.packages.serverValidatePackageManifest"
+category = "package-manifest-validation"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:packages"
+js_export = "serverValidatePackageManifest"
+user_facing_name = "Validate Package Manifest"
+authority = "server-first-package-manifest-validation"
+runtime_path = "server-first-load-time-validation"
+hot_path_policy = "Package manifest validation runs at package fixture/enable/load time and must not appear on every edit, keypress, layout, or paint hot path."
+facade_path = "runtime/js/packages.ts::serverValidatePackageManifest"
+backing_rust = "src/packages/manifest.rs::validate_manifest_value"
+deno_op = "op_clay_packages_validate_manifest"
+deno_op_path = "src/server/ops/packages.rs::op_clay_packages_validate_manifest"
+documentation_path = "docs/reference/clay-js-api/packages/server-validate-package-manifest.md"
+key_bindings = []
+custom_properties = ["manifest:ClayPackageManifest=required", "apiPrefix:string=required", "entry:string=required", "loadEntry:string=optional"]
+permissions = []
+security_notes = "Validates package identity, semver, apiPrefix, permissions, modes, entry metadata, and prohibited authority metadata through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority."
+current_rust_owner = "src/packages/manifest.rs::ClayPackageManifest; src/packages/manifest.rs::validate_manifest_value"
+registry_public = true
+
+[[api]]
+id = "clay.packages.serverValidatePackagePermissions"
+category = "package-permission-validation"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:packages"
+js_export = "serverValidatePackagePermissions"
+user_facing_name = "Validate Package Permissions"
+authority = "server-first-package-permission-validation"
+runtime_path = "server-first-load-time-validation"
+hot_path_policy = "Package permission validation runs at package enable/load time and must not appear on every edit, keypress, layout, or paint hot path."
+facade_path = "runtime/js/packages.ts::serverValidatePackagePermissions"
+backing_rust = "src/packages/permissions.rs::parse_permission"
+deno_op = "op_clay_packages_validate_permissions"
+deno_op_path = "src/server/ops/packages.rs::op_clay_packages_validate_permissions"
+documentation_path = "docs/reference/clay-js-api/packages/server-validate-package-permissions.md"
+key_bindings = []
+custom_properties = ["permissions:string[]=required"]
+permissions = []
+security_notes = "Validates declared package permissions and grants no authority by itself; rejects unknown, undeclared, prohibited, or unapproved scopes through server validation and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority."
+current_rust_owner = "src/packages/permissions.rs::PackagePermission; src/packages/permissions.rs::parse_permission"
+registry_public = true
+
+[[api]]
+id = "clay.packages.serverLoadPackage"
+category = "package-loading"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:packages"
+js_export = "serverLoadPackage"
+user_facing_name = "Load Package"
+authority = "server-first-package-record-validation"
+runtime_path = "server-first-package-load-time-validation"
+hot_path_policy = "Package record loading validates package.json-shaped metadata at package fixture/enable/load time and must not appear on ordinary edit, keypress, layout, scroll, text-event, or paint hot paths."
+facade_path = "runtime/js/packages.ts::serverLoadPackage"
+backing_rust = "src/packages/record.rs::assemble_package_record"
+deno_op = "op_clay_packages_load_package"
+deno_op_path = "src/server/ops/packages.rs::op_clay_packages_load_package"
+documentation_path = "docs/reference/clay-js-api/packages/server-load-package.md"
+key_bindings = []
+custom_properties = ["packageJson:PackageJson=required", "clay.apiPrefix:string=required", "clay.docs:string=required", "clay.performance.estimatedManifestBytes:number=required"]
+permissions = []
+security_notes = "Validates a Clay package record through server validation and returns inert summary metadata only; package installation, enable/disable mutation, external package-manager execution, and package JavaScript execution remain separate and it does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority."
+current_rust_owner = "src/packages/record.rs::PackageRecord; src/packages/record.rs::assemble_package_record; src/server/ops/packages.rs::op_clay_packages_load_package"
+registry_public = true
+
+[[api]]
+id = "clay.modes.serverRegisterModePattern"
+category = "mode-document-classification"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:modes"
+js_export = "serverRegisterModePattern"
+user_facing_name = "Register Mode Pattern"
+authority = "server-first-mode-registration"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Mode pattern registration occurs at package/configuration load time and document open/reclassification; it is not on the typing, layout, or paint hot path."
+facade_path = "runtime/js/modes.ts::serverRegisterModePattern"
+backing_rust = "src/packages/modes.rs::ModeRegistry::register_mode"
+deno_op = "op_clay_modes_register_pattern"
+deno_op_path = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
+documentation_path = "docs/reference/clay-js-api/modes/server-register-mode-pattern.md"
+key_bindings = []
+custom_properties = ["extensions:string[]=required", "mimeTypes:string[]=[]", "fileNames:string[]=[]", "fileNamePatterns:string[]=[]", "modeId:string=required", "apiPrefix:string=required"]
+permissions = ["mode-registration"]
+security_notes = "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority."
+current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::ModeDeclaration"
+registry_public = true
+
+[[api]]
+id = "clay.modes.serverClassifyDocument"
+category = "mode-document-classification-query"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:modes"
+js_export = "serverClassifyDocument"
+user_facing_name = "Classify Document"
+authority = "server-owned-mode-classification-query"
+runtime_path = "server-first-query"
+hot_path_policy = "Document classification runs at document open/reload or explicit reclassification time and never participates in ordinary typing, layout, paint, or edit acknowledgement hot paths."
+facade_path = "runtime/js/modes.ts::serverClassifyDocument"
+backing_rust = "src/packages/modes.rs::ModeRegistry::classify"
+deno_op = "op_clay_modes_classify_document"
+deno_op_path = "src/server/ops/modes.rs::op_clay_modes_classify_document"
+documentation_path = "docs/reference/clay-js-api/modes/server-classify-document.md"
+key_bindings = []
+custom_properties = ["documentId:number=required", "path:string=optional", "mimeType:string=optional"]
+permissions = []
+security_notes = "Returns mode classification metadata from already registered static patterns through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority."
+current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::DocumentClassificationInput"
+registry_public = true
+
+[[api]]
+id = "clay.modes.serverActivateMajorMode"
+category = "mode-activation"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:modes"
+js_export = "serverActivateMajorMode"
+user_facing_name = "Activate Major Mode"
+authority = "server-first-mode-activation"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Major-mode activation is server-first and publishes validated inert behavior metadata; after activation, ordinary typing uses the installed manifest and does not call JavaScript."
+facade_path = "runtime/js/modes.ts::serverActivateMajorMode"
+backing_rust = "src/packages/modes.rs::ModeRegistry::activate_major_mode"
+deno_op = "op_clay_modes_activate_major_mode"
+deno_op_path = "src/server/ops/modes.rs::op_clay_modes_activate_major_mode"
+documentation_path = "docs/reference/clay-js-api/modes/server-activate-major-mode.md"
+key_bindings = []
+custom_properties = ["documentId:number=required", "path:string=optional", "mimeType:string=optional", "behaviorVersion:number=generated"]
+permissions = ["mode-activation"]
+security_notes = "Requires mode-activation permission and server validation that the mode was registered and matches the target document metadata; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or arbitrary client behavior authority."
+current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::MajorModeActivation"
+registry_public = true
+
+[[api]]
+id = "clay.modes.serverSelectDocumentManifest"
+category = "per-document-behavior-manifest-selection"
+visibility = "public"
+status = "planned"
+js_module = "clay:modes"
+js_export = "serverSelectDocumentManifest"
+user_facing_name = "Select Document Manifest"
+authority = "server-owned-mode-manifest-selection-planned"
+runtime_path = "server-first-op-wrapper-planned"
+hot_path_policy = "Per-document manifest selection is mode activation/reload work; the implemented Rust selector is not called from ordinary typing, keypress, layout, scroll, text-event, or paint hot paths."
+facade_path = "runtime/js/modes.ts::serverSelectDocumentManifest"
+backing_rust = "src/packages/modes.rs::ModeRegistry::select_behavior_manifest_for_document"
+deno_op = "op_clay_runtime_unavailable"
+deno_op_path = "src/server/ops/planned.rs::op_clay_runtime_unavailable"
+documentation_path = "docs/reference/primitives/package-loading.md"
+key_bindings = []
+custom_properties = ["documentId:number=required", "enabledPackages:PackageRecord[]=server-owned", "behaviorVersion:number=generated"]
+permissions = ["mode-activation"]
+security_notes = "Planned unavailable Clay JS API only; the current Rust selector is server-owned infrastructure behind mode activation tests and validates inert manifests without exposing raw Deno ops, package JavaScript, filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, package installation, or enable/disable authority."
+current_rust_owner = "src/packages/modes.rs::ModeRegistry::select_behavior_manifest_for_document; src/packages/modes.rs::DocumentManifestSelection"
+registry_public = false
+
+[[api]]
+id = "clay.commands.serverRegisterCommand"
+category = "command-registry"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:commands"
+js_export = "serverRegisterCommand"
+user_facing_name = "Register Command"
+authority = "server-first-command-registration"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Command registration occurs at package load time; command execution later follows the registered routing policy and is not part of local keypress-to-paint unless represented by an inert manifest route."
+facade_path = "runtime/js/commands.ts::serverRegisterCommand"
+backing_rust = "src/packages/commands.rs::CommandRegistry::register_command"
+deno_op = "op_clay_commands_register_command"
+deno_op_path = "src/server/ops/commands.rs::op_clay_commands_register_command"
+documentation_path = "docs/reference/clay-js-api/commands/server-register-command.md"
+key_bindings = []
+custom_properties = ["commandId:string=package-prefixed", "displayName:string=required", "routingPolicy:enum=server-first", "defaultKeyBindings:string[]=[]", "requiredPermissions:string[]=[]"]
+permissions = ["command-registration"]
+security_notes = "Requires command-registration permission and server validation of package-prefixed command IDs, routing policy, key binding metadata, and declared handler permissions; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or command handler authority by registration alone."
+current_rust_owner = "src/packages/commands.rs::CommandRegistry; src/packages/commands.rs::PackageCommandDeclaration"
+registry_public = true
+
+[[api]]
+id = "clay.commands.serverListCommands"
+category = "command-registry-query"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:commands"
+js_export = "serverListCommands"
+user_facing_name = "List Commands"
+authority = "server-owned-command-query"
+runtime_path = "server-first-query"
+hot_path_policy = "Command listing is a help/configuration/agent metadata query and never participates in ordinary keypress, layout, paint, or edit acknowledgement hot paths."
+facade_path = "runtime/js/commands.ts::serverListCommands"
+backing_rust = "src/packages/commands.rs::CommandRegistry::list"
+deno_op = "op_clay_commands_list_commands"
+deno_op_path = "src/server/ops/commands.rs::op_clay_commands_list_commands"
+documentation_path = "docs/reference/clay-js-api/commands/server-list-commands.md"
+key_bindings = []
+custom_properties = ["scope:enum=all", "includePackageCommands:boolean=true"]
+permissions = []
+security_notes = "Returns command metadata only after server validation of registry visibility; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, command execution, or command handler authority."
+current_rust_owner = "src/packages/commands.rs::CommandRegistry; src/packages/commands.rs::RegisteredCommand"
+registry_public = true
+
+[[api]]
+id = "clay.decorations.serverPublishDecorations"
+category = "decoration-range-publication"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:decorations"
+js_export = "serverPublishDecorations"
+user_facing_name = "Publish Decorations"
+authority = "server-first-decoration-publication"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Decoration publication is background and viewport-prioritized; it must not block ordinary typing, and the client renders validated inert spans locally without package JavaScript in paint or text-event handlers."
+facade_path = "runtime/js/decorations.ts::serverPublishDecorations"
+backing_rust = "src/server/decorations.rs::validate_decoration_publication"
+deno_op = "op_clay_decorations_publish_decorations"
+deno_op_path = "src/server/ops/decorations.rs::op_clay_decorations_publish_decorations"
+documentation_path = "docs/reference/clay-js-api/decorations/server-publish-decorations.md"
+key_bindings = []
+custom_properties = ["documentId:string=required", "documentVersion:number=required", "viewportByteRange:range=required", "spans:DecorationSpan[]=bounded", "packagePrefix:string=required"]
+permissions = ["render-decorations"]
+security_notes = "Requires render-decorations permission plus server validation of document version, byte ranges, payload size, style tokens, package provenance, and viewport bounds; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
+current_rust_owner = "src/server/decorations.rs::validate_decoration_publication; src/protocol/decorations.rs::DecorationSet"
+registry_public = true
+
+[[api]]
+id = "clay.parse.serverRegisterParseHandler"
+category = "incremental-parse-handler"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:parse"
+js_export = "serverRegisterParseHandler"
+user_facing_name = "Register Parse Handler"
+authority = "server-first-background-parse-registration"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Parse handlers run as cancellable Background work in the server JavaScript runtime and must never block ClientFirstPredictable keypress-to-paint paths."
+facade_path = "runtime/js/parse.ts::serverRegisterParseHandler"
+backing_rust = "src/server/parse_coordinator.rs::ParseCoordinator::register_handler"
+deno_op = "op_clay_parse_register_parse_handler"
+deno_op_path = "src/server/ops/parse.rs::op_clay_parse_register_parse_handler"
+documentation_path = "docs/reference/clay-js-api/parse/server-register-parse-handler.md"
+key_bindings = []
+custom_properties = ["modeId:string=required", "parseUnits:enum=line-group", "timeoutMs:number=50", "viewportPriority:boolean=true", "resultBudgetBytes:number=4096"]
+permissions = ["parse-document"]
+security_notes = "Requires parse-document permission and server validation of handler provenance, cancellation, timeout, document-version reads, and bounded DecorationUpdate output; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond open document content provided by Clay."
+current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/server/js_runtime.rs"
+registry_public = true
+
+[[api]]
+id = "clay.folding.serverPublishFoldingRanges"
+category = "folding-range-publication"
+visibility = "public"
+status = "planned"
+js_module = "clay:folding"
+js_export = "serverPublishFoldingRanges"
+user_facing_name = "Publish Folding Ranges"
+authority = "server-first-folding-range-publication"
+runtime_path = "server-first-op-wrapper-planned"
+hot_path_policy = "Folding range publication is background/UI-reactive and viewport-aware; local expand/collapse state is client-local after validated ranges arrive."
+facade_path = "runtime/js/folding.ts::serverPublishFoldingRanges"
+backing_rust = "src/server/folding.rs::FoldingRangeRegistry::publish_ranges"
+deno_op = "op_clay_folding_publish_ranges"
+deno_op_path = "src/server/ops/folding.rs::op_clay_folding_publish_ranges"
+documentation_path = "docs/reference/clay-js-api/folding/server-publish-folding-ranges.md"
+key_bindings = []
+custom_properties = ["documentId:string=required", "documentVersion:number=required", "ranges:FoldingRange[]=bounded", "packagePrefix:string=required"]
+permissions = ["render-folding"]
+security_notes = "Requires render-folding permission and server validation of document version, byte ranges, nesting, payload size, and package provenance; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
+current_rust_owner = "planned: src/server/folding.rs::FoldingRangeRegistry; src/protocol/folding.rs::FoldingRangeUpdate"
+registry_public = false
+
+# Phase 16 configuration review: package options, mode preferences, decoration theme preferences,
+# and parse policy preferences are preserved as planned `clay:configuration` APIs through
+# `~/.config/clay/init.js`. package enable/disable is package loading authority; no configuration API is added for it in this phase.
+# future enable/disable API requires an approved decision log, explicit permission model, and server validation before it can exist.
+[[api]]
+id = "clay.configuration.setPackageOption"
+category = "package-configuration"
+visibility = "public"
+status = "planned"
+js_module = "clay:configuration"
+js_export = "setPackageOption"
+user_facing_name = "Set Package Option"
+authority = "configuration-api-package-option"
+runtime_path = "server-side-configuration-to-package-load-planned"
+hot_path_policy = "Package options are applied through init.js/package-load configuration and explicit setting changes only; they do not run on typing, layout, paint, or parse-result hot paths."
+facade_path = "runtime/js/configuration.ts::setPackageOption"
+backing_rust = "src/server/configuration.rs::ConfigurationRuntime::set_package_option"
+deno_op = "op_clay_configuration_set_package_option"
+deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_set_package_option"
+documentation_path = "docs/reference/clay-js-api/configuration/set-package-option.md"
+key_bindings = []
+custom_properties = ["packagePrefix:string=required", "option:string=package-prefixed", "value:json=required", "source:enum=init-js"]
+permissions = ["package-configuration"]
+security_notes = "Requires package-configuration permission when the option changes package behavior and server validation through the ~/.config/clay/init.js configuration model; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, or enable/disable authority."
+current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/package_loader.rs"
+registry_public = false
+
+[[api]]
+id = "clay.configuration.setModePreference"
+category = "mode-configuration"
+visibility = "public"
+status = "planned"
+js_module = "clay:configuration"
+js_export = "setModePreference"
+user_facing_name = "Set Mode Preference"
+authority = "configuration-api-mode-preference"
+runtime_path = "server-side-configuration-to-mode-registry-planned"
+hot_path_policy = "Mode preferences are applied from ~/.config/clay/init.js during configuration load or explicit reclassification only; they do not run on typing, layout, paint, parse-result, or edit-ack hot paths."
+facade_path = "runtime/js/configuration.ts::setModePreference"
+backing_rust = "src/server/configuration.rs::ConfigurationRuntime::set_mode_preference; src/server/modes.rs::ModeRegistry"
+deno_op = "op_clay_configuration_set_mode_preference"
+deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_set_mode_preference"
+documentation_path = "docs/reference/clay-js-api/configuration/set-mode-preference.md"
+key_bindings = []
+custom_properties = ["modeId:string=registered", "extensions:string[]=optional", "mimeTypes:string[]=optional", "defaultActivation:enum=auto|manual=auto", "source:enum=init-js"]
+permissions = []
+security_notes = "Records user mode activation defaults for already registered modes through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, mode-registration, mode-activation, package installation, or enable/disable authority."
+current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/modes.rs::ModeRegistry"
+registry_public = false
+
+[[api]]
+id = "clay.configuration.setDecorationTheme"
+category = "decoration-configuration"
+visibility = "public"
+status = "planned"
+js_module = "clay:configuration"
+js_export = "setDecorationTheme"
+user_facing_name = "Set Decoration Theme"
+authority = "configuration-api-decoration-theme"
+runtime_path = "server-side-configuration-to-render-settings-planned"
+hot_path_policy = "Decoration theme changes are configuration/load-time or explicit UI preference updates; they are converted to bounded style-token metadata before paint and never execute package JavaScript on the typing or rendering hot path."
+facade_path = "runtime/js/configuration.ts::setDecorationTheme"
+backing_rust = "src/server/configuration.rs::ConfigurationRuntime::set_decoration_theme; src/server/decorations.rs::DecorationRegistry"
+deno_op = "op_clay_configuration_set_decoration_theme"
+deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_set_decoration_theme"
+documentation_path = "docs/reference/clay-js-api/configuration/set-decoration-theme.md"
+key_bindings = []
+custom_properties = ["theme:string=default", "styleTokens:string[]=known-only", "contrastMode:enum=default|high=default", "source:enum=init-js"]
+permissions = []
+security_notes = "Sets user preferences for known decoration style tokens through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, render-decorations, arbitrary GPU draw calls, native widget mutation, package installation, or enable/disable authority."
+current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/decorations.rs::DecorationRegistry"
+registry_public = false
+
+[[api]]
+id = "clay.configuration.setParsePolicy"
+category = "parse-configuration"
+visibility = "public"
+status = "planned"
+js_module = "clay:configuration"
+js_export = "setParsePolicy"
+user_facing_name = "Set Parse Policy"
+authority = "configuration-api-parse-policy"
+runtime_path = "server-side-configuration-to-parse-coordinator-planned"
+hot_path_policy = "Parse policy is applied at configuration/package load or explicit setting change; parse tasks remain cancellable Background work and this configuration never appears on the typing hot path."
+facade_path = "runtime/js/configuration.ts::setParsePolicy"
+backing_rust = "src/server/configuration.rs::ConfigurationRuntime::set_parse_policy; src/server/parse_coordinator.rs::ParseCoordinator"
+deno_op = "op_clay_configuration_set_parse_policy"
+deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_set_parse_policy"
+documentation_path = "docs/reference/clay-js-api/configuration/set-parse-policy.md"
+key_bindings = []
+custom_properties = ["timeoutMs:number=50", "maxTimeoutMs:number=250", "parseUnits:enum=file|region|line-group=line-group", "viewportPriority:boolean=true", "source:enum=init-js"]
+permissions = []
+security_notes = "Sets bounded parse scheduling preferences through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, parse-document, access beyond open document content, package installation, or enable/disable authority."
+current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/parse_coordinator.rs::ParseCoordinator"
 registry_public = false

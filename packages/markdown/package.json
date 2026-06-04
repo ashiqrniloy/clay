@@ -1,0 +1,113 @@
+{
+  "name": "@clay/markdown",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js",
+    "./parser": "./dist/parser.js",
+    "./sdui": "./dist/sdui.js"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0"
+  },
+  "clay": {
+    "apiPrefix": "markdown",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "permissions": [
+      "mode-registration",
+      "mode-activation",
+      "command-registration",
+      "parse-document",
+      "render-decorations"
+    ],
+    "modes": ["markdown"],
+    "docs": "./docs/index.md",
+    "apiDependencies": [
+      "clay.modes.serverRegisterModePattern",
+      "clay.modes.serverActivateMajorMode",
+      "clay.commands.serverRegisterCommand",
+      "clay.parse.serverRegisterParseHandler",
+      "clay.decorations.serverPublishDecorations"
+    ],
+    "performance": {
+      "estimatedManifestBytes": 1900,
+      "hotPathPolicy": "no hot-path JS on keypress/paint"
+    },
+    "contributions": {
+      "modePatterns": [
+        {
+          "mode": "markdown",
+          "displayName": "Markdown",
+          "extensions": ["md", "markdown", "mdown"],
+          "mimeTypes": ["text/markdown"]
+        }
+      ],
+      "commands": [
+        {
+          "id": "markdown.togglePreview",
+          "displayName": "Toggle Markdown Preview",
+          "routingPolicy": "server-first"
+        },
+        {
+          "id": "markdown.insertHeading",
+          "displayName": "Insert Markdown Heading",
+          "routingPolicy": "server-first"
+        },
+        {
+          "id": "markdown.toggleList",
+          "displayName": "Toggle Markdown List",
+          "routingPolicy": "server-first"
+        }
+      ],
+      "keyRouting": [
+        {
+          "commandId": "markdown.togglePreview",
+          "key": "Ctrl+Shift+M",
+          "routingPolicy": "server-first"
+        },
+        {
+          "commandId": "markdown.insertHeading",
+          "key": "Ctrl+Alt+1",
+          "routingPolicy": "server-first"
+        },
+        {
+          "commandId": "markdown.toggleList",
+          "key": "Ctrl+Shift+8",
+          "routingPolicy": "server-first"
+        }
+      ],
+      "textTransforms": [
+        {
+          "transformId": "markdown.list-continuation",
+          "kind": "enter-rule"
+        },
+        {
+          "transformId": "markdown.fenced-code-indent",
+          "kind": "enter-rule"
+        },
+        {
+          "transformId": "markdown.inline-pair-handling",
+          "kind": "pair-rule"
+        }
+      ],
+      "sdui": [
+        {
+          "regionId": "markdown.previewStatus",
+          "displayName": "Markdown Preview Status",
+          "adapter": "./dist/sdui.js",
+          "estimatedSnapshotBytes": 2048,
+          "estimatedUpdateBytes": 512
+        }
+      ],
+      "decorations": [
+        {
+          "primitiveId": "markdown.syntaxDecorations",
+          "kind": "markdown.syntax",
+          "adapter": "./dist/parser.js"
+        }
+      ]
+    }
+  }
+}

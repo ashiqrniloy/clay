@@ -8,6 +8,8 @@ use masonry::parley::style::{LineHeight, StyleProperty};
 use masonry::peniko::{Color, Fill};
 use masonry::{TextAlign, TextAlignOptions};
 
+use crate::perf::metrics::global_recorder;
+
 use super::surface::{TEXT_FONT_SIZE, TEXT_INSET};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,9 +83,16 @@ impl LayoutState {
         caret_visible_byte_offset: Option<usize>,
         selection_visible_byte_range: Option<Range<usize>>,
         selection_color: Color,
+        decoration_visible_byte_ranges: &[(Range<usize>, Color)],
     ) -> VisualLayoutMetrics {
+        let recorder = global_recorder();
+        let _scope = recorder.scope("editor.layout.paint_text");
         if self.should_rebuild(key, ctx.fonts_changed()) {
+            let _rebuild_scope = recorder.scope("editor.layout.rebuild");
+            recorder.record_counter("editor.layout.cache_miss", 1);
             self.rebuild(ctx, display_text, max_width, key);
+        } else {
+            recorder.record_counter("editor.layout.cache_hit", 1);
         }
 
         let cached = self
@@ -111,6 +120,25 @@ impl LayoutState {
             TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
+        for (range, decoration_color) in decoration_visible_byte_ranges {
+            for rect in
+                Self::selection_rects_in_layout(&cached.layout, cached.text_len, range.clone())
+            {
+                let rect = Rect::new(
+                    rect.x0 + TEXT_INSET,
+                    rect.y0 + TEXT_INSET - *scroll_y,
+                    rect.x1 + TEXT_INSET,
+                    rect.y1 + TEXT_INSET - *scroll_y,
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    *decoration_color,
+                    None,
+                    &rect,
+                );
+            }
+        }
         if let Some(range) = selection_visible_byte_range {
             for rect in Self::selection_rects_in_layout(&cached.layout, cached.text_len, range) {
                 let rect = Rect::new(

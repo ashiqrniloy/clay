@@ -1,6 +1,14 @@
 mod behavior;
+mod configuration;
 mod connection;
-mod document;
+pub mod decorations;
+pub(crate) mod document;
+#[allow(dead_code)]
+mod js_runtime;
+#[allow(dead_code)]
+mod ops;
+pub mod parse_coordinator;
+mod sdui;
 mod workspace;
 
 use std::{
@@ -23,10 +31,14 @@ use tokio::net::UnixListener;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
-use crate::{ipc::IpcEndpoint, protocol::codec::Codec};
+use crate::{
+    ipc::IpcEndpoint,
+    protocol::{RuntimeDiagnostic, codec::Codec},
+};
 
 use self::{
     behavior::ActiveBehaviorManifest, connection::handle_connection, document::DocumentState,
+    js_runtime::ClayJsRuntimeService, parse_coordinator::ParseCoordinator, sdui::StaticSduiState,
     workspace::WorkspaceState,
 };
 
@@ -37,6 +49,7 @@ const ERROR_PIPE_CONNECTED: i32 = 535;
 pub struct ServerConfig {
     pub endpoint: IpcEndpoint,
     pub workspace_roots: Vec<PathBuf>,
+    pub configuration_root: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -44,6 +57,7 @@ impl ServerConfig {
         Self {
             endpoint: endpoint.into(),
             workspace_roots: Vec::new(),
+            configuration_root: None,
         }
     }
 }
@@ -55,6 +69,12 @@ pub struct IpcServer {
     document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     workspace: Arc<Mutex<WorkspaceState>>,
+    sdui: Arc<Mutex<StaticSduiState>>,
+    runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    #[allow(dead_code)]
+    parse_coordinator: ParseCoordinator,
+    #[allow(dead_code)]
+    js_runtime: ClayJsRuntimeService,
     next_client_id: AtomicU64,
 }
 
@@ -78,6 +98,10 @@ impl IpcServer {
             document: Arc::new(Mutex::new(DocumentState::default())),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
             workspace: Arc::new(Mutex::new(workspace)),
+            sdui: Arc::new(Mutex::new(StaticSduiState::for_document(1, 1))),
+            runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            parse_coordinator: ParseCoordinator::default(),
+            js_runtime: ClayJsRuntimeService::default(),
             next_client_id: AtomicU64::new(1),
         })
     }
@@ -85,6 +109,7 @@ impl IpcServer {
     #[cfg(unix)]
     pub async fn run(self) -> Result<(), ServerError> {
         let listener = bind_unix_listener(self.config.endpoint.as_unix_socket_path())?;
+        self.load_default_configuration().await;
         self.accept_unix_loop(listener).await
     }
 
@@ -112,6 +137,7 @@ impl IpcServer {
             .endpoint
             .validate_windows_named_pipe()
             .map_err(ServerError::InvalidEndpoint)?;
+        self.load_default_configuration().await;
         let mut connections = JoinSet::new();
         loop {
             let pipe = create_named_pipe_server(self.config.endpoint.as_windows_named_pipe())?;
@@ -137,6 +163,64 @@ impl IpcServer {
         )))
     }
 
+    async fn load_default_configuration(&self) {
+        let evaluation = if let Some(config_root) = self.config.configuration_root.clone() {
+            self.js_runtime
+                .load_configuration_from_root_with_workspace(
+                    config_root,
+                    Arc::clone(&self.workspace),
+                )
+                .await
+                .map(Some)
+        } else {
+            self.js_runtime
+                .load_default_configuration_with_workspace(Arc::clone(&self.workspace))
+                .await
+        };
+
+        match evaluation {
+            Ok(Some(evaluation)) => self.apply_runtime_evaluation(evaluation).await,
+            Ok(None) => {}
+            Err(error) => {
+                let diagnostic = error.diagnostic();
+                eprintln!(
+                    "clay server configuration failed [{}]: {}",
+                    diagnostic.code, diagnostic.message
+                );
+                self.runtime_diagnostics.lock().await.push(diagnostic);
+            }
+        }
+    }
+
+    async fn apply_runtime_evaluation(&self, evaluation: js_runtime::ClayRuntimeEvaluation) {
+        if let Some(tree) = evaluation.published_sdui_tree {
+            if let Err(error) = self.sdui.lock().await.replace_with_runtime_tree(tree) {
+                let diagnostic = RuntimeDiagnostic::error(
+                    "clay.sdui.invalid_tree",
+                    "Published SDUI tree failed server validation.",
+                );
+                eprintln!(
+                    "clay server rejected runtime SDUI tree [{}]: {} ({error:?})",
+                    diagnostic.code, diagnostic.message
+                );
+                self.runtime_diagnostics.lock().await.push(diagnostic);
+            }
+        }
+        if let Some(manifest) = evaluation.behavior_manifest {
+            if let Err(error) = self.behavior.lock().await.publish_replacement(manifest) {
+                let diagnostic = RuntimeDiagnostic::error(
+                    "clay.behavior.invalid_manifest",
+                    "Runtime behavior manifest failed server validation.",
+                );
+                eprintln!(
+                    "clay server rejected runtime behavior manifest [{}]: {} ({error:?})",
+                    diagnostic.code, diagnostic.message
+                );
+                self.runtime_diagnostics.lock().await.push(diagnostic);
+            }
+        }
+    }
+
     fn spawn_connection<S>(&self, stream: S, connections: &mut JoinSet<()>)
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -145,10 +229,21 @@ impl IpcServer {
         let document = Arc::clone(&self.document);
         let behavior = Arc::clone(&self.behavior);
         let workspace = Arc::clone(&self.workspace);
+        let sdui = Arc::clone(&self.sdui);
+        let runtime_diagnostics = Arc::clone(&self.runtime_diagnostics);
         let codec = self.codec;
         connections.spawn(async move {
-            if let Err(error) =
-                handle_connection(stream, client_id, document, behavior, workspace, codec).await
+            if let Err(error) = handle_connection(
+                stream,
+                client_id,
+                document,
+                behavior,
+                workspace,
+                sdui,
+                runtime_diagnostics,
+                codec,
+            )
+            .await
             {
                 eprintln!("clay server connection {client_id} closed with error: {error}");
             }
@@ -274,7 +369,7 @@ mod tests {
 
     use tokio::{net::UnixStream, sync::Mutex};
 
-    use super::{ActiveBehaviorManifest, IpcServer, ServerConfig};
+    use super::{ActiveBehaviorManifest, ClayJsRuntimeService, IpcServer, ServerConfig};
     use crate::{
         protocol::{
             ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
@@ -304,6 +399,10 @@ mod tests {
                 workspace.reserve_document_ids_from(2);
                 Arc::new(Mutex::new(workspace))
             },
+            sdui: Arc::new(Mutex::new(StaticSduiState::for_document(1, 1))),
+            runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            parse_coordinator: ParseCoordinator::default(),
+            js_runtime: ClayJsRuntimeService::default(),
             next_client_id: AtomicU64::new(1),
         }
     }
@@ -350,6 +449,7 @@ mod tests {
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+        let _sdui = codec.read_server_message(&mut stream).await.unwrap();
 
         codec
             .write_client_message(
@@ -408,6 +508,16 @@ mod tests {
         assert!(error.to_string().contains("invalid workspace root"));
 
         let _ = fs::remove_dir(server.config.workspace_roots[0].clone());
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[test]
+    fn ordinary_typing_does_not_enter_js_runtime() {
+        let socket_path = unique_socket_path("runtime-not-hot-path");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+
+        assert_eq!(server.js_runtime.evaluation_count(), 0);
+
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 

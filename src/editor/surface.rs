@@ -7,9 +7,10 @@ use masonry::peniko::{Color, Fill};
 use crate::client::behavior::{
     ClientBehaviorState, ClientLocalEdit, RoutedBehavior, ServerIntentRoute,
 };
+use crate::perf::metrics::PerfRecorder;
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, DocumentAccess, DocumentId, DocumentVersion, EditOperation,
-    EnterRule, KeyStroke, PairRule,
+    BehaviorManifest, BehaviorVersion, DecorationKind, DecorationSet, DecorationSpan,
+    DocumentAccess, DocumentId, DocumentVersion, EditOperation, EnterRule, KeyStroke, PairRule,
 };
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
@@ -24,12 +25,26 @@ const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
 const TEXT_COLOR: Color = Color::from_rgb8(0xf4, 0xf1, 0xff);
 const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
 const SELECTION_COLOR: Color = Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66);
+const SYNTAX_DECORATION_COLOR: Color = Color::from_rgba8(0x3f, 0x66, 0xff, 0x33);
+const SEMANTIC_DECORATION_COLOR: Color = Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f);
+const DIAGNOSTIC_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f);
+const SEARCH_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0xd1, 0x66, 0x45);
 const CARET_COLOR: Color = Color::from_rgb8(0xff, 0xff, 0xff);
 const CARET_WIDTH: f64 = 1.5;
 pub(super) const TEXT_INSET: f64 = 48.0;
 pub(super) const TEXT_FONT_SIZE: f32 = 20.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
 const LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
+
+fn decoration_color(kind: DecorationKind, style_token: &str) -> Color {
+    match kind {
+        DecorationKind::Diagnostic => DIAGNOSTIC_DECORATION_COLOR,
+        DecorationKind::SearchMatch => SEARCH_DECORATION_COLOR,
+        DecorationKind::Semantic => SEMANTIC_DECORATION_COLOR,
+        DecorationKind::Syntax if style_token.starts_with("markup.") => SEMANTIC_DECORATION_COLOR,
+        DecorationKind::Syntax => SYNTAX_DECORATION_COLOR,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorCommand<'a> {
@@ -121,6 +136,13 @@ pub struct EditorDocumentState {
     pub behavior_manifest: Option<BehaviorManifest>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EditorDecorationState {
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+    spans: Vec<DecorationSpan>,
+}
+
 impl Default for EditorDocumentState {
     fn default() -> Self {
         Self {
@@ -141,9 +163,11 @@ pub struct EditorSurface {
     selection: Option<SelectionState>,
     viewport: Viewport,
     layout: LayoutState,
+    decorations: EditorDecorationState,
     visual_scroll_y: f64,
     last_visual_max_scroll_y: f64,
     follow_visual_end: bool,
+    perf: PerfRecorder,
 }
 
 impl EditorSurface {
@@ -162,6 +186,7 @@ impl EditorSurface {
         self.selection = None;
         self.viewport = Viewport::default();
         self.layout = LayoutState::default();
+        self.decorations = EditorDecorationState::default();
         self.visual_scroll_y = 0.0;
         self.last_visual_max_scroll_y = 0.0;
         self.follow_visual_end = false;
@@ -172,6 +197,28 @@ impl EditorSurface {
             self.document.behavior_version = manifest.behavior_version;
             self.document.behavior_manifest = Some(manifest);
         }
+    }
+
+    pub fn apply_decoration_set(&mut self, set: DecorationSet) -> bool {
+        if set.document_id != self.document.document_id
+            || set.document_version != self.document.document_version
+        {
+            return false;
+        }
+        self.decorations = EditorDecorationState {
+            document_id: set.document_id,
+            document_version: set.document_version,
+            spans: set.spans,
+        };
+        true
+    }
+
+    pub fn decoration_span_count(&self) -> usize {
+        self.decorations.spans.len()
+    }
+
+    pub fn decoration_state_version(&self) -> Option<DocumentVersion> {
+        (!self.decorations.spans.is_empty()).then_some(self.decorations.document_version)
     }
 
     pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
@@ -405,6 +452,15 @@ impl EditorSurface {
         self.visible_snapshot().text
     }
 
+    pub fn with_perf_recorder(mut self, perf: PerfRecorder) -> Self {
+        self.perf = perf;
+        self
+    }
+
+    pub fn perf_snapshots(&self) -> Vec<crate::perf::metrics::MetricSnapshot> {
+        self.perf.snapshots()
+    }
+
     pub fn hit_test_document_offset(&self, point: Point) -> Option<usize> {
         let snapshot = self.visible_snapshot();
         if snapshot.text.is_empty() {
@@ -425,22 +481,7 @@ impl EditorSurface {
 
     pub fn caret_geometry(&self, width: f32) -> Option<Rect> {
         let snapshot = self.visible_snapshot();
-        let caret = self.cursor.caret();
-        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
-        if caret < snapshot.start_byte_offset || caret > visible_end {
-            return None;
-        }
-
-        let visible_offset = caret - snapshot.start_byte_offset;
-        let geometry = self
-            .layout
-            .caret_geometry_for_visible_byte_offset(visible_offset, width)?;
-        Some(Rect::new(
-            geometry.rect.x0 + TEXT_INSET,
-            geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
-            geometry.rect.x1 + TEXT_INSET,
-            geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
-        ))
+        self.caret_geometry_from_visible_snapshot(&snapshot, width)
     }
 
     pub fn place_caret_at_point(&mut self, point: Point) -> bool {
@@ -560,6 +601,7 @@ impl EditorSurface {
 
         let caret_visible_offset = self.visible_caret_offset(&snapshot);
         let selection_visible_range = self.visible_selection_range(&snapshot);
+        let decoration_visible_ranges = self.visible_decoration_ranges(&snapshot);
         let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width);
         let metrics = self.layout.paint_text(
             ctx,
@@ -574,6 +616,7 @@ impl EditorSurface {
             caret_visible_offset,
             selection_visible_range,
             SELECTION_COLOR,
+            &decoration_visible_ranges,
         );
         if current_text.is_empty() {
             self.visual_scroll_y = 0.0;
@@ -582,7 +625,13 @@ impl EditorSurface {
             self.last_visual_max_scroll_y = metrics.max_scroll_y(available_height);
         }
         if focused {
-            self.paint_caret(scene, current_text.is_empty(), max_width, available_height);
+            self.paint_caret(
+                scene,
+                current_text.is_empty(),
+                max_width,
+                available_height,
+                caret_visible_offset,
+            );
         }
         self.follow_visual_end = false;
     }
@@ -593,6 +642,7 @@ impl EditorSurface {
         text_is_empty: bool,
         max_width: f32,
         available_height: f64,
+        caret_visible_offset: Option<usize>,
     ) {
         let caret = if text_is_empty {
             Rect::new(
@@ -602,8 +652,19 @@ impl EditorSurface {
                 (TEXT_INSET + TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER)
                     .min(TEXT_INSET + available_height),
             )
-        } else if let Some(rect) = self.caret_geometry(CARET_WIDTH as f32) {
-            rect
+        } else if let Some(visible_offset) = caret_visible_offset {
+            let Some(geometry) = self
+                .layout
+                .caret_geometry_for_visible_byte_offset(visible_offset, CARET_WIDTH as f32)
+            else {
+                return;
+            };
+            Rect::new(
+                geometry.rect.x0 + TEXT_INSET,
+                geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
+                geometry.rect.x1 + TEXT_INSET,
+                geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
+            )
         } else {
             return;
         };
@@ -617,6 +678,29 @@ impl EditorSurface {
         scene.push_clip_layer(Affine::IDENTITY, &clip);
         scene.fill(Fill::NonZero, Affine::IDENTITY, CARET_COLOR, None, &caret);
         scene.pop_layer();
+    }
+
+    fn caret_geometry_from_visible_snapshot(
+        &self,
+        snapshot: &VisibleSnapshot,
+        width: f32,
+    ) -> Option<Rect> {
+        let caret = self.cursor.caret();
+        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        if caret < snapshot.start_byte_offset || caret > visible_end {
+            return None;
+        }
+
+        let visible_offset = caret - snapshot.start_byte_offset;
+        let geometry = self
+            .layout
+            .caret_geometry_for_visible_byte_offset(visible_offset, width)?;
+        Some(Rect::new(
+            geometry.rect.x0 + TEXT_INSET,
+            geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
+            geometry.rect.x1 + TEXT_INSET,
+            geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
+        ))
     }
 
     fn visible_caret_offset(&self, snapshot: &VisibleSnapshot) -> Option<usize> {
@@ -636,9 +720,37 @@ impl EditorSurface {
         (start < end).then_some((start - visible_start)..(end - visible_start))
     }
 
+    fn visible_decoration_ranges(&self, snapshot: &VisibleSnapshot) -> Vec<(Range<usize>, Color)> {
+        if self.decorations.document_id != self.document.document_id
+            || self.decorations.document_version != self.document.document_version
+        {
+            return Vec::new();
+        }
+        let visible_start = snapshot.start_byte_offset;
+        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        self.decorations
+            .spans
+            .iter()
+            .filter_map(|span| {
+                let start = (span.byte_start as usize).max(visible_start);
+                let end = (span.byte_end as usize).min(visible_end);
+                (start < end).then_some((
+                    (start - visible_start)..(end - visible_start),
+                    decoration_color(span.kind, &span.style_token),
+                ))
+            })
+            .collect()
+    }
+
     fn visible_snapshot(&self) -> VisibleSnapshot {
+        let _scope = self.perf.scope("editor.visible_extraction");
         let range = self.viewport.visible_range(self.buffer.line_len());
-        self.buffer.visible_snapshot(range)
+        let snapshot = self.buffer.visible_snapshot(range);
+        self.perf.record_bytes(
+            "editor.visible_extraction.bytes",
+            snapshot.text.len() as u64,
+        );
+        snapshot
     }
 
     fn selected_range(&self) -> Option<Range<usize>> {
@@ -663,7 +775,13 @@ impl EditorSurface {
 
         match manifest.editor_rules.enter {
             EnterRule::InsertNewlineOnly => "\n".to_string(),
-            EnterRule::PreserveLeadingWhitespace => {
+            // The generic list-continuation and fence-indent variants are
+            // executed by Rust-known transform engines when the client applies
+            // them locally.  For now fall through to whitespace preservation;
+            // the full engine implementation is tracked in a later task.
+            EnterRule::ContinueLineMarkers { .. }
+            | EnterRule::PreserveFenceBodyIndent { .. }
+            | EnterRule::PreserveLeadingWhitespace => {
                 let line_before = self.buffer.line_text_before_byte(byte_offset);
                 let indent: String = line_before
                     .chars()
@@ -779,6 +897,7 @@ impl EditorSurface {
 
         self.ensure_caret_line_visible();
         self.follow_visual_end = true;
+        self.perf.record_counter("editor.input.local_edit", 1);
         let edit_event = self.client_first_event(operation);
         EditorCommandOutcome::changed(edit_event)
     }
@@ -924,6 +1043,7 @@ mod tests {
 
     use super::{EditorCommand, EditorSurface, TEXT_INSET};
     use crate::editor::layout::LayoutCacheKey;
+    use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
         BehaviorManifest, CommandDeclaration, DocumentAccess, EditOperation, KeyBindingContext,
         KeyBindingRule, KeyCode, KeyStroke, RoutingPolicy, TabMode,
@@ -935,6 +1055,32 @@ mod tests {
             writeln!(text, "line {line:05}").expect("writing to String cannot fail");
         }
         text
+    }
+
+    #[test]
+    fn editor_visible_extraction_records_metric_when_enabled() {
+        let perf = PerfRecorder::for_test(true);
+        let mut editor = EditorSurface::default().with_perf_recorder(perf);
+        editor.load_snapshot(
+            1,
+            2,
+            "alpha\nbeta".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+
+        assert_eq!(editor.visible_text(), "alpha\nbeta");
+
+        let snapshots = editor.perf_snapshots();
+        assert!(
+            snapshots
+                .iter()
+                .any(|snapshot| snapshot.name == "editor.visible_extraction")
+        );
+        assert!(
+            snapshots
+                .iter()
+                .any(|snapshot| snapshot.name == "editor.visible_extraction.bytes")
+        );
     }
 
     #[test]

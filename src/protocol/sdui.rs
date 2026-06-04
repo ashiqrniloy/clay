@@ -140,6 +140,102 @@ pub enum SduiTreeOperation {
 }
 
 #[cfg(test)]
+pub(crate) fn representative_sdui_tree() -> SduiTree {
+    let root_id = SduiNodeId(1);
+    let sidebar_id = SduiNodeId(2);
+    let stack_id = SduiNodeId(3);
+    let label_id = SduiNodeId(4);
+    let button_id = SduiNodeId(5);
+    let list_id = SduiNodeId(6);
+    let editor_id = SduiNodeId(7);
+
+    SduiTree {
+        ui_version: 1,
+        root_id,
+        nodes: vec![
+            SduiNode::new(
+                root_id,
+                SduiNodeKind::Flex {
+                    direction: SduiFlexDirection::Row,
+                    children: vec![sidebar_id, editor_id],
+                },
+            ),
+            SduiNode::new(
+                sidebar_id,
+                SduiNodeKind::Panel {
+                    title: "Workspace".to_string(),
+                    children: vec![stack_id],
+                },
+            ),
+            SduiNode::new(
+                stack_id,
+                SduiNodeKind::Stack {
+                    children: vec![label_id, button_id, list_id],
+                },
+            ),
+            SduiNode::new(
+                label_id,
+                SduiNodeKind::Label {
+                    text: "Document 7 · version 3".to_string(),
+                },
+            ),
+            SduiNode::new(
+                button_id,
+                SduiNodeKind::Button {
+                    label: "Refresh".to_string(),
+                    action: SduiActionIntent::command(
+                        "workspace.refresh",
+                        SduiActionSource::Button { node_id: button_id },
+                    ),
+                },
+            ),
+            SduiNode::new(
+                list_id,
+                SduiNodeKind::List {
+                    items: vec![SduiListItem {
+                        id: "active-document".to_string(),
+                        label: "Document 7".to_string(),
+                        detail: Some("Server-generated editor view".to_string()),
+                        action: Some(SduiActionIntent::command(
+                            "document.open_recent",
+                            SduiActionSource::ListItem {
+                                node_id: list_id,
+                                item_id: "active-document".to_string(),
+                            },
+                        )),
+                    }],
+                },
+            ),
+            SduiNode::new(
+                editor_id,
+                SduiNodeKind::EditorView {
+                    binding: SduiEditorBinding {
+                        document_id: 7,
+                        expected_version: Some(3),
+                    },
+                },
+            ),
+        ],
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn representative_panel_update() -> SduiTreeUpdate {
+    SduiTreeUpdate {
+        base_ui_version: 1,
+        new_ui_version: 2,
+        operations: vec![SduiTreeOperation::ReplaceNode {
+            node: SduiNode::new(
+                SduiNodeId(4),
+                SduiNodeKind::Label {
+                    text: "Document 7 · version 4".to_string(),
+                },
+            ),
+        }],
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

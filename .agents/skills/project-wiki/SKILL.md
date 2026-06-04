@@ -17,6 +17,8 @@ Use this workflow whenever writing or changing code:
 4. Keep the master index navigable. Link every discoverable wiki page and briefly state what it teaches.
 5. Keep code and wiki synchronized when behavior, architecture, data flow, dependencies, examples, or tests change.
 6. When creating or substantially rewriting a page, use `.agents/skills/project-wiki/references/page-template.md` if it exists.
+7. When work adds or changes reusable editor primitives, package/mode primitives, protocol primitives, or JS package capabilities built on primitives, document the primitive inventory comprehensively: source paths, public/reference docs, implementation wiki pages, tests, permissions, hot-path policy, and how future modes should reuse the primitive.
+8. Add or update deterministic tests where practical so every primitive remains recorded in the reference docs, wiki pages, and master wiki index. Prefer tests such as `tests/primitives_docs.rs` or successor documentation-coverage tests that fail without mutating files.
 
 ## Wiki Scope and Boundary
 
@@ -25,6 +27,7 @@ Document implementation units and behaviors at enough depth for onboarding; do n
 Include:
 
 - Public surfaces at an implementation level: APIs, CLIs, protocols, configuration, commands, extension points, UI surfaces, and user-visible behavior.
+- Reusable primitives at an implementation level: primitive name/category, owning Rust module, JS facade/op when present, package permission, protocol shape, hot-path policy, validation rules, source/test paths, reference-doc links, and examples of package or mode reuse.
 - Internal modules, components, functions, data structures, state machines, algorithms, control flow, and interactions.
 - Cross-cutting concerns: error handling, validation, security boundaries, performance constraints, concurrency, persistence, and testing strategy.
 - Important tradeoffs, invariants, assumptions, and known limitations.
@@ -76,3 +79,4 @@ A wiki update is good enough when:
 - Copying large source files into the wiki instead of explaining the implementation.
 - Writing vague summaries that do not explain how the code works.
 - Letting generated docs or comments replace the educational code wiki unless the project explicitly uses those generated artifacts as wiki pages.
+- Adding or changing primitive implementations without corresponding wiki/reference coverage and deterministic tests that keep the primitive recorded.

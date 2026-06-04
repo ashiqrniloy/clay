@@ -21,7 +21,7 @@ agent_guidance: Use `clay.documents.serverReloadDocument` only through the docum
 lookup_tags: [documents, workspace, file, reload, dirty-state, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -33,7 +33,7 @@ Reload an open workspace document from disk through server-side validation.
 
 ## Description
 
-`serverReloadDocument` is the planned public API for **Reload Document**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
+`serverReloadDocument` is the runtime-backed public API for **Reload Document**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
 
 Authority: `server-authoritative-file-reload`. Runtime path: `server-first-file-io`. Reloading is an explicit server file IO command and is not on ordinary edit acknowledgement, rendering, or input hot paths.
 
@@ -74,11 +74,11 @@ No behavior-changing custom properties are defined for this API.
 
 Returns a promise for refreshed metadata and text snapshot.
 
-Current Phase 9 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. Current Phase 9 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
 
 ## Permissions and security
 
@@ -97,7 +97,7 @@ Use `clay.documents.serverReloadDocument` only through the documented Clay JS fa
 ## Backing implementation
 
 - JS facade: `runtime/js/documents.ts::serverReloadDocument`
-- Future Deno op: `src/server/ops/documents.rs::op_clay_documents_reload_document` (`op_clay_documents_reload_document`)
+- Deno op: `src/server/ops/documents.rs::op_clay_documents_reload_document` (`op_clay_documents_reload_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::reload_document`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
 

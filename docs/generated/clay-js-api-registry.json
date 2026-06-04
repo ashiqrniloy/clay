@@ -41,7 +41,7 @@
       "deno_op_path": "src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest",
       "name": "getActiveBehaviorManifest",
       "user_facing_name": "Get Active Behavior Manifest",
-      "summary": "Get Active Behavior Manifest through the planned `clay:behavior` Clay JavaScript facade.",
+      "summary": "Get Active Behavior Manifest through the runtime-backed `clay:behavior` Clay JavaScript facade.",
       "owner": "server",
       "phase": "Phase 7",
       "visibility": "public",
@@ -53,7 +53,7 @@
       "lookup_tags": ["behavior", "behaviormanifestrouting", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     },
     {
@@ -68,7 +68,7 @@
       "deno_op_path": "src/server/ops/behavior.rs::op_clay_behavior_list_routes",
       "name": "listBehaviorRoutes",
       "user_facing_name": "List Behavior Routes",
-      "summary": "List Behavior Routes through the planned `clay:behavior` Clay JavaScript facade.",
+      "summary": "List Behavior Routes through the runtime-backed `clay:behavior` Clay JavaScript facade.",
       "owner": "server",
       "phase": "Phase 7",
       "visibility": "public",
@@ -80,8 +80,106 @@
       "lookup_tags": ["behavior", "behaviormanifestrouting", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
+    },
+    {
+      "id": "clay.commands.serverListCommands",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/commands/server-list-commands.md",
+      "js_module": "clay:commands",
+      "js_export": "serverListCommands",
+      "js_facade": "runtime/js/commands.ts::serverListCommands",
+      "backing_rust": "src/packages/commands.rs::CommandRegistry::list",
+      "deno_op": "op_clay_commands_list_commands",
+      "deno_op_path": "src/server/ops/commands.rs::op_clay_commands_list_commands",
+      "name": "serverListCommands",
+      "user_facing_name": "List Commands",
+      "summary": "List Commands through the runtime-backed `clay:commands` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "scope",
+          "type": "enum",
+          "default": "all",
+          "description": "Behavior-changing setting `scope` for this primitive gate API."
+        },
+        {
+          "name": "includePackageCommands",
+          "type": "boolean",
+          "default": "true",
+          "description": "Behavior-changing setting `includePackageCommands` for this primitive gate API."
+        }
+      ],
+      "security": "Returns command metadata only after server validation of registry visibility; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, command execution, or command handler authority.",
+      "agent_guidance": "Use `clay.commands.serverListCommands` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "commandregistryquery", "commands"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.commands.serverRegisterCommand",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/commands/server-register-command.md",
+      "js_module": "clay:commands",
+      "js_export": "serverRegisterCommand",
+      "js_facade": "runtime/js/commands.ts::serverRegisterCommand",
+      "backing_rust": "src/packages/commands.rs::CommandRegistry::register_command",
+      "deno_op": "op_clay_commands_register_command",
+      "deno_op_path": "src/server/ops/commands.rs::op_clay_commands_register_command",
+      "name": "serverRegisterCommand",
+      "user_facing_name": "Register Command",
+      "summary": "Register Command through the runtime-backed `clay:commands` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": ["command-registration"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "commandId",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Behavior-changing setting `commandId` for this primitive gate API."
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "default": "required",
+          "description": "Behavior-changing setting `displayName` for this primitive gate API."
+        },
+        {
+          "name": "routingPolicy",
+          "type": "enum",
+          "default": "server-first",
+          "description": "Behavior-changing setting `routingPolicy` for this primitive gate API."
+        },
+        {
+          "name": "defaultKeyBindings",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Behavior-changing setting `defaultKeyBindings` for this primitive gate API."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Behavior-changing setting `requiredPermissions` for this primitive gate API."
+        }
+      ],
+      "security": "Requires command-registration permission and server validation of package-prefixed command IDs, routing policy, key binding metadata, and declared handler permissions; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or command handler authority by registration alone.",
+      "agent_guidance": "Use `clay.commands.serverRegisterCommand` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "commandregistry", "commands"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
     },
     {
       "id": "clay.configuration.getConfigurationState",
@@ -95,9 +193,9 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_get_state",
       "name": "getConfigurationState",
       "user_facing_name": "Get Configuration State",
-      "summary": "Inspect planned Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.",
+      "summary": "Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.",
       "owner": "server",
-      "phase": "Phase 8",
+      "phase": "Phase 13",
       "visibility": "public",
       "permissions": [],
       "key_bindings": [],
@@ -115,12 +213,12 @@
           "description": "Ordered local configuration module paths once runtime loading exists."
         }
       ],
-      "security": "Returns configuration metadata only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "security": "Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `clay.configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
       "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
     },
     {
@@ -135,9 +233,9 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_load_module",
       "name": "loadConfigurationModule",
       "user_facing_name": "Load Configuration Module",
-      "summary": "Load a local modular configuration file from the planned `~/.config/clay/init.js` server-side configuration runtime.",
+      "summary": "Load a local modular configuration file from the runtime-backed `~/.config/clay/init.js` server-side configuration runtime.",
       "owner": "server",
-      "phase": "Phase 8",
+      "phase": "Phase 13",
       "visibility": "public",
       "permissions": [],
       "key_bindings": [],
@@ -149,13 +247,71 @@
           "description": "Local configuration module path relative to `~/.config/clay/init.js`."
         }
       ],
-      "security": "Local modular configuration contract only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "security": "Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `clay.configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
       "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
+    },
+    {
+      "id": "clay.decorations.serverPublishDecorations",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/decorations/server-publish-decorations.md",
+      "js_module": "clay:decorations",
+      "js_export": "serverPublishDecorations",
+      "js_facade": "runtime/js/decorations.ts::serverPublishDecorations",
+      "backing_rust": "src/server/decorations.rs::validate_decoration_publication",
+      "deno_op": "op_clay_decorations_publish_decorations",
+      "deno_op_path": "src/server/ops/decorations.rs::op_clay_decorations_publish_decorations",
+      "name": "serverPublishDecorations",
+      "user_facing_name": "Publish Decorations",
+      "summary": "Publish viewport-bounded, inert decoration spans from server-side package code.",
+      "owner": "server",
+      "phase": "Phase 18",
+      "visibility": "public",
+      "permissions": ["render-decorations"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "number",
+          "default": "required",
+          "description": "Target open document ID."
+        },
+        {
+          "name": "documentVersion",
+          "type": "number",
+          "default": "required",
+          "description": "Server document version the spans were produced for."
+        },
+        {
+          "name": "viewportByteRange",
+          "type": "byte-range",
+          "default": "required",
+          "description": "Visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded."
+        },
+        {
+          "name": "spans",
+          "type": "DecorationSpan[]",
+          "default": "[]",
+          "description": "Bounded inert byte-range spans with known kinds and style tokens."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "package context",
+          "description": "Package API prefix retained as provenance."
+        }
+      ],
+      "security": "Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, known style tokens, known kinds, and DECORATION_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.",
+      "agent_guidance": "Use `clay.decorations.serverPublishDecorations` from server-side package code only. Publish inert spans; never invent renderer callbacks, CSS, raw ops, or client-side JavaScript hooks.",
+      "lookup_tags": ["js-api", "decorations", "markdown", "decorationrange", "syntax-highlighting"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
     },
     {
       "id": "clay.documents.serverGetDocumentLease",
@@ -235,7 +391,7 @@
       "lookup_tags": ["documents", "workspace", "metadata", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     },
     {
@@ -262,7 +418,7 @@
       "lookup_tags": ["documents", "workspace", "metadata", "list", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     },
     {
@@ -277,7 +433,7 @@
       "deno_op_path": "src/server/ops/documents.rs::op_clay_documents_open_document",
       "name": "serverOpenDocument",
       "user_facing_name": "Open Document",
-      "summary": "Open an authorized workspace text file through the planned `clay:documents` server-authoritative facade.",
+      "summary": "Open an authorized workspace text file through the runtime-backed `clay:documents` server-authoritative facade.",
       "owner": "server",
       "phase": "Phase 9",
       "visibility": "public",
@@ -289,7 +445,7 @@
       "lookup_tags": ["documents", "workspace", "file", "open", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     },
     {
@@ -316,7 +472,7 @@
       "lookup_tags": ["documents", "workspace", "file", "reload", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     },
     {
@@ -343,7 +499,7 @@
       "lookup_tags": ["documents", "workspace", "file", "save", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     },
     {
@@ -658,7 +814,7 @@
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "bindKey",
       "user_facing_name": "Bind Key",
-      "summary": "Bind Key through the planned `clay:keybindings` Clay JavaScript facade.",
+      "summary": "Bind Key through the runtime-backed `clay:keybindings` Clay JavaScript facade.",
       "owner": "server",
       "phase": "Phase 7",
       "visibility": "public",
@@ -695,7 +851,7 @@
       "lookup_tags": ["js-api", "keybindingmanagement", "keybindings"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
     },
     {
@@ -706,11 +862,11 @@
       "js_export": "listKeyBindings",
       "js_facade": "runtime/js/keybindings.ts::listKeyBindings",
       "backing_rust": "src/protocol/mod.rs::BehaviorManifest::minimal_text_editing",
-      "deno_op": "op_clay_keybindings_list_keybindings",
-      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_list_keybindings",
+      "deno_op": "op_clay_keybindings_list_key_bindings",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_list_key_bindings",
       "name": "listKeyBindings",
       "user_facing_name": "List Key Bindings",
-      "summary": "List Key Bindings through the planned `clay:keybindings` Clay JavaScript facade.",
+      "summary": "List Key Bindings through the runtime-backed `clay:keybindings` Clay JavaScript facade.",
       "owner": "server",
       "phase": "Phase 7",
       "visibility": "public",
@@ -729,7 +885,7 @@
       "lookup_tags": ["js-api", "keybindingmanagement", "keybindings"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
     },
     {
@@ -744,7 +900,7 @@
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_unbind_key",
       "name": "unbindKey",
       "user_facing_name": "Unbind Key",
-      "summary": "Unbind Key through the planned `clay:keybindings` Clay JavaScript facade.",
+      "summary": "Unbind Key through the runtime-backed `clay:keybindings` Clay JavaScript facade.",
       "owner": "server",
       "phase": "Phase 7",
       "visibility": "public",
@@ -775,8 +931,704 @@
       "lookup_tags": ["js-api", "keybindingmanagement", "keybindings"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
+    },
+    {
+      "id": "clay.modes.serverActivateMajorMode",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/modes/server-activate-major-mode.md",
+      "js_module": "clay:modes",
+      "js_export": "serverActivateMajorMode",
+      "js_facade": "runtime/js/modes.ts::serverActivateMajorMode",
+      "backing_rust": "src/packages/modes.rs::ModeRegistry::activate_major_mode",
+      "deno_op": "op_clay_modes_activate_major_mode",
+      "deno_op_path": "src/server/ops/modes.rs::op_clay_modes_activate_major_mode",
+      "name": "serverActivateMajorMode",
+      "user_facing_name": "Activate Major Mode",
+      "summary": "Activate Major Mode through the runtime-backed `clay:modes` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": ["mode-activation"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "number",
+          "default": "required",
+          "description": "Behavior-changing setting `documentId` for this primitive gate API."
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "default": "optional",
+          "description": "Behavior-changing setting `path` for this primitive gate API."
+        },
+        {
+          "name": "mimeType",
+          "type": "string",
+          "default": "optional",
+          "description": "Behavior-changing setting `mimeType` for this primitive gate API."
+        },
+        {
+          "name": "behaviorVersion",
+          "type": "number",
+          "default": "generated",
+          "description": "Behavior-changing setting `behaviorVersion` for this primitive gate API."
+        }
+      ],
+      "security": "Requires mode-activation permission and server validation that the mode was registered and matches the target document metadata; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or arbitrary client behavior authority.",
+      "agent_guidance": "Use `clay.modes.serverActivateMajorMode` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "modeactivation", "modes"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.modes.serverClassifyDocument",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/modes/server-classify-document.md",
+      "js_module": "clay:modes",
+      "js_export": "serverClassifyDocument",
+      "js_facade": "runtime/js/modes.ts::serverClassifyDocument",
+      "backing_rust": "src/packages/modes.rs::ModeRegistry::classify",
+      "deno_op": "op_clay_modes_classify_document",
+      "deno_op_path": "src/server/ops/modes.rs::op_clay_modes_classify_document",
+      "name": "serverClassifyDocument",
+      "user_facing_name": "Classify Document",
+      "summary": "Classify Document through the runtime-backed `clay:modes` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "number",
+          "default": "required",
+          "description": "Behavior-changing setting `documentId` for this primitive gate API."
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "default": "optional",
+          "description": "Behavior-changing setting `path` for this primitive gate API."
+        },
+        {
+          "name": "mimeType",
+          "type": "string",
+          "default": "optional",
+          "description": "Behavior-changing setting `mimeType` for this primitive gate API."
+        }
+      ],
+      "security": "Returns mode classification metadata from already registered static patterns through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.",
+      "agent_guidance": "Use `clay.modes.serverClassifyDocument` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "modedocumentclassificationquery", "modes"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.modes.serverRegisterModePattern",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/modes/server-register-mode-pattern.md",
+      "js_module": "clay:modes",
+      "js_export": "serverRegisterModePattern",
+      "js_facade": "runtime/js/modes.ts::serverRegisterModePattern",
+      "backing_rust": "src/packages/modes.rs::ModeRegistry::register_mode",
+      "deno_op": "op_clay_modes_register_pattern",
+      "deno_op_path": "src/server/ops/modes.rs::op_clay_modes_register_pattern",
+      "name": "serverRegisterModePattern",
+      "user_facing_name": "Register Mode Pattern",
+      "summary": "Register Mode Pattern through the runtime-backed `clay:modes` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": ["mode-registration"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "extensions",
+          "type": "string[]",
+          "default": "required",
+          "description": "Behavior-changing setting `extensions` for this primitive gate API."
+        },
+        {
+          "name": "mimeTypes",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Behavior-changing setting `mimeTypes` for this primitive gate API."
+        },
+        {
+          "name": "fileNames",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Behavior-changing setting `fileNames` for this primitive gate API."
+        },
+        {
+          "name": "fileNamePatterns",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Behavior-changing setting `fileNamePatterns` for this primitive gate API."
+        },
+        {
+          "name": "modeId",
+          "type": "string",
+          "default": "required",
+          "description": "Behavior-changing setting `modeId` for this primitive gate API."
+        },
+        {
+          "name": "apiPrefix",
+          "type": "string",
+          "default": "required",
+          "description": "Behavior-changing setting `apiPrefix` for this primitive gate API."
+        }
+      ],
+      "security": "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.",
+      "agent_guidance": "Use `clay.modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "modedocumentclassification", "modes"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.packages.serverLoadPackage",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/packages/server-load-package.md",
+      "js_module": "clay:packages",
+      "js_export": "serverLoadPackage",
+      "js_facade": "runtime/js/packages.ts::serverLoadPackage",
+      "backing_rust": "src/packages/record.rs::assemble_package_record",
+      "deno_op": "op_clay_packages_load_package",
+      "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_load_package",
+      "name": "serverLoadPackage",
+      "user_facing_name": "Load Package",
+      "summary": "Validate a package.json-shaped Clay package record and return inert load-time summary metadata.",
+      "owner": "server",
+      "phase": "Phase 17",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "packageJson",
+          "type": "PackageJson",
+          "default": "required",
+          "description": "The package.json-shaped object containing name, version, and clay metadata to validate."
+        },
+        {
+          "name": "clay.apiPrefix",
+          "type": "string",
+          "default": "required",
+          "description": "Package-owned API prefix used for provenance and contribution ID validation."
+        },
+        {
+          "name": "clay.docs",
+          "type": "string",
+          "default": "required",
+          "description": "Package documentation path required by the load contract."
+        },
+        {
+          "name": "clay.performance.estimatedManifestBytes",
+          "type": "number",
+          "default": "required",
+          "description": "Declared package manifest payload estimate checked against server budgets."
+        }
+      ],
+      "security": "Validates a Clay package record through server validation and returns inert summary metadata only; package installation, enable/disable mutation, external package-manager execution, and package JavaScript execution remain separate and it does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.",
+      "agent_guidance": "Use this API to verify package load metadata in the controlled server runtime; do not use it to install packages, enable packages, execute package JavaScript, or call raw Deno ops.",
+      "lookup_tags": ["js-api", "packages", "package-loading", "primitive-gate"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.packages.serverValidatePackageManifest",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/packages/server-validate-package-manifest.md",
+      "js_module": "clay:packages",
+      "js_export": "serverValidatePackageManifest",
+      "js_facade": "runtime/js/packages.ts::serverValidatePackageManifest",
+      "backing_rust": "src/packages/manifest.rs::validate_manifest_value",
+      "deno_op": "op_clay_packages_validate_manifest",
+      "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_validate_manifest",
+      "name": "serverValidatePackageManifest",
+      "user_facing_name": "Validate Package Manifest",
+      "summary": "Validate Package Manifest through the runtime-backed `clay:packages` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "manifest",
+          "type": "ClayPackageManifest",
+          "default": "required",
+          "description": "Behavior-changing setting `manifest` for this primitive gate API."
+        },
+        {
+          "name": "apiPrefix",
+          "type": "string",
+          "default": "required",
+          "description": "Behavior-changing setting `apiPrefix` for this primitive gate API."
+        },
+        {
+          "name": "entry",
+          "type": "string",
+          "default": "required",
+          "description": "Behavior-changing setting `entry` for this primitive gate API."
+        },
+        {
+          "name": "loadEntry",
+          "type": "string",
+          "default": "optional",
+          "description": "Behavior-changing setting `loadEntry` for this primitive gate API."
+        }
+      ],
+      "security": "Validates package identity, semver, apiPrefix, permissions, modes, entry metadata, and prohibited authority metadata through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.",
+      "agent_guidance": "Use `clay.packages.serverValidatePackageManifest` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "packagemanifestvalidation", "packages"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.packages.serverValidatePackagePermissions",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/packages/server-validate-package-permissions.md",
+      "js_module": "clay:packages",
+      "js_export": "serverValidatePackagePermissions",
+      "js_facade": "runtime/js/packages.ts::serverValidatePackagePermissions",
+      "backing_rust": "src/packages/permissions.rs::parse_permission",
+      "deno_op": "op_clay_packages_validate_permissions",
+      "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_validate_permissions",
+      "name": "serverValidatePackagePermissions",
+      "user_facing_name": "Validate Package Permissions",
+      "summary": "Validate Package Permissions through the runtime-backed `clay:packages` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 16.5",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "permissions",
+          "type": "string[]",
+          "default": "required",
+          "description": "Behavior-changing setting `permissions` for this primitive gate API."
+        }
+      ],
+      "security": "Validates declared package permissions and grants no authority by itself; rejects unknown, undeclared, prohibited, or unapproved scopes through server validation and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.",
+      "agent_guidance": "Use `clay.packages.serverValidatePackagePermissions` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["js-api", "packagepermissionvalidation", "packages"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.parse.serverRegisterParseHandler",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
+      "js_module": "clay:parse",
+      "js_export": "serverRegisterParseHandler",
+      "js_facade": "runtime/js/parse.ts::serverRegisterParseHandler",
+      "backing_rust": "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
+      "deno_op": "op_clay_parse_register_parse_handler",
+      "deno_op_path": "src/server/ops/parse.rs::op_clay_parse_register_parse_handler",
+      "name": "serverRegisterParseHandler",
+      "user_facing_name": "Register Parse Handler",
+      "summary": "Register a server-side background parse provider for an active package mode.",
+      "owner": "server",
+      "phase": "Phase 18",
+      "visibility": "public",
+      "permissions": ["parse-document"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "modeId",
+          "type": "string",
+          "default": "required",
+          "description": "Active mode ID this handler serves."
+        },
+        {
+          "name": "parseUnits",
+          "type": "enum",
+          "default": "line-group",
+          "description": "Coarsest incremental parse unit: file, region, or line-group."
+        },
+        {
+          "name": "viewportPriority",
+          "type": "boolean",
+          "default": "true",
+          "description": "Whether visible ranges are prioritized before adjacent/off-viewport ranges."
+        },
+        {
+          "name": "timeoutMs",
+          "type": "number",
+          "default": "50",
+          "description": "Bounded handler timeout policy validated at registration/configuration time."
+        },
+        {
+          "name": "resultBudgetBytes",
+          "type": "number",
+          "default": "4096",
+          "description": "Incremental parse result budget enforced before publication."
+        }
+      ],
+      "security": "Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, and bounded parse result publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.",
+      "agent_guidance": "Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser. Do not pass executable callbacks in registration payloads or put parse work on the client hot path.",
+      "lookup_tags": ["js-api", "parse", "markdown", "incrementalparseupdate", "parser"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.defineButton",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-button.md",
+      "js_module": "clay:sdui",
+      "js_export": "defineButton",
+      "js_facade": "runtime/js/sdui.ts::defineButton",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::Button",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "defineButton",
+      "user_facing_name": "Define Button",
+      "summary": "Create a runtime-backed inert SDUI button with a server-routed action intent through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "label",
+          "type": "string",
+          "default": "required",
+          "description": "Button label rendered by the native client."
+        },
+        {
+          "name": "action",
+          "type": "SduiActionIntent",
+          "default": "required",
+          "description": "Server-routed command intent; it is metadata, not executable code."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.defineButton` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.defineEditorView",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-editor-view.md",
+      "js_module": "clay:sdui",
+      "js_export": "defineEditorView",
+      "js_facade": "runtime/js/sdui.ts::defineEditorView",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::EditorView",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "defineEditorView",
+      "user_facing_name": "Define Editor View",
+      "summary": "Create a runtime-backed inert SDUI document-bound editor view placeholder through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string|number",
+          "default": "current",
+          "description": "Server-known document identifier to bind to the native editor view."
+        },
+        {
+          "name": "expectedVersion",
+          "type": "number|null",
+          "default": "null",
+          "description": "Optional document version expectation used for safe binding metadata."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.defineEditorView` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.defineFlex",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-flex.md",
+      "js_module": "clay:sdui",
+      "js_export": "defineFlex",
+      "js_facade": "runtime/js/sdui.ts::defineFlex",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::Flex",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "defineFlex",
+      "user_facing_name": "Define Flex Layout",
+      "summary": "Create a runtime-backed inert SDUI row or column layout container through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "direction",
+          "type": "enum",
+          "default": "row",
+          "description": "Layout direction; allowed values are row and column."
+        },
+        {
+          "name": "children",
+          "type": "SduiNodeDefinition[]",
+          "default": "[]",
+          "description": "Child node definitions arranged in the chosen direction."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.defineFlex` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.defineLabel",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-label.md",
+      "js_module": "clay:sdui",
+      "js_export": "defineLabel",
+      "js_facade": "runtime/js/sdui.ts::defineLabel",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::Label",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "defineLabel",
+      "user_facing_name": "Define Label",
+      "summary": "Create a runtime-backed inert SDUI text label through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "text",
+          "type": "string",
+          "default": "required",
+          "description": "Inert label text rendered by the native client."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.defineLabel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.defineList",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-list.md",
+      "js_module": "clay:sdui",
+      "js_export": "defineList",
+      "js_facade": "runtime/js/sdui.ts::defineList",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::List",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "defineList",
+      "user_facing_name": "Define List",
+      "summary": "Create a runtime-backed inert SDUI list of inert selectable items through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "items",
+          "type": "SduiListItemDefinition[]",
+          "default": "[]",
+          "description": "List items with labels, optional details, and optional server-routed action intents."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.defineList` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.definePanel",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-panel.md",
+      "js_module": "clay:sdui",
+      "js_export": "definePanel",
+      "js_facade": "runtime/js/sdui.ts::definePanel",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::Panel",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "definePanel",
+      "user_facing_name": "Define Panel",
+      "summary": "Create a runtime-backed inert SDUI panel container through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "title",
+          "type": "string",
+          "default": "required",
+          "description": "Panel title rendered by the native client."
+        },
+        {
+          "name": "children",
+          "type": "SduiNodeDefinition[]",
+          "default": "[]",
+          "description": "Child node definitions that are arranged inside the panel."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.definePanel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.defineStack",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/define-stack.md",
+      "js_module": "clay:sdui",
+      "js_export": "defineStack",
+      "js_facade": "runtime/js/sdui.ts::defineStack",
+      "backing_rust": "src/protocol/sdui.rs::SduiNodeKind::Stack",
+      "deno_op": "op_clay_sdui_define_node",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_define_node",
+      "name": "defineStack",
+      "user_facing_name": "Define Stack Layout",
+      "summary": "Create a runtime-backed inert SDUI stack layout container through the `clay:sdui` Clay JavaScript facade.",
+      "owner": "server",
+      "phase": "Phase 12",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "children",
+          "type": "SduiNodeDefinition[]",
+          "default": "[]",
+          "description": "Child node definitions arranged as a native stack."
+        },
+        {
+          "name": "id",
+          "type": "string|number",
+          "default": "optional",
+          "description": "Optional stable SDUI node identifier used for reconciliation."
+        }
+      ],
+      "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.defineStack` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.sdui.publishTree",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/sdui/publish-tree.md",
+      "js_module": "clay:sdui",
+      "js_export": "publishTree",
+      "js_facade": "runtime/js/sdui.ts::publishTree",
+      "backing_rust": "src/server/sdui.rs::validate_runtime_tree",
+      "deno_op": "op_clay_sdui_publish_tree",
+      "deno_op_path": "src/server/ops/sdui.rs::op_clay_sdui_publish_tree",
+      "name": "publishTree",
+      "user_facing_name": "Publish SDUI Tree",
+      "summary": "Publish a runtime-built inert server-driven UI tree through the `clay:sdui` server-side facade.",
+      "owner": "server",
+      "phase": "Phase 13",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "tree",
+          "type": "SduiNodeDefinition",
+          "default": "required",
+          "description": "Root node definition previously built with `clay:sdui` helpers."
+        }
+      ],
+      "security": "Publishes inert declarative UI metadata only after server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.sdui.publishTree` only from server-side configuration or extension code after building inert SDUI nodes with documented helpers; never call raw ops or embed executable client script.",
+      "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase13", "runtime-backed", "configuration"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
     },
     {
       "id": "clay.workspace.serverListWorkspaceRoots",
@@ -802,7 +1654,7 @@
       "lookup_tags": ["workspace", "roots", "metadata", "file", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": true
     }
   ]

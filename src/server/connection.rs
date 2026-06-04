@@ -7,13 +7,14 @@ use tokio::{
 
 use crate::protocol::{
     ClientId, ClientMessage, DocumentId, DocumentMetadata, PROTOCOL_VERSION, ProtocolErrorCode,
-    ServerMessage, WorkspaceRootId,
+    RuntimeDiagnostic, ServerMessage, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
 use super::{
     behavior::ActiveBehaviorManifest,
     document::DocumentState,
+    sdui::{StaticSduiState, sdui_action_response},
     workspace::{WorkspaceError, WorkspaceState},
 };
 
@@ -23,6 +24,8 @@ pub(crate) async fn handle_connection<S>(
     document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     workspace: Arc<Mutex<WorkspaceState>>,
+    sdui: Arc<Mutex<StaticSduiState>>,
+    runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -34,8 +37,16 @@ where
             protocol_version,
             client_name: _,
         } if protocol_version == PROTOCOL_VERSION => {
-            send_welcome_snapshot_and_manifest(&mut stream, client_id, &document, &behavior, codec)
-                .await?;
+            send_welcome_snapshot_and_manifest(
+                &mut stream,
+                client_id,
+                &document,
+                &behavior,
+                &sdui,
+                &runtime_diagnostics,
+                codec,
+            )
+            .await?;
         }
         ClientMessage::Hello { .. } => {
             codec
@@ -215,6 +226,19 @@ where
                 let response = document_list_response(&workspace, client_id).await;
                 codec.write_server_message(&mut stream, &response).await?;
             }
+            ClientMessage::SduiAction {
+                client_id: _,
+                ui_version: _,
+                intent,
+            } => {
+                let response = {
+                    let state = sdui.lock().await;
+                    sdui_action_response(&state, &intent)
+                };
+                if let Some(response) = response {
+                    codec.write_server_message(&mut stream, &response).await?;
+                }
+            }
             ClientMessage::Hello { .. } => {
                 codec
                     .write_server_message(
@@ -235,6 +259,8 @@ async fn send_welcome_snapshot_and_manifest<S>(
     client_id: u64,
     document: &Arc<Mutex<DocumentState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    runtime_diagnostics: &Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -260,7 +286,21 @@ where
         .await?;
 
     let manifest_message = behavior.lock().await.manifest_message();
-    codec.write_server_message(stream, &manifest_message).await
+    codec
+        .write_server_message(stream, &manifest_message)
+        .await?;
+
+    let sdui_snapshot = sdui.lock().await.snapshot_message(client_id);
+    codec.write_server_message(stream, &sdui_snapshot).await?;
+
+    let diagnostics = runtime_diagnostics.lock().await.clone();
+    for diagnostic in diagnostics {
+        codec
+            .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+            .await?;
+    }
+
+    Ok(())
 }
 
 async fn document_for_message(
@@ -416,6 +456,14 @@ mod tests {
         Arc::new(Mutex::new(WorkspaceState::new()))
     }
 
+    fn sdui_state() -> Arc<Mutex<StaticSduiState>> {
+        Arc::new(Mutex::new(StaticSduiState::for_document(1, 1)))
+    }
+
+    fn runtime_diagnostics() -> Arc<Mutex<Vec<RuntimeDiagnostic>>> {
+        Arc::new(Mutex::new(Vec::new()))
+    }
+
     fn temp_workspace(name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -431,10 +479,12 @@ mod tests {
     use crate::{
         protocol::{
             BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
-            EditRejection, FileErrorCode, PROTOCOL_VERSION, ServerMessage, codec::Codec,
+            EditRejection, FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiNodeKind,
+            ServerMessage, codec::Codec,
         },
         server::{
-            behavior::ActiveBehaviorManifest, document::DocumentState, workspace::WorkspaceState,
+            behavior::ActiveBehaviorManifest, document::DocumentState, sdui::StaticSduiState,
+            workspace::WorkspaceState,
         },
     };
 
@@ -454,6 +504,8 @@ mod tests {
             document,
             behavior,
             workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
         let mut client = client;
@@ -503,6 +555,8 @@ mod tests {
             document,
             behavior,
             workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
         let mut client = client;
@@ -530,6 +584,197 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_sends_initial_sdui_snapshot_after_bootstrap() {
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "Hello from server".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::SduiSnapshot { client_id, tree } => {
+                assert_eq!(client_id, 99);
+                assert_eq!(tree.ui_version, 1);
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|node| matches!(node.kind, SduiNodeKind::EditorView { .. }))
+                );
+            }
+            message => panic!("expected SduiSnapshot, got {message:?}"),
+        }
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_receives_js_generated_sdui_snapshot() {
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            1,
+            "Hello from runtime SDUI".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = sdui_state();
+        {
+            let runtime_tree = crate::protocol::SduiTree {
+                ui_version: 1,
+                root_id: crate::protocol::SduiNodeId(1),
+                nodes: vec![
+                    crate::protocol::SduiNode::new(
+                        crate::protocol::SduiNodeId(1),
+                        SduiNodeKind::Flex {
+                            direction: crate::protocol::SduiFlexDirection::Row,
+                            children: vec![
+                                crate::protocol::SduiNodeId(2),
+                                crate::protocol::SduiNodeId(3),
+                            ],
+                        },
+                    ),
+                    crate::protocol::SduiNode::new(
+                        crate::protocol::SduiNodeId(2),
+                        SduiNodeKind::Panel {
+                            title: "Runtime".to_string(),
+                            children: Vec::new(),
+                        },
+                    ),
+                    crate::protocol::SduiNode::new(
+                        crate::protocol::SduiNodeId(3),
+                        SduiNodeKind::EditorView {
+                            binding: crate::protocol::SduiEditorBinding {
+                                document_id: 1,
+                                expected_version: Some(1),
+                            },
+                        },
+                    ),
+                ],
+            };
+            sdui.lock()
+                .await
+                .replace_with_runtime_tree(runtime_tree)
+                .unwrap();
+        }
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            workspace_state(),
+            Arc::clone(&sdui),
+            runtime_diagnostics(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::SduiSnapshot { tree, .. } => {
+                assert!(tree.nodes.iter().any(|node| matches!(
+                    &node.kind,
+                    SduiNodeKind::Panel { title, .. } if title == "Runtime"
+                )));
+            }
+            message => panic!("expected runtime SduiSnapshot, got {message:?}"),
+        }
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn server_sends_runtime_diagnostics_after_bootstrap() {
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::default()));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let diagnostics = Arc::new(Mutex::new(vec![RuntimeDiagnostic::error(
+            "clay.runtime.invalid_import",
+            "Only clay:* facades and relative local configuration modules are allowed.",
+        )]));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            workspace_state(),
+            sdui_state(),
+            diagnostics,
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                "clay.runtime.invalid_import",
+                "Only clay:* facades and relative local configuration modules are allowed.",
+            ))
+        );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn server_acknowledges_insert_edit() {
         let (client, server) = duplex(4096);
         let codec = Codec::default();
@@ -545,6 +790,8 @@ mod tests {
             document,
             behavior,
             workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
         let mut client = client;
@@ -562,6 +809,7 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -611,6 +859,8 @@ mod tests {
             Arc::clone(&document),
             behavior,
             workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
         let mut client = client;
@@ -628,6 +878,7 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -708,6 +959,8 @@ mod tests {
             document,
             behavior,
             workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
         let mut client = client;
@@ -725,6 +978,7 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -777,6 +1031,8 @@ mod tests {
             document,
             behavior,
             Arc::clone(&workspace),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
         let mut client = client;
@@ -794,6 +1050,7 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -898,7 +1155,14 @@ mod tests {
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
         let server_task = tokio::spawn(handle_connection(
-            server, 99, document, behavior, workspace, codec,
+            server,
+            99,
+            document,
+            behavior,
+            workspace,
+            sdui_state(),
+            runtime_diagnostics(),
+            codec,
         ));
         let mut client = client;
 
@@ -915,6 +1179,7 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -978,6 +1243,8 @@ mod tests {
             document,
             behavior,
             workspace_state(),
+            sdui_state(),
+            runtime_diagnostics(),
             codec,
         ));
 

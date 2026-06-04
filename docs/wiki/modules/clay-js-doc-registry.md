@@ -23,6 +23,8 @@ The Clay JS documentation registry turns the Markdown files linked under `docs/i
 - Include Phase 9 file/workspace APIs (`clay.documents.serverOpenDocument`, `serverSaveDocument`, `serverReloadDocument`, `serverGetDocumentStatus`, `serverListDocuments`, and `clay.workspace.serverListWorkspaceRoots`) so app/help/agent lookup can discover server-owned file IO and workspace metadata capabilities without exposing raw protocol messages or filesystem authority.
 - Verify key binding configuration APIs (`clay.keybindings.bindKey`, `clay.keybindings.unbindKey`, and `clay.keybindings.listKeyBindings`) as planned server-side configuration/query APIs with empty default key-binding lists, queryable `key`/`command`/`scope`/`when` custom properties, command ID validation notes, and no external authority.
 - Verify initial editor customization metadata for `clay.editor.clientSetCursorStyle`, including generated `color`, `blinking`, and `type` custom properties with types, defaults, allowed values where relevant, lookup coverage, and no document-mutation or external authority.
+- Include Phase 13 SDUI schema helper/publication APIs under `clay:sdui` (`definePanel`, `defineLabel`, `defineButton`, `defineList`, `defineEditorView`, `defineFlex`, `defineStack`, and `publishTree`) so app/help/agent lookup can discover runtime-backed inert server-driven UI construction without exposing raw protocol DTOs, native observability internals, or client-side script authority.
+- Keep Phase 15 SDUI observability helpers (`SduiObservableSnapshot`, `SduiStatusObservation`, and their extraction methods) crate-internal unless a future dedicated Clay JS API adds docs, facade, op, inventory, and generated-registry metadata.
 - Produce deterministic JSON ordered by stable API ID.
 - Load the checked-in generated JSON with `ClayJsApiRegistry::from_generated` for app/help/agent discovery without reading source Markdown during normal lookup.
 - Provide read-only lookup helpers for stable ID, JS module/export, user-facing name, kind/owner, lookup tag, default key binding, and custom property name.
@@ -69,6 +71,7 @@ let configurable_color_apis = registry.by_custom_property("color");
 - Configuration entry point entries are contract metadata only. `loadConfigurationModule` describes future server-side local module loading from `~/.config/clay/init.js`; Phase 8 does not read those files, evaluate JavaScript, load packages/extensions, access the network/workspace, run shell commands, or grant client-side JavaScript authority.
 - File/workspace entries are contract metadata only until future `deno_core` op wrappers exist. The docs record required server-side validation, workspace root authorization, path traversal rejection, typed file errors, and no raw host filesystem authority; the generated registry does not perform IO or broaden workspace permissions.
 - Editor customization entries are metadata contracts only. Cursor style remains configuration/customization UI state, while viewport sizing remains a planned client-local layout API rather than user configuration; neither path grants document mutation or routes ordinary typing through JavaScript.
+- SDUI helper entries describe inert native UI nodes, action intents, and explicit validated publication; they do not expose native observability snapshots/status structs, execute client scripts, grant document/file/workspace authority, or run in Masonry paint/input hot paths.
 - Security metadata records authority boundaries only; it does not grant permissions or execute configuration.
 - Configuration-relevant APIs must deny implicit filesystem, network, shell, extension loading, AI mutation, workspace, package loading, WASM, and client-side JavaScript execution authority in both source documentation and generated registry metadata.
 
@@ -77,6 +80,7 @@ let configurable_color_apis = registry.by_custom_property("color");
 - `tests/clay_js_doc_registry.rs::generated_registry_is_current`: stale-artifact check and repair command.
 - `tests/clay_js_doc_registry.rs::generated_registry_contains_all_indexed_public_apis`: verifies master-index coverage and unique stable IDs.
 - `tests/clay_js_doc_registry.rs::generated_registry_preserves_configuration_metadata`: verifies key binding, custom property, permission, security, facade, op, Rust owner, and lookup-tag metadata survives generation.
+- `tests/clay_js_doc_registry.rs::generated_registry_contains_phase13_sdui_runtime_apis`: verifies Phase 13 SDUI helper/publication docs are generated under `clay:sdui`, keep empty default key bindings, preserve runtime-backed sync/async metadata, deny external authority, and are discoverable by SDUI lookup tags/custom properties.
 - `tests/clay_js_doc_registry.rs::lookup_finds_api_by_stable_id_and_export`: verifies ID, JS module/export, user-facing name, kind/owner, and tag lookups over generated data.
 - `tests/clay_js_doc_registry.rs::lookup_finds_configuration_by_custom_property`: verifies custom property discovery for cursor style configuration metadata.
 - `tests/clay_js_doc_registry.rs::cursor_style_custom_properties_are_complete`: verifies `color`, `blinking`, and `type` include type/default metadata and that the enum documents `block`, `bar`, and `underline`.
@@ -95,6 +99,7 @@ let configurable_color_apis = registry.by_custom_property("color");
 - `tests/rust_visibility_api_mapping.rs::docs_public_items_are_internal_registry_infrastructure`: verifies `src/docs` public Rust items remain explicitly classified as internal registry/update-command infrastructure rather than accidental user-facing Clay JS APIs.
 - `tests/clay_js_api_inventory.rs::configuration_docs_deny_implicit_external_authority`: verifies configuration-relevant inventory records, Markdown frontmatter, and Markdown bodies all include the required no-authority language.
 - `tests/clay_js_api_inventory.rs::permission_bearing_configuration_requires_validation_notes`: verifies any configuration-relevant API with explicit permissions documents permission/server validation notes.
+- `tests/clay_js_api_inventory.rs::phase15_sdui_observability_surfaces_remain_internal`: verifies `SduiObservableSnapshot`, `SduiNativeState::observable_snapshot`, `SduiStatusObservation`, and `EditorWidget::status_observation` remain `pub(crate)`, and that public `clay.sdui.*` inventory entries stay limited to documented schema helpers plus `publishTree`.
 
 ## Related
 

@@ -1,7 +1,7 @@
-// Clay document authority facade skeleton.
+// Clay document authority facade.
 //
-// Document APIs are planned server-authoritative APIs. The facade keeps stable
-// user imports separate from Rust internals and future op wrapper names.
+// Runtime-backed document APIs call server-owned op wrappers while keeping
+// stable user imports separate from Rust internals and raw op names.
 
 export type DocumentId = string;
 export type WorkspaceRootId = string;
@@ -61,6 +61,30 @@ export interface ReloadDocumentResult {
   text: string;
 }
 
+interface DocumentOps {
+  op_clay_documents_open_document?: (optionsJson: string) => Promise<string>;
+  op_clay_documents_save_document?: (optionsJson: string) => Promise<string>;
+  op_clay_documents_reload_document?: (optionsJson: string) => Promise<string>;
+  op_clay_documents_get_document_status?: (documentIdJson: string) => Promise<string>;
+  op_clay_documents_list_documents?: () => Promise<string>;
+}
+
+declare const globalThis: { Deno?: { core?: { ops?: DocumentOps } } };
+
+function documentOps(): Required<DocumentOps> {
+  const ops = globalThis.Deno?.core?.ops;
+  if (
+    typeof ops?.op_clay_documents_open_document !== "function" ||
+    typeof ops?.op_clay_documents_save_document !== "function" ||
+    typeof ops?.op_clay_documents_reload_document !== "function" ||
+    typeof ops?.op_clay_documents_get_document_status !== "function" ||
+    typeof ops?.op_clay_documents_list_documents !== "function"
+  ) {
+    throw new Error("clay:documents runtime ops are unavailable in this environment");
+  }
+  return ops as Required<DocumentOps>;
+}
+
 function plannedApi(name: string): never {
   throw new Error(`${name} is planned; Clay JS runtime op wiring is not implemented yet`);
 }
@@ -76,25 +100,21 @@ export async function serverGetDocumentLease(documentId: DocumentId): Promise<Do
 }
 
 export async function serverOpenDocument(options: OpenDocumentOptions): Promise<OpenDocumentResult> {
-  void options;
-  plannedApi("clay.documents.serverOpenDocument");
+  return JSON.parse(await documentOps().op_clay_documents_open_document(JSON.stringify(options))) as OpenDocumentResult;
 }
 
 export async function serverSaveDocument(options: SaveDocumentOptions): Promise<SaveDocumentResult> {
-  void options;
-  plannedApi("clay.documents.serverSaveDocument");
+  return JSON.parse(await documentOps().op_clay_documents_save_document(JSON.stringify(options))) as SaveDocumentResult;
 }
 
 export async function serverReloadDocument(options: ReloadDocumentOptions): Promise<ReloadDocumentResult> {
-  void options;
-  plannedApi("clay.documents.serverReloadDocument");
+  return JSON.parse(await documentOps().op_clay_documents_reload_document(JSON.stringify(options))) as ReloadDocumentResult;
 }
 
 export async function serverGetDocumentStatus(documentId: DocumentId): Promise<DocumentMetadata> {
-  void documentId;
-  plannedApi("clay.documents.serverGetDocumentStatus");
+  return JSON.parse(await documentOps().op_clay_documents_get_document_status(JSON.stringify(documentId))) as DocumentMetadata;
 }
 
 export async function serverListDocuments(): Promise<DocumentMetadata[]> {
-  plannedApi("clay.documents.serverListDocuments");
+  return JSON.parse(await documentOps().op_clay_documents_list_documents()) as DocumentMetadata[];
 }

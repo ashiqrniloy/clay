@@ -5,11 +5,11 @@ js_module: "clay:keybindings"
 js_export: listKeyBindings
 js_facade: runtime/js/keybindings.ts::listKeyBindings
 backing_rust: src/protocol/mod.rs::BehaviorManifest::minimal_text_editing
-deno_op: op_clay_keybindings_list_keybindings
-deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_list_keybindings
+deno_op: op_clay_keybindings_list_key_bindings
+deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_list_key_bindings
 name: listKeyBindings
 user_facing_name: List Key Bindings
-summary: List Key Bindings through the planned `clay:keybindings` Clay JavaScript facade.
+summary: List Key Bindings through the runtime-backed `clay:keybindings` Clay JavaScript facade.
 owner: server
 phase: Phase 7
 visibility: public
@@ -25,7 +25,7 @@ agent_guidance: Use `clay.keybindings.listKeyBindings` only for its documented k
 lookup_tags: [js-api, keybindingmanagement, keybindings]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: false
 ---
 
@@ -33,11 +33,11 @@ async: false
 
 ## Summary
 
-List Key Bindings through the planned `clay:keybindings` Clay JavaScript facade.
+List Key Bindings through the runtime-backed `clay:keybindings` Clay JavaScript facade.
 
 ## Description
 
-`listKeyBindings` is the planned public Phase 8 configuration query API for **List Key Bindings**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`listKeyBindings` is the runtime-backed public configuration query API for **List Key Bindings**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
 Authority: `configuration-query-api`. Runtime path: `server-side-query`. Listing key bindings is a background/help/configuration query and is not part of ordinary keypress handling. It returns documented manifest-routing metadata and never installs arbitrary JavaScript into the Rust client keypress path.
 
@@ -73,13 +73,13 @@ No default key binding is assigned. Users may bind a key to `clay.keybindings.li
 
 ## Return and async behavior
 
-Returns key binding records for help/configuration inspection.
+Returns key binding records for help/configuration inspection from the server-owned behavior manifest state.
 
-Current facade/runtime status is `planned`; this page defines the Phase 8 configuration contract before executable `deno_core` op wiring exists.
+The Phase 13 facade/runtime status is `runtime-backed`; the `deno_core` op wiring is executable during server-side configuration evaluation.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Current Phase 7 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 
@@ -96,7 +96,7 @@ Use `clay.keybindings.listKeyBindings` when the user asks for list key bindings 
 ## Backing implementation
 
 - JS facade: `runtime/js/keybindings.ts::listKeyBindings`
-- Future Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_list_keybindings` (`op_clay_keybindings_list_keybindings`)
+- Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_list_key_bindings` (`op_clay_keybindings_list_key_bindings`)
 - Backing Rust/current owner: `src/protocol/mod.rs::BehaviorManifest::minimal_text_editing`
 - Current implementation audit path: `src/protocol/mod.rs::BehaviorManifest; src/protocol/mod.rs::KeyBindingRule`
 

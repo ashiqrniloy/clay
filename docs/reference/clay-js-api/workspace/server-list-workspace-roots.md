@@ -21,7 +21,7 @@ agent_guidance: Use `clay.workspace.serverListWorkspaceRoots` only through the d
 lookup_tags: [workspace, roots, metadata, file, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -33,7 +33,7 @@ List server-configured workspace root metadata without exposing unrestricted hos
 
 ## Description
 
-`serverListWorkspaceRoots` is the planned public API for **List Workspace Roots**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
+`serverListWorkspaceRoots` is the runtime-backed public API for **List Workspace Roots**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
 
 Authority: `server-authoritative-workspace-query`. Runtime path: `server-first-query`. Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, Masonry paint/layout, or ordinary edit acknowledgement hot paths.
 
@@ -72,11 +72,11 @@ No behavior-changing custom properties are defined for this API.
 
 Returns a promise for sanitized workspace root metadata advertised by the server.
 
-Current Phase 9 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. Current Phase 9 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
 
 ## Permissions and security
 
@@ -95,7 +95,7 @@ Use `clay.workspace.serverListWorkspaceRoots` only through the documented Clay J
 ## Backing implementation
 
 - JS facade: `runtime/js/workspace.ts::serverListWorkspaceRoots`
-- Future Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_roots` (`op_clay_workspace_list_roots`)
+- Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_roots` (`op_clay_workspace_list_roots`)
 - Backing Rust/current owner: `src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
 

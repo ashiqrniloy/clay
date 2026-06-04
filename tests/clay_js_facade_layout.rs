@@ -21,7 +21,14 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
     ),
     (
         "runtime/js/configuration.ts",
-        &["loadConfigurationModule", "getConfigurationState"],
+        &[
+            "loadConfigurationModule",
+            "getConfigurationState",
+            "setPackageOption",
+            "setModePreference",
+            "setDecorationTheme",
+            "setParsePolicy",
+        ],
     ),
     (
         "runtime/js/documents.ts",
@@ -40,7 +47,46 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         "runtime/js/behavior.ts",
         &["getActiveBehaviorManifest", "listBehaviorRoutes"],
     ),
+    (
+        "runtime/js/sdui.ts",
+        &[
+            "definePanel",
+            "defineLabel",
+            "defineButton",
+            "defineList",
+            "defineEditorView",
+            "defineFlex",
+            "defineStack",
+            "publishTree",
+        ],
+    ),
     ("runtime/js/application.ts", &["quit"]),
+    (
+        "runtime/js/packages.ts",
+        &[
+            "serverValidatePackageManifest",
+            "serverValidatePackagePermissions",
+            "serverLoadPackage",
+        ],
+    ),
+    (
+        "runtime/js/modes.ts",
+        &[
+            "serverRegisterModePattern",
+            "serverClassifyDocument",
+            "serverActivateMajorMode",
+            "serverSelectDocumentManifest",
+            "serverRegisterDecorationProvider",
+            "serverRegisterParseProvider",
+            "serverRegisterFoldingProvider",
+        ],
+    ),
+    (
+        "runtime/js/commands.ts",
+        &["serverRegisterCommand", "serverListCommands"],
+    ),
+    ("runtime/js/decorations.ts", &["serverPublishDecorations"]),
+    ("runtime/js/parse.ts", &["serverRegisterParseHandler"]),
 ];
 
 #[test]

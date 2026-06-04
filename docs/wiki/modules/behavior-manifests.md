@@ -22,6 +22,7 @@ Behavior manifests are server-owned, server-issued, inert declarations that let 
 - `src/behavior/manifest.rs` validates manifest invariants before a manifest is trusted or installed.
 - `src/server/behavior.rs` owns the active server manifest, publishes validated replacements with deterministic version increments, and performs constant-time behavior-version checks.
 - `src/server/connection.rs` sends the active manifest during handshake and rejects edit/intent messages whose behavior version does not match the active server version before canonical document mutation.
+- `src/server/ops/keybindings.rs` and `src/server/ops/behavior.rs` let server-side configuration JavaScript update/query manifests through validated Clay facades without adding JavaScript to the client hot path.
 - `src/client/behavior.rs` validates initial/replacement manifests, atomically swaps active client behavior, and routes key strokes to local built-in edits or server-intent declarations.
 - `src/client/mod.rs` validates handshake manifests and processes replacement manifest messages from the server connection loop.
 - `src/editor/surface.rs` consults the installed manifest to decide whether ordinary edits can emit client-first edit events and uses the client router for key-level behavior.
@@ -42,6 +43,8 @@ Routing is explicit through `RoutingPolicy` variants: client-first predictable, 
 `validate_manifest` checks duplicate command IDs, unknown key binding commands, ambiguous key sequences, invalid tab/pair/autocomplete rules, and authority/routing mismatches. The schema has no field for arbitrary scripts or executable hooks.
 
 On the server, `ActiveBehaviorManifest` wraps the current manifest. `Default` creates and validates the default text-editing manifest at behavior version `1`. Connection handshake sends `ServerMessage::BehaviorManifest` from this active state rather than constructing an ad hoc manifest in codec or connection code. Replacement publishing validates the candidate manifest, overwrites its version with `current + 1`, and only swaps the active manifest after validation succeeds; invalid candidates leave the previous manifest and version active.
+
+During embedded-runtime configuration evaluation, `bindKey` and `unbindKey` operate on a runtime-local `ActiveBehaviorManifest` in `ClayOpState`. They parse a single chord such as `Ctrl+S`, validate `editor`/`global` scope, reject unsupported `when` expressions and unregistered commands, and compile the result into the same `KeyBindingRule`/`CommandDeclaration` structures used by static manifests. If configuration changed behavior state, `ClayRuntimeEvaluation` returns the updated manifest so server startup can install it through normal manifest validation/versioning.
 
 Every incoming `ClientMessage::Edit` and `ClientMessage::EditorIntent` carries a `behavior_version`. `src/server/connection.rs` checks that value against `ActiveBehaviorManifest::version()` before taking the document mutex and before calling `DocumentState::apply_edit`. A mismatch returns `ServerMessage::EditRejected { reason: EditRejection::InvalidBehaviorVersion { behavior_version, server_behavior_version } }`, preserving the canonical rope and document version.
 
@@ -71,6 +74,7 @@ validate_manifest(&manifest).unwrap();
 - Enter, Tab, pair insertion, comment continuation, and autocomplete trigger classification are driven by installed manifest data, not hardcoded side-effectful extension code.
 - Server-first command routes do not mutate local text before server acknowledgement.
 - The server, not the client, chooses and advances behavior versions; client-supplied stale or future behavior versions cannot bypass validation.
+- Runtime key binding registration is a manifest compilation step, not a client JavaScript handler installation step.
 - Behavior-version validation happens before document mutation and does not inspect full document text.
 
 ## Tests
@@ -78,6 +82,7 @@ validate_manifest(&manifest).unwrap();
 - `src/protocol/codec.rs`: round-trips `ServerMessage::BehaviorManifest` updates and `InvalidBehaviorVersion` rejections through the IPC codec, and rejects invalid or oversized manifest frames.
 - `src/behavior/manifest.rs`: validates executable/side-effect authority rejection, duplicate command/key binding rejection, and all routing policy variants.
 - `src/server/behavior.rs`: validates replacement publishing increments behavior versions, rejects invalid replacements without advancing state, and reports version mismatch metadata.
+- `src/server/js_runtime.rs`: validates runtime `bindKey`/`unbindKey`, behavior query facades, unknown command rejection, and manifest-based client key routing from a runtime-generated manifest.
 - `src/server/connection.rs`: validates handshake manifest publication and stale behavior-version edit rejection without canonical mutation.
 - `src/client/behavior.rs`: validates atomic client replacement, previous-manifest retention on invalid replacement, client-first key routing, Tab routing, autocomplete trigger classification, and server-first intent routing.
 - `src/client/mod.rs`: validates full outbound edit queues fail immediately via `try_send` without awaiting IPC capacity.
@@ -88,6 +93,7 @@ validate_manifest(&manifest).unwrap();
 ## Related
 
 - [Protocol Codec](protocol-codec.md)
+- [Behavior Runtime Registration](behavior-runtime-registration.md)
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
 - [Client Edit Emission](../flows/client-edit-emission.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)

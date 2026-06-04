@@ -2,6 +2,7 @@ use std::{
     error::Error,
     ffi::OsString,
     fmt,
+    path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     time::Duration,
 };
@@ -18,6 +19,8 @@ use tokio::sync::mpsc;
 use clay::client::{self, ClientConnectionEvent};
 use clay::ipc::{IpcEndpoint, default_endpoint, smoke_endpoint};
 use clay::masonry_editor::{EditorAction, EditorStatus, EditorWidget};
+use clay::perf::fixtures::{FixtureKind, FixtureSpec, default_fixture_path, generate_fixture_file};
+use clay::perf::metrics::{PERF_PROFILE_FLAG, PerfConfig, install_global_recorder};
 #[cfg(any(unix, windows))]
 use clay::server::{IpcServer, ServerConfig};
 
@@ -67,11 +70,47 @@ impl AppDriver for Driver {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClayCommand {
-    Auto { endpoint: IpcEndpoint },
-    Client { endpoint: IpcEndpoint },
-    Server { endpoint: IpcEndpoint },
-    SmokeGui { endpoint: IpcEndpoint },
+    Auto {
+        endpoint: IpcEndpoint,
+    },
+    Client {
+        endpoint: IpcEndpoint,
+    },
+    Server {
+        endpoint: IpcEndpoint,
+        configuration_root: Option<PathBuf>,
+    },
+    SmokeGui {
+        endpoint: IpcEndpoint,
+        configuration_root: Option<PathBuf>,
+    },
+    PerfFixture {
+        kind: FixtureKind,
+        size_mib: usize,
+        seed: u64,
+        output: Option<PathBuf>,
+    },
     Help,
+    Package {
+        subcommand: PackageCliSubcommand,
+    },
+}
+
+/// Subcommand for `clay package <op> [args...]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PackageCliSubcommand {
+    /// Install a package by spec (delegates to the configured npm-compatible manager).
+    Add { package_spec: String },
+    /// Remove an installed package.
+    Remove { package_name: String },
+    /// List all installed packages and their enabled status.
+    List,
+    /// Enable a previously installed package (runs Clay-owned validation).
+    Enable { package_name: String },
+    /// Disable a currently enabled package.
+    Disable { package_name: String },
+    /// Inspect metadata for a specific package.
+    Inspect { package_name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +135,7 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint]\n  clay client [endpoint]\n  clay smoke-gui\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n";
+const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec>\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchDiagnostic {
@@ -218,16 +257,45 @@ impl Error for LaunchError {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    match parse_command(std::env::args_os().skip(1).collect())? {
-        ClayCommand::Server { endpoint } => run_server(endpoint),
+    let (args, profile_perf) = extract_profile_perf_flag(std::env::args_os().skip(1));
+    install_global_recorder(PerfConfig::from_env().with_flag(profile_perf));
+
+    match parse_command(args)? {
+        ClayCommand::Server {
+            endpoint,
+            configuration_root,
+        } => run_server(endpoint, configuration_root),
         ClayCommand::Client { endpoint } => run_client(endpoint, false),
         ClayCommand::Auto { endpoint } => run_client(endpoint, true),
-        ClayCommand::SmokeGui { endpoint } => run_smoke_gui(endpoint),
+        ClayCommand::SmokeGui {
+            endpoint,
+            configuration_root,
+        } => run_smoke_gui(endpoint, configuration_root),
+        ClayCommand::PerfFixture {
+            kind,
+            size_mib,
+            seed,
+            output,
+        } => run_perf_fixture(kind, size_mib, seed, output),
         ClayCommand::Help => {
             println!("{CLI_USAGE}");
             Ok(())
         }
+        ClayCommand::Package { subcommand } => run_package_subcommand(subcommand),
     }
+}
+
+fn extract_profile_perf_flag(args: impl Iterator<Item = OsString>) -> (Vec<OsString>, bool) {
+    let mut profile_perf = false;
+    let mut retained = Vec::new();
+    for argument in args {
+        if argument == PERF_PROFILE_FLAG {
+            profile_perf = true;
+        } else {
+            retained.push(argument);
+        }
+    }
+    (retained, profile_perf)
 }
 
 fn parse_command(args: Vec<OsString>) -> Result<ClayCommand, CliError> {
@@ -240,11 +308,12 @@ fn parse_command(args: Vec<OsString>) -> Result<ClayCommand, CliError> {
 
     match first.to_string_lossy().as_ref() {
         "help" | "--help" | "-h" => Ok(ClayCommand::Help),
-        "server" | "--server" => parse_endpoint_subcommand("server", args)
-            .map(|endpoint| ClayCommand::Server { endpoint }),
+        "server" | "--server" => parse_server_subcommand(args),
         "client" | "--client" => parse_endpoint_subcommand("client", args)
             .map(|endpoint| ClayCommand::Client { endpoint }),
         "smoke-gui" | "smoke" | "--smoke-gui" => parse_smoke_gui_subcommand(args),
+        "perf-fixture" => parse_perf_fixture_subcommand(args),
+        "package" => parse_package_subcommand(args),
         _ => {
             if let Some(extra) = args.next() {
                 return Err(CliError::new(format!(
@@ -257,6 +326,85 @@ fn parse_command(args: Vec<OsString>) -> Result<ClayCommand, CliError> {
             })
         }
     }
+}
+
+fn parse_perf_fixture_subcommand(
+    args: impl Iterator<Item = OsString>,
+) -> Result<ClayCommand, CliError> {
+    let mut kind = None;
+    let mut size_mib = None;
+    let mut seed = 0xC1A4_F14E;
+    let mut output = None;
+    let mut args = args.peekable();
+
+    while let Some(argument) = args.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--kind" => {
+                let Some(value) = args.next() else {
+                    return Err(CliError::new(
+                        "missing value after --kind for 'perf-fixture'",
+                    ));
+                };
+                let value = value.to_string_lossy();
+                kind = Some(FixtureKind::parse(&value).ok_or_else(|| {
+                    CliError::new(format!("unknown performance fixture kind '{value}'"))
+                })?);
+            }
+            "--size-mib" => {
+                let Some(value) = args.next() else {
+                    return Err(CliError::new(
+                        "missing value after --size-mib for 'perf-fixture'",
+                    ));
+                };
+                size_mib = Some(parse_positive_usize("--size-mib", &value)?);
+            }
+            "--seed" => {
+                let Some(value) = args.next() else {
+                    return Err(CliError::new(
+                        "missing value after --seed for 'perf-fixture'",
+                    ));
+                };
+                seed = parse_u64("--seed", &value)?;
+            }
+            "--output" => {
+                let Some(value) = args.next() else {
+                    return Err(CliError::new(
+                        "missing value after --output for 'perf-fixture'",
+                    ));
+                };
+                output = Some(PathBuf::from(value));
+            }
+            other => {
+                return Err(CliError::new(format!(
+                    "unexpected argument for 'perf-fixture': {other}"
+                )));
+            }
+        }
+    }
+
+    Ok(ClayCommand::PerfFixture {
+        kind: kind.ok_or_else(|| CliError::new("missing --kind for 'perf-fixture'"))?,
+        size_mib: size_mib.ok_or_else(|| CliError::new("missing --size-mib for 'perf-fixture'"))?,
+        seed,
+        output,
+    })
+}
+
+fn parse_positive_usize(option: &str, value: &OsString) -> Result<usize, CliError> {
+    let text = value.to_string_lossy();
+    let parsed = text
+        .parse::<usize>()
+        .map_err(|_| CliError::new(format!("invalid numeric value for {option}: {text}")))?;
+    if parsed == 0 {
+        return Err(CliError::new(format!("{option} must be greater than zero")));
+    }
+    Ok(parsed)
+}
+
+fn parse_u64(option: &str, value: &OsString) -> Result<u64, CliError> {
+    let text = value.to_string_lossy();
+    text.parse::<u64>()
+        .map_err(|_| CliError::new(format!("invalid numeric value for {option}: {text}")))
 }
 
 fn parse_endpoint_subcommand(
@@ -278,35 +426,281 @@ fn parse_endpoint_subcommand(
     Ok(endpoint)
 }
 
-fn parse_smoke_gui_subcommand(
-    mut args: impl Iterator<Item = OsString>,
-) -> Result<ClayCommand, CliError> {
-    if let Some(extra) = args.next() {
-        return Err(CliError::new(format!(
-            "unexpected extra argument for 'smoke-gui': {}",
-            extra.to_string_lossy()
-        )));
-    }
-
-    Ok(ClayCommand::SmokeGui {
-        endpoint: smoke_endpoint("gui"),
+fn parse_server_subcommand(args: impl Iterator<Item = OsString>) -> Result<ClayCommand, CliError> {
+    let (endpoint, configuration_root) = parse_endpoint_and_config_fixture("server", args, true)?;
+    Ok(ClayCommand::Server {
+        endpoint,
+        configuration_root,
     })
 }
 
+fn parse_smoke_gui_subcommand(
+    args: impl Iterator<Item = OsString>,
+) -> Result<ClayCommand, CliError> {
+    let (_endpoint, configuration_root) =
+        parse_endpoint_and_config_fixture("smoke-gui", args, false)?;
+    Ok(ClayCommand::SmokeGui {
+        endpoint: smoke_endpoint("gui"),
+        configuration_root,
+    })
+}
+
+fn parse_endpoint_and_config_fixture(
+    mode: &str,
+    args: impl Iterator<Item = OsString>,
+    allow_endpoint: bool,
+) -> Result<(IpcEndpoint, Option<PathBuf>), CliError> {
+    let mut endpoint = None;
+    let mut configuration_root = None;
+
+    let mut args = args.peekable();
+    while let Some(argument) = args.next() {
+        if argument == "--config-fixture" {
+            let Some(name) = args.next() else {
+                return Err(CliError::new(format!(
+                    "missing fixture name after --config-fixture for '{mode}'"
+                )));
+            };
+            if configuration_root.is_some() {
+                return Err(CliError::new(format!(
+                    "duplicate --config-fixture option for '{mode}'"
+                )));
+            }
+            configuration_root = Some(resolve_config_fixture(&name)?);
+        } else if allow_endpoint && endpoint.is_none() {
+            endpoint = Some(IpcEndpoint::from_argument(argument));
+        } else {
+            return Err(CliError::new(format!(
+                "unexpected extra argument for '{mode}': {}",
+                argument.to_string_lossy()
+            )));
+        }
+    }
+
+    Ok((
+        endpoint.unwrap_or_else(default_endpoint),
+        configuration_root,
+    ))
+}
+
+fn resolve_config_fixture(name: &OsString) -> Result<PathBuf, CliError> {
+    let name = name.to_string_lossy();
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+        return Err(CliError::new(format!(
+            "invalid configuration fixture name '{name}'"
+        )));
+    }
+
+    let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("configuration")
+        .join(name.as_ref());
+    if !fixture_root.join("init.js").is_file() {
+        return Err(CliError::new(format!(
+            "configuration fixture '{}' does not contain init.js",
+            name
+        )));
+    }
+    Ok(fixture_root)
+}
+
+fn parse_package_subcommand(args: impl Iterator<Item = OsString>) -> Result<ClayCommand, CliError> {
+    let mut args = args.peekable();
+    let Some(op) = args.next() else {
+        return Err(CliError::new(
+            "clay package requires a subcommand: add | remove | list | enable | disable | inspect",
+        ));
+    };
+    match op.to_string_lossy().as_ref() {
+        "add" => {
+            let spec = args.next().ok_or_else(|| {
+                CliError::new("clay package add requires a package spec, e.g. @clay/markdown")
+            })?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Add {
+                    package_spec: spec.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        "remove" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package remove requires a package name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Remove {
+                    package_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        "list" => Ok(ClayCommand::Package {
+            subcommand: PackageCliSubcommand::List,
+        }),
+        "enable" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package enable requires a package name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Enable {
+                    package_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        "disable" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package disable requires a package name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Disable {
+                    package_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        "inspect" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package inspect requires a package name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Inspect {
+                    package_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        unknown => Err(CliError::new(format!(
+            "unknown clay package subcommand `{unknown}`; expected: add | remove | list | enable | disable | inspect"
+        ))),
+    }
+}
+
+fn run_package_subcommand(subcommand: PackageCliSubcommand) -> Result<(), Box<dyn Error>> {
+    use clay::packages::manager::PnpmBackend;
+    use clay::packages::service::PackageService;
+
+    // Default store: ~/.config/clay/packages
+    let store_root = dirs_home_config_clay_packages();
+    let mut service = PackageService::new(store_root, Box::new(PnpmBackend::new()));
+
+    match subcommand {
+        PackageCliSubcommand::Add { package_spec } => {
+            println!("Installing {package_spec}…");
+            service.install(&package_spec)?;
+            println!("Installed {package_spec}");
+        }
+        PackageCliSubcommand::Remove { package_name } => {
+            println!("Removing {package_name}…");
+            service.remove(&package_name)?;
+            println!("Removed {package_name}");
+        }
+        PackageCliSubcommand::List => {
+            let packages = service.list();
+            if packages.is_empty() {
+                println!("No packages installed.");
+            } else {
+                for pkg in &packages {
+                    let status = if pkg.is_enabled {
+                        "[enabled]"
+                    } else {
+                        "[installed]"
+                    };
+                    println!("  {} {} {} {status}", pkg.name, pkg.version, pkg.api_prefix);
+                }
+            }
+        }
+        PackageCliSubcommand::Enable { package_name } => {
+            println!("Enabling {package_name}…");
+            service.enable(&package_name)?;
+            println!("Enabled {package_name}");
+        }
+        PackageCliSubcommand::Disable { package_name } => {
+            println!("Disabling {package_name}…");
+            service.disable(&package_name)?;
+            println!("Disabled {package_name}");
+        }
+        PackageCliSubcommand::Inspect { package_name } => match service.inspect(&package_name) {
+            Some(inspection) => {
+                println!("Package:     {}", inspection.name);
+                println!("Version:     {}", inspection.version);
+                println!("API prefix:  {}", inspection.api_prefix);
+                println!(
+                    "Status:      {}",
+                    if inspection.is_enabled {
+                        "enabled"
+                    } else {
+                        "installed"
+                    }
+                );
+                println!("Modes:       {:?}", inspection.modes);
+                println!("Permissions: {:?}", inspection.permissions);
+                println!("Commands:    {}", inspection.command_count);
+                println!("Config keys: {}", inspection.configuration_count);
+                if let Some(docs) = &inspection.docs_path {
+                    println!("Docs:        {docs}");
+                }
+            }
+            None => eprintln!("Package `{package_name}` is not installed."),
+        },
+    }
+    Ok(())
+}
+
+fn dirs_home_config_clay_packages() -> std::path::PathBuf {
+    // Prefer the platform config dir; fall back to the current directory.
+    let base = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    match base {
+        Some(home) => home.join(".config").join("clay").join("packages"),
+        None => std::path::PathBuf::from(".clay-packages"),
+    }
+}
+
 #[cfg(any(unix, windows))]
-fn run_server(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+fn run_server(
+    endpoint: IpcEndpoint,
+    configuration_root: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
     eprintln!("{}", LaunchDiagnostic::server_starting(&endpoint));
+    let mut config = ServerConfig::new(endpoint.clone());
+    config.configuration_root = configuration_root;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(IpcServer::new(ServerConfig::new(endpoint.clone())).run())
+        .block_on(IpcServer::new(config).run())
         .map_err(|error| LaunchError::server_start_failed(endpoint, error.to_string()))?;
     Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]
-fn run_server(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+fn run_server(
+    endpoint: IpcEndpoint,
+    _configuration_root: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
     Err(format!("Clay server IPC is unsupported on this platform: {endpoint}").into())
+}
+
+fn run_perf_fixture(
+    kind: FixtureKind,
+    size_mib: usize,
+    seed: u64,
+    output: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
+    let size_bytes = size_mib
+        .checked_mul(1024 * 1024)
+        .ok_or("--size-mib is too large")?;
+    let spec = FixtureSpec {
+        kind,
+        size_bytes,
+        seed,
+    };
+    let output = output.unwrap_or_else(|| default_fixture_path(kind, size_mib));
+    let output = generate_fixture_file(&spec, &output)?;
+    println!(
+        "generated {} MiB {} fixture at {}",
+        size_mib,
+        kind.as_str(),
+        output.display()
+    );
+    Ok(())
 }
 
 fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<(), Box<dyn Error>> {
@@ -348,12 +742,15 @@ fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<()
     run_editor(editor_widget, events, &runtime)
 }
 
-fn run_smoke_gui(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+fn run_smoke_gui(
+    endpoint: IpcEndpoint,
+    configuration_root: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     let executable = std::env::current_exe()?.into_os_string();
-    let mut server = ManagedServer::spawn(executable, &endpoint)?;
+    let mut server = ManagedServer::spawn(executable, &endpoint, configuration_root.as_deref())?;
 
     eprintln!("{}", LaunchDiagnostic::smoke_server_starting(&endpoint));
     let session = runtime.block_on(connect_with_retry_while(&endpoint, || server.try_wait()))?;
@@ -376,8 +773,12 @@ struct ManagedServer {
 }
 
 impl ManagedServer {
-    fn spawn(executable: OsString, endpoint: &IpcEndpoint) -> Result<Self, Box<dyn Error>> {
-        let child = managed_server_command(executable, endpoint).spawn()?;
+    fn spawn(
+        executable: OsString,
+        endpoint: &IpcEndpoint,
+        configuration_root: Option<&Path>,
+    ) -> Result<Self, Box<dyn Error>> {
+        let child = managed_server_command(executable, endpoint, configuration_root).spawn()?;
         Ok(Self {
             child: Some(child),
             endpoint: endpoint.clone(),
@@ -437,8 +838,19 @@ fn background_server_command(executable: OsString, endpoint: &IpcEndpoint) -> Co
     command
 }
 
-fn managed_server_command(executable: OsString, endpoint: &IpcEndpoint) -> Command {
+fn managed_server_command(
+    executable: OsString,
+    endpoint: &IpcEndpoint,
+    configuration_root: Option<&Path>,
+) -> Command {
     let mut command = server_command(executable, endpoint);
+    if let Some(configuration_root) = configuration_root {
+        command.arg("--config-fixture").arg(
+            configuration_root
+                .file_name()
+                .expect("fixture root has a name"),
+        );
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -583,12 +995,13 @@ fn connection_event_user_event(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::{ffi::OsString, path::PathBuf};
 
     use super::{
-        ClayCommand, LaunchDiagnostic, LaunchReadinessFailure, background_server_command,
-        connect_with_retry, connect_with_retry_while, connection_event_user_event,
-        managed_server_command, parse_command,
+        ClayCommand, FixtureKind, LaunchDiagnostic, LaunchReadinessFailure,
+        background_server_command, connect_with_retry, connect_with_retry_while,
+        connection_event_user_event, extract_profile_perf_flag, managed_server_command,
+        parse_command,
     };
     use clay::client::{ClientBootstrapError, ClientConnectionEvent};
     use clay::editor::{EditorSurface, is_printable_text};
@@ -630,6 +1043,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_profile_perf_as_global_developer_flag() {
+        let (args, enabled) = extract_profile_perf_flag(
+            vec!["smoke-gui".into(), "--profile-perf".into()].into_iter(),
+        );
+
+        assert!(enabled);
+        assert_eq!(args, vec![OsString::from("smoke-gui")]);
+        assert!(matches!(
+            parse_command(args).expect("global profiling flag is stripped before parsing"),
+            ClayCommand::SmokeGui { .. }
+        ));
+    }
+
+    #[test]
     fn parses_default_launch_modes() {
         assert!(matches!(
             parse_command(vec![]).expect("bare clay parses"),
@@ -657,9 +1084,17 @@ mod tests {
             match command {
                 ClayCommand::Auto { endpoint }
                 | ClayCommand::Client { endpoint }
-                | ClayCommand::Server { endpoint }
-                | ClayCommand::SmokeGui { endpoint } => assert!(!endpoint.to_string().is_empty()),
+                | ClayCommand::Server { endpoint, .. }
+                | ClayCommand::SmokeGui { endpoint, .. } => {
+                    assert!(!endpoint.to_string().is_empty())
+                }
+                ClayCommand::PerfFixture { .. } => {
+                    panic!("perf fixture should not be selected by launch modes")
+                }
                 ClayCommand::Help => panic!("help should not be selected by launch modes"),
+                ClayCommand::Package { .. } => {
+                    panic!("package subcommand should not be selected by launch modes")
+                }
             }
         }
     }
@@ -673,13 +1108,52 @@ mod tests {
             let endpoint = match command {
                 ClayCommand::Auto { endpoint }
                 | ClayCommand::Client { endpoint }
-                | ClayCommand::Server { endpoint } => endpoint,
+                | ClayCommand::Server { endpoint, .. } => endpoint,
                 ClayCommand::SmokeGui { .. } => {
                     panic!("default smoke endpoint must remain isolated")
                 }
+                ClayCommand::PerfFixture { .. } => {
+                    panic!("perf fixture should not be selected by default launch modes")
+                }
                 ClayCommand::Help => panic!("help should not be selected by default launch modes"),
+                ClayCommand::Package { .. } => {
+                    panic!("package subcommand should not be selected by default launch modes")
+                }
             };
             assert_eq!(endpoint, expected);
+        }
+    }
+
+    #[test]
+    fn parses_perf_fixture_subcommand() {
+        match parse_command(vec![
+            "perf-fixture".into(),
+            "--kind".into(),
+            "mixed-unicode".into(),
+            "--size-mib".into(),
+            "16".into(),
+            "--output".into(),
+            "target/perf-fixtures/mixed-16m.txt".into(),
+            "--seed".into(),
+            "42".into(),
+        ])
+        .expect("perf fixture parses")
+        {
+            ClayCommand::PerfFixture {
+                kind,
+                size_mib,
+                seed,
+                output,
+            } => {
+                assert_eq!(kind, FixtureKind::MixedUnicode);
+                assert_eq!(size_mib, 16);
+                assert_eq!(seed, 42);
+                assert_eq!(
+                    output.unwrap(),
+                    PathBuf::from("target/perf-fixtures/mixed-16m.txt")
+                );
+            }
+            command => panic!("expected perf fixture command, got {command:?}"),
         }
     }
 
@@ -689,7 +1163,9 @@ mod tests {
 
         match parse_command(vec!["server".into(), endpoint.into()]).expect("server endpoint parses")
         {
-            ClayCommand::Server { endpoint: parsed } => {
+            ClayCommand::Server {
+                endpoint: parsed, ..
+            } => {
                 assert_eq!(parsed.as_child_arg(), OsString::from(endpoint));
             }
             command => panic!("expected server command, got {command:?}"),
@@ -741,7 +1217,7 @@ mod tests {
         let executable = OsString::from("clay-test-executable");
         let endpoint = clay::ipc::smoke_endpoint("gui");
         let endpoint_arg = endpoint.as_child_arg();
-        let command = managed_server_command(executable.clone(), &endpoint);
+        let command = managed_server_command(executable.clone(), &endpoint, None);
 
         assert_eq!(command.get_program(), executable.as_os_str());
         assert_eq!(
@@ -750,6 +1226,54 @@ mod tests {
                 .map(|argument| argument.to_owned())
                 .collect::<Vec<_>>(),
             vec![OsString::from("server"), endpoint_arg]
+        );
+    }
+
+    #[test]
+    fn smoke_launch_evaluates_runtime_config_fixture() {
+        let command = parse_command(vec![
+            "smoke-gui".into(),
+            "--config-fixture".into(),
+            "runtime-sdui".into(),
+        ])
+        .expect("runtime SDUI smoke fixture parses");
+
+        match command {
+            ClayCommand::SmokeGui {
+                configuration_root: Some(root),
+                ..
+            } => {
+                assert!(root.ends_with("runtime-sdui"));
+                assert!(root.join("init.js").is_file());
+            }
+            command => panic!("expected smoke GUI fixture command, got {command:?}"),
+        }
+    }
+
+    #[test]
+    fn managed_server_command_forwards_config_fixture_without_shell() {
+        let executable = OsString::from("clay-test-executable");
+        let endpoint = clay::ipc::smoke_endpoint("gui");
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("configuration")
+            .join("runtime-sdui");
+        let endpoint_arg = endpoint.as_child_arg();
+        let command = managed_server_command(executable.clone(), &endpoint, Some(&fixture));
+
+        assert_eq!(command.get_program(), executable.as_os_str());
+        assert_eq!(
+            command
+                .get_args()
+                .map(|argument| argument.to_owned())
+                .collect::<Vec<_>>(),
+            vec![
+                OsString::from("server"),
+                endpoint_arg,
+                OsString::from("--config-fixture"),
+                OsString::from("runtime-sdui"),
+            ]
         );
     }
 
@@ -802,6 +1326,41 @@ mod tests {
                 );
             }
             MasonryUserEvent::AccessKit(..) => panic!("connection events must use actions"),
+        }
+    }
+
+    #[test]
+    fn smoke_launch_routes_sdui_events_to_gui() {
+        let window_id = WindowId::next();
+        let widget_id = WidgetId::next();
+        let event = ClientConnectionEvent::SduiSnapshot {
+            client_id: 1,
+            tree: clay::protocol::SduiTree {
+                ui_version: 1,
+                root_id: clay::protocol::SduiNodeId(1),
+                nodes: vec![clay::protocol::SduiNode::new(
+                    clay::protocol::SduiNodeId(1),
+                    clay::protocol::SduiNodeKind::Label {
+                        text: "Workspace".to_string(),
+                    },
+                )],
+            },
+        };
+
+        let user_event = connection_event_user_event(window_id, widget_id, event.clone());
+
+        match user_event {
+            MasonryUserEvent::Action(action_window_id, action, action_widget_id) => {
+                assert_eq!(action_window_id, window_id);
+                assert_eq!(action_widget_id, widget_id);
+                assert_eq!(
+                    *action
+                        .downcast::<clay::masonry_editor::EditorAction>()
+                        .expect("SDUI connection action type"),
+                    clay::masonry_editor::EditorAction::ClientConnection(event)
+                );
+            }
+            MasonryUserEvent::AccessKit(..) => panic!("SDUI events must use GUI actions"),
         }
     }
 

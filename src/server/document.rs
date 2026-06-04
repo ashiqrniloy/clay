@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use crop::Rope;
 
+use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentVersion, EditOperation, EditRejection, LeaseId,
     LockOwner, ProtocolErrorCode, RegionLockConflict, RegionLockId, ServerMessage, TransactionId,
@@ -152,6 +153,11 @@ impl DocumentState {
         transaction_id: TransactionId,
         operation: EditOperation,
     ) -> ServerMessage {
+        let recorder = global_recorder();
+        let _scope = recorder.scope_with_metadata(
+            "server.document.apply_edit",
+            MetricMetadata::transaction(document_id, client_id, transaction_id, base_version),
+        );
         if document_id != self.document_id {
             return ServerMessage::EditRejected {
                 document_id,
@@ -213,6 +219,7 @@ impl DocumentState {
         self.version += 1;
         self.last_transaction_id = Some(transaction_id);
         self.dirty = true;
+        recorder.record_counter("server.document.edit_ack", 1);
         ServerMessage::EditAck {
             document_id: self.document_id,
             confirmed_version: self.version,

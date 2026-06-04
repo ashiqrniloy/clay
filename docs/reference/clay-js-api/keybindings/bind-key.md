@@ -9,7 +9,7 @@ deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: bindKey
 user_facing_name: Bind Key
-summary: Bind Key through the planned `clay:keybindings` Clay JavaScript facade.
+summary: Bind Key through the runtime-backed `clay:keybindings` Clay JavaScript facade.
 owner: server
 phase: Phase 7
 visibility: public
@@ -37,7 +37,7 @@ agent_guidance: Use `clay.keybindings.bindKey` only for its documented keybindin
 lookup_tags: [js-api, keybindingmanagement, keybindings]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: false
 ---
 
@@ -45,13 +45,13 @@ async: false
 
 ## Summary
 
-Bind Key through the planned `clay:keybindings` Clay JavaScript facade.
+Bind Key through the runtime-backed `clay:keybindings` Clay JavaScript facade.
 
 ## Description
 
-`bindKey` is the planned public Phase 8 configuration API for **Bind Key**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`bindKey` is the runtime-backed public configuration API for **Bind Key**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `configuration-api`. Runtime path: `server-side-configuration-to-behavior-manifest`. Binding keys updates future inert behavior manifests; the Rust client executes the resulting manifest without arbitrary JavaScript. The planned runtime validates key chords, scopes, `when` conditions, and command/API IDs before publishing manifest changes.
+Authority: `configuration-api`. Runtime path: `server-side-configuration-to-behavior-manifest`. Binding keys updates inert behavior manifests; the Rust client executes the resulting manifest without arbitrary JavaScript. The runtime validates key chords, scopes, `when` conditions, and command/API IDs before publishing manifest changes.
 
 ## When to use
 
@@ -91,13 +91,13 @@ No default key binding is assigned. Users may bind a key to `clay.keybindings.bi
 
 ## Return and async behavior
 
-Returns the key binding record once configuration runtime wiring exists.
+Returns the key binding record after the server validates the chord, scope, optional condition, and command/API ID and updates the inert behavior manifest.
 
-Current facade/runtime status is `planned`; this page defines the Phase 8 configuration contract before executable `deno_core` op wiring exists.
+The Phase 13 facade/runtime status is `runtime-backed`; the `deno_core` op wiring is executable during server-side configuration evaluation.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Current Phase 7 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 
@@ -114,7 +114,7 @@ Use `clay.keybindings.bindKey` when the user asks for bind key through the Clay 
 ## Backing implementation
 
 - JS facade: `runtime/js/keybindings.ts::bindKey`
-- Future Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
+- Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/protocol/mod.rs::KeyBindingRule`
 - Current implementation audit path: `src/protocol/mod.rs::KeyBindingRule; src/client/behavior.rs::ClientBehaviorState::route_key`
 

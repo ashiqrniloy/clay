@@ -21,7 +21,7 @@ agent_guidance: Use `clay.documents.serverGetDocumentStatus` only through the do
 lookup_tags: [documents, workspace, metadata, dirty-state, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -33,7 +33,7 @@ Query server-owned metadata for an open workspace document, including dirty stat
 
 ## Description
 
-`serverGetDocumentStatus` is the planned public API for **Get Document Status**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
+`serverGetDocumentStatus` is the runtime-backed public API for **Get Document Status**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
 
 Authority: `server-authoritative-document-query`. Runtime path: `server-first-query`. Status queries are background/help/programmatic metadata queries and are not needed for ordinary local paint or edit hot paths.
 
@@ -72,11 +72,11 @@ No behavior-changing custom properties are defined for this API.
 
 Returns a promise for server-owned document metadata.
 
-Current Phase 9 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. Current Phase 9 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
 
 ## Permissions and security
 
@@ -95,7 +95,7 @@ Use `clay.documents.serverGetDocumentStatus` only through the documented Clay JS
 ## Backing implementation
 
 - JS facade: `runtime/js/documents.ts::serverGetDocumentStatus`
-- Future Deno op: `src/server/ops/documents.rs::op_clay_documents_get_document_status` (`op_clay_documents_get_document_status`)
+- Deno op: `src/server/ops/documents.rs::op_clay_documents_get_document_status` (`op_clay_documents_get_document_status`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::document_metadata`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
 

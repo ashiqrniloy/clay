@@ -29,6 +29,15 @@ Explain the implementation step by step. Include data flow, control flow, state,
 <minimal realistic example>
 ```
 
+## Primitive Coverage
+
+Use this section when the page covers reusable editor/package primitives.
+
+- Primitive/category name and owning Rust/source module.
+- JS facade/op/protocol shape when present.
+- Permissions, validation rules, hot-path policy, and payload/performance budgets.
+- How current and future modes/packages should reuse it without mode-specific Rust branches.
+
 ## Invariants and Constraints
 
 - Important invariant or assumption.

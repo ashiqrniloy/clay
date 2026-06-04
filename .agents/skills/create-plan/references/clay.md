@@ -2,6 +2,29 @@
 
 Apply these requirements only when creating or updating plan documents for the Clay project.
 
+## Primitive-First Mode and Package Task
+
+Each Clay phase plan that implements or materially changes an editor mode, language mode, first-party JS package, package runtime capability, or reusable editor capability must include a separate primitive-review task before package/mode implementation tasks.
+
+The task should require:
+
+- Read existing primitive reference docs and implementation wiki pages before designing package behavior: `docs/reference/primitives/index.md`, `docs/reference/primitives/registry.md`, relevant strategy docs, `docs/wiki/modules/primitive-architecture.md`, and relevant primitive/module wiki pages.
+- Inventory existing Rust-side primitives such as document classification, major-mode activation, commands/key routing, inert text transforms, parse handlers, decoration transport, SDUI, configuration, folding, completions, diagnostics, or other current surfaces.
+- State what the new package/mode can achieve with existing primitives before proposing new Rust code.
+- Plan new Rust primitives only when needed, and require them to be generic/reusable across future modes instead of named or shaped around a single language such as Markdown or Python.
+- Build JS package functionality on top of those primitives; do not add mode-specific Rust server/client branches, parser logic, renderer callbacks, or package-specific client behavior.
+- Add documentation and tests that keep every new/changed primitive recorded in reference docs, code wiki pages, wiki index navigation, and deterministic primitive-documentation checks.
+
+Recommended task title:
+
+```markdown
+- [ ] Review existing editor primitives and plan generic primitive gaps before package work
+```
+
+Place this task after entry-gate/baseline tasks and before implementation or cleanup tasks that depend on the primitive assessment.
+
+Decision source: `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`.
+
 ## Clay JS API Task
 
 Each Clay plan document must include a separate task near the end of the plan to create or verify Clay JavaScript APIs for public programmatic behavior and Rust public functions introduced or changed by the plan.

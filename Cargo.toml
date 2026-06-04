@@ -7,6 +7,7 @@ default-run = "clay"
 [dependencies]
 crop = "0.4.3"
 deno_core = "0.400.0"
+deno_error = "=0.7.1"
 masonry = "0.4.0"
 masonry_winit = "0.4.0"
 parley = "0.6.0"
@@ -18,3 +19,22 @@ tokio = { version = "1.52.2", features = ["full"] }
 vello = "0.6.0"
 wgpu = "26.0.1"
 winit = "0.30.13"
+
+[dev-dependencies]
+criterion = { version = "0.7", features = ["html_reports"] }
+
+[[bench]]
+name = "editor_baselines"
+harness = false
+
+[[bench]]
+name = "protocol_server_baselines"
+harness = false
+
+[[bench]]
+name = "runtime_sdui_baselines"
+harness = false
+
+[[bench]]
+name = "markdown_baselines"
+harness = false

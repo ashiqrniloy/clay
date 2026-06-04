@@ -191,6 +191,189 @@ fn facade_exports_function(facade_path: &str, export_name: &str) -> bool {
 }
 
 #[test]
+fn phase15_sdui_observability_surfaces_remain_internal() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sdui_source =
+        fs::read_to_string(root.join("src/masonry_sdui.rs")).expect("read src/masonry_sdui.rs");
+    let editor_source =
+        fs::read_to_string(root.join("src/masonry_editor.rs")).expect("read src/masonry_editor.rs");
+
+    assert!(
+        sdui_source.contains("pub(crate) struct SduiObservableSnapshot"),
+        "Phase 15 SDUI structural observations must stay crate-internal until a dedicated Clay JS API is designed"
+    );
+    assert!(
+        sdui_source.contains("pub(crate) fn observable_snapshot"),
+        "SduiNativeState::observable_snapshot must stay crate-internal"
+    );
+    assert!(
+        editor_source.contains("pub(crate) struct SduiStatusObservation"),
+        "Phase 15 GUI status observations must stay crate-internal until a dedicated Clay JS API is designed"
+    );
+    assert!(
+        editor_source.contains("pub(crate) fn status_observation"),
+        "EditorWidget::status_observation must stay crate-internal"
+    );
+
+    let public_sdui_ids: BTreeSet<_> = public_inventory_entries()
+        .into_iter()
+        .map(|entry| entry.get("id").to_string())
+        .filter(|id| id.starts_with("clay.sdui."))
+        .collect();
+    let expected_public_sdui_ids = BTreeSet::from([
+        "clay.sdui.defineButton".to_string(),
+        "clay.sdui.defineEditorView".to_string(),
+        "clay.sdui.defineFlex".to_string(),
+        "clay.sdui.defineLabel".to_string(),
+        "clay.sdui.defineList".to_string(),
+        "clay.sdui.definePanel".to_string(),
+        "clay.sdui.defineStack".to_string(),
+        "clay.sdui.publishTree".to_string(),
+    ]);
+    assert_eq!(
+        public_sdui_ids, expected_public_sdui_ids,
+        "Phase 15 must not add a public SDUI observability/configuration API without docs, facade, op, and registry metadata"
+    );
+}
+
+#[test]
+fn phase17_configuration_apis_cover_reviewed_package_surfaces() {
+    let expected = [
+        (
+            "clay.configuration.setPackageOption",
+            ["packagePrefix", "option", "value", "source"].as_slice(),
+        ),
+        (
+            "clay.configuration.setModePreference",
+            [
+                "modeId",
+                "extensions",
+                "mimeTypes",
+                "defaultActivation",
+                "source",
+            ]
+            .as_slice(),
+        ),
+        (
+            "clay.configuration.setDecorationTheme",
+            ["theme", "styleTokens", "contrastMode", "source"].as_slice(),
+        ),
+        (
+            "clay.configuration.setParsePolicy",
+            [
+                "timeoutMs",
+                "maxTimeoutMs",
+                "parseUnits",
+                "viewportPriority",
+                "source",
+            ]
+            .as_slice(),
+        ),
+    ];
+    let entries = inventory_entries();
+    let overview = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/clay-js-api/configuration.md"),
+    )
+    .expect("read configuration overview");
+
+    for (id, custom_properties) in expected {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing Phase 17 configuration API review entry {id}"));
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "{id} remains planned until concrete validators/settings are promoted"
+        );
+        assert_eq!(entry.get("js_module"), "clay:configuration");
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "{id} must not enter the public registry until docs/op/runtime are promoted"
+        );
+        assert!(
+            entry.get("hot_path_policy").contains("not")
+                || entry.get("hot_path_policy").contains("never"),
+            "{id} must document that configuration stays off typing/rendering hot paths"
+        );
+        assert!(
+            entry.get("runtime_path").contains("planned"),
+            "{id} runtime path must remain explicit planned metadata"
+        );
+        for property in custom_properties {
+            assert!(
+                inventory_custom_property_names(entry.get("custom_properties"))
+                    .contains(&property.to_string()),
+                "{id} custom_properties must include {property}"
+            );
+        }
+        assert!(
+            overview.contains(id),
+            "configuration overview must record Phase 17 review result for {id}"
+        );
+    }
+
+    assert!(
+        overview.contains(
+            "Package enable/disable remains a privileged package service or CLI operation"
+        ),
+        "configuration overview must record enable/disable deferral"
+    );
+}
+
+#[test]
+fn sdui_query_ui_state_decision_is_recorded() {
+    let entries = inventory_entries();
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.get("id") != "clay.sdui.queryUiState"),
+        "clay:sdui.queryUiState must stay absent until promoted with full docs/registry/tests"
+    );
+
+    let overview = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/clay-js-api/configuration.md"),
+    )
+    .expect("read configuration overview");
+    assert!(overview.contains("`clay:sdui.queryUiState` remains deferred"));
+    assert!(
+        overview.contains("`SduiObservableSnapshot` and `SduiStatusObservation` stay internal")
+    );
+}
+
+#[test]
+fn package_configuration_cannot_grant_prohibited_authority() {
+    let entries = inventory_entries();
+    let configuration_ids = [
+        "clay.configuration.setPackageOption",
+        "clay.configuration.setModePreference",
+        "clay.configuration.setDecorationTheme",
+        "clay.configuration.setParsePolicy",
+    ];
+
+    for id in configuration_ids {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing configuration entry {id}"));
+        let security_notes = entry.get("security_notes");
+        for denied in denied_configuration_authorities() {
+            assert!(
+                security_notes.contains(denied),
+                "{id} security_notes must deny {denied} authority"
+            );
+        }
+        for denied in ["raw Deno ops", "package installation", "enable/disable"] {
+            assert!(
+                security_notes.contains(denied),
+                "{id} security_notes must deny {denied} authority"
+            );
+        }
+    }
+}
+
+#[test]
 fn api_inventory_has_required_fields() {
     let entries = inventory_entries();
     let required_fields = [
@@ -301,6 +484,70 @@ fn api_inventory_classifies_current_editor_behavior() {
             .any(|entry| entry.get("hot_path_policy").contains("asynchronously")),
         "hot-path inventory must record that ordinary editing is async to the server"
     );
+}
+
+#[test]
+fn api_inventory_primitive_gate_entries_are_implemented_or_planned() {
+    let entries = inventory_entries();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing primitive gate API inventory entry {id}"))
+    };
+
+    for id in [
+        "clay.packages.serverValidatePackageManifest",
+        "clay.packages.serverValidatePackagePermissions",
+        "clay.packages.serverLoadPackage",
+        "clay.modes.serverRegisterModePattern",
+        "clay.modes.serverClassifyDocument",
+        "clay.modes.serverActivateMajorMode",
+        "clay.commands.serverRegisterCommand",
+        "clay.commands.serverListCommands",
+        "clay.decorations.serverPublishDecorations",
+        "clay.parse.serverRegisterParseHandler",
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(
+            entry.get("status"),
+            "runtime-backed",
+            "{id} must be marked implemented"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "true",
+            "{id} must be public in the generated registry"
+        );
+        assert!(
+            entry.get("hot_path_policy").contains("not")
+                || entry.get("hot_path_policy").contains("never")
+                || entry.get("hot_path_policy").contains("must not"),
+            "{id} must document that primitive gate work is outside ordinary hot paths"
+        );
+    }
+
+    let select_manifest = entry_by_id("clay.modes.serverSelectDocumentManifest");
+    assert_eq!(select_manifest.get("status"), "planned");
+    assert_eq!(select_manifest.get("registry_public"), "false");
+    assert_eq!(
+        select_manifest.get("deno_op"),
+        "op_clay_runtime_unavailable"
+    );
+
+    for id in ["clay.folding.serverPublishFoldingRanges"] {
+        let entry = entry_by_id(id);
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "{id} must remain a planned API"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "{id} must not be generated before implementation"
+        );
+    }
 }
 
 #[test]
@@ -419,7 +666,11 @@ fn clay_js_api_docs_have_required_frontmatter_and_body_sections() {
         }
         assert_eq!(fields.get("kind").map(String::as_str), Some("clay-js-api"));
         assert_eq!(fields.get("visibility").map(String::as_str), Some("public"));
-        assert_eq!(fields.get("stability").map(String::as_str), Some("planned"));
+        assert_eq!(
+            fields.get("stability").map(String::as_str),
+            Some(entry.get("status")),
+            "{id} documentation stability must match inventory status"
+        );
         assert!(
             fields
                 .get("security")
@@ -655,6 +906,50 @@ fn configuration_docs_deny_implicit_external_authority() {
                 entry.get("documentation_path")
             );
         }
+    }
+}
+
+#[test]
+fn clay_js_api_docs_cover_primitive_gate_surfaces() {
+    let linked_paths = docs_index_registry_links();
+    for id in [
+        "clay.packages.serverValidatePackageManifest",
+        "clay.packages.serverValidatePackagePermissions",
+        "clay.packages.serverLoadPackage",
+        "clay.modes.serverRegisterModePattern",
+        "clay.modes.serverClassifyDocument",
+        "clay.modes.serverActivateMajorMode",
+        "clay.commands.serverRegisterCommand",
+        "clay.commands.serverListCommands",
+    ] {
+        let entry = public_inventory_entries()
+            .into_iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing public primitive gate entry {id}"));
+        assert!(
+            linked_paths.contains(entry.get("documentation_path")),
+            "{id} must be linked from docs/index.md"
+        );
+        assert!(
+            facade_exports_function(entry.get("facade_path"), entry.get("js_export")),
+            "{id} facade export must exist"
+        );
+        let doc_text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(entry.get("documentation_path")),
+        )
+        .expect("read primitive gate API doc");
+        assert!(
+            doc_text.contains(entry.get("deno_op_path")),
+            "{id} docs must name the op wrapper path"
+        );
+        assert!(
+            doc_text.contains("raw op names") || doc_text.contains("Deno.core.ops"),
+            "{id} docs must steer users away from raw ops"
+        );
+        assert!(
+            doc_text.contains("does not grant filesystem"),
+            "{id} docs must include security no-authority notes"
+        );
     }
 }
 

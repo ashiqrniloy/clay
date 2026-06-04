@@ -9,9 +9,9 @@ deno_op: op_clay_configuration_load_module
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_load_module
 name: loadConfigurationModule
 user_facing_name: Load Configuration Module
-summary: Load a local modular configuration file from the planned `~/.config/clay/init.js` server-side configuration runtime.
+summary: Load a local modular configuration file from the runtime-backed `~/.config/clay/init.js` server-side configuration runtime.
 owner: server
-phase: Phase 8
+phase: Phase 13
 visibility: public
 permissions: []
 key_bindings: []
@@ -20,12 +20,12 @@ custom_properties:
     type: string
     default: none
     description: Local configuration module path relative to `~/.config/clay/init.js`.
-security: Local modular configuration contract only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+security: Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `clay.configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.
 lookup_tags: [configuration, entrypoint, initjs, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -33,13 +33,13 @@ async: true
 
 ## Summary
 
-Load a local modular configuration file from the planned `~/.config/clay/init.js` server-side configuration runtime.
+Load a local modular configuration file from the runtime-backed `~/.config/clay/init.js` server-side configuration runtime.
 
 ## Description
 
-`loadConfigurationModule` is the planned public API for **Load Configuration Module**. It documents Clay's modular local configuration contract without implementing runtime JavaScript evaluation in Phase 8.
+`loadConfigurationModule` is the runtime-backed public API for **Load Configuration Module**. It implements Clay's modular local configuration contract inside the constrained Phase 13 server-side JavaScript runtime.
 
-Authority: `configuration-api`. Runtime path: `server-side-configuration-loader-planned`. Configuration starts at `~/.config/clay/init.js`; this API lets that entry point declare additional local configuration modules, such as `./keys.js` or `./editor.js`, once the Phase 11 server-side JavaScript runtime exists. Ordinary keypress handling, Masonry paint/layout, IPC frame handling, and editor rendering must not wait on this API.
+Authority: `configuration-api`. Runtime path: `server-side-configuration-loader-runtime`. Configuration starts at `~/.config/clay/init.js`; this API lets that entry point declare additional local configuration modules, such as `./keys.js` or `./editor.js`, through the Phase 13 server-side JavaScript runtime. Ordinary keypress handling, Masonry paint/layout, IPC frame handling, and editor rendering must not wait on this API.
 
 ## When to use
 
@@ -62,7 +62,7 @@ bindKey("Ctrl+I", "clay.editor.serverInsertText", { scope: "editor" });
 await loadConfigurationModule({ path: "./editor.js" });
 ```
 
-`path` is a local configuration module path interpreted relative to the Clay configuration directory/entry point. Phase 8 documents this contract only; it does not read or execute the file.
+`path` is a local configuration module path interpreted relative to the Clay configuration directory/entry point. The server validates the resolved path against the configuration root before importing and evaluating the local module.
 
 ## Options
 
@@ -78,17 +78,17 @@ No default key binding is assigned. Users call `loadConfigurationModule` from `~
 
 ## Return and async behavior
 
-Returns `Promise<void>` when runtime wiring exists because module loading is ordered configuration work. Current Phase 8 facade/runtime status is `planned`; the typed stub throws a planned-runtime error rather than loading or executing files.
+Returns `Promise<void>` because module loading is ordered asynchronous configuration work. The Phase 13 runtime-backed facade imports validated local configuration modules during startup/reload evaluation.
 
 ## Errors
 
-The planned runtime should fail if `path` is missing, malformed, outside the local configuration module contract, attempts package/URL/extension/workspace loading, or if future server-side validation rejects the module. Current Phase 8 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if `path` is missing, malformed, outside the local configuration module contract, attempts package/URL/extension/workspace loading, or if future server-side validation rejects the module. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 
-No additional permission is granted by this API in Phase 8.
+No additional permission is granted by this API in Phase 13.
 
-Local modular configuration contract only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
@@ -99,7 +99,7 @@ Use `clay.configuration.loadConfigurationModule` when the user asks how to split
 ## Backing implementation
 
 - JS facade: `runtime/js/configuration.ts::loadConfigurationModule`
-- Future Deno op: `src/server/ops/configuration.rs::op_clay_configuration_load_module` (`op_clay_configuration_load_module`)
+- Deno op: `src/server/ops/configuration.rs::op_clay_configuration_load_module` (`op_clay_configuration_load_module`)
 - Backing Rust/current owner: `src/server/configuration.rs::ConfigurationRuntime::load_module`
 - Current implementation audit path: `runtime/js/configuration.ts::loadConfigurationModule`
 

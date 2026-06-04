@@ -181,6 +181,146 @@ fn generated_registry_contains_phase9_file_workspace_apis() {
 }
 
 #[test]
+fn generated_registry_contains_primitive_gate_runtime_apis() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    for (id, module, export, permission) in [
+        (
+            "clay.packages.serverValidatePackageManifest",
+            "clay:packages",
+            "serverValidatePackageManifest",
+            None,
+        ),
+        (
+            "clay.packages.serverValidatePackagePermissions",
+            "clay:packages",
+            "serverValidatePackagePermissions",
+            None,
+        ),
+        (
+            "clay.packages.serverLoadPackage",
+            "clay:packages",
+            "serverLoadPackage",
+            None,
+        ),
+        (
+            "clay.modes.serverRegisterModePattern",
+            "clay:modes",
+            "serverRegisterModePattern",
+            Some("mode-registration"),
+        ),
+        (
+            "clay.modes.serverClassifyDocument",
+            "clay:modes",
+            "serverClassifyDocument",
+            None,
+        ),
+        (
+            "clay.modes.serverActivateMajorMode",
+            "clay:modes",
+            "serverActivateMajorMode",
+            Some("mode-activation"),
+        ),
+        (
+            "clay.commands.serverRegisterCommand",
+            "clay:commands",
+            "serverRegisterCommand",
+            Some("command-registration"),
+        ),
+        (
+            "clay.commands.serverListCommands",
+            "clay:commands",
+            "serverListCommands",
+            None,
+        ),
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing {id}"));
+        assert_eq!(entry.js_module, module);
+        assert_eq!(entry.js_export, export);
+        assert_eq!(entry.stability, "runtime-backed");
+        assert!(entry.key_bindings.is_empty());
+        assert!(entry.security.contains("server validation"));
+        assert!(entry.security.contains("raw Deno ops"));
+        if let Some(permission) = permission {
+            assert!(
+                entry.permissions.iter().any(|value| value == permission),
+                "{id} must preserve required permission {permission}"
+            );
+        }
+    }
+
+    assert!(
+        registry
+            .by_id("clay.modes.serverSelectDocumentManifest")
+            .is_none()
+    );
+    assert!(
+        registry
+            .by_lookup_tag("packages")
+            .iter()
+            .any(|entry| entry.id == "clay.packages.serverValidatePackageManifest")
+    );
+}
+
+#[test]
+fn generated_registry_contains_phase13_sdui_runtime_apis() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let expected = [
+        ("clay.sdui.definePanel", "definePanel", false),
+        ("clay.sdui.defineLabel", "defineLabel", false),
+        ("clay.sdui.defineButton", "defineButton", false),
+        ("clay.sdui.defineList", "defineList", false),
+        ("clay.sdui.defineEditorView", "defineEditorView", false),
+        ("clay.sdui.defineFlex", "defineFlex", false),
+        ("clay.sdui.defineStack", "defineStack", false),
+        ("clay.sdui.publishTree", "publishTree", true),
+    ];
+
+    for (id, js_export, is_async) in expected {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing {id}"));
+        assert_eq!(entry.js_module, "clay:sdui");
+        assert_eq!(entry.js_export, js_export);
+        assert_eq!(entry.stability, "runtime-backed");
+        assert_eq!(entry.is_async, is_async, "{id} async metadata is wrong");
+        assert!(entry.key_bindings.is_empty());
+        assert!(entry.lookup_tags.iter().any(|tag| tag == "sdui"));
+        assert!(entry.security.contains("inert declarative UI metadata"));
+        for denied in denied_configuration_authorities() {
+            assert!(
+                entry.security.contains(denied),
+                "{id} must deny implicit {denied} authority"
+            );
+        }
+    }
+
+    assert!(
+        registry
+            .by_lookup_tag("server-driven-ui")
+            .iter()
+            .any(|entry| entry.id == "clay.sdui.defineEditorView"),
+        "SDUI helpers should be discoverable by server-driven-ui lookup tag"
+    );
+    assert!(
+        registry
+            .by_custom_property("documentId")
+            .iter()
+            .any(|entry| entry.id == "clay.sdui.defineEditorView"),
+        "editor-view helper should be discoverable by documentId custom property"
+    );
+    assert!(
+        registry
+            .by_custom_property("tree")
+            .iter()
+            .any(|entry| entry.id == "clay.sdui.publishTree"),
+        "publishTree should be discoverable by tree custom property"
+    );
+}
+
+#[test]
 fn lookup_finds_api_by_stable_id_and_export() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
@@ -486,11 +626,7 @@ fn configuration_entrypoint_is_documented_and_indexed() {
 
     assert_eq!(load_module.js_module, "clay:configuration");
     assert_eq!(load_module.js_export, "loadConfigurationModule");
-    assert!(
-        load_module
-            .security
-            .contains("Phase 8 does not execute JavaScript")
-    );
+    assert!(load_module.security.contains("constrained runtime"));
     assert!(
         load_module
             .custom_properties
@@ -513,7 +649,7 @@ fn configuration_entrypoint_is_documented_and_indexed() {
 }
 
 #[test]
-fn configuration_module_loading_is_planned_no_authority() {
+fn configuration_module_loading_is_runtime_backed_no_external_authority() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let load_module = registry
         .by_js_export("clay:configuration", "loadConfigurationModule")

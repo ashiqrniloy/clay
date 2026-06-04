@@ -14,12 +14,13 @@ Create or update actionable, numbered, documentation-backed implementation plans
 3. Choose the next filename by incrementing the highest existing three-digit prefix, e.g. `001-Setup.md`, `002-Window-Creation.md`.
 4. Read current docs for relevant libraries, frameworks, SDKs, packages, crates, CLIs, or services. Prefer project-local docs, then documentation lookup tools. Record exact docs/API references in the plan.
 5. If `.agents/skills/project-patterns/` exists, use it before writing task approaches and cite relevant pattern files.
-6. Load project-specific plan requirements deterministically:
+6. For phase implementation plans that add or change an editor mode, language mode, JS package, extension point, or reusable capability, include a dedicated primitive-review task before implementation. The task must inventory existing primitives, document what can be achieved with them, plan only generic reusable new primitives when required, and then build package/mode functionality on top of those primitives.
+7. Load project-specific plan requirements deterministically:
    - Read `.agents/skills/create-plan/references/default.md` if it exists.
    - Read `.agents/skills/create-plan/references/<git-root-basename>.md` if it exists.
    - Apply all loaded requirements before finalizing tasks.
-7. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
-8. Write the plan using the structure below.
+8. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
+9. Write the plan using the structure below.
 
 ## Required Plan Structure
 
@@ -74,6 +75,7 @@ Create or update actionable, numbered, documentation-backed implementation plans
 - Keep acceptance criteria specific; include functional, performance, code quality, and security criteria for every task.
 - Treat `Approach` as mandatory and evidence-based.
 - Include documentation-derived API examples for library/framework/SDK/package/crate/CLI/service usage.
+- For new JS packages or mode implementations, add a primitive-first task before package work: read primitive docs/wiki, assess existing Rust-side primitives, identify generic primitive gaps, reject mode-specific Rust logic, and include tests/docs so the primitive library becomes easier to reuse for later modes.
 - List every expected file. If uncertain, mark the list tentative and explain why.
 - Write test cases before implementation, derived from acceptance criteria.
 - Apply loaded project-specific requirements before finalizing the task list.

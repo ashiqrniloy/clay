@@ -33,6 +33,13 @@ pub(crate) struct WorkspaceRoot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkspaceRootMetadata {
+    pub(crate) workspace_root_id: WorkspaceRootId,
+    pub(crate) display_name: String,
+    pub(crate) display_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileDocumentState {
     workspace_root_id: WorkspaceRootId,
     canonical_path: PathBuf,
@@ -149,6 +156,24 @@ impl WorkspaceState {
         self.next_root_id = self.next_root_id.saturating_add(1);
         self.roots.insert(id, WorkspaceRoot { id, canonical_path });
         Ok(id)
+    }
+
+    pub(crate) fn list_root_metadata(&self) -> Vec<WorkspaceRootMetadata> {
+        let mut roots = self
+            .roots
+            .values()
+            .map(|root| WorkspaceRootMetadata {
+                workspace_root_id: root.id,
+                display_name: root
+                    .canonical_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| root.canonical_path.to_string_lossy().into_owned()),
+                display_path: display_authorized_path(&root.canonical_path),
+            })
+            .collect::<Vec<_>>();
+        roots.sort_by_key(|root| root.workspace_root_id);
+        roots
     }
 
     pub(crate) async fn open_existing_file(

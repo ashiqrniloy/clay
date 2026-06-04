@@ -12,8 +12,11 @@ use masonry::vello::Scene;
 
 use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
 use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, background_color};
+use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
+use crate::perf::metrics::global_recorder;
 use crate::protocol::{
-    BehaviorManifest, DocumentAccess, DocumentId, DocumentVersion, KeyCode, KeyModifiers, KeyStroke,
+    BehaviorManifest, DocumentAccess, DocumentId, DocumentVersion, KeyCode, KeyModifiers,
+    KeyStroke, RuntimeDiagnostic,
 };
 
 const STATUS_BAR_HEIGHT: f64 = 28.0;
@@ -41,6 +44,19 @@ pub struct EditorStatus {
     document_id: Option<DocumentId>,
     version: Option<DocumentVersion>,
     access: Option<DocumentAccess>,
+    runtime_diagnostic: Option<RuntimeDiagnostic>,
+}
+
+// Internal GUI observability surface for headless tests and future agent inspection.
+// It intentionally remains pub(crate) instead of a Clay JS API because it only
+// exposes status chrome already rendered by the native widget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SduiStatusObservation {
+    pub status_text: String,
+    pub connection_label: String,
+    pub access_label: String,
+    pub sync_version: Option<DocumentVersion>,
+    pub diagnostic_text: Option<String>,
 }
 
 impl EditorStatus {
@@ -50,6 +66,7 @@ impl EditorStatus {
             document_id: None,
             version: None,
             access: None,
+            runtime_diagnostic: None,
         }
     }
 
@@ -63,6 +80,7 @@ impl EditorStatus {
             document_id: Some(document_id),
             version: Some(version),
             access: Some(access),
+            runtime_diagnostic: None,
         }
     }
 
@@ -72,6 +90,7 @@ impl EditorStatus {
             document_id: None,
             version: None,
             access: None,
+            runtime_diagnostic: None,
         }
     }
 
@@ -87,28 +106,63 @@ impl EditorStatus {
         self
     }
 
-    fn text(&self) -> String {
-        let connection = match self.connection {
+    fn connection_label(&self) -> &'static str {
+        match self.connection {
             EditorConnectionStatus::Connecting => "Connecting",
             EditorConnectionStatus::Connected => "Connected",
             EditorConnectionStatus::LocalFallback => "Local Fallback",
             EditorConnectionStatus::Disconnected => "Disconnected",
-        };
-        let access = match &self.access {
+        }
+    }
+
+    fn access_label(&self) -> &'static str {
+        match &self.access {
             Some(DocumentAccess::Editable { .. }) => "Editable",
             Some(DocumentAccess::ReadOnly) => "Read-only Observer",
             None => "No Server",
-        };
-        let version = self
-            .version
-            .map(|version| format!("v{version}"))
-            .unwrap_or_else(|| "version unknown".to_string());
-        let document = self
-            .document_id
-            .map(|document_id| format!("doc {document_id}"))
-            .unwrap_or_else(|| "local document".to_string());
+        }
+    }
 
-        format!("Clay — {connection} — {access} — {document} — {version}")
+    fn version_label(&self) -> String {
+        self.version
+            .map(|version| format!("v{version}"))
+            .unwrap_or_else(|| "version unknown".to_string())
+    }
+
+    fn document_label(&self) -> String {
+        self.document_id
+            .map(|document_id| format!("doc {document_id}"))
+            .unwrap_or_else(|| "local document".to_string())
+    }
+
+    fn diagnostic_text(&self) -> Option<String> {
+        self.runtime_diagnostic
+            .as_ref()
+            .map(|diagnostic| format!("Runtime {}: {}", diagnostic.code, diagnostic.message))
+    }
+
+    fn text(&self) -> String {
+        let mut text = format!(
+            "Clay — {} — {} — {} — {}",
+            self.connection_label(),
+            self.access_label(),
+            self.document_label(),
+            self.version_label()
+        );
+        if let Some(diagnostic) = self.diagnostic_text() {
+            text.push_str(&format!(" — {diagnostic}"));
+        }
+        text
+    }
+
+    fn observation(&self) -> SduiStatusObservation {
+        SduiStatusObservation {
+            status_text: self.text(),
+            connection_label: self.connection_label().to_string(),
+            access_label: self.access_label().to_string(),
+            sync_version: self.version,
+            diagnostic_text: self.diagnostic_text(),
+        }
     }
 }
 
@@ -124,6 +178,7 @@ pub struct EditorWidget {
     edit_queue: Option<ClientEditQueue>,
     next_transaction_id: u64,
     status: EditorStatus,
+    sdui: SduiNativeState,
 }
 
 impl Default for EditorWidget {
@@ -140,6 +195,7 @@ impl Default for EditorWidget {
             edit_queue: None,
             next_transaction_id: 1,
             status,
+            sdui: SduiNativeState::empty(),
         }
     }
 }
@@ -164,6 +220,7 @@ impl EditorWidget {
             edit_queue: None,
             next_transaction_id: 1,
             status,
+            sdui: SduiNativeState::empty(),
         }
     }
 
@@ -211,6 +268,17 @@ impl EditorWidget {
                 self.editor.install_behavior_manifest(manifest);
                 false
             }
+            ClientConnectionEvent::SduiSnapshot { tree, .. } => {
+                self.sdui.apply_snapshot(tree);
+                true
+            }
+            ClientConnectionEvent::SduiUpdate(update) => self.sdui.apply_update(update),
+            ClientConnectionEvent::DecorationSet(set) => self.editor.apply_decoration_set(set),
+            ClientConnectionEvent::RuntimeDiagnostic(diagnostic) => {
+                let mut next_status = self.status.clone();
+                next_status.runtime_diagnostic = Some(diagnostic);
+                self.set_status(next_status)
+            }
             ClientConnectionEvent::Disconnected | ClientConnectionEvent::ConnectionError(_) => {
                 let next_status = EditorStatus {
                     connection: EditorConnectionStatus::Disconnected,
@@ -227,7 +295,23 @@ impl EditorWidget {
     }
 
     pub fn status_text(&self) -> String {
-        self.status.text()
+        self.status_observation().status_text
+    }
+
+    pub(crate) fn status_observation(&self) -> SduiStatusObservation {
+        self.status.observation()
+    }
+
+    pub fn sdui_visible_texts(&self) -> Vec<String> {
+        self.sdui.visible_texts()
+    }
+
+    pub fn sdui_ui_version(&self) -> u64 {
+        self.sdui.ui_version()
+    }
+
+    pub fn decoration_span_count(&self) -> usize {
+        self.editor.decoration_span_count()
     }
 
     fn set_status(&mut self, status: EditorStatus) -> bool {
@@ -285,6 +369,11 @@ impl EditorWidget {
         } else {
             format!("{status}. {text}")
         }
+    }
+
+    fn editor_region_contains(&self, size: Size, point: masonry::kurbo::Point) -> bool {
+        let document_id = self.editor.document_state().document_id;
+        editor_region_for_document(size, &self.sdui, document_id).contains(point)
     }
 
     fn paint_status_line(&self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
@@ -346,12 +435,25 @@ impl Widget for EditorWidget {
                 if button_event.button == Some(PointerButton::Primary) =>
             {
                 let point = ctx.local_position(button_event.state.position);
-                ctx.capture_pointer();
-                (self.editor.place_caret_at_point(point), true)
+                if let Some(intent) = self.sdui.action_for_point(point) {
+                    if let Some(edit_queue) = &self.edit_queue {
+                        let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
+                    }
+                    (false, true)
+                } else if self.editor_region_contains(ctx.size(), point) {
+                    ctx.capture_pointer();
+                    (self.editor.place_caret_at_point(point), true)
+                } else {
+                    (false, true)
+                }
             }
             PointerEvent::Move(pointer_update) if ctx.is_active() => {
                 let point = ctx.local_position(pointer_update.current.position);
-                (self.editor.extend_selection_to_point(point), true)
+                if self.editor_region_contains(ctx.size(), point) {
+                    (self.editor.extend_selection_to_point(point), true)
+                } else {
+                    (false, true)
+                }
             }
             PointerEvent::Up(_) | PointerEvent::Cancel(_) if ctx.is_active() => (false, true),
             PointerEvent::Scroll(PointerScrollEvent { delta, .. }) => {
@@ -488,6 +590,8 @@ impl Widget for EditorWidget {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        let recorder = global_recorder();
+        let _scope = recorder.scope("masonry.render_prepare.paint");
         let rect = ctx.size().to_rect();
         scene.fill(
             Fill::NonZero,
@@ -497,6 +601,7 @@ impl Widget for EditorWidget {
             &rect,
         );
         self.editor.paint(ctx, scene);
+        self.sdui.paint(ctx, scene);
         self.paint_status_line(ctx, scene);
     }
 
@@ -528,10 +633,44 @@ impl Widget for EditorWidget {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorStatus, EditorWidget};
+    use super::{EditorStatus, EditorWidget, SduiStatusObservation};
     use crate::client::{ClientConnectionEvent, ClientInitialState, ClientResyncSnapshot};
     use crate::editor::EditorCommand;
-    use crate::protocol::{BehaviorManifest, DocumentAccess};
+    use crate::protocol::{
+        BehaviorManifest, DocumentAccess, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection,
+        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+    };
+
+    fn sdui_tree(label_text: &str) -> SduiTree {
+        SduiTree {
+            ui_version: 1,
+            root_id: SduiNodeId(1),
+            nodes: vec![
+                SduiNode::new(
+                    SduiNodeId(1),
+                    SduiNodeKind::Flex {
+                        direction: SduiFlexDirection::Row,
+                        children: vec![SduiNodeId(2), SduiNodeId(3)],
+                    },
+                ),
+                SduiNode::new(
+                    SduiNodeId(2),
+                    SduiNodeKind::Label {
+                        text: label_text.to_string(),
+                    },
+                ),
+                SduiNode::new(
+                    SduiNodeId(3),
+                    SduiNodeKind::EditorView {
+                        binding: SduiEditorBinding {
+                            document_id: 7,
+                            expected_version: Some(12),
+                        },
+                    },
+                ),
+            ],
+        }
+    }
 
     fn initial_state(access: DocumentAccess, version: u64) -> ClientInitialState {
         ClientInitialState {
@@ -631,6 +770,106 @@ mod tests {
     }
 
     #[test]
+    fn runtime_diagnostic_updates_status_text() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        let diagnostic = RuntimeDiagnostic::error(
+            "clay.runtime.syntax_error",
+            "JavaScript syntax error while evaluating server-side configuration.",
+        );
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
+        );
+
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connected — Editable — doc 7 — v12 — Runtime clay.runtime.syntax_error: JavaScript syntax error while evaluating server-side configuration."
+        );
+    }
+
+    #[test]
+    fn status_observation_local_fallback_state() {
+        let widget = EditorWidget::default().with_status(EditorStatus::local_fallback());
+
+        assert_eq!(
+            widget.status_observation(),
+            SduiStatusObservation {
+                status_text: "Clay — Local Fallback — No Server — local document — version unknown"
+                    .to_string(),
+                connection_label: "Local Fallback".to_string(),
+                access_label: "No Server".to_string(),
+                sync_version: None,
+                diagnostic_text: None,
+            }
+        );
+    }
+
+    #[test]
+    fn status_observation_connected_editable_with_version() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            4,
+        ));
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::EditAck {
+                document_id: 7,
+                version: 5,
+                transaction_id: 1,
+            })
+        );
+
+        assert_eq!(widget.status_observation().connection_label, "Connected");
+        assert_eq!(widget.status_observation().access_label, "Editable");
+        assert_eq!(widget.status_observation().sync_version, Some(5));
+    }
+
+    #[test]
+    fn status_observation_diagnostic_present_after_runtime_diagnostic_event() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        let diagnostic = RuntimeDiagnostic::error(
+            "clay.runtime.syntax_error",
+            "JavaScript syntax error while evaluating server-side configuration.",
+        );
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
+        );
+
+        assert_eq!(
+            widget.status_observation().diagnostic_text,
+            Some(
+                "Runtime clay.runtime.syntax_error: JavaScript syntax error while evaluating server-side configuration."
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn status_observation_does_not_regress_accessibility_label() {
+        let widget = EditorWidget::with_initial_state(initial_state(DocumentAccess::ReadOnly, 12));
+        let observation = widget.status_observation();
+
+        assert!(
+            widget
+                .accessibility_label()
+                .contains(&observation.status_text)
+        );
+        assert!(
+            observation
+                .status_text
+                .contains(&observation.connection_label)
+        );
+        assert!(observation.status_text.contains(&observation.access_label));
+    }
+
+    #[test]
     fn resync_event_replaces_editor_snapshot() {
         let mut widget = EditorWidget::default();
         widget.editor.command(EditorCommand::Insert("local"));
@@ -653,6 +892,98 @@ mod tests {
         assert_eq!(
             widget.editor.document_state().access,
             DocumentAccess::ReadOnly
+        );
+    }
+
+    #[test]
+    fn sdui_snapshot_replaces_native_tree_state() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::SduiSnapshot {
+                client_id: 11,
+                tree: sdui_tree("Ready"),
+            })
+        );
+
+        assert_eq!(widget.sdui_ui_version(), 1);
+        assert!(widget.sdui_visible_texts().contains(&"Ready".to_string()));
+    }
+
+    #[test]
+    fn sdui_update_preserves_editor_document_state() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.apply_connection_event(ClientConnectionEvent::SduiSnapshot {
+            client_id: 11,
+            tree: sdui_tree("Ready"),
+        });
+        let before_text = widget.editor.visible_text();
+        let before_version = widget.editor.document_state().document_version;
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::SduiUpdate(SduiTreeUpdate {
+                base_ui_version: 1,
+                new_ui_version: 2,
+                operations: vec![SduiTreeOperation::ReplaceNode {
+                    node: SduiNode::new(
+                        SduiNodeId(2),
+                        SduiNodeKind::Label {
+                            text: "Updated".to_string(),
+                        },
+                    ),
+                }],
+            },))
+        );
+
+        assert_eq!(widget.editor.visible_text(), before_text);
+        assert_eq!(
+            widget.editor.document_state().document_version,
+            before_version
+        );
+        assert!(widget.sdui_visible_texts().contains(&"Updated".to_string()));
+    }
+
+    #[test]
+    fn side_panel_update_does_not_replace_editor_widget() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.command(EditorCommand::Insert(" local"));
+        widget.apply_connection_event(ClientConnectionEvent::SduiSnapshot {
+            client_id: 11,
+            tree: sdui_tree("Ready"),
+        });
+        let before_text = widget.editor.visible_text();
+        let before_document = widget.editor.document_state().clone();
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::SduiUpdate(SduiTreeUpdate {
+                base_ui_version: 1,
+                new_ui_version: 2,
+                operations: vec![SduiTreeOperation::ReplaceNode {
+                    node: SduiNode::new(
+                        SduiNodeId(2),
+                        SduiNodeKind::Label {
+                            text: "Side panel updated".to_string(),
+                        },
+                    ),
+                }],
+            },))
+        );
+
+        assert_eq!(widget.editor.visible_text(), before_text);
+        assert_eq!(widget.editor.document_state(), &before_document);
+        assert!(
+            widget
+                .sdui_visible_texts()
+                .contains(&"Side panel updated".to_string())
         );
     }
 }

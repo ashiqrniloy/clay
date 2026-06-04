@@ -7,10 +7,11 @@ use std::{
 
 use crate::editor::EditorEditEvent;
 use crate::ipc::IpcEndpoint;
+use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, DocumentAccess, DocumentId,
-    DocumentVersion, EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode,
-    ServerMessage, TransactionId,
+    BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, DecorationSet, DocumentAccess,
+    DocumentId, DocumentVersion, EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode,
+    RuntimeDiagnostic, SduiActionIntent, SduiTree, SduiTreeUpdate, ServerMessage, TransactionId,
     codec::{Codec, CodecError},
 };
 
@@ -200,10 +201,21 @@ impl ClientEditQueue {
         event: EditorEditEvent,
         transaction_id: TransactionId,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        let recorder = global_recorder();
+        let _scope = recorder.scope_with_metadata(
+            "client.edit_queue.enqueue",
+            MetricMetadata::document(event.document_id, event.base_version),
+        );
         let operation = event.operation;
         let base_version = {
             let mut state = self.sync_state.lock().expect("client sync state poisoned");
-            state.reserve_pending(event.document_id, transaction_id, operation.clone())
+            let base_version =
+                state.reserve_pending(event.document_id, transaction_id, operation.clone());
+            recorder.record_gauge(
+                "client.edit_queue.pending_depth",
+                state.pending.len() as u64,
+            );
+            base_version
         };
         let message = ClientMessage::Edit {
             document_id: event.document_id,
@@ -224,10 +236,28 @@ impl ClientEditQueue {
         if let Err(error) = self.sender.try_send(message) {
             let mut state = self.sync_state.lock().expect("client sync state poisoned");
             state.rollback_pending_reservation(transaction_id);
+            recorder.record_counter("client.edit_queue.enqueue_failed", 1);
+            recorder.record_gauge(
+                "client.edit_queue.pending_depth",
+                state.pending.len() as u64,
+            );
             return Err(error);
         }
 
+        recorder.record_counter("client.edit_queue.enqueued", 1);
         Ok(())
+    }
+
+    pub fn enqueue_sdui_action(
+        &self,
+        ui_version: u64,
+        intent: SduiActionIntent,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::SduiAction {
+            client_id: self.client_id,
+            ui_version,
+            intent,
+        })
     }
 
     pub fn sync_snapshot(&self) -> ClientSyncSnapshot {
@@ -237,13 +267,15 @@ impl ClientEditQueue {
             .snapshot()
     }
 
-    fn with_authority(mut self, client_id: ClientId, access: &DocumentAccess) -> Self {
+    #[doc(hidden)]
+    pub fn with_authority(mut self, client_id: ClientId, access: &DocumentAccess) -> Self {
         self.client_id = client_id;
         self.lease_id = access.lease_id();
         self
     }
 
-    fn with_confirmed_version(mut self, confirmed_version: DocumentVersion) -> Self {
+    #[doc(hidden)]
+    pub fn with_confirmed_version(mut self, confirmed_version: DocumentVersion) -> Self {
         self.sync_state = Arc::new(Mutex::new(ClientSyncState::new(confirmed_version)));
         self
     }
@@ -277,6 +309,13 @@ pub enum ClientConnectionEvent {
         reason: String,
     },
     ResyncSnapshot(ClientResyncSnapshot),
+    SduiSnapshot {
+        client_id: ClientId,
+        tree: SduiTree,
+    },
+    SduiUpdate(SduiTreeUpdate),
+    DecorationSet(DecorationSet),
+    RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
     ServerError {
         code: ProtocolErrorCode,
@@ -565,10 +604,19 @@ async fn run_connection<S>(
             incoming = codec.read_server_message(&mut reader) => {
                 match incoming {
                     Ok(ServerMessage::EditAck { document_id, confirmed_version, transaction_id }) => {
-                        sync_state
-                            .lock()
-                            .expect("client sync state poisoned")
-                            .acknowledge(confirmed_version, transaction_id);
+                        let recorder = global_recorder();
+                        let _scope = recorder.scope_with_metadata(
+                            "client.edit_ack.apply",
+                            MetricMetadata::transaction(document_id, client_id, transaction_id, confirmed_version),
+                        );
+                        let pending_depth = {
+                            let mut state = sync_state
+                                .lock()
+                                .expect("client sync state poisoned");
+                            state.acknowledge(confirmed_version, transaction_id);
+                            state.pending.len()
+                        };
+                        recorder.record_gauge("client.edit_queue.pending_depth", pending_depth as u64);
                         let _ = events.send(ClientConnectionEvent::EditAck { document_id, version: confirmed_version, transaction_id }).await;
                     }
                     Ok(ServerMessage::EditRejected { document_id, transaction_id, reason }) => {
@@ -600,6 +648,18 @@ async fn run_connection<S>(
                             .expect("client sync state poisoned")
                             .apply_resync_snapshot(snapshot.clone());
                         let _ = events.send(ClientConnectionEvent::ResyncSnapshot(snapshot)).await;
+                    }
+                    Ok(ServerMessage::SduiSnapshot { client_id, tree }) => {
+                        let _ = events.send(ClientConnectionEvent::SduiSnapshot { client_id, tree }).await;
+                    }
+                    Ok(ServerMessage::SduiUpdate { update }) => {
+                        let _ = events.send(ClientConnectionEvent::SduiUpdate(update)).await;
+                    }
+                    Ok(ServerMessage::DecorationSet(set)) => {
+                        let _ = events.send(ClientConnectionEvent::DecorationSet(set)).await;
+                    }
+                    Ok(ServerMessage::RuntimeDiagnostic(diagnostic)) => {
+                        let _ = events.send(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)).await;
                     }
                     Ok(message @ ServerMessage::EditTransaction { .. }) => {
                         let _ = events.send(ClientConnectionEvent::EditTransaction(message)).await;
@@ -670,7 +730,8 @@ mod tests {
     use crate::protocol::EditRejection;
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess, EditOperation,
-        PROTOCOL_VERSION, ServerMessage, codec::Codec,
+        PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding,
+        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage, codec::Codec,
     };
     #[cfg(any(unix, windows))]
     use crate::server::{IpcServer, ServerConfig};
@@ -874,6 +935,29 @@ mod tests {
         assert!(queue.enqueue_edit_event(event.clone(), 1).is_ok());
         assert!(queue.enqueue_edit_event(event, 2).is_err());
         assert_eq!(queue.sync_snapshot().pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sdui_button_action_emits_server_intent() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
+        let intent = SduiActionIntent::command(
+            "workspace.refresh",
+            SduiActionSource::Button {
+                node_id: SduiNodeId(5),
+            },
+        );
+
+        queue.enqueue_sdui_action(3, intent.clone()).unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::SduiAction {
+                client_id: 42,
+                ui_version: 3,
+                intent,
+            }
+        );
     }
 
     #[tokio::test]
@@ -1345,6 +1429,135 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn client_receives_sdui_snapshot_event() {
+        let (client, mut server) = duplex(4096);
+        let codec = Codec::default();
+        let tree = SduiTree {
+            ui_version: 1,
+            root_id: SduiNodeId(1),
+            nodes: vec![SduiNode::new(
+                SduiNodeId(1),
+                SduiNodeKind::EditorView {
+                    binding: SduiEditorBinding {
+                        document_id: 7,
+                        expected_version: Some(10),
+                    },
+                },
+            )],
+        };
+        let expected_tree = tree.clone();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 7,
+                        version: 10,
+                        text: String::new(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::SduiSnapshot { client_id: 1, tree },
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::SduiSnapshot {
+                client_id: 1,
+                tree: expected_tree,
+            }
+        );
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_receives_runtime_diagnostic_event() {
+        let (client, mut server) = duplex(4096);
+        let codec = Codec::default();
+        let expected = RuntimeDiagnostic::error(
+            "clay.runtime.syntax_error",
+            "JavaScript syntax error while evaluating server-side configuration.",
+        );
+        let server_task = tokio::spawn({
+            let expected = expected.clone();
+            async move {
+                let _hello = codec.read_client_message(&mut server).await.unwrap();
+                codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::Welcome {
+                            client_id: 1,
+                            protocol_version: PROTOCOL_VERSION,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::InitialDocument {
+                            document_id: 2,
+                            version: 3,
+                            text: String::new(),
+                            access: DocumentAccess::Editable { lease_id: 1 },
+                            lease_id: Some(1),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                    )
+                    .await
+                    .unwrap();
+                codec
+                    .write_server_message(&mut server, &ServerMessage::RuntimeDiagnostic(expected))
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::RuntimeDiagnostic(expected)
+        );
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn client_installs_behavior_manifest_replacement_event() {
         let (client, mut server) = duplex(4096);
         let codec = Codec::default();
@@ -1566,8 +1779,13 @@ mod tests {
             )
             .unwrap();
 
+        let mut event = session.events.recv().await.unwrap();
+        if matches!(event, ClientConnectionEvent::SduiSnapshot { .. }) {
+            event = session.events.recv().await.unwrap();
+        }
+
         assert_eq!(
-            session.events.recv().await.unwrap(),
+            event,
             ClientConnectionEvent::EditAck {
                 document_id: session.initial_state.document_id,
                 version: session.initial_state.document_version + 1,
@@ -1652,6 +1870,7 @@ mod tests {
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+        let _sdui = codec.read_server_message(&mut stream).await.unwrap();
 
         codec
             .write_client_message(
@@ -1749,6 +1968,7 @@ mod tests {
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+        let _sdui = codec.read_server_message(&mut stream).await.unwrap();
 
         codec
             .write_client_message(

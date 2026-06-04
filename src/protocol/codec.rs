@@ -3,6 +3,8 @@ use std::{error::Error, fmt, io};
 use rkyv::{Archive, Deserialize, Serialize, rancor};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::perf::metrics::global_recorder;
+
 use super::{ClientMessage, ServerMessage};
 
 const LENGTH_PREFIX_BYTES: usize = 4;
@@ -98,6 +100,7 @@ impl Codec {
 
         let declared_len = u32::from_be_bytes(header) as usize;
         if declared_len > self.max_frame_size {
+            global_recorder().record_counter("protocol.codec.frame_too_large", 1);
             return Err(CodecError::FrameTooLarge {
                 len: declared_len,
                 max: self.max_frame_size,
@@ -125,13 +128,17 @@ impl Codec {
                 >,
             >,
     {
+        let recorder = global_recorder();
+        let _scope = recorder.scope("protocol.codec.encode");
         let payload = rkyv::to_bytes::<rancor::Error>(message).map_err(CodecError::serialize)?;
         if payload.len() > self.max_frame_size {
+            recorder.record_counter("protocol.codec.frame_too_large", 1);
             return Err(CodecError::FrameTooLarge {
                 len: payload.len(),
                 max: self.max_frame_size,
             });
         }
+        recorder.record_bytes("protocol.codec.payload_bytes", payload.len() as u64);
 
         let payload_len = u32::try_from(payload.len()).map_err(|_| CodecError::FrameTooLarge {
             len: payload.len(),
@@ -159,12 +166,15 @@ impl Codec {
                 .expect("slice length checked"),
         ) as usize;
         if declared_len > self.max_frame_size {
+            global_recorder().record_counter("protocol.codec.frame_too_large", 1);
             return Err(CodecError::FrameTooLarge {
                 len: declared_len,
                 max: self.max_frame_size,
             });
         }
 
+        let recorder = global_recorder();
+        let _scope = recorder.scope("protocol.codec.decode");
         let payload = &frame[LENGTH_PREFIX_BYTES..];
         if payload.len() != declared_len {
             return Err(CodecError::LengthMismatch {
@@ -172,6 +182,7 @@ impl Codec {
                 actual: payload.len(),
             });
         }
+        recorder.record_bytes("protocol.codec.decoded_payload_bytes", payload.len() as u64);
 
         let mut aligned_payload = rkyv::util::AlignedVec::<16>::with_capacity(payload.len());
         aligned_payload.extend_from_slice(payload);
@@ -238,11 +249,16 @@ impl Error for CodecError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Codec, CodecError};
-    use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
-        EditRejection, FileErrorCode, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
-        ServerMessage,
+    use super::{Codec, CodecError, LENGTH_PREFIX_BYTES};
+    use crate::{
+        perf::budgets::{SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES},
+        protocol::{
+            BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
+            EditRejection, FileErrorCode, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
+            RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
+            SduiNodeId, SduiNodeKind, SduiTree, SduiTreeUpdate, ServerMessage,
+            representative_panel_update, representative_sdui_tree,
+        },
     };
 
     #[test]
@@ -400,6 +416,121 @@ mod tests {
     }
 
     #[test]
+    fn sdui_snapshot_codec_round_trips() {
+        let codec = Codec::default();
+        let tree = SduiTree {
+            ui_version: 1,
+            root_id: SduiNodeId(1),
+            nodes: vec![SduiNode::new(
+                SduiNodeId(1),
+                SduiNodeKind::EditorView {
+                    binding: SduiEditorBinding {
+                        document_id: 7,
+                        expected_version: Some(3),
+                    },
+                },
+            )],
+        };
+        let message = ServerMessage::SduiSnapshot { client_id: 9, tree };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn sdui_update_and_action_codec_round_trip() {
+        let codec = Codec::default();
+        let update = ServerMessage::SduiUpdate {
+            update: SduiTreeUpdate {
+                base_ui_version: 1,
+                new_ui_version: 2,
+                operations: Vec::new(),
+            },
+        };
+        let action = ClientMessage::SduiAction {
+            client_id: 9,
+            ui_version: 1,
+            intent: SduiActionIntent::command(
+                "workspace.refresh",
+                SduiActionSource::Button {
+                    node_id: SduiNodeId(5),
+                },
+            ),
+        };
+
+        let frame = codec.encode_server_message(&update).unwrap();
+        assert_eq!(codec.decode_server_message(&frame).unwrap(), update);
+        let frame = codec.encode_client_message(&action).unwrap();
+        assert_eq!(codec.decode_client_message(&frame).unwrap(), action);
+    }
+
+    #[test]
+    fn sdui_snapshot_payload_stays_under_initial_budget() {
+        let codec = Codec::default();
+        let message = ServerMessage::SduiSnapshot {
+            client_id: 9,
+            tree: representative_sdui_tree(),
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let payload_len = frame.len() - LENGTH_PREFIX_BYTES;
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+        assert!(
+            payload_len <= SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
+            "representative SDUI snapshot payload was {payload_len} bytes; budget is {SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES} bytes"
+        );
+    }
+
+    #[test]
+    fn sdui_update_payload_stays_under_initial_budget() {
+        let codec = Codec::default();
+        let message = ServerMessage::SduiUpdate {
+            update: representative_panel_update(),
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let payload_len = frame.len() - LENGTH_PREFIX_BYTES;
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+        assert!(
+            payload_len <= SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            "representative SDUI update payload was {payload_len} bytes; budget is {SDUI_UPDATE_PAYLOAD_BUDGET_BYTES} bytes"
+        );
+    }
+
+    #[test]
+    fn sdui_update_payload_smaller_than_snapshot_for_panel_change() {
+        let codec = Codec::default();
+        let snapshot = ServerMessage::SduiSnapshot {
+            client_id: 9,
+            tree: representative_sdui_tree(),
+        };
+        let update = ServerMessage::SduiUpdate {
+            update: representative_panel_update(),
+        };
+
+        let snapshot_frame = codec.encode_server_message(&snapshot).unwrap();
+        let update_frame = codec.encode_server_message(&update).unwrap();
+        let snapshot_payload_len = snapshot_frame.len() - LENGTH_PREFIX_BYTES;
+        let update_payload_len = update_frame.len() - LENGTH_PREFIX_BYTES;
+
+        assert_eq!(codec.decode_server_message(&update_frame).unwrap(), update);
+        assert!(
+            update_payload_len < snapshot_payload_len,
+            "panel update payload ({update_payload_len} bytes) should be smaller than snapshot payload ({snapshot_payload_len} bytes)"
+        );
+        assert!(
+            update_payload_len <= SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            "representative SDUI panel update payload was {update_payload_len} bytes; budget is {SDUI_UPDATE_PAYLOAD_BUDGET_BYTES} bytes"
+        );
+    }
+
+    #[test]
     fn protocol_round_trips_open_save_reload_messages() {
         let codec = Codec::default();
         let open = ClientMessage::OpenDocument {
@@ -464,6 +595,10 @@ mod tests {
                 workspace_root_id: Some(2),
                 document_id: None,
             },
+            ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                "clay.runtime.syntax_error",
+                "JavaScript syntax error while evaluating server-side configuration.",
+            )),
         ];
 
         for message in messages {
@@ -496,6 +631,19 @@ mod tests {
         let error = codec.encode_server_message(&message).unwrap_err();
 
         assert!(matches!(error, CodecError::FrameTooLarge { max: 8, .. }));
+    }
+
+    #[test]
+    fn oversized_sdui_frame_is_rejected() {
+        let codec = Codec::new(64);
+        let message = ServerMessage::SduiSnapshot {
+            client_id: 9,
+            tree: representative_sdui_tree(),
+        };
+
+        let error = codec.encode_server_message(&message).unwrap_err();
+
+        assert!(matches!(error, CodecError::FrameTooLarge { max: 64, .. }));
     }
 
     #[test]

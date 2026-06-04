@@ -1,6 +1,10 @@
 pub mod codec;
+pub mod decorations;
+pub mod parse;
 pub mod sdui;
 
+pub use decorations::*;
+pub use parse::*;
 pub use sdui::*;
 
 /// Current wire protocol version for the local Clay IPC boundary.
@@ -313,8 +317,34 @@ pub enum TextEditCapability {
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum EnterRule {
+    /// Copy the indentation of the previous line only.
     PreserveLeadingWhitespace,
+    /// Insert a bare newline with no indentation.
     InsertNewlineOnly,
+    /// After a line beginning with one of the given `markers`, insert a new
+    /// line that repeats the same marker and indentation.  When the current
+    /// item body is empty and `exit_on_empty_item` is true, remove the marker
+    /// instead ("exit" the list).  Any mode whose syntax has list-like
+    /// continuation (Markdown, AsciiDoc, Org-mode, RST, …) uses this variant
+    /// by declaring its own marker strings — no mode-specific Rust code needed.
+    ContinueLineMarkers {
+        /// Prefix strings that trigger continuation, e.g. `["-", "*", "+"]`
+        /// or `["1.", "2."]` for ordered lists.  The special token
+        /// `"ordered-dot"` signals the engine to increment the numeric prefix.
+        markers: Vec<String>,
+        /// Remove the marker rather than repeating it when the current item
+        /// body is empty.
+        exit_on_empty_item: bool,
+    },
+    /// Inside a fenced block opened by one of `fence_markers` (e.g. `"```"`,
+    /// `"~~~"`), copy the indentation of the first non-fence body line instead
+    /// of the leading whitespace of the fence line.  Any mode with fenced
+    /// constructs (Markdown, RST, AsciiDoc code blocks, …) can use this
+    /// variant by declaring its own fence delimiter strings.
+    PreserveFenceBodyIndent {
+        /// Opening/closing fence delimiter strings, e.g. `["```", "~~~"]`.
+        fence_markers: Vec<String>,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -462,6 +492,35 @@ pub enum ClientMessage {
     ListDocuments {
         client_id: ClientId,
     },
+    SduiAction {
+        client_id: ClientId,
+        ui_version: SduiVersion,
+        intent: SduiActionIntent,
+    },
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeDiagnostic {
+    pub severity: DiagnosticSeverity,
+    pub code: String,
+    pub message: String,
+}
+
+impl RuntimeDiagnostic {
+    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Error,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -478,6 +537,14 @@ pub enum ServerMessage {
         lease_id: Option<LeaseId>,
     },
     BehaviorManifest(BehaviorManifest),
+    SduiSnapshot {
+        client_id: ClientId,
+        tree: SduiTree,
+    },
+    SduiUpdate {
+        update: SduiTreeUpdate,
+    },
+    DecorationSet(DecorationSet),
     EditAck {
         document_id: DocumentId,
         confirmed_version: DocumentVersion,
@@ -526,6 +593,7 @@ pub enum ServerMessage {
         workspace_root_id: Option<WorkspaceRootId>,
         document_id: Option<DocumentId>,
     },
+    RuntimeDiagnostic(RuntimeDiagnostic),
     Error {
         code: ProtocolErrorCode,
         message: String,

@@ -9,9 +9,9 @@ deno_op: op_clay_configuration_get_state
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_get_state
 name: getConfigurationState
 user_facing_name: Get Configuration State
-summary: Inspect planned Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.
+summary: Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.
 owner: server
-phase: Phase 8
+phase: Phase 13
 visibility: public
 permissions: []
 key_bindings: []
@@ -24,12 +24,12 @@ custom_properties:
     type: string[]
     default: []
     description: Ordered local configuration module paths once runtime loading exists.
-security: Returns configuration metadata only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+security: Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `clay.configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.
 lookup_tags: [configuration, entrypoint, initjs, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: false
 ---
 
@@ -37,13 +37,13 @@ async: false
 
 ## Summary
 
-Inspect planned Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.
+Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.
 
 ## Description
 
-`getConfigurationState` is the planned public API for **Get Configuration State**. It provides a stable Clay JS lookup surface for app/help/agent discovery of configuration entry point metadata while configuration execution remains deferred.
+`getConfigurationState` is the runtime-backed public API for **Get Configuration State**. It provides a stable Clay JS lookup surface for app/help/agent discovery of the active configuration entry point and loaded local modules.
 
-Authority: `configuration-query-api`. Runtime path: `server-side-configuration-query-planned`. The entry point is `~/.config/clay/init.js`, and any modules reported by this API are local configuration modules declared by that entry point. This query is background/help/configuration metadata and must not be part of ordinary input/rendering hot paths.
+Authority: `configuration-query-api`. Runtime path: `server-side-configuration-query-runtime`. The entry point is `~/.config/clay/init.js`, and any modules reported by this API are local configuration modules declared by that entry point. This query is background/help/configuration metadata and must not be part of ordinary input/rendering hot paths.
 
 ## When to use
 
@@ -64,7 +64,7 @@ console.log(state.entryPoint); // "~/.config/clay/init.js"
 const { entryPoint, loadedModules } = getConfigurationState();
 ```
 
-Phase 8 defines the shape only; the current facade stub does not read or execute configuration files.
+Phase 13 returns sanitized runtime state for the active server-side configuration evaluation; it does not expose arbitrary filesystem access or source contents.
 
 ## Options
 
@@ -81,7 +81,7 @@ No default key binding is assigned. Users may bind a key to `clay.configuration.
 
 ## Return and async behavior
 
-Returns a `ConfigurationState` object when runtime wiring exists:
+Returns a `ConfigurationState` object:
 
 ```ts
 interface ConfigurationState {
@@ -90,17 +90,17 @@ interface ConfigurationState {
 }
 ```
 
-Current Phase 8 facade/runtime status is `planned`; the typed stub throws a planned-runtime error rather than reading configuration state.
+The Phase 13 runtime-backed facade returns sanitized configuration metadata.
 
 ## Errors
 
-The planned runtime should fail only for unavailable configuration service state or future server-side validation errors. Current Phase 8 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails only for unavailable configuration service state or future server-side validation errors. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 
 No additional permission is required beyond access to the running editor session.
 
-Returns configuration metadata only; Phase 8 does not execute JavaScript and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
@@ -111,7 +111,7 @@ Use `clay.configuration.getConfigurationState` when the user asks for Clay confi
 ## Backing implementation
 
 - JS facade: `runtime/js/configuration.ts::getConfigurationState`
-- Future Deno op: `src/server/ops/configuration.rs::op_clay_configuration_get_state` (`op_clay_configuration_get_state`)
+- Deno op: `src/server/ops/configuration.rs::op_clay_configuration_get_state` (`op_clay_configuration_get_state`)
 - Backing Rust/current owner: `src/server/configuration.rs::ConfigurationState`
 - Current implementation audit path: `runtime/js/configuration.ts::getConfigurationState`
 

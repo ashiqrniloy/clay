@@ -9,7 +9,7 @@ deno_op: op_clay_documents_open_document
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_open_document
 name: serverOpenDocument
 user_facing_name: Open Document
-summary: Open an authorized workspace text file through the planned `clay:documents` server-authoritative facade.
+summary: Open an authorized workspace text file through the runtime-backed `clay:documents` server-authoritative facade.
 owner: server
 phase: Phase 9
 visibility: public
@@ -21,7 +21,7 @@ agent_guidance: Use `clay.documents.serverOpenDocument` only through the documen
 lookup_tags: [documents, workspace, file, open, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -29,11 +29,11 @@ async: true
 
 ## Summary
 
-Open an authorized workspace text file through the planned `clay:documents` server-authoritative facade.
+Open an authorized workspace text file through the runtime-backed `clay:documents` server-authoritative facade.
 
 ## Description
 
-`serverOpenDocument` is the planned public API for **Open Document**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
+`serverOpenDocument` is the runtime-backed public API for **Open Document**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
 
 Authority: `server-authoritative-file-open`. Runtime path: `server-first-file-io`. Opening a file is an explicit server command that may read a full UTF-8 snapshot once; ordinary keypress-to-paint editing remains asynchronous and does not call JavaScript, workspace validation, or file IO.
 
@@ -73,11 +73,11 @@ No behavior-changing custom properties are defined for this API.
 
 Returns a promise for document metadata plus the initial text snapshot.
 
-Current Phase 9 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. Current Phase 9 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
 
 ## Permissions and security
 
@@ -96,7 +96,7 @@ Use `clay.documents.serverOpenDocument` only through the documented Clay JS faca
 ## Backing implementation
 
 - JS facade: `runtime/js/documents.ts::serverOpenDocument`
-- Future Deno op: `src/server/ops/documents.rs::op_clay_documents_open_document` (`op_clay_documents_open_document`)
+- Deno op: `src/server/ops/documents.rs::op_clay_documents_open_document` (`op_clay_documents_open_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::open_existing_file`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
 

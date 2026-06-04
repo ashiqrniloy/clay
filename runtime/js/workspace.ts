@@ -1,7 +1,7 @@
-// Clay workspace authority facade skeleton.
+// Clay workspace authority facade.
 //
-// Workspace APIs are planned server-authoritative metadata APIs. They expose
-// configured workspace root metadata without granting client filesystem access.
+// Workspace APIs expose server-authoritative metadata without granting client
+// filesystem access.
 
 export type WorkspaceRootId = string;
 
@@ -11,10 +11,20 @@ export interface WorkspaceRootMetadata {
   displayPath: string;
 }
 
-function plannedApi(name: string): never {
-  throw new Error(`${name} is planned; Clay JS runtime op wiring is not implemented yet`);
+interface WorkspaceOps {
+  op_clay_workspace_list_roots?: () => Promise<string>;
+}
+
+declare const globalThis: { Deno?: { core?: { ops?: WorkspaceOps } } };
+
+function workspaceOps(): Required<WorkspaceOps> {
+  const ops = globalThis.Deno?.core?.ops;
+  if (typeof ops?.op_clay_workspace_list_roots !== "function") {
+    throw new Error("clay:workspace runtime ops are unavailable in this environment");
+  }
+  return ops as Required<WorkspaceOps>;
 }
 
 export async function serverListWorkspaceRoots(): Promise<WorkspaceRootMetadata[]> {
-  plannedApi("clay.workspace.serverListWorkspaceRoots");
+  return JSON.parse(await workspaceOps().op_clay_workspace_list_roots()) as WorkspaceRootMetadata[];
 }

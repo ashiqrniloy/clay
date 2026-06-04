@@ -23,13 +23,6 @@ impl ActiveBehaviorManifest {
         Ok(Self { manifest })
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read-only manifest access is used by tests now and future server publishing hooks"
-        )
-    )]
     pub(crate) fn manifest(&self) -> &BehaviorManifest {
         &self.manifest
     }
@@ -62,13 +55,6 @@ impl ActiveBehaviorManifest {
         })
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "manifest replacement is internal Phase 6 server ownership plumbing for future hot reload"
-        )
-    )]
     pub(crate) fn publish_replacement(
         &mut self,
         mut replacement: BehaviorManifest,

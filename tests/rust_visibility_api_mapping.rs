@@ -155,6 +155,21 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/mod.rs::IpcServer::try_new",
         "src/server/mod.rs::IpcServer::run",
         "src/server/mod.rs::ServerConfig::new",
+        "src/server/decorations.rs::DecorationValidationError",
+        "src/server/decorations.rs::validate_decoration_publication",
+        "src/server/decorations.rs::validate_decoration_set",
+        "src/server/parse_coordinator.rs::ParseCoordinator::new",
+        "src/server/parse_coordinator.rs::ParseCoordinator::next_update",
+        "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
+        "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse",
+        "src/server/parse_coordinator.rs::ParseCoordinator::stats",
+        "src/server/parse_coordinator.rs::ParseCoordinator::validate_update",
+        "src/server/parse_coordinator.rs::ParseCoordinatorError",
+        "src/server/parse_coordinator.rs::ParseCoordinatorStats",
+        "src/server/parse_coordinator.rs::ParseHandler",
+        "src/server/parse_coordinator.rs::ParseHandlerFuture",
+        "src/server/parse_coordinator.rs::ParseHandlerMeta",
+        "src/server/parse_coordinator.rs::ParseScheduleRequest",
     ]
     .into_iter()
     .collect();
@@ -169,6 +184,39 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         unmapped.is_empty(),
         "public server Rust items must be either mapped in docs/reference/clay-js-api/api-inventory.toml or explicitly allowlisted as non-JS server infrastructure: {unmapped:?}"
     );
+}
+
+#[test]
+fn rust_visibility_mapping_has_no_unmapped_public_primitive_functions() {
+    let inventory_text = inventory_rust_mapping_text();
+    for mapped in [
+        "src/packages/manifest.rs::validate_manifest_value",
+        "src/packages/permissions.rs::parse_permission",
+        "src/packages/record.rs::assemble_package_record",
+        "src/packages/modes.rs::ModeRegistry::register_mode",
+        "src/packages/modes.rs::ModeRegistry::classify",
+        "src/packages/modes.rs::ModeRegistry::activate_major_mode",
+        "src/packages/modes.rs::ModeRegistry::select_behavior_manifest_for_document",
+        "src/packages/commands.rs::CommandRegistry::register_command",
+        "src/packages/commands.rs::CommandRegistry::list",
+        "op_clay_packages_validate_manifest",
+        "op_clay_packages_validate_permissions",
+        "op_clay_packages_load_package",
+        "op_clay_modes_register_pattern",
+        "op_clay_modes_classify_document",
+        "op_clay_modes_activate_major_mode",
+        "op_clay_commands_register_command",
+        "op_clay_commands_list_commands",
+        "runtime/js/packages.ts::serverValidatePackageManifest",
+        "runtime/js/packages.ts::serverLoadPackage",
+        "runtime/js/modes.ts::serverActivateMajorMode",
+        "runtime/js/commands.ts::serverRegisterCommand",
+    ] {
+        assert!(
+            inventory_text.contains(mapped),
+            "primitive gate public Rust/op/facade capability {mapped} must be mapped in api-inventory.toml"
+        );
+    }
 }
 
 #[test]

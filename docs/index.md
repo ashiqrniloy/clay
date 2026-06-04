@@ -10,7 +10,19 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 
 ## Developer Guides
 
+- [Clay Primitives Reference](reference/primitives/index.md) — Phase 16 primitives navigation index, prioritized backlog, and Phase 17 prerequisite checklist.
+- [Existing Primitive Audit](reference/primitives/audit.md) — Phase 16 static audit of behavior manifest, SDUI, configuration, file/workspace, document, and observability primitives.
+- [Primitive Registry Schema](reference/primitives/registry.md) — Phase 16 primitive category taxonomy, registry schema, Clay JS API shape stubs, security boundaries, and advisory primitive budgets.
+- [Rendering Customization Strategy](reference/primitives/rendering-strategy.md) — Phase 16 inert rendering declarations, decoration update shape, SDUI reuse, client rendering attachment points, budgets, and security boundaries.
+- [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — Phase 16 parse unit boundaries, cancellable server-side parse tasks, viewport-prioritized result delivery, fallback behavior, budgets, and security boundaries.
+- [Markdown Mode POC Requirements](reference/primitives/markdown-mode-requirements.md) — Phase 16 Markdown mode Phase 18 readiness checklist, primitive prerequisite map, performance targets, API stubs, and first-party package security scope.
+- [Package Primitive Security and Provenance Requirements](reference/primitives/package-security.md) — Phase 16 package primitive prefix, permission, validation, conflict, prohibited-authority, and provenance model.
+- [Phase 17 Package Loading Runtime Facades](reference/primitives/package-loading.md) — package load/runtime boundaries, conflict handling, runtime facade wiring, hot-path policy, and Phase 18 decoration/parse handoff.
+- [@clay/markdown Package](reference/packages/markdown.md) — first-party Markdown package contract, entries, permissions, file patterns, and runtime boundary.
+- [Primitive Implementation Gate](reference/primitives/implementation-gate.md) — Phase 16.5 package/mode validation gate, fixture format, deterministic failure coverage, and Phase 17/18 handoff.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, `smoke-gui`, foreground server/client, GUI status, and local IPC smoke validation.
+- [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
+- [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
 
 ## Clay JS API Registry Source Files
@@ -20,6 +32,9 @@ The generated documentation registry must read this section as the explicit incl
 - [quit](reference/clay-js-api/application/quit.md) — `clay.application.quit`
 - [getActiveBehaviorManifest](reference/clay-js-api/behavior/get-active-behavior-manifest.md) — `clay.behavior.getActiveBehaviorManifest`
 - [listBehaviorRoutes](reference/clay-js-api/behavior/list-behavior-routes.md) — `clay.behavior.listBehaviorRoutes`
+- [serverListCommands](reference/clay-js-api/commands/server-list-commands.md) — `clay.commands.serverListCommands`
+- [serverRegisterCommand](reference/clay-js-api/commands/server-register-command.md) — `clay.commands.serverRegisterCommand`
+- [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `clay.decorations.serverPublishDecorations`
 - [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `clay.configuration.getConfigurationState`
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `clay.configuration.loadConfigurationModule`
 - [serverGetDocumentLease](reference/clay-js-api/documents/server-get-document-lease.md) — `clay.documents.serverGetDocumentLease`
@@ -40,6 +55,21 @@ The generated documentation registry must read this section as the explicit incl
 - [bindKey](reference/clay-js-api/keybindings/bind-key.md) — `clay.keybindings.bindKey`
 - [listKeyBindings](reference/clay-js-api/keybindings/list-key-bindings.md) — `clay.keybindings.listKeyBindings`
 - [unbindKey](reference/clay-js-api/keybindings/unbind-key.md) — `clay.keybindings.unbindKey`
+- [serverActivateMajorMode](reference/clay-js-api/modes/server-activate-major-mode.md) — `clay.modes.serverActivateMajorMode`
+- [serverClassifyDocument](reference/clay-js-api/modes/server-classify-document.md) — `clay.modes.serverClassifyDocument`
+- [serverRegisterModePattern](reference/clay-js-api/modes/server-register-mode-pattern.md) — `clay.modes.serverRegisterModePattern`
+- [serverLoadPackage](reference/clay-js-api/packages/server-load-package.md) — `clay.packages.serverLoadPackage`
+- [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `clay.parse.serverRegisterParseHandler`
+- [serverValidatePackageManifest](reference/clay-js-api/packages/server-validate-package-manifest.md) — `clay.packages.serverValidatePackageManifest`
+- [serverValidatePackagePermissions](reference/clay-js-api/packages/server-validate-package-permissions.md) — `clay.packages.serverValidatePackagePermissions`
+- [defineButton](reference/clay-js-api/sdui/define-button.md) — `clay.sdui.defineButton`
+- [defineEditorView](reference/clay-js-api/sdui/define-editor-view.md) — `clay.sdui.defineEditorView`
+- [defineFlex](reference/clay-js-api/sdui/define-flex.md) — `clay.sdui.defineFlex`
+- [defineLabel](reference/clay-js-api/sdui/define-label.md) — `clay.sdui.defineLabel`
+- [defineList](reference/clay-js-api/sdui/define-list.md) — `clay.sdui.defineList`
+- [definePanel](reference/clay-js-api/sdui/define-panel.md) — `clay.sdui.definePanel`
+- [defineStack](reference/clay-js-api/sdui/define-stack.md) — `clay.sdui.defineStack`
+- [publishTree](reference/clay-js-api/sdui/publish-tree.md) — `clay.sdui.publishTree`
 - [serverListWorkspaceRoots](reference/clay-js-api/workspace/server-list-workspace-roots.md) — `clay.workspace.serverListWorkspaceRoots`
 
 ## Registry Rules

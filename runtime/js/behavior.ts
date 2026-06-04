@@ -17,16 +17,19 @@ export interface BehaviorRoute {
   apiId?: string;
 }
 
-function plannedApi(name: string): never {
-  throw new Error(`${name} is planned; Clay JS runtime op wiring is not implemented yet`);
+const ops = globalThis.Deno?.core?.ops;
+
+function requireOps(): NonNullable<typeof ops> {
+  if (!ops) {
+    throw new Error("clay.behavior.runtime_unavailable: Clay behavior APIs require the server runtime");
+  }
+  return ops;
 }
 
 export async function getActiveBehaviorManifest(documentId?: string): Promise<BehaviorManifestSummary> {
-  void documentId;
-  plannedApi("clay.behavior.getActiveBehaviorManifest");
+  return JSON.parse(requireOps().op_clay_behavior_get_active_manifest(JSON.stringify(documentId ?? null)));
 }
 
 export async function listBehaviorRoutes(documentId?: string): Promise<BehaviorRoute[]> {
-  void documentId;
-  plannedApi("clay.behavior.listBehaviorRoutes");
+  return JSON.parse(requireOps().op_clay_behavior_list_routes(JSON.stringify(documentId ?? null)));
 }

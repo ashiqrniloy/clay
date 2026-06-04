@@ -9,7 +9,7 @@ deno_op: op_clay_behavior_get_active_manifest
 deno_op_path: src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest
 name: getActiveBehaviorManifest
 user_facing_name: Get Active Behavior Manifest
-summary: Get Active Behavior Manifest through the planned `clay:behavior` Clay JavaScript facade.
+summary: Get Active Behavior Manifest through the runtime-backed `clay:behavior` Clay JavaScript facade.
 owner: server
 phase: Phase 7
 visibility: public
@@ -21,7 +21,7 @@ agent_guidance: Use `clay.behavior.getActiveBehaviorManifest` only for its docum
 lookup_tags: [behavior, behaviormanifestrouting, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -29,11 +29,11 @@ async: true
 
 ## Summary
 
-Get Active Behavior Manifest through the planned `clay:behavior` Clay JavaScript facade.
+Get Active Behavior Manifest through the runtime-backed `clay:behavior` Clay JavaScript facade.
 
 ## Description
 
-`getActiveBehaviorManifest` is the planned public API for **Get Active Behavior Manifest**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`getActiveBehaviorManifest` is the runtime-backed public API for **Get Active Behavior Manifest**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
 Authority: `server-owned-behavior-query`. Runtime path: `background-query`. Queries manifest metadata for help/agents/configuration; hot-path routing uses the already-installed inert manifest locally.
 
@@ -71,11 +71,11 @@ No behavior-changing custom properties are defined for this API.
 
 Returns a promise for inert behavior manifest metadata.
 
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current Phase 13 facade/runtime status is `runtime-backed`; this page defines the public contract before executable `deno_core` op wiring exists.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Current Phase 7 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 
@@ -92,7 +92,7 @@ Use `clay.behavior.getActiveBehaviorManifest` when the user asks for get active 
 ## Backing implementation
 
 - JS facade: `runtime/js/behavior.ts::getActiveBehaviorManifest`
-- Future Deno op: `src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest` (`op_clay_behavior_get_active_manifest`)
+- Deno op: `src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest` (`op_clay_behavior_get_active_manifest`)
 - Backing Rust/current owner: `src/client/behavior.rs::ClientBehaviorState::active_manifest`
 - Current implementation audit path: `src/behavior/manifest.rs::validate_manifest; src/client/behavior.rs::ClientBehaviorState`
 

@@ -1,0 +1,108 @@
+# First-Party Markdown Package
+
+## Source
+
+- `packages/markdown/package.json`
+- `packages/markdown/dist/index.js`
+- `packages/markdown/dist/load.js`
+- `packages/markdown/dist/parser.js`
+- `packages/markdown/src/parser.js`
+- `packages/markdown/dist/sdui.js`
+- `packages/markdown/src/sdui.js`
+- `packages/markdown/docs/index.md`
+- `docs/reference/packages/markdown.md`
+- `src/packages/record.rs`
+- `tests/package_loading.rs`
+- `tests/fixtures/markdown/sample.md`
+- `tests/fixtures/configuration/markdown-mode/init.js`
+- `tests/fixtures/configuration/markdown-mode/workspace/sample.md`
+
+## Overview
+
+The Phase 18 Markdown POC now has a real first-party package scaffold at `packages/markdown/`. The package validates as `@clay/markdown` with API prefix `markdown`, declares the `markdown` major mode, lists `.md`, `.markdown`, `.mdown`, and `text/markdown` classification metadata, and exposes load/runtime JavaScript entry files without adding Markdown-specific Rust package-loading paths.
+
+The scaffold is intentionally contract-first: it records package identity, permissions, entries, docs, performance expectations, inert command/transform/SDUI/decoration metadata, and parse/decorations API dependencies. It now includes the package-owned Markdown parser/decorator adapter at `./dist/parser.js`, keeping markdown-it token-stream conversion logic in the JavaScript package boundary while Rust continues to validate and render generic Clay decoration spans. It also includes the package-owned SDUI preview/status adapter at `./dist/sdui.js`, which builds inert Clay SDUI nodes for mode, parse, decoration, and preview status without raw Deno ops or client-side script hooks.
+
+## How It Works
+
+`packages/markdown/package.json` stays below `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` so the existing manifest validator can accept it at enable/load time. The retained Clay metadata includes:
+
+- Required entries: `./dist/index.js`, `./dist/load.js`, parser export `./dist/parser.js`, and SDUI export `./dist/sdui.js`.
+- Required docs path: `./docs/index.md`.
+- Required permissions: `mode-registration`, `mode-activation`, `command-registration`, `parse-document`, and `render-decorations`.
+- API dependencies for mode registration/activation, command registration, parse handler registration, and decoration publication.
+- Inert contribution descriptors for Markdown commands, client-first transform sketches, SDUI status metadata with an adapter path, syntax decoration metadata with parser adapter path, mode patterns, and parse handler metadata.
+- A package dependency on `markdown-it`; the adapter also accepts injected markdown-it tokens/parser instances so parser execution can be tested without changing Clay's decoration protocol shape.
+
+`src/packages/record.rs` now validates that permission-bearing Clay JS API dependencies cannot be declared unless the package also declares their matching permission. This is generic validation, not a Markdown special case. For example, a package depending on `clay.parse.serverRegisterParseHandler` must declare `parse-document`, and one depending on `clay.decorations.serverPublishDecorations` must declare `render-decorations`.
+
+`packages/markdown/dist/index.js` exports static package contract data plus `markdownPackageManifest()` so runtime loaders and tests share the same manifest shape. `packages/markdown/dist/load.js` exports `markdownPackageContract()` and `loadMarkdownPackage(clay, options)` for load-time registration through documented Clay JS facades: it validates the package with `clay.packages.serverLoadPackage`, registers mode patterns, activates the document major mode, registers commands, and registers the markdown-it parse handler with the parser adapter path. `packages/markdown/dist/parser.js` parses markdown-it block tokens and inline child-token streams, uses package-owned source/line indexes to derive viewport-bounded spans for ATX headings, strong/emphasis, inline code, fenced code blocks, and ordered/unordered list markers, then can publish them via `clay.decorations.serverPublishDecorations`. The adapter calls `markdownIt.parse(text, {})` or accepts injected token streams/parser objects for tests; it never calls `render` and never exposes markdown-it tokens, HTML, CSS, callbacks, or renderer state through Clay protocol shapes. Inline decoration ranges are recovered by walking markdown-it inline children against `token.content`; UTF-16 source offsets are converted to UTF-8 byte offsets through the package-owned source index before inert spans are published. `packages/markdown/dist/sdui.js` exposes `buildMarkdownPreviewStatusTree()` and `publishMarkdownPreviewStatus()` helpers that compose a `Markdown Preview` panel, markdown-it parse status, decoration status, a document-bound editor view, and a `markdown.togglePreview` button action from inert `clay:sdui` node helpers. The client still receives only validated inert data; no package JavaScript is needed for keypress, paint, scroll, layout, or text-event handlers.
+
+The deterministic configuration fixture in `tests/fixtures/configuration/markdown-mode/init.js` exercises the full workflow without a package-manager process: it validates the package manifest, opens `workspace/sample.md` when a test supplies the workspace root, registers/activates Markdown mode, registers package commands and parse/decorations providers, publishes representative decorations, and publishes the Markdown preview/status SDUI tree. The fixture falls back to document `1` when no workspace root exists so manual `cargo run -- smoke-gui --config-fixture markdown-mode` stays deterministic and does not grant broader filesystem authority.
+
+## Invariants and Constraints
+
+- Installing or recording `@clay/markdown` does not execute package JavaScript.
+- Enabling/loading runs the existing Clay package validators and conflict checks only during package/configuration/document activation operations.
+- The package does not request prohibited filesystem, network, shell, AI, raw Deno op, WASM, native-widget, package-enable, workspace-mutation, or client-side JavaScript authority.
+- Markdown-specific behavior is not hard-coded into Rust package loading; Rust only gained generic API-dependency permission validation.
+- The package manifest must remain bounded by `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`; long style-token lists belong in parser/docs code, not manifest metadata, unless package metadata transport budgets are changed by a later decision/task.
+- Parser-produced spans use generic `kind: "syntax"` plus known Clay style tokens (`markup.heading.*`, `markup.strong`, `markup.emphasis`, `markup.inline-code`, `markup.code-block`, `markup.list-marker`), never markdown-it tokens, AST nodes, CSS, callbacks, HTML, or renderer functions.
+- Package-owned SDUI actions must target commands that are already registered in the runtime command registry; disabling or invalidating the package removes enabled package records and the plain-text fallback manifest contains no `markdown.*` command/keybinding authority.
+
+## Performance, Smoke, and Tests
+
+Phase 18 keeps Markdown verification split between hard deterministic guards and advisory local benchmarks. `benches/markdown_baselines.rs` measures package activation/manifest selection, parse-update/decorations validation, and native decorated-editor render-adjacent work without running package JavaScript on client hot paths. `tools/bench/markdown-parser.mjs` measures actual active Markdown parser cost by building 1 MiB, 5 MiB, and 16 MiB corpora from the largest committed repository Markdown files and timing `markdown-it` plus package-adapter calls.
+
+`docs/development/performance.md` records both the parser replacement rationale and active rewrite verification. Historical `mdast-util-from-markdown` full-document results were too slow for ordinary large-file editing (`fromMarkdown` ~1.28 s at 1 MiB, ~16.24 s at 5 MiB, and did not complete 16 MiB within 120 s), while `markdown-it` completed the same corpora much faster. After the package rewrite, the active harness completed local 1.01 MiB, 5.02 MiB, and 16.01 MiB repository-Markdown corpora in about 127.2/190.2 ms, 428.6/608.7 ms, and 1007.4/1577.8 ms for parser/adapter paths respectively. The former adapter's repeated byte-offset scanning was also infeasible for full documents (~49.3 s at 1 MiB), so durable large-file Markdown support should optimize the markdown-it adapter and viewport/range mapping rather than add client-side JavaScript or full-document IPC.
+
+Run focused coverage with:
+
+```text
+cargo test --test package_loading
+cargo test --test markdown_mode
+cargo test --test performance_budgets
+cargo bench --no-run
+node --check tools/bench/markdown-parser.mjs
+node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8
+npm install --prefix packages/markdown --no-save --no-package-lock --ignore-scripts markdown-it@^14.1.0
+node --expose-gc tools/bench/markdown-parser.mjs --sizes 1MiB,5MiB,16MiB --parser markdown-it,adapter --iterations 1 --warmup 0
+cargo test markdown_package_runtime_loads_markdown_it_workflow --lib
+cargo test markdown_parser_adapter_publishes_viewport_bounded_decorations --lib
+```
+
+Relevant tests:
+
+- `markdown_package_contract_validates_with_required_metadata`
+- `markdown_package_rejects_missing_required_permissions`
+- `markdown_package_does_not_execute_on_install`
+- `markdown_package_docs_path_is_required_and_resolvable`
+- `markdown_package_has_no_mdast_dependency`
+- `markdown_runtime_code_has_no_from_markdown_import`
+- `markdown_parser_adapter_uses_markdown_it_package_boundary`
+- `markdown_parser_adapter_publishes_protocol_spans_without_parser_data`
+- `markdown_it_adapter_has_token_stream_range_fixtures`
+- `server::js_runtime::tests::markdown_package_runtime_loads_markdown_it_workflow`
+- `markdown_package_declares_sdui_preview_status_adapter`
+- `markdown_sdui_status_reports_markdown_it_parse_state`
+- `markdown_disabled_falls_back_to_plain_text_after_rewrite`
+- `markdown_invalid_package_reports_sanitized_diagnostics`
+- `markdown_behavior_manifest_fits_budget`
+- `markdown_parse_and_decoration_payloads_fit_budgets`
+- `markdown_reload_reinstalls_manifest_and_decorations`
+- `markdown_typing_does_not_wait_for_markdown_it_parse`
+- `markdown_it_adapter_large_fixture_span_counts_are_stable`
+- `markdown_structural_sdui_snapshot_matches_fixture`
+- `server::js_runtime::tests::markdown_parser_adapter_publishes_viewport_bounded_decorations`
+- `server::js_runtime::tests::markdown_config_fixture_opens_workspace_and_publishes_status_sdui`
+
+## Related
+
+- [Package Loading](package-loading.md)
+- [Package Primitive Gate](package-primitive-gate.md)
+- [Mode Registry](mode-registry.md)
+- [Command Registry](command-registry.md)
+- [Parse Coordinator](parse-coordinator.md)
+- [Decoration Transport](decoration-transport.md)
+- `docs/reference/packages/markdown.md`
+- `packages/markdown/docs/index.md`

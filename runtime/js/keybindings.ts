@@ -21,24 +21,23 @@ export interface KeyBindingRecord {
   when?: string;
 }
 
-function plannedApi(name: string): never {
-  throw new Error(`${name} is planned; Clay JS runtime op wiring is not implemented yet`);
+const ops = globalThis.Deno?.core?.ops;
+
+function requireOps(): NonNullable<typeof ops> {
+  if (!ops) {
+    throw new Error("clay.keybindings.runtime_unavailable: Clay key binding APIs require the server runtime");
+  }
+  return ops;
 }
 
 export function bindKey(key: string, command: string, options: Omit<BindKeyOptions, "key" | "command"> = {}): KeyBindingRecord {
-  void key;
-  void command;
-  void options;
-  plannedApi("clay.keybindings.bindKey");
+  return JSON.parse(requireOps().op_clay_keybindings_bind_key(key, command, JSON.stringify(options ?? {})));
 }
 
 export function unbindKey(key: string, options: Pick<BindKeyOptions, "scope" | "when"> = {}): void {
-  void key;
-  void options;
-  plannedApi("clay.keybindings.unbindKey");
+  requireOps().op_clay_keybindings_unbind_key(key, JSON.stringify(options ?? {}));
 }
 
-export function listKeyBindings(scope?: KeyBindingScopeFilter): KeyBindingRecord[] {
-  void scope;
-  plannedApi("clay.keybindings.listKeyBindings");
+export function listKeyBindings(scope: KeyBindingScopeFilter = "all"): KeyBindingRecord[] {
+  return JSON.parse(requireOps().op_clay_keybindings_list_key_bindings(scope));
 }

@@ -1,0 +1,26 @@
+# Clay Primitives Reference
+
+This directory is the Phase 16 architecture source for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18.
+
+## Documents
+
+- [Existing Primitive Audit](audit.md) — existing behavior manifest, SDUI, configuration, document/workspace, editor, and observability primitives.
+- [Primitive Registry Schema](registry.md) — canonical primitive taxonomy, schema vocabulary, authority boundaries, performance budgets, and planned Clay JS API shape stubs.
+- [Rendering Customization Strategy](rendering-strategy.md) — inert decoration/layout/render declarations and SDUI reuse for package rendering.
+- [Incremental Parse and Background Parse Update Strategy](parse-update-strategy.md) — server-side parse task lifecycle, cancellation, viewport filtering, and fallback behavior.
+- [Markdown Mode POC Requirements](markdown-mode-requirements.md) — Phase 18 readiness checklist for `@clay/markdown`.
+- [Package Primitive Security and Provenance Requirements](package-security.md) — package prefix, permission, validation, conflict, and prohibited-authority baseline.
+- [Phase 17 Package Loading Runtime Facades](package-loading.md) — package load/runtime boundaries, conflict handling, runtime facade wiring, hot-path policy, and Phase 18 decoration/parse handoff.
+- [Primitive Implementation Gate](implementation-gate.md) — Phase 16.5 runtime validation gate, fixture format, load/activation scope boundary, and Phase 17/18 handoff.
+- [Prioritized Primitive Backlog](backlog.md) — sortable Phase-17-required, Phase-18-required, and deferred primitive implementation backlog plus the Phase 17 prerequisite checklist.
+
+## Phase 17 Readiness Summary
+
+Phase 17 should implement package loading and mode primitives before Phase 18 starts the Markdown POC. The minimum Phase 17 gates are:
+
+1. Package manifests carry Clay metadata (`apiPrefix`, permissions, modes, load/runtime entries) and are validated at enable/load time.
+2. `DocumentClassification`, `MajorModeActivation`, and `CommandDeclaration` have planned Clay JS API stubs and implementation tasks.
+3. Phase 16.5's [Primitive Implementation Gate](implementation-gate.md) validates fixtures and future package metadata before Phase 17 package installation/enable/load workflows expand.
+4. Package contributions preserve prefix/provenance and reject duplicate mode names, duplicate command IDs, ambiguous key bindings, and undeclared permissions deterministically.
+5. Per-document/per-mode behavior manifest selection can atomically install client-safe `ClientFirstPredictable` text transforms and server-routed commands.
+6. Phase 18 primitives (`DecorationRange`, `IncrementalParseUpdate`, and Markdown SDUI/keybinding extensions) have explicit handoff entries in [backlog.md](backlog.md).

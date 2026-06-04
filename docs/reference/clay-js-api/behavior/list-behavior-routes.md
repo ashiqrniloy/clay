@@ -9,7 +9,7 @@ deno_op: op_clay_behavior_list_routes
 deno_op_path: src/server/ops/behavior.rs::op_clay_behavior_list_routes
 name: listBehaviorRoutes
 user_facing_name: List Behavior Routes
-summary: List Behavior Routes through the planned `clay:behavior` Clay JavaScript facade.
+summary: List Behavior Routes through the runtime-backed `clay:behavior` Clay JavaScript facade.
 owner: server
 phase: Phase 7
 visibility: public
@@ -21,7 +21,7 @@ agent_guidance: Use `clay.behavior.listBehaviorRoutes` only for its documented b
 lookup_tags: [behavior, behaviormanifestrouting, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: true
 ---
 
@@ -29,11 +29,11 @@ async: true
 
 ## Summary
 
-List Behavior Routes through the planned `clay:behavior` Clay JavaScript facade.
+List Behavior Routes through the runtime-backed `clay:behavior` Clay JavaScript facade.
 
 ## Description
 
-`listBehaviorRoutes` is the planned public API for **List Behavior Routes**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`listBehaviorRoutes` is the runtime-backed public API for **List Behavior Routes**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
 Authority: `server-owned-behavior-query`. Runtime path: `background-query`. Route inspection is a background query; actual route decisions for keypresses remain local manifest evaluation.
 
@@ -71,11 +71,11 @@ No behavior-changing custom properties are defined for this API.
 
 Returns a promise for inert behavior route metadata.
 
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Current Phase 13 facade/runtime status is `runtime-backed`; this page defines the public contract before executable `deno_core` op wiring exists.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Current Phase 7 stubs throw a planned-runtime error rather than performing the operation.
+The runtime fails if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 
@@ -92,7 +92,7 @@ Use `clay.behavior.listBehaviorRoutes` when the user asks for list behavior rout
 ## Backing implementation
 
 - JS facade: `runtime/js/behavior.ts::listBehaviorRoutes`
-- Future Deno op: `src/server/ops/behavior.rs::op_clay_behavior_list_routes` (`op_clay_behavior_list_routes`)
+- Deno op: `src/server/ops/behavior.rs::op_clay_behavior_list_routes` (`op_clay_behavior_list_routes`)
 - Backing Rust/current owner: `src/client/behavior.rs::ClientBehaviorState::route_key`
 - Current implementation audit path: `src/protocol/mod.rs::RoutingPolicy; src/client/behavior.rs::ClientBehaviorState::route_key`
 

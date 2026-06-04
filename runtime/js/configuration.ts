@@ -1,9 +1,9 @@
-// Clay configuration facade skeleton.
+// Clay configuration facade.
 //
-// Configuration is planned to run from `~/.config/clay/init.js` in a
-// server-side JavaScript runtime. These APIs only describe the stable facade;
-// they do not load user files or grant filesystem, network, shell, package, AI,
-// workspace, or client-side JavaScript authority.
+// Configuration runs from `~/.config/clay/init.js` in Clay's constrained
+// server-side JavaScript runtime. These APIs delegate to Clay-owned ops when
+// the embedded runtime provides them; they do not grant network, shell,
+// package, AI, workspace, WASM, or client-side JavaScript authority.
 
 export interface ConfigurationModuleOptions {
   path: string;
@@ -14,15 +14,67 @@ export interface ConfigurationState {
   loadedModules: string[];
 }
 
-function plannedApi(name: string): never {
-  throw new Error(`${name} is planned; Clay JS runtime op wiring is not implemented yet`);
+type ClayCoreOps = {
+  op_clay_configuration_load_module?: (path: string) => string;
+  op_clay_configuration_get_state?: () => string;
+  op_clay_runtime_unavailable?: (api: string) => void;
+};
+
+declare const Deno: undefined | { core?: { ops?: ClayCoreOps } };
+
+function configurationOps(): ClayCoreOps & {
+  op_clay_configuration_load_module: (path: string) => string;
+  op_clay_configuration_get_state: () => string;
+} {
+  const ops = Deno?.core?.ops;
+  if (
+    typeof ops?.op_clay_configuration_load_module !== "function" ||
+    typeof ops?.op_clay_configuration_get_state !== "function"
+  ) {
+    throw new Error("clay.configuration runtime ops are unavailable in this context");
+  }
+  return ops as ClayCoreOps & {
+    op_clay_configuration_load_module: (path: string) => string;
+    op_clay_configuration_get_state: () => string;
+  };
+}
+
+function plannedConfigurationApi(api: string): never {
+  const unavailable = Deno?.core?.ops?.op_clay_runtime_unavailable;
+  if (typeof unavailable === "function") {
+    unavailable(api);
+  }
+  throw new Error(`${api} is planned; configuration setting validation is not implemented yet`);
 }
 
 export async function loadConfigurationModule(options: ConfigurationModuleOptions): Promise<void> {
-  void options;
-  plannedApi("clay.configuration.loadConfigurationModule");
+  if (options === null || typeof options !== "object" || typeof options.path !== "string") {
+    throw new Error("clay.configuration.invalid_module: loadConfigurationModule requires { path: string }");
+  }
+  const path = configurationOps().op_clay_configuration_load_module(options.path);
+  await import(path);
 }
 
 export function getConfigurationState(): ConfigurationState {
-  plannedApi("clay.configuration.getConfigurationState");
+  return JSON.parse(configurationOps().op_clay_configuration_get_state()) as ConfigurationState;
+}
+
+export function setPackageOption(options: unknown): never {
+  void options;
+  return plannedConfigurationApi("clay.configuration.setPackageOption");
+}
+
+export function setModePreference(options: unknown): never {
+  void options;
+  return plannedConfigurationApi("clay.configuration.setModePreference");
+}
+
+export function setDecorationTheme(options: unknown): never {
+  void options;
+  return plannedConfigurationApi("clay.configuration.setDecorationTheme");
+}
+
+export function setParsePolicy(options: unknown): never {
+  void options;
+  return plannedConfigurationApi("clay.configuration.setParsePolicy");
 }
