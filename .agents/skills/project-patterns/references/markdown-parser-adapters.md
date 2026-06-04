@@ -1,9 +1,0 @@
-# Markdown Parser Adapters
-
-- Phase 18 Markdown mode must replace the `mdast-util-from-markdown` implementation with a `markdown-it` implementation inside the `@clay/markdown` JavaScript package.
-- The `markdown-it` adapter is a full rewrite, not a small patch to the mdast adapter. `markdown-it` exposes a token stream: block tokens are top-level sequence items, opening and closing tags are separate tokens, and inline container tokens expose nested `children` tokens. Adapter logic must traverse tokens and package-owned source/line indexes rather than mdast nodes.
-- Keep parser-specific code behind a narrow package adapter boundary, e.g. `parseMarkdownDecorations(...)`, so the Clay protocol carries only generic `DecorationSpan`/parse result shapes and does not expose parser-specific tokens, AST nodes, HTML, CSS, callbacks, or renderer state.
-- Rust UI/rendering/server code must stay parser-agnostic and Markdown-agnostic. It may validate and render generic decoration, parse, behavior, command, and SDUI primitives, but it must not branch on Markdown syntax or `markdown-it` token types.
-- Parser-adapter plans/tests must include exact UTF-8 byte range validation, marker-derived range validation for headings/lists/fences, inline child token coverage, viewport filtering, stale-version rejection, payload budget checks, and large-file parser benchmark evidence using existing repository Markdown files.
-- Cleanup plans must remove mdast dependencies, mdast adapter code, mdast-specific tests/docs, and stale decision references before treating `markdown-it` as the active implementation.
-- Decision log sources: `decision-logs/2026-06-03-2306-start-markdown-poc-with-mdast-util-from-markdown.md` (superseded parser start) and `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md` (current parser replacement).

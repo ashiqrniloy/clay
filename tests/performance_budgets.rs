@@ -30,6 +30,22 @@ fn phase18_plan_doc() -> String {
     .expect("read Phase 18 Markdown mode plan")
 }
 
+fn phase18_5_plan_doc() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/plans/021-Phase18.5-Large-File-Markdown-Performance-and-Memory.md"
+    ))
+    .expect("read Phase 18.5 large-file Markdown plan")
+}
+
+fn performance_fixtures_wiki_doc() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/wiki/modules/performance-fixtures.md"
+    ))
+    .expect("read performance fixtures wiki")
+}
+
 #[test]
 fn performance_docs_list_all_supported_benchmark_commands() {
     let doc = performance_doc();
@@ -197,6 +213,119 @@ fn markdown_benchmark_docs_record_markdown_it_results() {
         assert!(
             doc.contains(expected),
             "performance guide must record active markdown-it benchmark marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_large_file_performance_contract_documents_overhead_budget() {
+    let doc = performance_doc();
+    let wiki = performance_fixtures_wiki_doc();
+    let plan = phase18_5_plan_doc();
+
+    for expected in [
+        "Large-file Markdown editor-parity contract (Phase 18.5)",
+        "The 30 MiB target applies to **Markdown-specific overhead only**, not total process RSS",
+        "markdown_overhead <= 30 MiB",
+        "baseline_rss",
+        "document_memory",
+        "markdown_parser_temporary_allocations",
+        "retained_decoration_cache_memory",
+        "total_rss",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document large-file memory contract marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "markdown_overhead <= 30 MiB",
+        "whole-process 30 MiB cap",
+        "baseline_rss",
+        "document_memory",
+        "retained_decoration_cache_memory",
+    ] {
+        assert!(
+            wiki.contains(expected),
+            "performance fixture wiki must document large-file memory accounting marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "not total process RSS below 30 MiB",
+        "Markdown parsing/decoration overhead at or below 30 MiB",
+        "What is possible and should be implemented",
+    ] {
+        assert!(
+            plan.contains(expected),
+            "Phase 18.5 plan must preserve feasibility marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_large_file_contract_rejects_full_document_hot_path() {
+    let doc = performance_doc();
+    let wiki = performance_fixtures_wiki_doc();
+
+    for expected in [
+        "ordinary open, edit, and scroll paths must not run full-document parse/decorate",
+        "Markdown parser delay may only affect decoration freshness",
+        "Full-document work is allowed only as cancellable idle/background validation",
+        "Large Markdown files (`> 5 MiB`, including the 16 MiB target)",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must reject full-document large-file hot path marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "large files (`> 5 MiB`) must not use full-document parse/decorate on ordinary open, edit, or scroll paths",
+        "typing/local paint",
+        "visible decoration refresh",
+        "parser cancellation",
+    ] {
+        assert!(
+            wiki.contains(expected),
+            "performance fixture wiki must record editor-comparison target marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_benchmark_reports_baseline_document_and_markdown_overhead() {
+    let doc = performance_doc();
+    let wiki = performance_fixtures_wiki_doc();
+
+    for expected in [
+        "Benchmark JSON for large-file Markdown work must expose separate",
+        "`total_rss`",
+        "`baseline_rss`",
+        "`document_memory`",
+        "`markdown_parser_temporary_allocations`",
+        "`retained_decoration_cache_memory`",
+        "`markdown_overhead`",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must require benchmark JSON memory category marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "Benchmark JSON for future large-file Markdown runs must separate",
+        "`total_rss`",
+        "`baseline_rss`",
+        "`document_memory`",
+        "`markdown_parser_temporary_allocations`",
+        "`retained_decoration_cache_memory`",
+        "`markdown_overhead`",
+    ] {
+        assert!(
+            wiki.contains(expected),
+            "performance fixture wiki must require benchmark JSON memory category marker `{expected}`"
         );
     }
 }

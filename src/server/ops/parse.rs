@@ -4,7 +4,7 @@ use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Map, Value, json};
 
-use crate::protocol::ParseUnit;
+use crate::{perf::budgets::SYNTAX_CACHE_BUDGET_BYTES, protocol::ParseUnit};
 
 use super::{
     ClayOpState,
@@ -40,6 +40,24 @@ pub(super) fn op_clay_parse_register_parse_handler(
             "clay.parse.invalid_handler: timeoutMs must be between 1 and 5000",
         ));
     }
+    let max_window_bytes = optional_u64(
+        options
+            .get("maxWindowBytes")
+            .or_else(|| options.get("parseWindowBytes")),
+    )?
+    .unwrap_or(64 * 1024);
+    let guard_bytes = optional_u64(options.get("guardBytes"))?.unwrap_or(4 * 1024);
+    let memory_budget_bytes =
+        optional_u64(options.get("memoryBudgetBytes"))?.unwrap_or(SYNTAX_CACHE_BUDGET_BYTES as u64);
+    if max_window_bytes == 0
+        || memory_budget_bytes == 0
+        || max_window_bytes > memory_budget_bytes
+        || memory_budget_bytes > SYNTAX_CACHE_BUDGET_BYTES as u64
+    {
+        return Err(clay_error(
+            "clay.parse.invalid_handler: window and memory budgets must be non-zero, bounded, and within the syntax cache budget",
+        ));
+    }
     reject_executable_handler(options)?;
 
     let registration = crate::server::parse_coordinator::ParseHandlerMeta {
@@ -58,6 +76,11 @@ pub(super) fn op_clay_parse_register_parse_handler(
         "parseUnit": parse_unit_name(parse_unit),
         "viewportPriority": viewport_priority,
         "timeoutMs": timeout_ms,
+        "parsePolicy": {
+            "maxWindowBytes": max_window_bytes,
+            "guardBytes": guard_bytes,
+            "memoryBudgetBytes": memory_budget_bytes,
+        },
     }))
     .map_err(|error| {
         clay_error(format!(

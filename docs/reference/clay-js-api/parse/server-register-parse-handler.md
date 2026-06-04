@@ -32,11 +32,23 @@ custom_properties:
     type: number
     default: 50
     description: Bounded handler timeout policy validated at registration/configuration time.
+  - name: maxWindowBytes
+    type: number
+    default: 65536
+    description: Maximum bytes included in one bounded parse-window snapshot.
+  - name: guardBytes
+    type: number
+    default: 4096
+    description: Generic context bytes added around requested ranges while staying within the window cap.
+  - name: memoryBudgetBytes
+    type: number
+    default: 31457280
+    description: Retained syntax/window memory budget capped by SYNTAX_CACHE_BUDGET_BYTES.
   - name: resultBudgetBytes
     type: number
     default: 4096
     description: Incremental parse result budget enforced before publication.
-security: Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, and bounded parse result publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.
+security: Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, bounded parse-window snapshots, syntax memory budget, and bounded parse result publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.
 agent_guidance: Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser. Do not pass executable callbacks in registration payloads or put parse work on the client hot path.
 lookup_tags: [js-api, parse, markdown, incrementalparseupdate, parser]
 app_visible: true
@@ -97,6 +109,9 @@ serverRegisterParseHandler({
 - `parseUnits` / `parseUnit` (`"file" | "region" | "line-group"`, default `"line-group"`): Incremental unit hint.
 - `viewportPriority` (`boolean`, default `true`): Prioritize visible parse output.
 - `timeoutMs` (`number`, default `50`): Bounded timeout policy; values must be between 1 and 5000.
+- `maxWindowBytes` / `parseWindowBytes` (`number`, default `65536`): Maximum bytes Clay may include in one bounded parse-window snapshot.
+- `guardBytes` (`number`, default `4096`): Generic context bytes Clay may add around requested viewport/invalidated ranges, still capped by `maxWindowBytes`.
+- `memoryBudgetBytes` (`number`, default `31457280`): Retained syntax/window budget; values must be non-zero and at or below `SYNTAX_CACHE_BUDGET_BYTES`.
 - `resultBudgetBytes` (`number`, default `4096`): Parse-result payload budget; runtime uses `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`.
 
 Registration payloads are metadata only. Executable fields such as `handler`, `callback`, `onParse`, or `function` are rejected by the current public contract; package runtime integration invokes approved server-side code through Clay's constrained runtime boundary.
@@ -111,6 +126,9 @@ No default key binding is assigned.
 - `parseUnits`: incremental scheduling contract.
 - `viewportPriority`: visible-range priority policy.
 - `timeoutMs`: timeout/budget policy.
+- `maxWindowBytes` / `parseWindowBytes`: bounded parse-window size policy.
+- `guardBytes`: bounded parse-window guard context policy.
+- `memoryBudgetBytes`: retained syntax/window memory policy.
 - `resultBudgetBytes`: parse-result payload budget metadata.
 
 ## Return and async behavior
@@ -119,13 +137,13 @@ Returns JSON-serializable registration metadata synchronously from the server ru
 
 ## Errors
 
-Fails with Clay error codes when permissions are missing, package identity is malformed, mode is empty, parse unit is unsupported, timeout is out of bounds, or executable callback fields are supplied.
+Fails with Clay error codes when permissions are missing, package identity is malformed, mode is empty, parse unit is unsupported, timeout/window/memory budgets are out of bounds, or executable callback fields are supplied.
 
 ## Permissions and security
 
 Requires: `parse-document`.
 
-The API does not grant filesystem, network, shell, AI mutation, workspace mutation, package installation/enabling, WASM, raw ops, or client-side JavaScript authority. Parser input is limited to Clay-provided open document content and bounded edit/viewport metadata.
+The API does not grant filesystem, network, shell, AI mutation, workspace mutation, package installation/enabling, WASM, raw ops, or client-side JavaScript authority. Parser input is limited to Clay-provided open document content and bounded edit/viewport/window metadata; large-file parse windows expose only validated byte ranges from already-open documents.
 
 ## Agent guidance
 

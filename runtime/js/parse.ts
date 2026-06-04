@@ -28,6 +28,10 @@ export type ServerRegisterParseHandlerOptions = {
   parseUnit?: "file" | "region" | "line-group";
   viewportPriority?: boolean;
   timeoutMs?: number;
+  maxWindowBytes?: number;
+  parseWindowBytes?: number;
+  guardBytes?: number;
+  memoryBudgetBytes?: number;
 };
 
 export function serverRegisterParseHandler(options: ServerRegisterParseHandlerOptions): unknown {

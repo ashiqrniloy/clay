@@ -2,10 +2,14 @@ use std::ops::Range;
 
 use crop::Rope;
 
-use crate::perf::metrics::{MetricMetadata, global_recorder};
+use crate::perf::{
+    budgets::SYNTAX_CACHE_BUDGET_BYTES,
+    metrics::{MetricMetadata, global_recorder},
+};
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentVersion, EditOperation, EditRejection, LeaseId,
-    LockOwner, ProtocolErrorCode, RegionLockConflict, RegionLockId, ServerMessage, TransactionId,
+    LockOwner, ParseByteRange, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode,
+    RegionLockConflict, RegionLockId, ServerMessage, TransactionId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +254,86 @@ impl DocumentState {
         self.text.to_string()
     }
 
+    pub(crate) fn parse_window_snapshot(
+        &self,
+        package_prefix: &str,
+        mode_id: &str,
+        range: ParseByteRange,
+        max_window_bytes: u64,
+    ) -> Result<ParseWindowSnapshot, String> {
+        self.validate_parse_snapshot_range(range, max_window_bytes)?;
+        let start = usize::try_from(range.start)
+            .map_err(|_| "parse snapshot start is too large".to_string())?;
+        let end = usize::try_from(range.end)
+            .map_err(|_| "parse snapshot end is too large".to_string())?;
+        Ok(ParseWindowSnapshot {
+            document_id: self.document_id,
+            document_version: self.version,
+            package_prefix: package_prefix.to_string(),
+            mode_id: mode_id.to_string(),
+            byte_start: range.start,
+            byte_end: range.end,
+            base_line: if self.text.byte_len() == 0 {
+                0
+            } else {
+                self.text.line_of_byte(start) as u64
+            },
+            text: self.text.byte_slice(start..end).to_string(),
+        })
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "parse-window snapshots are consumed by large-file parser integration in a follow-up phase"
+        )
+    )]
+    pub(crate) fn parse_window_snapshots(
+        &self,
+        package_prefix: &str,
+        mode_id: &str,
+        viewport: ParseByteRange,
+        invalidated_ranges: &[ParseByteRange],
+        policy: ParsePolicy,
+    ) -> Result<Vec<ParseWindowSnapshot>, String> {
+        if policy.max_window_bytes == 0
+            || policy.memory_budget_bytes == 0
+            || policy.memory_budget_bytes > SYNTAX_CACHE_BUDGET_BYTES as u64
+        {
+            return Err("parse policy exceeds supported bounds".to_string());
+        }
+
+        let mut ranges = Vec::with_capacity(invalidated_ranges.len().saturating_add(1));
+        ranges.push(viewport);
+        ranges.extend_from_slice(invalidated_ranges);
+        ranges.sort_by(|left, right| {
+            let left_visible = left.intersects(viewport);
+            let right_visible = right.intersects(viewport);
+            right_visible
+                .cmp(&left_visible)
+                .then_with(|| left.start.cmp(&right.start))
+                .then_with(|| left.end.cmp(&right.end))
+        });
+
+        let mut snapshots = Vec::with_capacity(ranges.len());
+        let mut retained_bytes = 0u64;
+        for range in ranges {
+            let window = self.expand_parse_window(range, policy)?;
+            retained_bytes = retained_bytes.saturating_add(window.len());
+            if retained_bytes > policy.memory_budget_bytes {
+                return Err("parse window snapshots exceed memory budget".to_string());
+            }
+            snapshots.push(self.parse_window_snapshot(
+                package_prefix,
+                mode_id,
+                window,
+                policy.max_window_bytes,
+            )?);
+        }
+        Ok(snapshots)
+    }
+
     pub(crate) fn mark_clean_if_version(&mut self, version: DocumentVersion) -> bool {
         if self.version == version {
             self.dirty = false;
@@ -375,6 +459,74 @@ impl DocumentState {
         Ok(start..end)
     }
 
+    fn validate_parse_snapshot_range(
+        &self,
+        range: ParseByteRange,
+        max_window_bytes: u64,
+    ) -> Result<(), String> {
+        if max_window_bytes == 0 {
+            return Err("parse snapshot max window must be non-zero".to_string());
+        }
+        self.validate_range(range.start, range.end)?;
+        if range.len() > max_window_bytes {
+            return Err(format!(
+                "parse snapshot range length {} exceeds max window {max_window_bytes}",
+                range.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn expand_parse_window(
+        &self,
+        range: ParseByteRange,
+        policy: ParsePolicy,
+    ) -> Result<ParseByteRange, String> {
+        self.validate_parse_snapshot_range(range, policy.max_window_bytes)?;
+        let original_len = range.len();
+        let guard_budget = policy.max_window_bytes.saturating_sub(original_len);
+        let before = policy.guard_bytes.min(guard_budget / 2);
+        let after = policy.guard_bytes.min(guard_budget.saturating_sub(before));
+        let start = self.floor_char_boundary(range.start.saturating_sub(before))?;
+        let end = self.ceil_char_boundary(range.end.saturating_add(after))?;
+        if end.saturating_sub(start) <= policy.max_window_bytes {
+            return Ok(ParseByteRange::new(start, end));
+        }
+
+        let capped_end = self.floor_char_boundary(start.saturating_add(policy.max_window_bytes))?;
+        if capped_end < range.end {
+            return Err("parse snapshot range cannot fit inside max window".to_string());
+        }
+        Ok(ParseByteRange::new(start, capped_end))
+    }
+
+    fn floor_char_boundary(&self, offset: u64) -> Result<u64, String> {
+        let mut offset = offset.min(self.text.byte_len() as u64);
+        while offset > 0 {
+            let candidate = usize::try_from(offset)
+                .map_err(|_| "parse snapshot offset is too large".to_string())?;
+            if self.text.is_char_boundary(candidate) {
+                return Ok(offset);
+            }
+            offset -= 1;
+        }
+        Ok(0)
+    }
+
+    fn ceil_char_boundary(&self, offset: u64) -> Result<u64, String> {
+        let text_len = self.text.byte_len() as u64;
+        let mut offset = offset.min(text_len);
+        while offset < text_len {
+            let candidate = usize::try_from(offset)
+                .map_err(|_| "parse snapshot offset is too large".to_string())?;
+            if self.text.is_char_boundary(candidate) {
+                return Ok(offset);
+            }
+            offset += 1;
+        }
+        Ok(text_len)
+    }
+
     fn validate_lock_range(&self, start: u64, end: u64) -> Result<(), String> {
         self.validate_range(start, end)?;
         if start == end {
@@ -431,7 +583,8 @@ impl Default for DocumentState {
 mod tests {
     use super::DocumentState;
     use crate::protocol::{
-        DocumentAccess, EditOperation, EditRejection, LockOwner, RegionLockConflict, ServerMessage,
+        DocumentAccess, EditOperation, EditRejection, LockOwner, ParseByteRange, ParsePolicy,
+        RegionLockConflict, ServerMessage,
     };
 
     #[test]
@@ -577,6 +730,55 @@ mod tests {
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
             }
+        );
+    }
+
+    #[test]
+    fn parse_window_snapshot_slices_only_requested_server_range() {
+        let document = DocumentState::new(
+            7,
+            format!("{}VISIBLE{}", "a".repeat(8192), "b".repeat(8192)),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+
+        let snapshot = document
+            .parse_window_snapshot("plain", "plain", ParseByteRange::new(8192, 8199), 1024)
+            .unwrap();
+
+        assert_eq!(snapshot.document_id, 7);
+        assert_eq!(snapshot.document_version, 1);
+        assert_eq!(snapshot.package_prefix, "plain");
+        assert_eq!(snapshot.mode_id, "plain");
+        assert_eq!(snapshot.text, "VISIBLE");
+        assert!(snapshot.text.len() < document.text.byte_len() / 1000);
+    }
+
+    #[test]
+    fn parse_window_snapshots_validate_utf8_boundaries_and_memory_budget() {
+        let document = DocumentState::new(
+            7,
+            "alpha\néclair\nomega".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let policy = ParsePolicy::new(16, 2, 32, 50);
+
+        let snapshots = document
+            .parse_window_snapshots(
+                "plain",
+                "plain",
+                ParseByteRange::new(0, 5),
+                &[ParseByteRange::new(8, 13)],
+                policy,
+            )
+            .unwrap();
+
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].byte_start, 0);
+        assert!(snapshots[1].text.contains("clair"));
+        assert!(
+            document
+                .parse_window_snapshot("plain", "plain", ParseByteRange::new(7, 13), 16)
+                .is_err()
         );
     }
 

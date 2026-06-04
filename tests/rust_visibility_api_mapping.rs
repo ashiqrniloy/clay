@@ -162,6 +162,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/parse_coordinator.rs::ParseCoordinator::next_update",
         "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
         "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse",
+        "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse_with_windows",
         "src/server/parse_coordinator.rs::ParseCoordinator::stats",
         "src/server/parse_coordinator.rs::ParseCoordinator::validate_update",
         "src/server/parse_coordinator.rs::ParseCoordinatorError",

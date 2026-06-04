@@ -1,4 +1,4 @@
-use std::fmt::Write as _;
+use std::{fmt::Write as _, fs};
 
 use clay::editor::{EditorCommand, EditorSurface};
 use clay::protocol::DocumentAccess;
@@ -68,6 +68,19 @@ fn layout_cache_invalidates_on_text_width_font_or_viewport_changes() {
 
     assert!(wide_window.len() > narrow_window.len());
     assert!(wide_window.starts_with("line 00000\n"));
+}
+
+#[test]
+fn parse_window_snapshot_primitive_uses_bounded_rope_slicing() {
+    let document_source =
+        fs::read_to_string("src/server/document.rs").expect("document source readable");
+    let parse_source = fs::read_to_string("src/server/parse_coordinator.rs")
+        .expect("parse coordinator source readable");
+
+    assert!(document_source.contains("byte_slice(start..end).to_string()"));
+    assert!(document_source.contains("validate_parse_snapshot_range"));
+    assert!(parse_source.contains("schedule_parse_with_windows"));
+    assert!(parse_source.contains("previous.abort()"));
 }
 
 #[test]

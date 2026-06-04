@@ -10,10 +10,10 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
-    perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    perf::budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     protocol::{
         BehaviorVersion, DocumentId, DocumentVersion, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification,
+        ParseEditNotification, ParsePolicy, ParseWindowSnapshot, SyntaxMemoryBudget,
     },
     server::decorations::validate_decoration_set,
 };
@@ -55,6 +55,27 @@ pub enum ParseCoordinatorError {
     InvalidViewportRange,
     InvalidatedRangeInvalid {
         index: usize,
+    },
+    InvalidParsePolicy,
+    InvalidWindowRange {
+        index: usize,
+    },
+    WindowMetadataMismatch {
+        index: usize,
+    },
+    WindowTextLengthMismatch {
+        index: usize,
+        expected: usize,
+        actual: usize,
+    },
+    WindowTooLarge {
+        index: usize,
+        bytes: usize,
+        budget: usize,
+    },
+    WindowBudgetExceeded {
+        bytes: usize,
+        budget: usize,
     },
     StaleDocumentVersion {
         result_version: DocumentVersion,
@@ -111,6 +132,8 @@ impl ParseScheduleRequest {
             mode_id: self.mode_id,
             viewport,
             invalidated_ranges,
+            parse_windows: Vec::new(),
+            memory_budget: None,
         }
     }
 }
@@ -210,7 +233,24 @@ impl ParseCoordinator {
         &self,
         request: ParseScheduleRequest,
     ) -> Result<(), ParseCoordinatorError> {
+        self.schedule_parse_with_windows(request, Vec::new(), None)
+    }
+
+    /// Schedule parse work with server-prepared bounded document snapshots.
+    ///
+    /// The caller remains responsible for creating snapshots from already-open
+    /// server-canonical document text. The coordinator validates package/mode,
+    /// document/version, byte-range, and memory-budget metadata before the
+    /// package handler can observe any text.
+    pub fn schedule_parse_with_windows(
+        &self,
+        request: ParseScheduleRequest,
+        parse_windows: Vec<ParseWindowSnapshot>,
+        policy: Option<ParsePolicy>,
+    ) -> Result<(), ParseCoordinatorError> {
         validate_request_ranges(&request)?;
+        validate_parse_policy(policy)?;
+        validate_window_snapshots(&request, &parse_windows, policy)?;
         let handler_key = HandlerKey {
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
@@ -220,7 +260,12 @@ impl ParseCoordinator {
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
         };
-        let notification = request.into_notification();
+        let mut notification = request.into_notification();
+        if let Some(policy) = policy {
+            notification.memory_budget =
+                Some(SyntaxMemoryBudget::new(policy.memory_budget_bytes, 0));
+        }
+        notification.parse_windows = parse_windows;
 
         let handler = {
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
@@ -380,5 +425,81 @@ fn validate_request_ranges(request: &ParseScheduleRequest) -> Result<(), ParseCo
             return Err(ParseCoordinatorError::InvalidatedRangeInvalid { index });
         }
     }
+    Ok(())
+}
+
+fn validate_parse_policy(policy: Option<ParsePolicy>) -> Result<(), ParseCoordinatorError> {
+    let Some(policy) = policy else {
+        return Ok(());
+    };
+    if policy.max_window_bytes == 0
+        || policy.memory_budget_bytes == 0
+        || policy.memory_budget_bytes > SYNTAX_CACHE_BUDGET_BYTES as u64
+        || policy.max_window_bytes > policy.memory_budget_bytes
+        || policy.timeout_ms == 0
+        || policy.timeout_ms > 5_000
+    {
+        return Err(ParseCoordinatorError::InvalidParsePolicy);
+    }
+    Ok(())
+}
+
+fn validate_window_snapshots(
+    request: &ParseScheduleRequest,
+    parse_windows: &[ParseWindowSnapshot],
+    policy: Option<ParsePolicy>,
+) -> Result<(), ParseCoordinatorError> {
+    let max_window_bytes = policy
+        .map(|policy| policy.max_window_bytes as usize)
+        .unwrap_or(SYNTAX_CACHE_BUDGET_BYTES);
+    let memory_budget_bytes = policy
+        .map(|policy| policy.memory_budget_bytes as usize)
+        .unwrap_or(SYNTAX_CACHE_BUDGET_BYTES);
+    let mut total_bytes = 0usize;
+
+    for (index, snapshot) in parse_windows.iter().enumerate() {
+        if snapshot.document_id != request.document_id
+            || snapshot.document_version != request.document_version
+            || snapshot.package_prefix != request.package_prefix
+            || snapshot.mode_id != request.mode_id
+        {
+            return Err(ParseCoordinatorError::WindowMetadataMismatch { index });
+        }
+        let range = snapshot.byte_range();
+        if !range.is_valid() {
+            return Err(ParseCoordinatorError::InvalidWindowRange { index });
+        }
+        let expected = usize::try_from(range.len()).map_err(|_| {
+            ParseCoordinatorError::WindowTextLengthMismatch {
+                index,
+                expected: usize::MAX,
+                actual: snapshot.text_len_bytes(),
+            }
+        })?;
+        let actual = snapshot.text_len_bytes();
+        if actual != expected {
+            return Err(ParseCoordinatorError::WindowTextLengthMismatch {
+                index,
+                expected,
+                actual,
+            });
+        }
+        if actual > max_window_bytes {
+            return Err(ParseCoordinatorError::WindowTooLarge {
+                index,
+                bytes: actual,
+                budget: max_window_bytes,
+            });
+        }
+        total_bytes = total_bytes.saturating_add(actual);
+    }
+
+    if total_bytes > memory_budget_bytes {
+        return Err(ParseCoordinatorError::WindowBudgetExceeded {
+            bytes: total_bytes,
+            budget: memory_budget_bytes,
+        });
+    }
+
     Ok(())
 }

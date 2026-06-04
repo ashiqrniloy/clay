@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use clay::{
     packages::record::{PackageRecord, assemble_package_record},
-    perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    perf::budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan,
-        IncrementalParseUpdate, ParseByteRange, ParseEditNotification, ParseUnit,
+        IncrementalParseUpdate, ParseByteRange, ParseEditNotification, ParsePolicy, ParseUnit,
+        ParseWindowSnapshot,
     },
     server::parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
 };
@@ -47,6 +48,23 @@ fn request(version: u64) -> ParseScheduleRequest {
         viewport: ParseByteRange::new(0, 64),
         invalidated_ranges: vec![ParseByteRange::new(20, 30), ParseByteRange::new(0, 5)],
     }
+}
+
+fn parse_window(version: u64, start: u64, text: &str) -> ParseWindowSnapshot {
+    ParseWindowSnapshot {
+        document_id: 7,
+        document_version: version,
+        package_prefix: "markdown".to_string(),
+        mode_id: "markdown".to_string(),
+        byte_start: start,
+        byte_end: start + text.len() as u64,
+        base_line: 0,
+        text: text.to_string(),
+    }
+}
+
+fn parse_policy(max_window_bytes: u64, memory_budget_bytes: u64) -> ParsePolicy {
+    ParsePolicy::new(max_window_bytes, 16, memory_budget_bytes, 50)
 }
 
 fn update(version: u64) -> IncrementalParseUpdate {
@@ -314,6 +332,187 @@ async fn stale_parse_result_is_not_published() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn parse_window_snapshot_is_bounded_and_versioned() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ParseEditNotification>();
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            move |notification: ParseEditNotification| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(notification.clone())
+                        .expect("windowed notification observed");
+                    Ok(update(notification.document_version))
+                }
+            },
+        )
+        .unwrap();
+
+    coordinator
+        .schedule_parse_with_windows(
+            request(8),
+            vec![parse_window(8, 1_024, "# visible\n")],
+            Some(parse_policy(4_096, 30 * 1024 * 1024)),
+        )
+        .unwrap();
+
+    let notification = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(notification.document_id, 7);
+    assert_eq!(notification.document_version, 8);
+    assert_eq!(notification.parse_windows.len(), 1);
+    assert_eq!(notification.parse_windows[0].byte_start, 1_024);
+    assert_eq!(notification.parse_windows[0].byte_end, 1_034);
+    assert_eq!(notification.parse_windows[0].text, "# visible\n");
+    assert_eq!(
+        notification.memory_budget.unwrap().budget_bytes,
+        30 * 1024 * 1024
+    );
+}
+
+#[tokio::test]
+async fn large_file_edit_does_not_copy_full_document_to_parser() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<usize>();
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            move |notification: ParseEditNotification| {
+                let tx = tx.clone();
+                async move {
+                    let delivered_bytes: usize = notification
+                        .parse_windows
+                        .iter()
+                        .map(ParseWindowSnapshot::text_len_bytes)
+                        .sum();
+                    tx.send(delivered_bytes).expect("parser input measured");
+                    Ok(update(notification.document_version))
+                }
+            },
+        )
+        .unwrap();
+
+    let document_bytes = 16 * 1024 * 1024usize;
+    let bounded_window = "x".repeat(4096);
+    coordinator
+        .schedule_parse_with_windows(
+            request(9),
+            vec![parse_window(9, 8 * 1024 * 1024, &bounded_window)],
+            Some(parse_policy(4096, 30 * 1024 * 1024)),
+        )
+        .unwrap();
+
+    let delivered_bytes = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(delivered_bytes < document_bytes / 1024);
+    assert_eq!(delivered_bytes, 4096);
+}
+
+#[tokio::test]
+async fn newer_viewport_parse_cancels_stale_window_work() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                if notification.document_version == 1 {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+                Ok(update(notification.document_version))
+            },
+        )
+        .unwrap();
+
+    coordinator
+        .schedule_parse_with_windows(
+            request(1),
+            vec![parse_window(1, 0, "first")],
+            Some(parse_policy(4096, 30 * 1024 * 1024)),
+        )
+        .unwrap();
+    coordinator
+        .schedule_parse_with_windows(
+            request(2),
+            vec![parse_window(2, 64, "second")],
+            Some(parse_policy(4096, 30 * 1024 * 1024)),
+        )
+        .unwrap();
+
+    let parsed = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(parsed.document_version, 2);
+    assert_eq!(coordinator.stats().cancelled_superseded_tasks, 1);
+}
+
+#[test]
+fn parse_window_snapshot_requires_parse_permission() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&[]);
+
+    let error = coordinator
+        .register_handler(&package, "markdown", |_notification| async move {
+            Ok(update(1))
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ParseCoordinatorError::MissingPermission {
+            package_prefix: "markdown".to_string()
+        }
+    );
+}
+
+#[test]
+fn parse_window_snapshot_rejects_oversized_or_mismatched_windows() {
+    let coordinator = ParseCoordinator::new();
+    let oversized = parse_window(1, 0, "0123456789");
+    assert!(matches!(
+        coordinator
+            .schedule_parse_with_windows(request(1), vec![oversized], Some(parse_policy(4, 1024)))
+            .unwrap_err(),
+        ParseCoordinatorError::WindowTooLarge { .. }
+    ));
+
+    let wrong_version = parse_window(2, 0, "ok");
+    assert!(matches!(
+        coordinator
+            .schedule_parse_with_windows(
+                request(1),
+                vec![wrong_version],
+                Some(parse_policy(4096, 8192))
+            )
+            .unwrap_err(),
+        ParseCoordinatorError::WindowMetadataMismatch { .. }
+    ));
+
+    assert!(matches!(
+        coordinator
+            .schedule_parse_with_windows(
+                request(1),
+                Vec::new(),
+                Some(parse_policy(4096, SYNTAX_CACHE_BUDGET_BYTES as u64 + 1))
+            )
+            .unwrap_err(),
+        ParseCoordinatorError::InvalidParsePolicy
+    ));
 }
 
 #[tokio::test]

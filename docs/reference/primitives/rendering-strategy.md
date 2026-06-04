@@ -150,6 +150,23 @@ Packages cannot:
 
 All package rendering flows through validated server-produced declarations. The Rust client renders those declarations locally using known code paths only.
 
+## Phase 18.5 Large-File Decoration-Cache Follow-Up
+
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that current decoration publication validates one viewport-bounded `DecorationSet`, while large-file modes need reusable chunk/cache primitives for retained near-viewport state.
+
+Required reusable primitive gaps:
+
+- `DecorationChunk`: a validated decoration payload keyed by document ID, document version, package prefix, mode ID, and byte range.
+- `SyntaxChunkCache`: a bounded LRU-style cache for syntax/decor chunks with stale-version invalidation, edit-range invalidation, viewport/near-viewport priority, and deterministic memory accounting.
+- `SyntaxCacheBudget`: a generic retained-cache budget. Phase 18.5 targets a 30 MiB Markdown-specific overhead cap for large-file workflows, but the primitive should be reusable by Python, Org, AsciiDoc, log-file, and other modes.
+
+Security and performance rules:
+
+- Cached chunks remain inert data: no parser tokens, AST nodes, CSS, draw callbacks, raw styles, native handles, client-side JavaScript, or executable closures.
+- Chunk publication still enforces package provenance, document version, byte-range validation, style-token validation, stale-version rejection, and `DECORATION_PAYLOAD_BUDGET_BYTES` per transport payload.
+- Paint must consume already-applied local spans only; cache eviction, chunk validation, parser execution, and package JavaScript remain outside paint, keypress, scroll, layout, and text-event handlers.
+- Rust cache/renderer primitives must not branch on Markdown syntax or markdown-it token names; package adapters translate language-specific parser output to generic decoration chunks before publication.
+
 ## Phase 17/18 Follow-Up
 
 - Define concrete protocol messages for `DecorationUpdate` and, if needed, `LayoutHintUpdate`.

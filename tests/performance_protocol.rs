@@ -7,13 +7,15 @@ use clay::{
         baselines::representative_sdui_tree,
         budgets::{
             BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
-            EDIT_ACK_PAYLOAD_BUDGET_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-            SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            EDIT_ACK_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+            SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            SYNTAX_CACHE_BUDGET_BYTES,
         },
         metrics::{PerfConfig, install_global_recorder},
     },
     protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, ServerMessage,
+        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, ParseByteRange,
+        ParsePolicy, ParseWindowRequest, ServerMessage, SyntaxMemoryBudget,
         codec::{Codec, CodecError},
     },
 };
@@ -155,6 +157,29 @@ fn representative_protocol_payloads_fit_phase14_budgets() {
         sdui_update_payload <= SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         "SDUI update payload {sdui_update_payload} exceeds budget {SDUI_UPDATE_PAYLOAD_BUDGET_BYTES}"
     );
+}
+
+#[test]
+fn parse_window_policy_keeps_large_file_snapshot_budget_bounded() {
+    let policy = ParsePolicy::new(64 * 1024, 4 * 1024, SYNTAX_CACHE_BUDGET_BYTES as u64, 50);
+    let request = ParseWindowRequest {
+        document_id: 7,
+        document_version: 12,
+        behavior_version: 3,
+        package_prefix: "plain".to_string(),
+        mode_id: "plain".to_string(),
+        requested_ranges: vec![ParseByteRange::new(8 * 1024 * 1024, 8 * 1024 * 1024 + 4096)],
+        viewport: ParseByteRange::new(8 * 1024 * 1024, 8 * 1024 * 1024 + 4096),
+        policy,
+    };
+    let metadata_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&request)
+        .expect("parse window request serializes")
+        .len();
+    let budget = SyntaxMemoryBudget::new(policy.memory_budget_bytes, 4096);
+
+    assert!(metadata_bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
+    assert_eq!(budget.remaining_bytes(), policy.memory_budget_bytes - 4096);
+    assert!(!budget.is_exceeded());
 }
 
 #[test]

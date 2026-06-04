@@ -170,6 +170,26 @@ This split keeps `DocumentState` focused on canonical document mutation, `ClayJs
 - Future exceptions require explicit permission declaration, server validation, documentation, and a decision log before implementation.
 - Client delivery contains inert declarations only; the Rust client renders known declarations locally.
 
+## Phase 18.5 Large-File Parse-Window Primitives
+
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) identified bounded parse input as a reusable primitive gap. Clay now defines generic parse-window and memory-budget shapes in `src/protocol/parse.rs` and validates them through `src/server/parse_coordinator.rs`; the names and validation rules are intentionally mode-neutral.
+
+Implemented reusable primitives:
+
+- `ParseWindowSnapshot`: a server-canonical, versioned, UTF-8-boundary-validated text slice with `document_id`, `document_version`, package/mode provenance, `byte_start`, `byte_end`, `base_line`, and bounded `text`.
+- `ParseWindowRequest` / `ParsePolicy`: a bounded request derived from viewport and invalidated ranges with generic guard bytes, timeout, package/mode provenance, `max_window_bytes`, and `memory_budget_bytes`.
+- `SyntaxMemoryBudget` (the implemented `SyntaxCacheBudget` primitive) and `SYNTAX_CACHE_BUDGET_BYTES`: retained syntax/cache memory accounting with a 30 MiB large-file budget separate from total RSS, runtime baseline, canonical document storage, and temporary parser allocations.
+- `DocumentState::parse_window_snapshot` / `parse_window_snapshots`: server-canonical rope slicing helpers that copy only validated byte windows, align guard ranges to UTF-8 boundaries, and reject oversized or over-budget windows.
+- `ParseCoordinator::schedule_parse_with_windows`: schedules background parse work with prevalidated snapshots, aborts superseded tasks for the same document/package/mode, and delivers the current windows to the package handler only after `parse-document` handler registration.
+
+Security and performance rules:
+
+- Range snapshots require the existing `parse-document` permission path because only registered parse handlers can receive them; install/enable alone grants no parser text access.
+- Snapshots expose only already-open document text inside validated requested windows and include document/version/provenance metadata for stale-result rejection and package ownership checks.
+- Large-file ordinary edits must not pass the full document string to package JavaScript; small-file full snapshots remain a policy decision only when they fit documented budgets.
+- The parse coordinator preserves stale-version rejection, cancellation/generation semantics, timeout bounds, payload budgets, package provenance, and no client-side package JavaScript.
+- Rust primitive names and branches remain language-neutral; rejected examples include `MarkdownParser`, `MarkdownItToken`, `MarkdownHeading`, `MarkdownFence`, `heading_open`, `list_item_open`, and `if mode == "markdown"` parser paths.
+
 ## Phase 17/18 Follow-Up
 
 - Add the `clay:parse` facade and `clay.parse.serverRegisterParseHandler` planned API stub.

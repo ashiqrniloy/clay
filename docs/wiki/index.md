@@ -19,6 +19,7 @@
 - [Primitive Architecture Documentation](modules/primitive-architecture-docs.md): Phase 16 primitive registry, rendering/parse strategy docs, Markdown mode prerequisite mapping, docs-index links, budget references, and static documentation tests.
 - [Primitive Architecture](modules/primitive-architecture.md): Internal overview of the Phase 16 primitive taxonomy, registry schema, planned API stub flow, backlog traceability, advisory budgets, and package/mode constraints.
 - [Phase 18 Markdown Primitive Review](modules/phase18-markdown-primitive-review.md): Primitive-first inventory for the markdown-it package rewrite, including existing generic capabilities, hot-path/security boundaries, and reusable primitive gaps to address before package-specific work.
+- [Phase 18.5 Large-File Markdown Primitive Review](modules/phase18-large-file-markdown-primitive-review.md): Large-file parse/cache primitive inventory covering existing scheduler, document, viewport, decoration, configuration, package, and benchmark primitives plus generic parse-window/cache gaps before implementation.
 - [Package Primitive Gate](modules/package-primitive-gate.md): Package manifest metadata validation, permission table, prefix/provenance diagnostics, reserved authority rejection, and package load-time security invariants.
 - [Package Loading](modules/package-loading.md): Phase 17 package record assembly, enable-time conflict checks, SDUI/status provenance and budget validation, service rollback behavior, and tests.
 - [First-Party Markdown Package](modules/first-party-markdown-package.md): `@clay/markdown` package scaffold, bounded manifest contract, markdown-it parser/decorator adapter, SDUI preview/status workflow, performance/regression verification, permission-bearing API dependency validation, docs path, fixtures, fallback behavior, and tests.
@@ -28,7 +29,7 @@
 - [Rendering Primitives](modules/rendering-primitives.md): Inert package rendering declarations, implemented `DecorationSet`/`DecorationSpan` design, SDUI versus inline span split, client attachment points, viewport updates, and rendering security boundaries.
 - [Decoration Transport](modules/decoration-transport.md): Implemented bounded `DecorationSet`/`DecorationSpan` protocol, server validation, client connection event, editor decoration store, native render hook, and tests.
 - [Parse Task Lifecycle](modules/parse-task-lifecycle.md): Server-side background parse task scheduling, edit notifications, cancellation, timeouts, viewport filtering, fallback behavior, and coordinator attachment points.
-- [Parse Coordinator](modules/parse-coordinator.md): Implemented Phase 18 `IncrementalParseUpdate` handoff with permission-gated handler registration, per-document cancellation, stale-result rejection, viewport-prioritized scheduling, payload budgets, and tests.
+- [Parse Coordinator](modules/parse-coordinator.md): Implemented Phase 18/18.5 `IncrementalParseUpdate` and parse-window handoff with permission-gated handler registration, bounded range snapshots, memory-budget validation, per-document cancellation, stale-result rejection, viewport-prioritized scheduling, payload budgets, and tests.
 
 ## Flows
 

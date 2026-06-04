@@ -217,6 +217,39 @@ The harness built corpora from the largest committed repository Markdown files r
 
 These values are advisory local evidence only. The deterministic gates remain payload budgets, non-blocking typing, structural SDUI, docs/registry lookup, benchmark script policy checks, and `cargo bench --no-run` benchmark compilation.
 
+### Large-file Markdown editor-parity contract (Phase 18.5)
+
+Established editor parity means responsive typing and scrolling with bounded syntax work, not synchronous full-document Markdown decoration. The Phase 18.5 contract is:
+
+- **Small Markdown files (`<= 1 MiB`)**: full-document `markdown-it` parsing and adapter work may run on open/reload or explicit resync when advisory local results stay comfortably below interactive thresholds, but it still must not block keypress-to-local-paint.
+- **Medium Markdown files (`> 1 MiB` and `<= 5 MiB`)**: viewport-first/windowed parsing is the default for ordinary edits and scroll. Full-document work is allowed only as cancellable idle/background validation and must not be part of open, edit, or scroll response.
+- **Large Markdown files (`> 5 MiB`, including the 16 MiB target)**: ordinary open, edit, and scroll paths must not run full-document parse/decorate. The package must parse bounded viewport/near-viewport windows, publish bounded decoration chunks, cancel stale work, and degrade to partial/plain-text highlighting when budgets would be exceeded.
+
+Editor-comparison targets for large Markdown workflows are local advisory targets until deterministic cross-machine enforcement exists:
+
+| Target | Phase 18.5 expectation | Measurement path |
+| --- | --- | --- |
+| Typing/local paint | `<= 16 ms` p95; Markdown parser delay may only affect decoration freshness | Existing `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`, `markdown_typing_does_not_wait_for_markdown_it_parse`, and future large-file typing guard |
+| Scroll/render-adjacent work | `<= 16 ms` p95 for local visible extraction/layout/paint-adjacent work | Existing `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` and future windowed decoration scroll benchmark |
+| Visible decoration refresh | Target `<= 100 ms` p95 for viewport/near-viewport Markdown chunks on local benchmark hardware; stale chunks may temporarily remain or clear | Future `windowed-adapter` benchmark and decoration chunk publication tests |
+| Parser cancellation | Superseded viewport/edit parse work should be cancelled or marked stale before publishing, target `<= 50 ms` p95 cancellation observation in local tests | Future parse-window coordinator tests |
+| Parser/decorator CPU by file size | Full-document path may remain advisory for `<= 1 MiB`; `5 MiB` and `16 MiB` ordinary workflows must use bounded windows rather than full-document adapter timings | `tools/bench/markdown-parser.mjs` full-document evidence plus future windowed mode |
+| Markdown memory overhead | `<= 30 MiB` retained/temporary Markdown-specific overhead for the 16 MiB workflow | Future benchmark JSON memory categories and cache accounting tests |
+
+Memory accounting separates total process size from Markdown-specific overhead:
+
+```text
+total_rss = process memory reported by the OS/runtime; always reported, not capped at 30 MiB
+baseline_rss = Clay/runtime process before opening or parsing the Markdown document
+document_memory = canonical document rope/text, layout metadata, edit state, and other non-Markdown parser state
+markdown_parser_temporary_allocations = bounded parse-window strings, markdown-it tokens, source indexes, and transient span arrays
+retained_decoration_cache_memory = validated syntax/decor chunks retained for visible and near-viewport ranges
+markdown_overhead = markdown_parser_temporary_allocations + retained_decoration_cache_memory
+Phase 18.5 target: markdown_overhead <= 30 MiB for a 16 MiB Markdown workflow
+```
+
+The 30 MiB target applies to **Markdown-specific overhead only**, not total process RSS. Total RSS must still be reported because it is useful for triage, but it is not the 30 MiB pass/fail value: a bare Node/V8 process on this workstation already reports more than 30 MiB RSS before opening a document. Benchmark JSON for large-file Markdown work must expose separate `total_rss`, `baseline_rss`, `document_memory`, `markdown_parser_temporary_allocations`, `retained_decoration_cache_memory`, and `markdown_overhead` categories so later tasks can compare the overhead budget without hiding process memory.
+
 Large-file parser recommendation from the local Node.js parser harness (Node v26.2.0 on this workstation): do **not** treat full-document `mdast-util-from-markdown` parsing as proven for ordinary large-file editing. The harness used existing repository Markdown files only, led by `plans/020-Phase18-Markdown-Mode-Package-Proof-of-Concept.md`, `roadmap.md`, and large plan documents; the synthesized corpora include headings, strong/emphasis, inline code, fenced code blocks, ordered/unordered lists, long paragraphs, many short sections, and UTF-8 content. Results were:
 
 | Corpus | `mdast-util-from-markdown` `fromMarkdown` | `markdown-it` parse | Package adapter path |

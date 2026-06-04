@@ -14,6 +14,10 @@ pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
 // thresholds.
 pub const DECORATION_PAYLOAD_BUDGET_BYTES: usize = 8192;
 pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
+// Generic retained syntax/decorator cache budget for large-file modes. Phase
+// 18.5 uses this as the 30 MiB Markdown-specific overhead target while keeping
+// the primitive language-neutral for future modes.
+pub const SYNTAX_CACHE_BUDGET_BYTES: usize = 30 * 1024 * 1024;
 pub const COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";

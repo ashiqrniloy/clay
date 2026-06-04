@@ -7,7 +7,7 @@ use clay::perf::budgets::{
     FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
     KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, MODE_ACTIVATION_P95_BUDGET_MS,
     PRIMITIVES_REGISTRY_VERSION, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
 };
 
 fn repository_path(relative: &str) -> std::path::PathBuf {
@@ -150,6 +150,7 @@ fn primitives_registry_linked_from_index() {
 fn primitives_budget_constants_compile() {
     assert_eq!(DECORATION_PAYLOAD_BUDGET_BYTES, 8192);
     assert_eq!(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, 4096);
+    assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
     assert_eq!(MODE_ACTIVATION_P95_BUDGET_MS, 100);
     assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 4096);
     assert_eq!(FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, 2048);
@@ -815,6 +816,13 @@ fn phase18_markdown_primitive_review() -> String {
     .expect("read Phase 18 Markdown primitive review")
 }
 
+fn phase18_large_file_markdown_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18-large-file-markdown-primitive-review.md",
+    ))
+    .expect("read Phase 18.5 large-file Markdown primitive review")
+}
+
 #[test]
 fn phase18_markdown_primitive_review_records_existing_inventory() {
     let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
@@ -873,6 +881,126 @@ fn phase18_markdown_primitive_review_records_generic_gaps_only() {
             review.contains(required),
             "Phase 18 Markdown primitive review must record generic-only gap guidance: {required}"
         );
+    }
+}
+
+#[test]
+fn phase18_large_file_markdown_review_records_generic_parse_window_gaps() {
+    let review = phase18_large_file_markdown_primitive_review();
+
+    for required in [
+        "Parse coordinator and parse protocol",
+        "Server document storage",
+        "Viewport primitives",
+        "Decoration transport and rendering",
+        "Configuration surfaces",
+        "Benchmark and budget primitives",
+        "`ParseEditNotification` carries metadata only",
+        "There is no `ParseWindowSnapshot`",
+        "no server-canonical range snapshot helper",
+        "no retained syntax cache accounting",
+        "`EditorSurface::apply_decoration_set` replaces one span set",
+        "no generic chunk key",
+        "no LRU chunk cache",
+        "`ParseWindowSnapshot` / `ParseRangeSnapshot`",
+        "`ParseWindowRequest` / `ParsePolicy`",
+        "`SyntaxCacheBudget` / memory accounting",
+        "`DecorationChunk` / `SyntaxChunkCache`",
+        "`ViewportRangeReport`",
+        "30 MiB",
+        "future large-file modes can reuse",
+        "Markdown-specific handling remains in `packages/markdown/dist/parser.js`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.5 large-file primitive review must record generic gap text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_large_file_review_links_reference_and_wiki_docs() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let parse_strategy = parse_update_strategy();
+    let rendering_strategy = rendering_strategy();
+    let review = phase18_large_file_markdown_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18-large-file-markdown-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.5 large-file primitive review"
+    );
+    for (doc_name, doc) in [
+        ("parse-update-strategy.md", parse_strategy.as_str()),
+        ("rendering-strategy.md", rendering_strategy.as_str()),
+    ] {
+        for required in [
+            "phase18-large-file-markdown-primitive-review.md",
+            "SyntaxCacheBudget",
+        ] {
+            assert!(
+                doc.contains(required),
+                "{doc_name} must link/reference the Phase 18.5 large-file primitive review and generic gap {required}"
+            );
+        }
+    }
+    assert!(
+        parse_strategy.contains("ParseWindowSnapshot"),
+        "parse-update-strategy.md must document the generic parse-window gap"
+    );
+    assert!(
+        rendering_strategy.contains("DecorationChunk"),
+        "rendering-strategy.md must document the generic decoration-chunk gap"
+    );
+    for required in [
+        "docs/reference/primitives/parse-update-strategy.md",
+        "docs/reference/primitives/rendering-strategy.md",
+        "[Parse Coordinator](parse-coordinator.md)",
+        "[Decoration Transport](decoration-transport.md)",
+    ] {
+        assert!(
+            review.contains(required),
+            "large-file primitive review must link related reference/wiki doc: {required}"
+        );
+    }
+}
+
+#[test]
+fn rust_large_file_primitives_have_no_markdown_token_branches() {
+    let primitive_sources = [
+        "src/protocol/parse.rs",
+        "src/server/parse_coordinator.rs",
+        "src/server/document.rs",
+        "src/protocol/decorations.rs",
+        "src/server/decorations.rs",
+        "src/editor/surface.rs",
+        "src/client/mod.rs",
+        "src/perf/budgets.rs",
+    ];
+    let forbidden = [
+        "heading_open",
+        "list_item_open",
+        "bullet_list_open",
+        "ordered_list_open",
+        "strong_open",
+        "em_open",
+        "code_inline",
+        "MarkdownParser",
+        "MarkdownItToken",
+        "MarkdownHeading",
+        "MarkdownFence",
+        "if mode == \"markdown\"",
+        "if mode_id == \"markdown\"",
+    ];
+
+    for path in primitive_sources {
+        let source = fs::read_to_string(repository_path(path)).expect("read primitive source");
+        for marker in forbidden {
+            assert!(
+                !source.contains(marker),
+                "{path} must not contain Markdown/markdown-it parser branch marker `{marker}`"
+            );
+        }
     }
 }
 

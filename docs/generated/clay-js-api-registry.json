@@ -1278,13 +1278,31 @@
           "description": "Bounded handler timeout policy validated at registration/configuration time."
         },
         {
+          "name": "maxWindowBytes",
+          "type": "number",
+          "default": "65536",
+          "description": "Maximum bytes included in one bounded parse-window snapshot."
+        },
+        {
+          "name": "guardBytes",
+          "type": "number",
+          "default": "4096",
+          "description": "Generic context bytes added around requested ranges while staying within the window cap."
+        },
+        {
+          "name": "memoryBudgetBytes",
+          "type": "number",
+          "default": "31457280",
+          "description": "Retained syntax/window memory budget capped by SYNTAX_CACHE_BUDGET_BYTES."
+        },
+        {
           "name": "resultBudgetBytes",
           "type": "number",
           "default": "4096",
           "description": "Incremental parse result budget enforced before publication."
         }
       ],
-      "security": "Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, and bounded parse result publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.",
+      "security": "Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, bounded parse-window snapshots, syntax memory budget, and bounded parse result publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.",
       "agent_guidance": "Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser. Do not pass executable callbacks in registration payloads or put parse work on the client hot path.",
       "lookup_tags": ["js-api", "parse", "markdown", "incrementalparseupdate", "parser"],
       "app_visible": true,
