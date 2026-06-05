@@ -5,6 +5,60 @@ export const modeId = "markdown";
 export const supportedExtensions = ["md", "markdown", "mdown"];
 export const supportedMimeTypes = ["text/markdown"];
 
+export const markdownLargeFilePolicy = Object.freeze({
+  smallFileMaxBytes: 1 * 1024 * 1024,
+  mediumFileMaxBytes: 5 * 1024 * 1024,
+  largeFileThresholdBytes: 5 * 1024 * 1024,
+  parseWindowBytes: 64 * 1024,
+  guardBytes: 4 * 1024,
+  memoryBudgetBytes: 30 * 1024 * 1024,
+  timeoutMs: 50,
+  fallbackMode: "plain-text-fallback",
+  highlightingStates: Object.freeze(["full", "windowed", "degraded", "plain-text-fallback"])
+});
+
+function finitePolicyNumber(value, fallback) {
+  const number = Number(value ?? fallback);
+  return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : fallback;
+}
+
+export function markdownPolicyForDocument(options = {}) {
+  const policy = { ...markdownLargeFilePolicy, ...(options.policy ?? {}) };
+  const byteLength = finitePolicyNumber(
+    options.documentByteLength ?? options.fileSizeBytes ?? options.byteLength,
+    0
+  );
+  const smallFileMaxBytes = finitePolicyNumber(policy.smallFileMaxBytes, markdownLargeFilePolicy.smallFileMaxBytes);
+  const mediumFileMaxBytes = finitePolicyNumber(policy.mediumFileMaxBytes, markdownLargeFilePolicy.mediumFileMaxBytes);
+  const memoryBudgetBytes = finitePolicyNumber(policy.memoryBudgetBytes, markdownLargeFilePolicy.memoryBudgetBytes);
+  const budgetExceeded = Boolean(
+    options.budgetExceeded ?? options.syntaxBudgetExceeded ?? options.memoryBudgetExceeded
+  );
+  const parserTimedOut = Boolean(options.parserTimedOut ?? options.parseTimedOut);
+
+  let tier = "small";
+  let highlightingState = "full";
+  if (byteLength > mediumFileMaxBytes) {
+    tier = "large";
+    highlightingState = "windowed";
+  } else if (byteLength > smallFileMaxBytes) {
+    tier = "medium";
+    highlightingState = "windowed";
+  }
+  if (parserTimedOut) highlightingState = "degraded";
+  if (budgetExceeded || memoryBudgetBytes === 0) highlightingState = "plain-text-fallback";
+
+  return Object.freeze({
+    tier,
+    byteLength,
+    highlightingState,
+    parseWindowBytes: finitePolicyNumber(policy.parseWindowBytes, markdownLargeFilePolicy.parseWindowBytes),
+    guardBytes: finitePolicyNumber(policy.guardBytes, markdownLargeFilePolicy.guardBytes),
+    memoryBudgetBytes,
+    timeoutMs: finitePolicyNumber(policy.timeoutMs, markdownLargeFilePolicy.timeoutMs)
+  });
+}
+
 export const commands = Object.freeze([
   {
     id: "markdown.togglePreview",

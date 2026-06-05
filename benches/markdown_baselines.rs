@@ -4,15 +4,17 @@ use clay::{
         modes::{DocumentClassificationInput, ModeDeclaration, ModeRegistry},
         record::{PackageRecord, assemble_package_record},
     },
+    perf::budgets::{DECORATION_NEAR_VIEWPORT_GUARD_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentAccess,
-        IncrementalParseUpdate, ParseByteRange, ParseUnit,
+        IncrementalParseUpdate, ParseByteRange, ParsePolicy, ParseUnit, ParseWindowRequest,
+        ParseWindowSnapshot, SyntaxMemoryBudget,
     },
     server::{decorations::validate_decoration_publication, parse_coordinator::ParseCoordinator},
 };
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
 fn markdown_package_record() -> PackageRecord {
     let text = std::fs::read_to_string("packages/markdown/package.json")
@@ -57,6 +59,26 @@ fn markdown_text(repetitions: usize) -> String {
     text
 }
 
+fn markdown_text_for_bytes(target_bytes: usize) -> String {
+    const BLOCK: &str = "# Windowed heading\n\nThis **strong** paragraph has _emphasis_ and `inline code`.\n\n- first item\n- second item\n\n```rust\nfn main() {}\n```\n\n";
+    let mut text = String::with_capacity(target_bytes.saturating_add(BLOCK.len()));
+    while text.len() < target_bytes {
+        text.push_str(BLOCK);
+    }
+    text.truncate(target_bytes);
+    text
+}
+
+fn large_file_sizes() -> [(&'static str, usize); 5] {
+    [
+        ("64KiB", 64 * 1024),
+        ("256KiB", 256 * 1024),
+        ("1MiB", 1024 * 1024),
+        ("5MiB", 5 * 1024 * 1024),
+        ("16MiB", 16 * 1024 * 1024),
+    ]
+}
+
 fn markdown_decoration_set(document_version: u64, viewport_end: u64) -> DecorationSet {
     let provenance = DecorationProvenance {
         package_name: "@clay/markdown".to_string(),
@@ -91,6 +113,51 @@ fn markdown_decoration_set(document_version: u64, viewport_end: u64) -> Decorati
         viewport_byte_start: 0,
         viewport_byte_end: viewport_end,
         spans,
+    }
+}
+
+fn large_file_decoration_set(document_version: u64, viewport_start: u64) -> DecorationSet {
+    let mut set = markdown_decoration_set(
+        document_version,
+        viewport_start + DECORATION_NEAR_VIEWPORT_GUARD_BYTES,
+    );
+    set.viewport_byte_start = viewport_start;
+    for span in &mut set.spans {
+        span.byte_start += viewport_start;
+        span.byte_end += viewport_start;
+    }
+    set
+}
+
+fn parse_window_request_for_size(document_bytes: usize) -> ParseWindowRequest {
+    let viewport_start = (document_bytes as u64 / 2).saturating_sub(8 * 1024);
+    ParseWindowRequest {
+        document_id: 7,
+        document_version: 3,
+        behavior_version: 3,
+        package_prefix: "markdown".to_string(),
+        mode_id: "markdown".to_string(),
+        requested_ranges: vec![ParseByteRange::new(
+            viewport_start,
+            viewport_start + 16 * 1024,
+        )],
+        viewport: ParseByteRange::new(viewport_start, viewport_start + 16 * 1024),
+        policy: ParsePolicy::new(64 * 1024, 4 * 1024, SYNTAX_CACHE_BUDGET_BYTES as u64, 50),
+    }
+}
+
+fn parse_window_snapshot_for_size(document_bytes: usize) -> ParseWindowSnapshot {
+    let text = markdown_text_for_bytes(64 * 1024);
+    let byte_start = (document_bytes as u64 / 2).saturating_sub(32 * 1024);
+    ParseWindowSnapshot {
+        document_id: 7,
+        document_version: 3,
+        package_prefix: "markdown".to_string(),
+        mode_id: "markdown".to_string(),
+        byte_start,
+        byte_end: byte_start + text.len() as u64,
+        base_line: 0,
+        text,
     }
 }
 
@@ -186,10 +253,77 @@ fn markdown_decorated_editor_baselines(c: &mut Criterion) {
     }
 }
 
+fn markdown_large_file_windowed_baselines(c: &mut Criterion) {
+    let record = markdown_package_record();
+    let mut group = c.benchmark_group("markdown_large_file_windowed_baselines");
+    for (label, document_bytes) in large_file_sizes() {
+        group.bench_with_input(
+            BenchmarkId::new("parse_window_request_metadata", label),
+            &document_bytes,
+            |b, &document_bytes| {
+                b.iter(|| {
+                    let request = parse_window_request_for_size(document_bytes);
+                    let snapshot = parse_window_snapshot_for_size(document_bytes);
+                    let budget = SyntaxMemoryBudget::new(
+                        request.policy.memory_budget_bytes,
+                        snapshot.text.len() as u64,
+                    );
+                    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&request)
+                        .expect("parse window request serializes")
+                        .len();
+                    black_box(bytes + budget.remaining_bytes() as usize + snapshot.text.len())
+                })
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("visible_decoration_chunk_validation", label),
+            &document_bytes,
+            |b, &document_bytes| {
+                b.iter(|| {
+                    let viewport_start = (document_bytes as u64 / 2).saturating_sub(8 * 1024);
+                    let validated = validate_decoration_publication(
+                        &record,
+                        3,
+                        black_box(large_file_decoration_set(3, viewport_start)),
+                    )
+                    .expect("large-file visible Markdown decoration chunk validates");
+                    black_box(validated.spans.len())
+                })
+            },
+        );
+    }
+}
+
+fn markdown_large_file_visible_render_baselines(c: &mut Criterion) {
+    let document_bytes = 16 * 1024 * 1024;
+    let text = markdown_text_for_bytes(document_bytes);
+    let mut group = c.benchmark_group("markdown_large_file_visible_render_baselines");
+    group.bench_function("render_adjacent_16m_windowed_chunk", |b| {
+        b.iter_batched(
+            || {
+                let mut surface = EditorSurface::default();
+                surface.load_snapshot(7, 3, text.clone(), DocumentAccess::Editable { lease_id: 1 });
+                let _ = surface.update_visible_line_count_for_height(48.0 * 2.0 + 12.0 * 28.0);
+                let _ = surface.apply_decoration_set(large_file_decoration_set(3, 0));
+                surface
+            },
+            |mut surface| {
+                let _ = surface.command(EditorCommand::MoveDown);
+                let _ = surface.command(EditorCommand::MoveUp);
+                let _ = surface.command(EditorCommand::SelectRight);
+                black_box(surface.visible_text().len() + surface.decoration_span_count())
+            },
+            BatchSize::LargeInput,
+        )
+    });
+}
+
 criterion_group!(
     benches,
     markdown_activation_baselines,
     markdown_parse_and_decoration_baselines,
-    markdown_decorated_editor_baselines
+    markdown_decorated_editor_baselines,
+    markdown_large_file_windowed_baselines,
+    markdown_large_file_visible_render_baselines
 );
 criterion_main!(benches);

@@ -3,10 +3,12 @@ use std::time::{Duration, Instant};
 use clay::{
     client::ClientEditQueue,
     editor::{EditorCommand, EditorEditEvent, EditorSurface},
+    packages::record::{PackageRecord, assemble_package_record},
     perf::{
         baselines::representative_sdui_tree,
         budgets::{
             BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
+            DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
             EDIT_ACK_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
             SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
             SYNTAX_CACHE_BUDGET_BYTES,
@@ -14,11 +16,15 @@ use clay::{
         metrics::{PerfConfig, install_global_recorder},
     },
     protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, ParseByteRange,
-        ParsePolicy, ParseWindowRequest, ServerMessage, SyntaxMemoryBudget,
+        BehaviorManifest, ClientMessage, DecorationKind, DecorationProvenance, DecorationSet,
+        DecorationSpan, DocumentAccess, EditOperation, IncrementalParseUpdate, ParseByteRange,
+        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowRequest, ParseWindowSnapshot,
+        ServerMessage, SyntaxMemoryBudget,
         codec::{Codec, CodecError},
     },
+    server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
 };
+use serde_json::json;
 
 const FRAME_PREFIX_BYTES: usize = 4;
 
@@ -36,6 +42,61 @@ fn edit_event(byte_offset: u64, text: &str) -> EditorEditEvent {
 
 fn payload_len(frame: &[u8]) -> usize {
     frame.len().saturating_sub(FRAME_PREFIX_BYTES)
+}
+
+fn package_with_parse_permission() -> PackageRecord {
+    assemble_package_record(&json!({
+        "name": "@clay/markdown",
+        "version": "0.1.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "markdown",
+            "entry": "./dist/index.js",
+            "permissions": ["parse-document"],
+            "modes": ["markdown"],
+            "docs": "./docs/index.md"
+        }
+    }))
+    .expect("package fixture validates")
+}
+
+fn markdown_parse_update_from_notification(
+    notification: ParseEditNotification,
+) -> IncrementalParseUpdate {
+    IncrementalParseUpdate {
+        document_id: notification.document_id,
+        document_version: notification.document_version,
+        behavior_version: notification.behavior_version,
+        package_prefix: notification.package_prefix,
+        mode_id: notification.mode_id,
+        parse_unit: ParseUnit::LineGroup,
+        viewport: notification.viewport,
+        invalidated_ranges: notification.invalidated_ranges,
+        syntax_tree_delta: Some("windowed:visible".to_string()),
+        decoration_update: None,
+    }
+}
+
+fn decoration_set_for_payload() -> DecorationSet {
+    DecorationSet {
+        document_id: 7,
+        document_version: 3,
+        viewport_byte_start: 8 * 1024 * 1024,
+        viewport_byte_end: 8 * 1024 * 1024 + DECORATION_NEAR_VIEWPORT_GUARD_BYTES,
+        spans: vec![DecorationSpan {
+            byte_start: 8 * 1024 * 1024,
+            byte_end: 8 * 1024 * 1024 + 16,
+            kind: DecorationKind::Syntax,
+            style_token: "markup.heading.1".to_string(),
+            priority: 10,
+            provenance: DecorationProvenance {
+                package_name: "@clay/markdown".to_string(),
+                package_version: "0.1.0".to_string(),
+                package_prefix: "markdown".to_string(),
+            },
+        }],
+    }
 }
 
 #[test]
@@ -160,6 +221,15 @@ fn representative_protocol_payloads_fit_phase14_budgets() {
 }
 
 #[test]
+fn decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport() {
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&decoration_set_for_payload())
+        .expect("decoration chunk serializes")
+        .len();
+
+    assert!(bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
+}
+
+#[test]
 fn parse_window_policy_keeps_large_file_snapshot_budget_bounded() {
     let policy = ParsePolicy::new(64 * 1024, 4 * 1024, SYNTAX_CACHE_BUDGET_BYTES as u64, 50);
     let request = ParseWindowRequest {
@@ -180,6 +250,73 @@ fn parse_window_policy_keeps_large_file_snapshot_budget_bounded() {
     assert!(metadata_bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
     assert_eq!(budget.remaining_bytes(), policy.memory_budget_bytes - 4096);
     assert!(!budget.is_exceeded());
+}
+
+#[tokio::test]
+async fn markdown_large_file_typing_does_not_wait_for_windowed_parse() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_parse_permission();
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                Ok(markdown_parse_update_from_notification(notification))
+            },
+        )
+        .expect("Markdown parse handler registers");
+
+    let mut surface = EditorSurface::default();
+    surface.load_snapshot(
+        7,
+        1,
+        "# Large visible heading\n".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    surface.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+    surface.command(EditorCommand::DocumentEnd);
+
+    let window_text = "# Large visible heading\n".repeat(256);
+    let byte_start = 8 * 1024 * 1024;
+    let started = Instant::now();
+    coordinator
+        .schedule_parse_with_windows(
+            ParseScheduleRequest {
+                document_id: 7,
+                document_version: 1,
+                behavior_version: 3,
+                package_prefix: "markdown".to_string(),
+                mode_id: "markdown".to_string(),
+                viewport: ParseByteRange::new(byte_start, byte_start + 4096),
+                invalidated_ranges: vec![ParseByteRange::new(byte_start, byte_start + 32)],
+            },
+            vec![ParseWindowSnapshot {
+                document_id: 7,
+                document_version: 1,
+                package_prefix: "markdown".to_string(),
+                mode_id: "markdown".to_string(),
+                byte_start,
+                byte_end: byte_start + window_text.len() as u64,
+                base_line: 0,
+                text: window_text,
+            }],
+            Some(ParsePolicy::new(
+                64 * 1024,
+                4 * 1024,
+                SYNTAX_CACHE_BUDGET_BYTES as u64,
+                50,
+            )),
+        )
+        .expect("windowed parse schedules in background");
+    let outcome = surface.command_with_event(EditorCommand::Insert("!"));
+
+    assert!(outcome.changed);
+    assert_eq!(surface.visible_text(), "# Large visible heading\n!");
+    assert!(
+        started.elapsed() < Duration::from_millis(25),
+        "local large-file typing must not wait for slow windowed parser"
+    );
 }
 
 #[test]

@@ -55,6 +55,8 @@ Publishes validated `DecorationSpan` data for an open document version. Clay fil
 
 `serverPublishDecorations` is the public Clay JS API for the Phase 18 `DecorationRange` primitive. It accepts a viewport-bounded set of byte spans from server-side package code, validates the package permission and provenance, checks version/range/style-token safety, enforces `DECORATION_PAYLOAD_BUDGET_BYTES`, and stores the validated set for server-to-client delivery.
 
+For Phase 18.5 large-file workflows, publication remains the same public facade: package code publishes bounded spans, while Clay's server/editor internals key them as versioned decoration chunks and keep only visible or near-viewport chunks under the generic syntax/decor cache budget. The chunk cache, LRU eviction, and `DecorationChunkKey` metadata are internal primitives rather than additional public JavaScript APIs.
+
 ## When to use
 
 Use this API when a package parse/render provider has produced syntax, semantic, diagnostic, search, or Markdown decoration spans for the current document viewport. Do not use it for preview panels; use `clay:sdui` for package UI.
@@ -123,6 +125,8 @@ No default key binding is assigned.
 
 Returns JSON-serializable publication metadata synchronously from the server runtime. The operation is intended for background parse/render work and must not be called from ordinary typing, paint, layout, scroll, pointer, or text-event paths.
 
+Large-file callers should publish only the current viewport plus bounded guard ranges. Clay may evict off-viewport chunks to keep retained syntax/decor cache overhead within `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB for the Phase 18.5 Markdown target), so callers must treat off-viewport highlighting as refreshable background state rather than a durable full-document cache.
+
 ## Errors
 
 Fails with Clay error codes when permissions are missing, options are malformed, the document version is stale, ranges are invalid or outside the viewport, style tokens/kinds are unknown, package provenance mismatches, executable payloads are attempted, or payload size exceeds `DECORATION_PAYLOAD_BUDGET_BYTES`.
@@ -135,7 +139,7 @@ The API accepts inert data only. It rejects arbitrary CSS, callbacks, draw funct
 
 ## Agent guidance
 
-Prefer this facade over raw ops or Rust internals. Keep publications viewport-bounded and use known style tokens. If a user asks for Markdown preview UI, use SDUI rather than decoration spans.
+Prefer this facade over raw ops or Rust internals. Keep publications viewport-bounded and use known style tokens. Do not expose or call internal chunk-cache helpers from packages; use this asynchronous/background facade and let Clay handle stale-version rejection, viewport priority, and memory-budget eviction. If a user asks for Markdown preview UI, use SDUI rather than decoration spans.
 
 ## Backing implementation
 

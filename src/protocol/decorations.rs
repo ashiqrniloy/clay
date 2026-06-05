@@ -28,7 +28,17 @@ pub struct DecorationSpan {
     pub provenance: DecorationProvenance,
 }
 
-/// Bounded, versioned server-to-client decoration payload for one document viewport.
+/// Cache key for one versioned decoration chunk.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DecorationChunkKey {
+    pub document_id: DocumentId,
+    pub document_version: DocumentVersion,
+    pub package_prefix: String,
+    pub byte_start: u64,
+    pub byte_end: u64,
+}
+
+/// Bounded, versioned server-to-client decoration payload for one document viewport or chunk.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct DecorationSet {
     pub document_id: DocumentId,
@@ -39,6 +49,22 @@ pub struct DecorationSet {
 }
 
 impl DecorationSet {
+    pub fn chunk_key(&self, package_prefix: impl Into<String>) -> DecorationChunkKey {
+        DecorationChunkKey {
+            document_id: self.document_id,
+            document_version: self.document_version,
+            package_prefix: package_prefix.into(),
+            byte_start: self.viewport_byte_start,
+            byte_end: self.viewport_byte_end,
+        }
+    }
+
+    pub fn package_prefix(&self) -> Option<&str> {
+        self.spans
+            .first()
+            .map(|span| span.provenance.package_prefix.as_str())
+    }
+
     pub fn sorted_viewport_first(mut self) -> Self {
         self.spans.sort_by(|left, right| {
             let left_visible =

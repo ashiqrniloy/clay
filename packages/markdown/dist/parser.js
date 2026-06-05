@@ -2,10 +2,18 @@ const DEFAULT_PACKAGE_NAME = "@clay/markdown";
 const DEFAULT_PACKAGE_VERSION = "0.1.0";
 const DEFAULT_API_PREFIX = "markdown";
 
-const MARKDOWN_IT_OPTIONS = Object.freeze({
+export const MARKDOWN_IT_OPTIONS = Object.freeze({
   html: false,
   linkify: false,
   typographer: false
+});
+
+export const DEFAULT_WINDOWED_MARKDOWN_POLICY = Object.freeze({
+  largeFileThresholdBytes: 5 * 1024 * 1024,
+  parseWindowBytes: 64 * 1024,
+  guardBytes: 4 * 1024,
+  memoryBudgetBytes: 30 * 1024 * 1024,
+  timeoutMs: 50
 });
 
 const STYLE_TOKENS = Object.freeze({
@@ -32,7 +40,14 @@ function utf8ByteLengthForCodePoint(codePoint) {
   return 4;
 }
 
-function buildSourceIndex(text) {
+function toFiniteNumber(value, fallback) {
+  const number = Number(value ?? fallback);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function buildSourceIndex(text, metadata = {}) {
+  const absoluteByteStart = Math.max(0, Math.trunc(toFiniteNumber(metadata.absoluteByteStart, 0)));
+  const baseLine = Math.max(0, Math.trunc(toFiniteNumber(metadata.baseLine, 0)));
   const codeUnitToByte = new Array(text.length + 1);
   codeUnitToByte[0] = 0;
   const lineCodeUnitStarts = [0];
@@ -53,12 +68,25 @@ function buildSourceIndex(text) {
   }
 
   const lineByteStarts = lineCodeUnitStarts.map((start) => codeUnitToByte[start] ?? byteOffset);
-  return { text, codeUnitToByte, lineCodeUnitStarts, lineByteStarts, totalBytes: byteOffset };
+  return {
+    text,
+    codeUnitToByte,
+    lineCodeUnitStarts,
+    lineByteStarts,
+    totalBytes: byteOffset,
+    absoluteByteStart,
+    absoluteByteEnd: absoluteByteStart + byteOffset,
+    baseLine
+  };
 }
 
-function codeUnitToByte(source, codeUnitOffset) {
+function codeUnitToWindowByte(source, codeUnitOffset) {
   const safeOffset = Math.max(0, Math.min(source.text.length, Number(codeUnitOffset ?? 0)));
   return source.codeUnitToByte[safeOffset] ?? source.totalBytes;
+}
+
+function codeUnitToAbsoluteByte(source, codeUnitOffset) {
+  return source.absoluteByteStart + codeUnitToWindowByte(source, codeUnitOffset);
 }
 
 function lineStartCodeUnit(source, lineNumber) {
@@ -96,26 +124,62 @@ function tokenSourceRange(source, token) {
   return { start, end };
 }
 
-function normalizeViewport(viewport, source) {
-  const byteStart = Math.max(0, Math.min(source.totalBytes, Number(viewport?.byteStart ?? 0)));
-  const byteEnd = Math.max(0, Math.min(source.totalBytes, Number(viewport?.byteEnd ?? source.totalBytes)));
+function windowMetadataFromOptions(options, text, totalBytes) {
+  const parseWindow = options.parseWindow ?? options.window ?? null;
+  const absoluteByteStart = Math.max(0, Math.trunc(toFiniteNumber(
+    options.absoluteByteStart ?? options.byteStart ?? parseWindow?.byteStart ?? parseWindow?.start,
+    0
+  )));
+  const declaredByteEnd = parseWindow?.byteEnd ?? parseWindow?.end;
+  const absoluteByteEnd = declaredByteEnd === undefined
+    ? absoluteByteStart + totalBytes
+    : Math.max(0, Math.trunc(toFiniteNumber(declaredByteEnd, absoluteByteStart + totalBytes)));
+  if (absoluteByteEnd < absoluteByteStart) {
+    throw new Error("markdown.parser.invalid_parse_window: byteStart must be <= byteEnd");
+  }
+  if (absoluteByteEnd - absoluteByteStart !== totalBytes) {
+    throw new Error("markdown.parser.invalid_parse_window: window byte range must match UTF-8 text length");
+  }
+  return {
+    absoluteByteStart,
+    baseLine: Math.max(0, Math.trunc(toFiniteNumber(options.baseLine ?? parseWindow?.baseLine, 0)))
+  };
+}
+
+function viewportNumbers(viewport, fallbackStart, fallbackEnd) {
+  const byteStart = Math.trunc(toFiniteNumber(viewport?.byteStart ?? viewport?.start, fallbackStart));
+  const byteEnd = Math.trunc(toFiniteNumber(viewport?.byteEnd ?? viewport?.end, fallbackEnd));
+  if (byteStart > byteEnd) {
+    throw new Error("markdown.parser.invalid_viewport: byteStart must be <= byteEnd");
+  }
   return { byteStart, byteEnd };
 }
 
-function spanInsideViewport(span, viewport) {
-  return span.byteStart >= viewport.byteStart && span.byteEnd <= viewport.byteEnd;
+function normalizeViewport(viewport, source) {
+  const requested = viewportNumbers(viewport, source.absoluteByteStart, source.absoluteByteEnd);
+  return {
+    byteStart: Math.max(source.absoluteByteStart, Math.min(source.absoluteByteEnd, requested.byteStart)),
+    byteEnd: Math.max(source.absoluteByteStart, Math.min(source.absoluteByteEnd, requested.byteEnd))
+  };
+}
+
+function spanIntersectsViewport(span, viewport) {
+  return span.byteStart < viewport.byteEnd && span.byteEnd > viewport.byteStart;
 }
 
 function pushSpan(spans, span, viewport) {
-  if (span.byteStart < span.byteEnd && spanInsideViewport(span, viewport)) {
-    spans.push(span);
-  }
+  if (span.byteStart >= span.byteEnd || !spanIntersectsViewport(span, viewport)) return;
+  spans.push({
+    ...span,
+    byteStart: Math.max(span.byteStart, viewport.byteStart),
+    byteEnd: Math.min(span.byteEnd, viewport.byteEnd)
+  });
 }
 
 function syntaxSpan(source, codeUnitStart, codeUnitEnd, styleToken, priority) {
   return {
-    byteStart: codeUnitToByte(source, codeUnitStart),
-    byteEnd: codeUnitToByte(source, codeUnitEnd),
+    byteStart: codeUnitToAbsoluteByte(source, codeUnitStart),
+    byteEnd: codeUnitToAbsoluteByte(source, codeUnitEnd),
     kind: "syntax",
     styleToken,
     priority
@@ -274,6 +338,28 @@ function walkMarkdownItInlineChildren(token, source, viewport, spans) {
   }
 }
 
+function sortSpans(spans) {
+  spans.sort((left, right) =>
+    right.priority - left.priority ||
+    left.byteStart - right.byteStart ||
+    left.byteEnd - right.byteEnd ||
+    left.styleToken.localeCompare(right.styleToken)
+  );
+  return spans;
+}
+
+function dedupeSortedSpans(spans) {
+  sortSpans(spans);
+  const deduped = [];
+  let previousKey = null;
+  for (const span of spans) {
+    const key = `${span.byteStart}:${span.byteEnd}:${span.kind}:${span.styleToken}:${span.priority}`;
+    if (key !== previousKey) deduped.push(span);
+    previousKey = key;
+  }
+  return deduped;
+}
+
 async function defaultMarkdownIt() {
   const module = await import("markdown-it");
   const MarkdownIt = module.default ?? module;
@@ -289,14 +375,62 @@ async function parseMarkdownItTokens(text, options) {
   return markdownIt.parse(text, {});
 }
 
-export async function parseMarkdownDecorations(options = {}) {
-  const text = String(options.text ?? "");
-  const source = buildSourceIndex(text);
-  const viewport = normalizeViewport(options.viewport, source);
-  if (viewport.byteStart > viewport.byteEnd) {
-    throw new Error("markdown.parser.invalid_viewport: byteStart must be <= byteEnd");
-  }
+function parseWindowInputs(options) {
+  const windows = options.parseWindows ?? options.parse_windows;
+  return Array.isArray(windows) ? windows : null;
+}
 
+function syntaxBudgetBytes(options = {}) {
+  return Math.max(0, Math.trunc(toFiniteNumber(
+    options.memoryBudgetBytes ?? options.policy?.memoryBudgetBytes,
+    DEFAULT_WINDOWED_MARKDOWN_POLICY.memoryBudgetBytes
+  )));
+}
+
+function parseInputByteLength(options = {}) {
+  const windows = parseWindowInputs(options);
+  if (windows) {
+    let total = 0;
+    for (const window of windows) {
+      total += buildSourceIndex(String(window?.text ?? "")).totalBytes;
+    }
+    return total;
+  }
+  return buildSourceIndex(String(options.text ?? "")).totalBytes;
+}
+
+function plainTextFallbackReason(options = {}) {
+  if (options.fallbackMode === "plain-text-fallback" || options.highlightingState === "plain-text-fallback") {
+    return "requested";
+  }
+  if (options.budgetExceeded === true || options.syntaxBudgetExceeded === true || options.memoryBudgetExceeded === true) {
+    return "budget-exceeded";
+  }
+  const budget = syntaxBudgetBytes(options);
+  if (budget === 0) return "budget-exceeded";
+  if (parseInputByteLength(options) > budget) return "budget-exceeded";
+  return null;
+}
+
+function fallbackStatus(reason) {
+  return reason ? {
+    highlightingState: "plain-text-fallback",
+    reason,
+    parse: "plain text fallback; Markdown parser paused",
+    decorations: "plain text fallback; syntax decorations cleared"
+  } : null;
+}
+
+function normalizeWindowOptions(options = {}) {
+  const text = String(options.text ?? "");
+  const provisional = buildSourceIndex(text);
+  const metadata = windowMetadataFromOptions(options, text, provisional.totalBytes);
+  const source = buildSourceIndex(text, metadata);
+  return { text, source, viewport: normalizeViewport(options.viewport, source) };
+}
+
+export async function parseMarkdownWindowDecorations(options = {}) {
+  const { text, source, viewport } = normalizeWindowOptions(options);
   const tokens = await parseMarkdownItTokens(text, options);
   const spans = [];
 
@@ -308,21 +442,68 @@ export async function parseMarkdownDecorations(options = {}) {
     walkMarkdownItInlineChildren(token, source, viewport, spans);
   }
 
-  spans.sort((left, right) =>
-    right.priority - left.priority ||
-    left.byteStart - right.byteStart ||
-    left.byteEnd - right.byteEnd ||
-    left.styleToken.localeCompare(right.styleToken)
-  );
+  return dedupeSortedSpans(spans);
+}
 
-  return spans;
+async function parseMarkdownWindowSetDecorations(options = {}) {
+  const windows = parseWindowInputs(options) ?? [];
+  const spans = [];
+  for (const window of windows) {
+    if (!window || typeof window !== "object") continue;
+    const byteStart = window.byteStart ?? window.byte_start;
+    const byteEnd = window.byteEnd ?? window.byte_end;
+    const baseLine = window.baseLine ?? window.base_line;
+    spans.push(...await parseMarkdownWindowDecorations({
+      ...options,
+      text: String(window.text ?? ""),
+      tokens: window.tokens,
+      absoluteByteStart: byteStart,
+      baseLine,
+      parseWindow: { byteStart, byteEnd, baseLine },
+      viewport: options.viewport ?? window.viewport,
+      blockContext: window.blockContext ?? window.block_context ?? options.blockContext
+    }));
+  }
+  return dedupeSortedSpans(spans);
+}
+
+export async function parseMarkdownDecorations(options = {}) {
+  if (plainTextFallbackReason(options)) return [];
+  if (parseWindowInputs(options)) {
+    return parseMarkdownWindowSetDecorations(options);
+  }
+  return parseMarkdownWindowDecorations(options);
+}
+
+function updateViewportFromOptions(options = {}) {
+  const windows = parseWindowInputs(options);
+  if (options.viewport) {
+    return viewportNumbers(options.viewport, 0, 0);
+  }
+  if (windows && windows.length > 0) {
+    let byteStart = Number.POSITIVE_INFINITY;
+    let byteEnd = 0;
+    for (const window of windows) {
+      const start = Math.max(0, Math.trunc(toFiniteNumber(window?.byteStart ?? window?.byte_start, 0)));
+      const text = String(window?.text ?? "");
+      const provisional = buildSourceIndex(text);
+      const end = Math.trunc(toFiniteNumber(window?.byteEnd ?? window?.byte_end, start + provisional.totalBytes));
+      byteStart = Math.min(byteStart, start);
+      byteEnd = Math.max(byteEnd, end);
+    }
+    if (byteStart !== Number.POSITIVE_INFINITY) return { byteStart, byteEnd };
+  }
+  const { viewport } = normalizeWindowOptions(options);
+  return {
+    byteStart: viewport.byteStart,
+    byteEnd: viewport.byteEnd
+  };
 }
 
 export async function parseMarkdownDecorationUpdate(options = {}) {
-  const text = String(options.text ?? "");
-  const source = buildSourceIndex(text);
-  const viewport = normalizeViewport(options.viewport, source);
-  const spans = await parseMarkdownDecorations({ ...options, text, viewport });
+  const fallback = fallbackStatus(plainTextFallbackReason(options));
+  const spans = fallback ? [] : await parseMarkdownDecorations(options);
+  const viewport = updateViewportFromOptions(options);
   return {
     documentId: Number(options.documentId),
     documentVersion: Number(options.documentVersion),
@@ -330,7 +511,12 @@ export async function parseMarkdownDecorationUpdate(options = {}) {
     packagePrefix: options.packagePrefix ?? options.apiPrefix ?? DEFAULT_API_PREFIX,
     mode: options.mode ?? "markdown",
     viewport,
-    spans
+    spans,
+    status: fallback ?? {
+      highlightingState: parseWindowInputs(options) ? "windowed" : "full",
+      parse: parseWindowInputs(options) ? "windowed visible syntax current" : "full document syntax current",
+      decorations: parseWindowInputs(options) ? "visible and near-viewport chunks current" : "full document decorations current"
+    }
   };
 }
 

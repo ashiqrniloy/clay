@@ -67,6 +67,8 @@ Registers metadata for a server-side package parser. The parse coordinator sched
 
 `serverRegisterParseHandler` is the public Clay JS API for the Phase 18 `IncrementalParseUpdate` primitive. It finalizes the package-facing registration contract for Markdown-required parsing without exposing raw `Deno.core.ops` or allowing package JavaScript in Rust client hot paths.
 
+For Phase 18.5 large-file workflows, the public API is still registration metadata only. `ParseWindowSnapshot`, `ParseWindowRequest`, parse-window scheduling, cancellation state, and syntax-cache accounting are internal Rust/protocol primitives; packages receive only Clay-supplied bounded window payloads through the approved server runtime path.
+
 ## When to use
 
 Use this API during package load/activation when a mode package can parse an open document and produce inert parse/decorations data. Markdown uses this to register line-group/region parsing for headings, emphasis, inline code, fenced code blocks, and list markers.
@@ -116,6 +118,8 @@ serverRegisterParseHandler({
 
 Registration payloads are metadata only. Executable fields such as `handler`, `callback`, `onParse`, or `function` are rejected by the current public contract; package runtime integration invokes approved server-side code through Clay's constrained runtime boundary.
 
+Large-file parse policy values are validated once at package load/registration or explicit configuration-promotion time, not per keypress or paint. Unsafe timeout, window, guard, or memory values are rejected before parser scheduling.
+
 ## Key bindings
 
 No default key binding is assigned.
@@ -147,7 +151,7 @@ The API does not grant filesystem, network, shell, AI mutation, workspace mutati
 
 ## Agent guidance
 
-Prefer this facade over raw ops or direct Rust calls. Keep parse work cancellable, viewport-prioritized, and separate from document mutation. Use `clay.decorations.serverPublishDecorations` for validated decoration publication.
+Prefer this facade over raw ops or direct Rust calls. Keep parse work cancellable, viewport-prioritized, and separate from document mutation. Do not expose internal parse-window snapshot structs or scheduler methods as package APIs unless a later phase promotes them with their own Clay JS facade, docs, registry entry, and validators. Use `clay.decorations.serverPublishDecorations` for validated decoration publication.
 
 ## Backing implementation
 

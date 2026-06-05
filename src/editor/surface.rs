@@ -7,10 +7,14 @@ use masonry::peniko::{Color, Fill};
 use crate::client::behavior::{
     ClientBehaviorState, ClientLocalEdit, RoutedBehavior, ServerIntentRoute,
 };
-use crate::perf::metrics::PerfRecorder;
+use crate::perf::{
+    budgets::{DECORATION_NEAR_VIEWPORT_GUARD_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
+    metrics::PerfRecorder,
+};
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, DecorationKind, DecorationSet, DecorationSpan,
-    DocumentAccess, DocumentId, DocumentVersion, EditOperation, EnterRule, KeyStroke, PairRule,
+    BehaviorManifest, BehaviorVersion, DecorationChunkKey, DecorationKind, DecorationSet,
+    DecorationSpan, DocumentAccess, DocumentId, DocumentVersion, EditOperation, EnterRule,
+    KeyStroke, PairRule,
 };
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
@@ -136,11 +140,21 @@ pub struct EditorDocumentState {
     pub behavior_manifest: Option<BehaviorManifest>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EditorDecorationChunk {
+    key: DecorationChunkKey,
+    spans: Vec<DecorationSpan>,
+    byte_size: usize,
+    last_access: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EditorDecorationState {
     document_id: DocumentId,
     document_version: DocumentVersion,
-    spans: Vec<DecorationSpan>,
+    chunks: Vec<EditorDecorationChunk>,
+    retained_bytes: usize,
+    access_counter: u64,
 }
 
 impl Default for EditorDocumentState {
@@ -153,6 +167,116 @@ impl Default for EditorDocumentState {
             behavior_manifest: None,
         }
     }
+}
+
+impl EditorDecorationState {
+    fn apply_set(&mut self, set: DecorationSet) -> bool {
+        if self.document_id != set.document_id || self.document_version != set.document_version {
+            *self = Self {
+                document_id: set.document_id,
+                document_version: set.document_version,
+                ..Self::default()
+            };
+        }
+
+        let Some(package_prefix) = set.package_prefix().map(str::to_string) else {
+            return true;
+        };
+        let Ok(bytes) = rkyv::to_bytes::<rkyv::rancor::Error>(&set).map(|bytes| bytes.len()) else {
+            return false;
+        };
+        if bytes > SYNTAX_CACHE_BUDGET_BYTES {
+            return false;
+        }
+
+        let key = set.chunk_key(package_prefix);
+        let viewport_start = set.viewport_byte_start;
+        let viewport_end = set.viewport_byte_end;
+        self.remove_key(&key);
+        let last_access = self.next_access();
+        self.retained_bytes = self.retained_bytes.saturating_add(bytes);
+        self.chunks.push(EditorDecorationChunk {
+            key,
+            spans: set.spans,
+            byte_size: bytes,
+            last_access,
+        });
+        self.evict_outside_near_viewport(viewport_start, viewport_end);
+        self.evict_lru_until_budget();
+        true
+    }
+
+    fn span_count(&self) -> usize {
+        self.chunks.iter().map(|chunk| chunk.spans.len()).sum()
+    }
+
+    fn state_version(&self) -> Option<DocumentVersion> {
+        (self.span_count() > 0).then_some(self.document_version)
+    }
+
+    fn visible_spans(
+        &self,
+        visible_start: u64,
+        visible_end: u64,
+    ) -> impl Iterator<Item = &DecorationSpan> {
+        self.chunks
+            .iter()
+            .filter(move |chunk| {
+                ranges_intersect(
+                    chunk.key.byte_start,
+                    chunk.key.byte_end,
+                    visible_start,
+                    visible_end,
+                )
+            })
+            .flat_map(|chunk| chunk.spans.iter())
+    }
+
+    fn next_access(&mut self) -> u64 {
+        self.access_counter = self.access_counter.saturating_add(1);
+        self.access_counter
+    }
+
+    fn remove_key(&mut self, key: &DecorationChunkKey) {
+        self.retain_chunks(|chunk| &chunk.key != key);
+    }
+
+    fn evict_outside_near_viewport(&mut self, viewport_start: u64, viewport_end: u64) {
+        let near_start = viewport_start.saturating_sub(DECORATION_NEAR_VIEWPORT_GUARD_BYTES);
+        let near_end = viewport_end.saturating_add(DECORATION_NEAR_VIEWPORT_GUARD_BYTES);
+        self.retain_chunks(|chunk| {
+            ranges_intersect(
+                chunk.key.byte_start,
+                chunk.key.byte_end,
+                near_start,
+                near_end,
+            )
+        });
+    }
+
+    fn evict_lru_until_budget(&mut self) {
+        while self.retained_bytes > SYNTAX_CACHE_BUDGET_BYTES {
+            let Some((oldest_index, _)) = self
+                .chunks
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, chunk)| chunk.last_access)
+            else {
+                break;
+            };
+            let removed = self.chunks.remove(oldest_index);
+            self.retained_bytes = self.retained_bytes.saturating_sub(removed.byte_size);
+        }
+    }
+
+    fn retain_chunks(&mut self, mut keep: impl FnMut(&EditorDecorationChunk) -> bool) {
+        self.chunks.retain(|chunk| keep(chunk));
+        self.retained_bytes = self.chunks.iter().map(|chunk| chunk.byte_size).sum();
+    }
+}
+
+fn ranges_intersect(left_start: u64, left_end: u64, right_start: u64, right_end: u64) -> bool {
+    left_start < right_end && left_end > right_start
 }
 
 #[derive(Debug, Default)]
@@ -205,20 +329,15 @@ impl EditorSurface {
         {
             return false;
         }
-        self.decorations = EditorDecorationState {
-            document_id: set.document_id,
-            document_version: set.document_version,
-            spans: set.spans,
-        };
-        true
+        self.decorations.apply_set(set)
     }
 
     pub fn decoration_span_count(&self) -> usize {
-        self.decorations.spans.len()
+        self.decorations.span_count()
     }
 
     pub fn decoration_state_version(&self) -> Option<DocumentVersion> {
-        (!self.decorations.spans.is_empty()).then_some(self.decorations.document_version)
+        self.decorations.state_version()
     }
 
     pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
@@ -260,6 +379,7 @@ impl EditorSurface {
         }
 
         self.document.document_version = version;
+        self.decorations = EditorDecorationState::default();
         true
     }
 
@@ -729,8 +849,7 @@ impl EditorSurface {
         let visible_start = snapshot.start_byte_offset;
         let visible_end = snapshot.start_byte_offset + snapshot.text.len();
         self.decorations
-            .spans
-            .iter()
+            .visible_spans(visible_start as u64, visible_end as u64)
             .filter_map(|span| {
                 let start = (span.byte_start as usize).max(visible_start);
                 let end = (span.byte_end as usize).min(visible_end);

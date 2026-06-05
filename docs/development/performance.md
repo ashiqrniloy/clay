@@ -43,7 +43,7 @@ Current benchmark targets:
 - `benches/protocol_server_baselines.rs`: `protocol_codec_payloads`, `client_edit_queue_pressure`, `server_document_acknowledgements`, and `server_stale_edit_rejections` groups for `rkyv` frame encoding/decoding, client queue pressure, initial-document payloads, and in-process server acknowledgement/rejection paths.
 - `benches/runtime_sdui_baselines.rs`: `runtime_configuration_baselines` and `sdui_application_baselines` groups for deterministic behavior-manifest construction plus native SDUI snapshot/update and SDUI codec paths.
 - `benches/markdown_baselines.rs`: `markdown_activation_baselines`, `markdown_parse_and_decoration_baselines`, and `markdown_decorated_editor_baselines` groups for first-party Markdown package classification/activation, parse-update/decorations validation, and native decorated-editor render-adjacent work.
-- `tools/bench/markdown-parser.mjs`: advisory Node.js harness for actual Markdown parser cost. It synthesizes 1 MiB, 5 MiB, and 16 MiB corpora by repeating the largest committed repository Markdown files, then times the active `markdown-it` parser and package parser adapter paths without creating dummy source documents. Historical mdast timings remain below only as replacement rationale.
+- `tools/bench/markdown-parser.mjs`: advisory Node.js harness for actual Markdown parser cost. It synthesizes 64 KiB, 256 KiB, 1 MiB, 5 MiB, and 16 MiB corpora by repeating the largest committed repository Markdown files, then times the active `markdown-it` parser, full-document package adapter advisory path, and `windowed-adapter` viewport path without creating dummy source documents. JSON output separates parser, adapter, transport, render-adjacent, status/fallback, and memory categories for Phase 18.5 editor-parity verification. Historical mdast timings remain below only as replacement rationale.
 
 Run all benchmarks locally:
 
@@ -76,7 +76,7 @@ Run the large Markdown parser harness. The install command populates local `pack
 npm install --prefix packages/markdown --no-save --no-package-lock --ignore-scripts markdown-it@^14.1.0
 node --check tools/bench/markdown-parser.mjs
 node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8
-node --expose-gc tools/bench/markdown-parser.mjs --sizes 1MiB,5MiB,16MiB --parser markdown-it,adapter --iterations 1 --warmup 0
+node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json
 ```
 
 Save and compare an advisory local baseline before performance-sensitive changes:
@@ -185,6 +185,7 @@ Hard guards and regression tests:
 - `markdown_behavior_manifest_fits_budget` encodes the actual Markdown behavior manifest with package commands/keymaps and verifies it stays within `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`.
 - `markdown_parse_and_decoration_payloads_fit_budgets` serializes a representative Markdown `IncrementalParseUpdate` plus `DecorationSet` for headings, strong/emphasis, inline code, fenced code blocks, and list markers; both stay under `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` and `DECORATION_PAYLOAD_BUDGET_BYTES`.
 - `markdown_typing_does_not_wait_for_markdown_it_parse` schedules a slow Markdown parser and proves local editor insertion completes before the server parse result, preserving the no-hot-path JavaScript rule.
+- `markdown_large_file_typing_does_not_wait_for_windowed_parse` schedules a slow bounded-window parser and proves large-file local typing still applies before parser completion.
 - `markdown_reload_reinstalls_manifest_and_decorations`, `markdown_disabled_falls_back_to_plain_text_after_rewrite`, `markdown_invalid_package_reports_sanitized_diagnostics`, and `markdown_fixture_activates_with_markdown_it_adapter` cover reload/restart, disabled fallback, invalid package diagnostics, package activation, and fixture/smoke setup without granting extra package authority.
 - `markdown_structural_sdui_snapshot_matches_fixture` keeps Markdown preview/status smoke coverage structural and headless; the fixture publishes inert `Markdown Preview` SDUI labels without screenshots, GPU work, or client-side package JavaScript.
 - Parser correctness evidence remains in the package/runtime tests: the `markdown-it` token-stream adapter emits required span kinds, keeps parser-specific data behind `packages/markdown/dist/parser.js`, avoids `mdast-util-from-markdown` imports, and verifies the UTF-8 fixture `# Hé 🦀` maps to exact Clay byte ranges.
@@ -196,6 +197,8 @@ Advisory local Markdown benchmark findings:
 - `markdown_activation_baselines` measures package metadata classification, major-mode activation, and behavior-manifest selection.
 - `markdown_parse_and_decoration_baselines` measures representative parse-update validation and server-side decoration publication validation.
 - `markdown_decorated_editor_baselines` measures native visible-editor work after applying inert Markdown decoration spans.
+- `markdown_large_file_windowed_baselines` measures bounded parse-window request metadata, syntax-memory budget accounting, and visible decoration chunk validation at 64 KiB, 256 KiB, 1 MiB, 5 MiB, and 16 MiB document sizes.
+- `markdown_large_file_visible_render_baselines` measures render-adjacent editor work after applying a visible windowed Markdown decoration chunk to a 16 MiB document.
 
 Local Phase 18 runs should compare the existing Phase 14/15/17 benchmark targets against `phase14-baseline` with `--baseline-lenient` and record any sustained regression in the plan. Newly added Markdown groups did not exist in the saved Phase 14 baseline, so their first local run is recorded as advisory Markdown evidence rather than a hard baseline comparison.
 
@@ -216,6 +219,26 @@ The harness built corpora from the largest committed repository Markdown files r
 | 16.01 MiB | 4,852 headings, 1,984 strong spans, 8,430 fences, UTF-8 present | 1007.381 ms, 733,415 tokens, peak RSS 455.23 MiB | 1577.844 ms, 231,008 spans, peak RSS 632.51 MiB |
 
 These values are advisory local evidence only. The deterministic gates remain payload budgets, non-blocking typing, structural SDUI, docs/registry lookup, benchmark script policy checks, and `cargo bench --no-run` benchmark compilation.
+
+### Large-file Markdown windowed benchmark verification (2026-06-05)
+
+After the Phase 18.5 windowed adapter and chunk cache work, the active benchmark command was extended and run locally with Node v26.2.0:
+
+```text
+node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json
+```
+
+The JSON was written to `target/markdown-phase18_5-benchmark.json` during verification and remains a local artifact, not a committed fixture. It reported `total_rss`, `baseline_rss`, `document_memory`, `markdown_parser_temporary_allocations`, `retained_decoration_cache_memory`, and `markdown_overhead` for each parser path. The full-document `markdown-it` and `adapter` rows are advisory evidence only for medium/large files; `windowed-adapter` is the ordinary editor path for visible Markdown refresh.
+
+| Corpus | Full `markdown-it` | Full adapter advisory | `windowed-adapter` visible path | Editor-parity finding |
+| --- | ---: | ---: | ---: | --- |
+| 64 KiB | 20.127 ms, `markdown_overhead` 1.76 MiB | 19.077 ms, 4.10 MiB | 14.199 ms, 3.73 MiB | Small-file paths stayed under the 30 MiB overhead budget; status/fallback check took 0.410 ms. |
+| 256 KiB | 30.211 ms, 5.78 MiB | 51.087 ms, 16.65 MiB | 16.948 ms, 3.61 MiB | Windowed path stayed bounded while full adapter remained allowed only because this is small; status/fallback check took 0.074 ms. |
+| 1 MiB | 136.551 ms, 26.31 MiB | 277.604 ms, 37.73 MiB | 28.511 ms, 3.62 MiB | Full adapter exceeded the overhead budget; windowed path stayed under budget; status/fallback check took 0.111 ms. |
+| 5 MiB | 557.065 ms, 76.14 MiB | 934.864 ms, 148.74 MiB | 21.954 ms, 3.64 MiB | Full-document paths are not hot-path eligible; windowed path stayed under budget; status/fallback check took 0.113 ms. |
+| 16 MiB | 1312.502 ms, 261.71 MiB | 2356.308 ms, 750.48 MiB | 26.272 ms, 3.64 MiB | Large-file editor path met the `windowed-adapter markdown_overhead <= 30 MiB` target and avoided full-document parser input; status/fallback check took 0.260 ms. |
+
+Deterministic guards now verify the same policy without machine-variant timing thresholds: `markdown_windowed_benchmark_uses_real_parser_and_repo_corpus`, `markdown_benchmark_json_reports_editor_parity_categories`, `markdown_large_file_memory_overhead_fits_budget`, `markdown_full_document_adapter_is_not_large_file_hot_path`, `markdown_large_file_typing_does_not_wait_for_windowed_parse`, and `markdown_full_document_adapter_is_not_large_file_hot_path_static_guard`.
 
 ### Large-file Markdown editor-parity contract (Phase 18.5)
 

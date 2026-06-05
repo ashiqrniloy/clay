@@ -3,7 +3,7 @@ use clay::perf::budgets::{
     EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES, KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS,
     LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS,
     SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
 };
 
 fn performance_doc() -> String {
@@ -61,7 +61,7 @@ fn performance_docs_list_all_supported_benchmark_commands() {
         "cargo bench --bench markdown_baselines markdown_parse_and_decoration_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "node --check tools/bench/markdown-parser.mjs",
         "node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8",
-        "node --expose-gc tools/bench/markdown-parser.mjs --sizes 1MiB,5MiB,16MiB --parser markdown-it,adapter --iterations 1 --warmup 0",
+        "node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json",
         "cargo test --test performance_protocol",
     ] {
         assert!(
@@ -331,16 +331,18 @@ fn markdown_benchmark_reports_baseline_document_and_markdown_overhead() {
 }
 
 #[test]
-fn markdown_it_parser_benchmark_script_uses_real_parser_and_repo_corpus() {
+fn markdown_windowed_benchmark_uses_real_parser_and_repo_corpus() {
     let script = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tools/bench/markdown-parser.mjs"
     ))
     .expect("read tools/bench/markdown-parser.mjs");
     for expected in [
-        "markdownIt.parse(text, {})",
-        "DEFAULT_PARSERS = ['markdown-it', 'adapter']",
+        "markdownIt.parse(corpus.text, {})",
+        "DEFAULT_SIZES = ['64KiB', '256KiB', '1MiB', '5MiB', '16MiB']",
+        "DEFAULT_PARSERS = ['markdown-it', 'adapter', 'windowed-adapter']",
         "parseMarkdownDecorations",
+        "parseWindows: [parseWindow]",
         "largest committed repository Markdown files",
         "no dummy prose generated",
         "EXCLUDED_DIRS",
@@ -348,6 +350,81 @@ fn markdown_it_parser_benchmark_script_uses_real_parser_and_repo_corpus() {
         assert!(
             script.contains(expected),
             "Markdown parser benchmark script must include marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_benchmark_json_reports_editor_parity_categories() {
+    let script = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tools/bench/markdown-parser.mjs"
+    ))
+    .expect("read tools/bench/markdown-parser.mjs");
+    let doc = performance_doc();
+    let wiki = performance_fixtures_wiki_doc();
+
+    for expected in [
+        "parser_full_document_advisory",
+        "adapter_windowed_viewport",
+        "status_fallback_policy",
+        "parserInputBytes",
+        "hotPathAllowed",
+        "total_rss",
+        "baseline_rss",
+        "document_memory",
+        "markdown_parser_temporary_allocations",
+        "retained_decoration_cache_memory",
+        "markdown_overhead",
+        "markdown_overhead_budget_met",
+    ] {
+        assert!(
+            script.contains(expected),
+            "Markdown benchmark JSON must include editor-parity category marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "windowed-adapter",
+        "64KiB,256KiB,1MiB,5MiB,16MiB",
+        "parser, adapter, transport, render-adjacent, status/fallback, and memory categories",
+    ] {
+        assert!(
+            doc.contains(expected) || wiki.contains(expected),
+            "docs/wiki must record benchmark extension marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_large_file_memory_overhead_fits_budget() {
+    let script = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tools/bench/markdown-parser.mjs"
+    ))
+    .expect("read tools/bench/markdown-parser.mjs");
+    assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
+    assert!(script.contains("MARKDOWN_OVERHEAD_BUDGET_BYTES = 30 * 1024 * 1024"));
+    assert!(script.contains("markdownOverhead <= MARKDOWN_OVERHEAD_BUDGET_BYTES"));
+    assert!(performance_doc().contains("windowed-adapter markdown_overhead"));
+}
+
+#[test]
+fn markdown_full_document_adapter_is_not_large_file_hot_path() {
+    let script = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tools/bench/markdown-parser.mjs"
+    ))
+    .expect("read tools/bench/markdown-parser.mjs");
+    for expected in [
+        "adapter_full_document_advisory",
+        "large-file full-document adapter is advisory only and not an ordinary hot path",
+        "hotPathAllowed",
+        "corpus.bytes <= SMALL_FILE_THRESHOLD_BYTES",
+    ] {
+        assert!(
+            script.contains(expected),
+            "benchmark script must reject full-document large-file hot paths via marker `{expected}`"
         );
     }
 }
@@ -405,4 +482,5 @@ fn performance_budget_constants_are_exported() {
     assert_eq!(SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS, 16);
     assert_eq!(RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS, 25);
     assert_eq!(LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, 256);
+    assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
 }

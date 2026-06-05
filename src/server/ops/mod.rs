@@ -21,7 +21,7 @@ use crate::{
         BehaviorManifest, BehaviorScope, CommandDeclaration, DecorationSet, EditorBehaviorRules,
         KeyBindingContext, KeyBindingRule, KeyStroke,
     },
-    server::behavior::ActiveBehaviorManifest,
+    server::{behavior::ActiveBehaviorManifest, decorations::SyntaxChunkCache},
 };
 
 use self::{
@@ -58,6 +58,7 @@ pub(crate) struct ClayOpState {
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
+    decoration_cache: Mutex<SyntaxChunkCache>,
     parse_handlers: Mutex<Vec<crate::server::parse_coordinator::ParseHandlerMeta>>,
     behavior: Mutex<ActiveBehaviorManifest>,
     modes: Mutex<crate::packages::modes::ModeRegistry>,
@@ -81,6 +82,7 @@ impl ClayOpState {
             runtime_records: Mutex::new(Vec::new()),
             published_sdui_tree: Mutex::new(None),
             published_decoration_set: Mutex::new(None),
+            decoration_cache: Mutex::new(SyntaxChunkCache::default()),
             parse_handlers: Mutex::new(Vec::new()),
             behavior: Mutex::new(ActiveBehaviorManifest::default()),
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
@@ -173,6 +175,13 @@ impl ClayOpState {
     }
 
     pub(super) fn publish_decoration_set(&self, set: DecorationSet) {
+        if let Some(package_prefix) = set.package_prefix() {
+            let _ = self
+                .decoration_cache
+                .lock()
+                .expect("Clay runtime op state mutex poisoned")
+                .insert_validated_set(package_prefix, set.clone());
+        }
         *self
             .published_decoration_set
             .lock()

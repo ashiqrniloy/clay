@@ -1405,6 +1405,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn markdown_large_file_parse_policy_rejects_unsafe_values() {
+        for (name, policy_fields, expected) in [
+            (
+                "zero timeout",
+                "timeoutMs: 0, maxWindowBytes: 64 * 1024, memoryBudgetBytes: 30 * 1024 * 1024",
+                "timeoutMs must be between 1 and 5000",
+            ),
+            (
+                "oversized timeout",
+                "timeoutMs: 5001, maxWindowBytes: 64 * 1024, memoryBudgetBytes: 30 * 1024 * 1024",
+                "timeoutMs must be between 1 and 5000",
+            ),
+            (
+                "zero cache budget",
+                "timeoutMs: 50, maxWindowBytes: 64 * 1024, memoryBudgetBytes: 0",
+                "window and memory budgets must be non-zero",
+            ),
+            (
+                "window larger than cache budget",
+                "timeoutMs: 50, maxWindowBytes: 64 * 1024, memoryBudgetBytes: 1024",
+                "window and memory budgets must be non-zero",
+            ),
+            (
+                "unbounded cache budget",
+                "timeoutMs: 50, maxWindowBytes: 64 * 1024, memoryBudgetBytes: 64 * 1024 * 1024",
+                "window and memory budgets must be non-zero",
+            ),
+        ] {
+            let source = format!(
+                r#"
+                import {{ serverRegisterParseHandler }} from "clay:parse";
+                const manifest = {{
+                  name: "@clay/markdown",
+                  version: "0.1.0",
+                  type: "module",
+                  exports: {{ ".": "./dist/index.js" }},
+                  clay: {{
+                    apiPrefix: "markdown",
+                    entry: "./dist/index.js",
+                    permissions: ["parse-document"],
+                    modes: ["markdown"],
+                    docs: "./docs/index.md"
+                  }}
+                }};
+                serverRegisterParseHandler({{
+                  packageManifest: manifest,
+                  mode: "markdown",
+                  parseUnit: "line-group",
+                  viewportPriority: true,
+                  {policy_fields}
+                }});
+                "#
+            );
+            let error = ClayJsRuntimeService::default()
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+
+            assert!(
+                matches!(error, ClayRuntimeError::Runtime(_)),
+                "{name} should fail in the runtime"
+            );
+            assert!(
+                error.to_string().contains(expected),
+                "{name} should reject unsafe parse policy with `{expected}`, got {error}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn phase18_parse_and_decoration_facades_are_runtime_backed() {
         let result = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
@@ -1592,6 +1662,363 @@ mod tests {
         }
         assert_eq!(result.op_records[1], "0:10:6:parseCalls=1");
         assert_eq!(result.published_decoration_set.unwrap().spans.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn markdown_windowed_adapter_offsets_ranges_to_absolute_document_bytes() {
+        let root = config_fixture("markdown-windowed-absolute-ranges");
+        let parser_source = fs::read_to_string("packages/markdown/dist/parser.js")
+            .expect("markdown parser adapter must exist");
+        fs::write(root.join("parser.js"), parser_source).unwrap();
+        fs::write(
+            root.join("init.js"),
+            r##"
+            import { parseMarkdownDecorations } from "./parser.js";
+
+            const windowText = "# Hé 🦀\n\nParagraph **dé** and `cø`.\n";
+            const absoluteByteStart = 4096;
+            const tokens = [
+              { type: "heading_open", tag: "h1", map: [0, 1] },
+              { type: "inline", map: [0, 1], content: "Hé 🦀", children: [{ type: "text", content: "Hé 🦀" }] },
+              { type: "heading_close" },
+              { type: "paragraph_open", map: [2, 3] },
+              {
+                type: "inline",
+                map: [2, 3],
+                content: "Paragraph **dé** and `cø`.",
+                children: [
+                  { type: "text", content: "Paragraph " },
+                  { type: "strong_open", markup: "**" },
+                  { type: "text", content: "dé" },
+                  { type: "strong_close", markup: "**" },
+                  { type: "text", content: " and " },
+                  { type: "code_inline", markup: "`", content: "cø" },
+                  { type: "text", content: "." }
+                ]
+              },
+              { type: "paragraph_close" }
+            ];
+            function utf8ByteLength(value) {
+              let bytes = 0;
+              for (const character of value) {
+                const codePoint = character.codePointAt(0);
+                bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+              }
+              return bytes;
+            }
+            function absoluteRangeFor(needle, from = 0) {
+              const start = windowText.indexOf(needle, from);
+              if (start < 0) throw new Error(`missing ${needle}`);
+              return {
+                byteStart: absoluteByteStart + utf8ByteLength(windowText.slice(0, start)),
+                byteEnd: absoluteByteStart + utf8ByteLength(windowText.slice(0, start + needle.length))
+              };
+            }
+            function span(styleToken) {
+              const found = spans.find((candidate) => candidate.styleToken === styleToken);
+              if (!found) throw new Error(`missing ${styleToken} in ${JSON.stringify(spans)}`);
+              return found;
+            }
+            function assertRange(styleToken, range) {
+              const found = span(styleToken);
+              if (found.byteStart !== range.byteStart || found.byteEnd !== range.byteEnd) {
+                throw new Error(`${styleToken} expected ${range.byteStart}:${range.byteEnd}, got ${found.byteStart}:${found.byteEnd}`);
+              }
+            }
+
+            let parseCalls = 0;
+            const fakeMarkdownIt = {
+              parse(source, env) {
+                parseCalls += 1;
+                if (source !== windowText || !env) throw new Error("markdown-it must receive only window text");
+                return tokens;
+              },
+              render() {
+                throw new Error("windowed adapter must not render HTML");
+              }
+            };
+            const spans = await parseMarkdownDecorations({
+              text: windowText,
+              absoluteByteStart,
+              baseLine: 120,
+              parseWindow: { byteStart: absoluteByteStart, byteEnd: absoluteByteStart + utf8ByteLength(windowText), baseLine: 120 },
+              viewport: { byteStart: absoluteByteStart, byteEnd: absoluteByteStart + utf8ByteLength(windowText) },
+              markdownIt: fakeMarkdownIt
+            });
+
+            assertRange("markup.heading.1", { byteStart: absoluteByteStart, byteEnd: absoluteByteStart + utf8ByteLength("# Hé 🦀") });
+            assertRange("markup.strong", absoluteRangeFor("**dé**"));
+            assertRange("markup.inline-code", absoluteRangeFor("`cø`"));
+            Deno.core.ops.op_clay_runtime_record(`${spans.length}:parseCalls=${parseCalls}:${span("markup.strong").byteStart}:${span("markup.inline-code").byteEnd}`);
+            "##,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["3:parseCalls=1:4118:4135"]);
+    }
+
+    #[tokio::test]
+    async fn markdown_windowed_adapter_does_not_parse_full_large_document() {
+        let root = config_fixture("markdown-windowed-no-full-doc");
+        let parser_source = fs::read_to_string("packages/markdown/dist/parser.js")
+            .expect("markdown parser adapter must exist");
+        fs::write(root.join("parser.js"), parser_source).unwrap();
+        fs::write(
+            root.join("init.js"),
+            r##"
+            import { parseMarkdownDecorationUpdate } from "./parser.js";
+
+            const windowText = "# Visible\n\n- item\n";
+            const absoluteByteStart = 8 * 1024 * 1024;
+            const largeDocumentSentinel = "x".repeat(16 * 1024 * 1024);
+            const tokens = [
+              { type: "heading_open", tag: "h1", map: [0, 1] },
+              { type: "inline", map: [0, 1], content: "Visible", children: [{ type: "text", content: "Visible" }] },
+              { type: "heading_close" },
+              { type: "bullet_list_open", map: [2, 3] },
+              { type: "list_item_open", map: [2, 3] },
+              { type: "paragraph_open", map: [2, 3] },
+              { type: "inline", map: [2, 3], content: "item", children: [{ type: "text", content: "item" }] },
+              { type: "paragraph_close" },
+              { type: "list_item_close" },
+              { type: "bullet_list_close" }
+            ];
+            function utf8ByteLength(value) {
+              let bytes = 0;
+              for (const character of value) {
+                const codePoint = character.codePointAt(0);
+                bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+              }
+              return bytes;
+            }
+            let parseCalls = 0;
+            const fakeMarkdownIt = {
+              parse(source) {
+                parseCalls += 1;
+                if (source === largeDocumentSentinel || source.length !== windowText.length) {
+                  throw new Error(`received unbounded source length ${source.length}`);
+                }
+                return tokens;
+              }
+            };
+            const update = await parseMarkdownDecorationUpdate({
+              documentId: 7,
+              documentVersion: 3,
+              behaviorVersion: 2,
+              viewport: { byteStart: absoluteByteStart, byteEnd: absoluteByteStart + utf8ByteLength(windowText) },
+              parseWindows: [{
+                text: windowText,
+                byteStart: absoluteByteStart,
+                byteEnd: absoluteByteStart + utf8ByteLength(windowText),
+                baseLine: 900
+              }],
+              markdownIt: fakeMarkdownIt
+            });
+            if (update.spans.length !== 2) throw new Error(`expected heading and list marker spans, got ${JSON.stringify(update.spans)}`);
+            Deno.core.ops.op_clay_runtime_record(`${update.viewport.byteStart}:${update.viewport.byteEnd}:${update.spans.length}:parseCalls=${parseCalls}`);
+            "##,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["8388608:8388626:2:parseCalls=1"]);
+    }
+
+    #[tokio::test]
+    async fn markdown_windowed_adapter_preserves_fence_and_list_context() {
+        let root = config_fixture("markdown-windowed-fence-list-context");
+        let parser_source = fs::read_to_string("packages/markdown/dist/parser.js")
+            .expect("markdown parser adapter must exist");
+        fs::write(root.join("parser.js"), parser_source).unwrap();
+        fs::write(
+            root.join("init.js"),
+            r##"
+            import { parseMarkdownDecorations } from "./parser.js";
+
+            const windowText = "```js\nconst visible = 1;\n```\n\n- item\n";
+            const absoluteByteStart = 2048;
+            const tokens = [
+              { type: "fence", tag: "code", map: [0, 3], markup: "```", info: "js" },
+              { type: "bullet_list_open", map: [4, 5] },
+              { type: "list_item_open", map: [4, 5] },
+              { type: "paragraph_open", map: [4, 5] },
+              { type: "inline", map: [4, 5], content: "item", children: [{ type: "text", content: "item" }] },
+              { type: "paragraph_close" },
+              { type: "list_item_close" },
+              { type: "bullet_list_close" }
+            ];
+            function utf8ByteLength(value) {
+              let bytes = 0;
+              for (const character of value) {
+                const codePoint = character.codePointAt(0);
+                bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+              }
+              return bytes;
+            }
+            const visibleStart = absoluteByteStart + utf8ByteLength("```js\n");
+            const visibleEnd = absoluteByteStart + utf8ByteLength(windowText.slice(0, windowText.indexOf(" item")));
+            const spans = await parseMarkdownDecorations({
+              text: windowText,
+              tokens,
+              absoluteByteStart,
+              parseWindow: { byteStart: absoluteByteStart, byteEnd: absoluteByteStart + utf8ByteLength(windowText) },
+              viewport: { byteStart: visibleStart, byteEnd: visibleEnd }
+            });
+            const fence = spans.find((span) => span.styleToken === "markup.code-block");
+            const list = spans.find((span) => span.styleToken === "markup.list-marker");
+            if (!fence || fence.byteStart !== visibleStart || fence.byteEnd > visibleEnd) {
+              throw new Error(`fence span was not clipped to the visible viewport: ${JSON.stringify(spans)}`);
+            }
+            if (!list || list.byteStart !== visibleEnd - 1 || list.byteEnd !== visibleEnd) {
+              throw new Error(`list marker did not survive guard-window parsing: ${JSON.stringify(spans)}`);
+            }
+            Deno.core.ops.op_clay_runtime_record(`${spans.length}:${fence.byteStart}:${fence.byteEnd}:${list.byteStart}:${list.byteEnd}`);
+            "##,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["2:2054:2077:2078:2079"]);
+    }
+
+    #[tokio::test]
+    async fn markdown_large_file_status_reports_windowed_highlighting() {
+        let root = config_fixture("markdown-large-file-windowed-status");
+        for file_name in ["index.js", "sdui.js"] {
+            fs::write(
+                root.join(file_name),
+                fs::read_to_string(format!("packages/markdown/dist/{file_name}"))
+                    .expect("first-party Markdown runtime module must exist"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.join("init.js"),
+            r##"
+            import { markdownPreviewStatusModel } from "./sdui.js";
+
+            const model = markdownPreviewStatusModel({
+              documentByteLength: 16 * 1024 * 1024,
+              documentPath: "C:/Users/alice/work/large.md"
+            });
+            if (model.status.highlightingState !== "windowed") throw new Error(JSON.stringify(model));
+            if (model.status.fileTier !== "large") throw new Error(JSON.stringify(model));
+            Deno.core.ops.op_clay_runtime_record(`${model.documentPath}:${model.status.parse}:${model.status.decorations}:${model.status.highlightingState}`);
+            "##,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.op_records,
+            vec![
+                "large.md:windowed visible syntax current:visible and near-viewport chunks current:windowed"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn markdown_large_file_budget_exhaustion_falls_back_to_plain_text() {
+        let root = config_fixture("markdown-large-file-plain-text-fallback");
+        let parser_source = fs::read_to_string("packages/markdown/dist/parser.js")
+            .expect("markdown parser adapter must exist");
+        fs::write(root.join("parser.js"), parser_source).unwrap();
+        fs::write(
+            root.join("init.js"),
+            r##"
+            import { parseMarkdownDecorationUpdate } from "./parser.js";
+
+            const windowText = "# Visible\n\n- item\n";
+            const fakeMarkdownIt = {
+              parse() {
+                throw new Error("plain-text fallback must not invoke markdown-it");
+              }
+            };
+            const update = await parseMarkdownDecorationUpdate({
+              documentId: 9,
+              documentVersion: 4,
+              behaviorVersion: 2,
+              viewport: { byteStart: 0, byteEnd: 18 },
+              parseWindows: [{ text: windowText, byteStart: 0, byteEnd: 18, baseLine: 0 }],
+              memoryBudgetBytes: 1,
+              markdownIt: fakeMarkdownIt
+            });
+            if (update.spans.length !== 0) throw new Error(`fallback must clear spans: ${JSON.stringify(update.spans)}`);
+            if (update.status.highlightingState !== "plain-text-fallback") throw new Error(JSON.stringify(update.status));
+            Deno.core.ops.op_clay_runtime_record(`${update.spans.length}:${update.status.highlightingState}:${update.status.reason}`);
+            "##,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.op_records,
+            vec!["0:plain-text-fallback:budget-exceeded"]
+        );
+    }
+
+    #[tokio::test]
+    async fn markdown_degraded_status_contains_no_document_text_or_paths() {
+        let root = config_fixture("markdown-degraded-status-sanitized");
+        for file_name in ["index.js", "sdui.js"] {
+            fs::write(
+                root.join(file_name),
+                fs::read_to_string(format!("packages/markdown/dist/{file_name}"))
+                    .expect("first-party Markdown runtime module must exist"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.join("init.js"),
+            r##"
+            import { markdownPreviewStatusModel } from "./sdui.js";
+
+            const model = markdownPreviewStatusModel({
+              documentByteLength: 6 * 1024 * 1024,
+              parserTimedOut: true,
+              documentPath: "C:/Users/alice/secrets/project.md",
+              diagnostic: "C:/Users/alice/secrets/project.md first line SECRET_DOCUMENT_TEXT"
+            });
+            const encoded = JSON.stringify(model);
+            for (const forbidden of ["C:/", "Users/alice", "secrets/project.md", "SECRET_DOCUMENT_TEXT"]) {
+              if (encoded.includes(forbidden)) throw new Error(`unsanitized status: ${encoded}`);
+            }
+            if (model.status.highlightingState !== "degraded") throw new Error(encoded);
+            Deno.core.ops.op_clay_runtime_record(`${model.documentPath}:${model.status.parse}:${model.status.highlightingState}`);
+            "##,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.op_records,
+            vec!["project.md:degraded; visible syntax refresh delayed:degraded"]
+        );
     }
 
     #[tokio::test]

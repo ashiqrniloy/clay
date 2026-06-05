@@ -1,4 +1,5 @@
 use clay::client::ClientConnectionEvent;
+use clay::editor::EditorSurface;
 use clay::masonry_editor::EditorWidget;
 use clay::packages::record::assemble_package_record;
 use clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES;
@@ -46,14 +47,22 @@ fn provenance() -> DecorationProvenance {
 }
 
 fn valid_set(document_version: u64) -> DecorationSet {
+    decoration_set_for_range(document_version, 0, 64)
+}
+
+fn decoration_set_for_range(
+    document_version: u64,
+    byte_start: u64,
+    byte_end: u64,
+) -> DecorationSet {
     DecorationSet {
         document_id: 7,
         document_version,
-        viewport_byte_start: 0,
-        viewport_byte_end: 64,
+        viewport_byte_start: byte_start,
+        viewport_byte_end: byte_end,
         spans: vec![DecorationSpan {
-            byte_start: 0,
-            byte_end: 5,
+            byte_start,
+            byte_end: (byte_start + 5).min(byte_end),
             kind: DecorationKind::Syntax,
             style_token: "markup.heading.1".to_string(),
             priority: 10,
@@ -236,6 +245,65 @@ fn markdown_decoration_update_rejects_off_viewport_spans() {
         validate_decoration_publication(&package, 3, set).unwrap_err(),
         DecorationValidationError::SpanOutsideViewport { index: 0 }
     ));
+}
+
+#[test]
+fn decoration_chunk_updates_stay_under_payload_budget() {
+    let package = decoration_package();
+    let set = validate_decoration_publication(&package, 3, valid_set(3)).unwrap();
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&set)
+        .expect("decoration chunk serializes")
+        .len();
+
+    assert!(bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
+    assert!(set.spans.iter().all(|span| {
+        span.byte_start >= set.viewport_byte_start && span.byte_end <= set.viewport_byte_end
+    }));
+}
+
+#[test]
+fn stale_decoration_chunks_are_ignored_after_edit() {
+    let package = decoration_package();
+    let set = validate_decoration_publication(&package, 3, valid_set(3)).unwrap();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "hello markdown".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+
+    assert!(editor.apply_decoration_set(set.clone()));
+    assert_eq!(editor.decoration_span_count(), 1);
+    assert!(editor.note_confirmed_version(7, 4));
+    assert_eq!(editor.decoration_span_count(), 0);
+    assert!(!editor.apply_decoration_set(set));
+}
+
+#[test]
+fn client_decoration_cache_keeps_near_viewport_chunks_only() {
+    let package = decoration_package();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "x".repeat(2 * 1024 * 1024),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+
+    let near =
+        validate_decoration_publication(&package, 3, decoration_set_for_range(3, 0, 64)).unwrap();
+    let far = validate_decoration_publication(
+        &package,
+        3,
+        decoration_set_for_range(3, 1024 * 1024, 1024 * 1024 + 64),
+    )
+    .unwrap();
+
+    assert!(editor.apply_decoration_set(near));
+    assert_eq!(editor.decoration_span_count(), 1);
+    assert!(editor.apply_decoration_set(far));
+    assert_eq!(editor.decoration_span_count(), 1);
 }
 
 #[test]

@@ -64,6 +64,140 @@ fn generated_registry_contains_all_indexed_public_apis() {
 }
 
 #[test]
+fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    let parse = registry
+        .by_id("clay.parse.serverRegisterParseHandler")
+        .expect("large-file parse handler API is generated");
+    assert_eq!(parse.js_module, "clay:parse");
+    assert_eq!(parse.js_export, "serverRegisterParseHandler");
+    assert_eq!(parse.key_bindings, Vec::<String>::new());
+    assert!(
+        parse
+            .permissions
+            .iter()
+            .any(|permission| permission == "parse-document")
+    );
+    for property in [
+        "modeId",
+        "parseUnits",
+        "viewportPriority",
+        "timeoutMs",
+        "maxWindowBytes",
+        "guardBytes",
+        "memoryBudgetBytes",
+        "resultBudgetBytes",
+    ] {
+        assert!(
+            parse
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "parse API registry entry must preserve custom property {property}"
+        );
+    }
+
+    let decorations = registry
+        .by_id("clay.decorations.serverPublishDecorations")
+        .expect("large-file decoration publication API is generated");
+    assert_eq!(decorations.js_module, "clay:decorations");
+    assert_eq!(decorations.js_export, "serverPublishDecorations");
+    assert_eq!(decorations.key_bindings, Vec::<String>::new());
+    assert!(
+        decorations
+            .permissions
+            .iter()
+            .any(|permission| permission == "render-decorations")
+    );
+    for property in [
+        "documentId",
+        "documentVersion",
+        "viewportByteRange",
+        "spans",
+        "packagePrefix",
+    ] {
+        assert!(
+            decorations
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "decoration API registry entry must preserve custom property {property}"
+        );
+    }
+
+    for (path, required) in [
+        (
+            "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
+            [
+                "bounded parse-window snapshots",
+                "cancellable",
+                "viewport-prioritized",
+                "memoryBudgetBytes",
+                "Do not expose internal parse-window snapshot structs",
+            ],
+        ),
+        (
+            "docs/reference/clay-js-api/decorations/server-publish-decorations.md",
+            [
+                "visible or near-viewport chunks",
+                "SYNTAX_CACHE_BUDGET_BYTES",
+                "30 MiB",
+                "stale-version rejection",
+                "Do not expose or call internal chunk-cache helpers",
+            ],
+        ),
+    ] {
+        let text = std::fs::read_to_string(root.join(path)).expect("read large-file API doc");
+        for phrase in required {
+            assert!(
+                text.contains(phrase),
+                "{path} must document large-file API policy phrase {phrase:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn large_file_api_docs_are_linked_from_index() {
+    let root = repository_root();
+    let indexed_paths: BTreeSet<_> = registry_source_paths(&root)
+        .expect("registry source paths")
+        .into_iter()
+        .collect();
+
+    for path in [
+        "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
+        "docs/reference/clay-js-api/decorations/server-publish-decorations.md",
+    ] {
+        assert!(
+            indexed_paths.contains(path),
+            "docs/index.md must link large-file public API doc {path}"
+        );
+    }
+}
+
+#[test]
+fn large_file_generated_registry_is_fresh() {
+    let root = repository_root();
+    check_generated_registry_current(&root).unwrap_or_else(|error| {
+        panic!("{error}\nRepair command: {UPDATE_COMMAND}");
+    });
+
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    for id in [
+        "clay.parse.serverRegisterParseHandler",
+        "clay.decorations.serverPublishDecorations",
+    ] {
+        assert!(
+            registry.by_id(id).is_some(),
+            "fresh generated registry must contain {id}"
+        );
+    }
+}
+
+#[test]
 fn generated_registry_preserves_configuration_metadata() {
     let root = repository_root();
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build generated registry from docs");

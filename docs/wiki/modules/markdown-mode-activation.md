@@ -13,9 +13,9 @@ generic protocol primitives — **with zero mode-specific logic in Rust**.
 | `src/protocol/mod.rs` | `EnterRule::ContinueLineMarkers`, `EnterRule::PreserveFenceBodyIndent` — generic variants usable by any mode; `PairRule` already supports multi-char delimiters |
 | `src/server/ops/modes.rs` | `op_clay_modes_activate_major_mode` — decodes package-supplied `editorRules`, `commands`, and `keymaps` JSON into generic protocol types; publishes updated `BehaviorManifest` |
 | `src/server/ops/mod.rs` | `ClayOpState::publish_mode_behavior_manifest` — mode-agnostic manifest publisher (combines default manifest + package editor rules + extra commands/keymaps + validation) |
-| `packages/markdown/dist/load.js` | **All Markdown-specific knowledge**: declares `editorRules` with `continueLineMarkers` and specific markers/pairs, declares commands, declares key bindings |
-| `packages/markdown/dist/index.js` | Package contract, mode metadata, command/transform declarations |
-| `packages/markdown/dist/parser.js` | Package-owned markdown-it token-stream parser/decorator adapter that maps block tokens, inline child tokens, and package-owned source/line indexes to Clay decoration spans |
+| `packages/markdown/dist/load.js` | **All Markdown-specific knowledge**: declares `editorRules` with `continueLineMarkers` and specific markers/pairs, declares commands, declares key bindings, and registers package-owned large-file parse policy defaults |
+| `packages/markdown/dist/index.js` | Package contract, mode metadata, command/transform declarations, and deterministic full/windowed/degraded/plain-text fallback policy defaults |
+| `packages/markdown/dist/parser.js` | Package-owned markdown-it token-stream parser/decorator adapter that maps block tokens, inline child tokens, and package-owned source/line indexes to Clay decoration spans or clears spans for plain-text fallback |
 | `packages/markdown/package.json` | Package metadata with contributions (commands, keyRouting, textTransforms, sdui, decorations) |
 | `tests/markdown_mode.rs` | Integration tests for mode activation plus parser-adapter package boundary checks |
 
@@ -119,7 +119,7 @@ mode-specific knowledge.
 - **No mode-specific types in Rust.** `EnterRule` variants use language-agnostic names.
 - **No mode-specific branching.** `ModeRegistry::select_behavior_manifest_for_document` stays completely generic — no `if mode_id == "markdown"` branch.
 - **No Markdown-named fields on `EditorBehaviorRules`.** The old `markdown_transforms: Option<MarkdownTransformRules>` field has been removed.
-- **JS package owns all Markdown-specific data.** Marker strings, pair delimiters, command IDs, key bindings, parser adapter path, and markdown-it SDUI parse status are declared in `dist/load.js`, `dist/parser.js`, and `dist/sdui.js`.
+- **JS package owns all Markdown-specific data.** Marker strings, pair delimiters, command IDs, key bindings, parser adapter path, large-file thresholds, fallback mode names, and markdown-it SDUI parse status are declared in `dist/index.js`, `dist/load.js`, `dist/parser.js`, and `dist/sdui.js`.
 - **Editor ops are JSON-in, generic-types-out.** `parse_editor_rules`, `parse_enter_rule`, `parse_pair_rule` handle JSON → `EnterRule`/`PairRule` with no mode awareness.
 
 ## Security
@@ -154,6 +154,13 @@ mode-specific knowledge.
 | `markdown_it_adapter_has_token_stream_range_fixtures` | Token/range fixtures cover headings, nested inline emphasis, inline code, fences, list markers, and UTF-8 |
 | `markdown_fixture_activates_with_markdown_it_adapter` | Fixture classification and package load runtime wiring use markdown-it parser/SDUI adapters through generic Clay facade signatures |
 | `markdown_sdui_status_reports_markdown_it_parse_state` | Structural SDUI reports markdown-it parse status and validates command-action provenance |
+| `markdown_large_file_policy_declares_thresholds_and_states` | Package-owned thresholds and full/windowed/degraded/plain-text fallback states are deterministic |
+| `markdown_large_file_status_reports_windowed_highlighting` | SDUI source contains fixed windowed/degraded/plain-text status labels |
+| `markdown_large_file_budget_exhaustion_falls_back_to_plain_text_static_guard` | Parser source clears spans and skips parser work when budget pressure requires plain text |
+| `markdown_degraded_status_contains_no_document_text_or_paths_static_guard` | SDUI source sanitizes status and does not consume raw diagnostics/document text |
+| `server::js_runtime::tests::markdown_large_file_status_reports_windowed_highlighting` | Runtime status model reports large Markdown files as windowed visible highlighting |
+| `server::js_runtime::tests::markdown_large_file_budget_exhaustion_falls_back_to_plain_text` | Runtime parser update returns zero spans and does not call markdown-it under budget exhaustion |
+| `server::js_runtime::tests::markdown_degraded_status_contains_no_document_text_or_paths` | Runtime status model omits absolute paths and raw diagnostic/document text |
 | `markdown_disabled_falls_back_to_plain_text_after_rewrite` | Disabled package removes Markdown command/keybinding authority and permits plain-text fallback |
 | `markdown_typing_does_not_wait_for_markdown_it_parse` | Slow parser simulation does not block local typing acknowledgement/application |
 | `server::js_runtime::tests::markdown_package_runtime_loads_markdown_it_workflow` | Actual package load module validates the manifest, activates Markdown, registers commands/parse, publishes injected markdown-it-token decorations, and publishes SDUI through Clay facades |

@@ -84,6 +84,45 @@ fn parse_window_snapshot_primitive_uses_bounded_rope_slicing() {
 }
 
 #[test]
+fn paint_uses_cached_inert_spans_without_package_javascript() {
+    let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let layout_source = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
+    let paint_sources = format!("{surface_source}\n{layout_source}");
+
+    assert!(surface_source.contains("visible_decoration_ranges"));
+    assert!(layout_source.contains("decoration_visible_byte_ranges"));
+    for forbidden in [
+        "markdownIt",
+        "parseMarkdown",
+        "serverPublishDecorations",
+        "Deno.core",
+        "op_clay",
+    ] {
+        assert!(
+            !paint_sources.contains(forbidden),
+            "paint/layout source must not call package/server/parser code: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn markdown_full_document_adapter_is_not_large_file_hot_path_static_guard() {
+    let bench_source = fs::read_to_string("tools/bench/markdown-parser.mjs")
+        .expect("Markdown benchmark script readable");
+    let load_source = fs::read_to_string("packages/markdown/dist/load.js")
+        .expect("Markdown load source readable");
+    let parser_source = fs::read_to_string("packages/markdown/dist/parser.js")
+        .expect("Markdown parser source readable");
+
+    assert!(bench_source.contains("adapter_full_document_advisory"));
+    assert!(bench_source.contains("adapter_windowed_viewport"));
+    assert!(bench_source.contains("hotPathAllowed"));
+    assert!(load_source.contains("parseWindowBytes"));
+    assert!(parser_source.contains("parseWindowInputs(options)"));
+    assert!(parser_source.contains("plainTextFallbackReason(options)"));
+}
+
+#[test]
 fn unicode_boundaries_remain_valid_after_layout_optimizations() {
     let mut editor = load_editor("a🦀b".to_string());
 

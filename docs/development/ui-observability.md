@@ -21,7 +21,7 @@ SDUI structural tests use `SduiObservableSnapshot` from `src/masonry_sdui.rs`. A
 
 GUI status tests use `SduiStatusObservation` from `src/masonry_editor.rs`. `EditorWidget::status_observation()` returns the status line, connection label, access label, latest sync version, and any active runtime diagnostic message without painting or starting a window.
 
-Markdown mode uses the same structural strategy. The deterministic `markdown-mode` fixture publishes a `Markdown Preview` panel with mode, parse, decorations, preview, and toggle-action text; `markdown_structural_sdui_snapshot_matches_fixture` verifies those visible labels through `SduiNativeState` without a window or GPU surface. This is the Phase 18 regression layer for the Markdown preview/status workflow.
+Markdown mode uses the same structural strategy. The deterministic `markdown-mode` fixture publishes a `Markdown Preview` panel with mode, parse, decorations, preview, and toggle-action text; `markdown_structural_sdui_snapshot_matches_fixture` verifies those visible labels through `SduiNativeState` without a window or GPU surface. Phase 18.5 also keeps large-file Markdown status structural and inert: package SDUI can report `full`, `windowed`, `degraded`, or `plain-text-fallback` highlighting with sanitized fixed strings, including a policy label for partial/viewport-only highlighting and plain-text fallback. This is the regression layer for the Markdown preview/status workflow.
 
 The main focused command for this coverage is:
 
@@ -57,4 +57,4 @@ Until those prerequisites exist, structural snapshots are the hard automated reg
 
 ## Performance and payload context
 
-SDUI payload size guardrails are tracked in [Performance Fixtures and Baseline Workflow](performance.md#sdui-payload-budget-findings). The observability tests should stay cheap, typed, and headless; they must not add synchronous JavaScript, IPC, filesystem, GPU, or window work to the ordinary typing/rendering hot path.
+SDUI payload size guardrails are tracked in [Performance Fixtures and Baseline Workflow](performance.md#sdui-payload-budget-findings). The observability tests should stay cheap, typed, and headless; they must not add synchronous JavaScript, IPC, filesystem, GPU, or window work to the ordinary typing/rendering hot path. Markdown large-file policy/status decisions are load/open/reload/configuration or explicit viewport-refresh work; paint reads already-validated SDUI and decoration state only.

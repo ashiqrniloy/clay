@@ -188,6 +188,44 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
 }
 
 #[test]
+fn server_public_functions_are_private_or_facade_backed() {
+    let inventory_text = inventory_rust_mapping_text();
+    let internal_large_file_primitives: BTreeSet<&str> = [
+        "src/server/decorations.rs::validate_decoration_set",
+        "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse_with_windows",
+        "src/server/parse_coordinator.rs::ParseCoordinator::stats",
+        "src/server/parse_coordinator.rs::ParseCoordinator::validate_update",
+    ]
+    .into_iter()
+    .collect();
+
+    for facade_backed in [
+        "src/server/decorations.rs::validate_decoration_publication",
+        "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
+        "op_clay_decorations_publish_decorations",
+        "op_clay_parse_register_parse_handler",
+        "runtime/js/decorations.ts::serverPublishDecorations",
+        "runtime/js/parse.ts::serverRegisterParseHandler",
+    ] {
+        assert!(
+            inventory_text.contains(facade_backed),
+            "large-file public capability {facade_backed} must be mapped through Clay JS API inventory"
+        );
+    }
+
+    for internal in internal_large_file_primitives {
+        assert!(
+            public_server_items().iter().any(|item| item == internal),
+            "{internal} is expected to remain classified as internal server infrastructure while public to the crate"
+        );
+        assert!(
+            !inventory_text.contains(internal),
+            "{internal} must not become a user-facing API without a dedicated Clay JS facade and docs"
+        );
+    }
+}
+
+#[test]
 fn rust_visibility_mapping_has_no_unmapped_public_primitive_functions() {
     let inventory_text = inventory_rust_mapping_text();
     for mapped in [

@@ -2,6 +2,7 @@ import {
   apiPrefix,
   behaviorTransforms,
   commands,
+  markdownLargeFilePolicy,
   markdownPackageManifest,
   modeId,
   packageName,
@@ -22,7 +23,15 @@ export function markdownPackageContract() {
       id: "markdown.parseDecorations",
       adapter: "./dist/parser.js",
       parseUnit: "line-group",
-      viewportPriority: true
+      viewportPriority: true,
+      parseWindowBytes: markdownLargeFilePolicy.parseWindowBytes,
+      guardBytes: markdownLargeFilePolicy.guardBytes,
+      memoryBudgetBytes: markdownLargeFilePolicy.memoryBudgetBytes,
+      timeoutMs: markdownLargeFilePolicy.timeoutMs,
+      smallFileMaxBytes: markdownLargeFilePolicy.smallFileMaxBytes,
+      mediumFileMaxBytes: markdownLargeFilePolicy.mediumFileMaxBytes,
+      largeFileThresholdBytes: markdownLargeFilePolicy.largeFileThresholdBytes,
+      fallbackMode: markdownLargeFilePolicy.fallbackMode
     },
     decorations: {
       primitiveId: "markdown.syntaxDecorations",
@@ -138,7 +147,11 @@ export async function loadMarkdownPackage(clay, options = {}) {
     mode: modeId,
     parseUnit: contract.parse.parseUnit,
     viewportPriority: contract.parse.viewportPriority,
-    adapter: contract.parse.adapter
+    adapter: contract.parse.adapter,
+    maxWindowBytes: contract.parse.parseWindowBytes,
+    guardBytes: contract.parse.guardBytes,
+    memoryBudgetBytes: contract.parse.memoryBudgetBytes,
+    timeoutMs: contract.parse.timeoutMs
   });
 
   return contract;

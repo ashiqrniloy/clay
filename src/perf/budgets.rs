@@ -13,6 +13,7 @@ pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
 // protocol messages and package/mode implementations promote them to hard CI
 // thresholds.
 pub const DECORATION_PAYLOAD_BUDGET_BYTES: usize = 8192;
+pub const DECORATION_NEAR_VIEWPORT_GUARD_BYTES: u64 = 256 * 1024;
 pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
 // Generic retained syntax/decorator cache budget for large-file modes. Phase
 // 18.5 uses this as the 30 MiB Markdown-specific overhead target while keeping

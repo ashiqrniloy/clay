@@ -150,25 +150,27 @@ Packages cannot:
 
 All package rendering flows through validated server-produced declarations. The Rust client renders those declarations locally using known code paths only.
 
-## Phase 18.5 Large-File Decoration-Cache Follow-Up
+## Phase 18.5 Large-File Decoration-Cache Primitive
 
-The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that current decoration publication validates one viewport-bounded `DecorationSet`, while large-file modes need reusable chunk/cache primitives for retained near-viewport state.
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates one viewport-bounded `DecorationSet`, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code now treats each validated `DecorationSet` as a versioned decoration chunk.
 
-Required reusable primitive gaps:
+Implemented reusable primitives:
 
-- `DecorationChunk`: a validated decoration payload keyed by document ID, document version, package prefix, mode ID, and byte range.
-- `SyntaxChunkCache`: a bounded LRU-style cache for syntax/decor chunks with stale-version invalidation, edit-range invalidation, viewport/near-viewport priority, and deterministic memory accounting.
-- `SyntaxCacheBudget`: a generic retained-cache budget. Phase 18.5 targets a 30 MiB Markdown-specific overhead cap for large-file workflows, but the primitive should be reusable by Python, Org, AsciiDoc, log-file, and other modes.
+- `DecorationChunkKey`: a validated chunk key with document ID, document version, package prefix, and byte range.
+- `SyntaxChunkCache`: a bounded LRU-style server/runtime cache for syntax/decor chunks with stale-version separation, viewport/near-viewport pruning, and deterministic retained-byte accounting.
+- `EditorDecorationState`: a client-local chunk cache that stores validated chunks outside paint, clears stale chunks on document version changes, prunes chunks outside the near-viewport guard, and paints only spans intersecting the current visible snapshot.
+- `SyntaxCacheBudget`: `SYNTAX_CACHE_BUDGET_BYTES` is the generic retained-cache budget. Phase 18.5 targets a 30 MiB Markdown-specific overhead cap for large-file workflows, but the primitive remains reusable by Python, Org, AsciiDoc, log-file, and other modes.
 
 Security and performance rules:
 
 - Cached chunks remain inert data: no parser tokens, AST nodes, CSS, draw callbacks, raw styles, native handles, client-side JavaScript, or executable closures.
 - Chunk publication still enforces package provenance, document version, byte-range validation, style-token validation, stale-version rejection, and `DECORATION_PAYLOAD_BUDGET_BYTES` per transport payload.
-- Paint must consume already-applied local spans only; cache eviction, chunk validation, parser execution, and package JavaScript remain outside paint, keypress, scroll, layout, and text-event handlers.
-- Rust cache/renderer primitives must not branch on Markdown syntax or markdown-it token names; package adapters translate language-specific parser output to generic decoration chunks before publication.
+- Paint consumes already-applied local spans only; cache eviction, chunk validation, parser execution, and package JavaScript remain outside paint, keypress, scroll, layout, and text-event handlers.
+- Rust cache/renderer primitives do not branch on Markdown syntax or markdown-it token names; package adapters translate language-specific parser output to generic decoration chunks before publication.
 
 ## Phase 17/18 Follow-Up
 
+- Extend chunk publication with explicit empty chunk-clearing metadata if package adapters need to clear an individual off-viewport package chunk without publishing replacement spans.
 - Define concrete protocol messages for `DecorationUpdate` and, if needed, `LayoutHintUpdate`.
 - Add client event handling outside paint handlers and store validated decorations in editor state.
 - Add a Parley/Vello style-range application hook in the editor text layout path.

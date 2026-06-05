@@ -404,11 +404,28 @@ fn markdown_it_adapter_has_token_stream_range_fixtures() {
         .expect("inline nesting fixture must exist");
     assert!(inline_nesting.contains("**bold and *em* text**"));
 
+    let window_boundaries = std::fs::read_to_string("tests/fixtures/markdown/window-boundaries.md")
+        .expect("window-boundary fixture must exist");
+    for expected in [
+        "```js",
+        "# Window Hé 🦀",
+        "**strong**",
+        "*emphasis*",
+        "`inline code`",
+        "- bullet",
+        "1. ordered",
+    ] {
+        assert!(
+            window_boundaries.contains(expected),
+            "window-boundary fixture must include `{expected}`"
+        );
+    }
+
     let parser = std::fs::read_to_string("packages/markdown/dist/parser.js")
         .expect("parser adapter must exist");
     for expected in [
         "walkMarkdownItInlineChildren",
-        "codeUnitToByte",
+        "codeUnitToAbsoluteByte",
         "lineCodeUnitStarts",
         "markdownIt.parse(text, {})",
         "html: false",
@@ -421,6 +438,61 @@ fn markdown_it_adapter_has_token_stream_range_fixtures() {
     assert!(
         !parser.contains("markdownIt.render") && !parser.contains(".render("),
         "adapter must parse tokens only and must not render HTML"
+    );
+}
+
+#[test]
+fn markdown_windowed_adapter_declares_bounded_parse_policy() {
+    let parser = std::fs::read_to_string("packages/markdown/dist/parser.js")
+        .expect("parser adapter must exist");
+    for expected in [
+        "DEFAULT_WINDOWED_MARKDOWN_POLICY",
+        "parseWindowBytes: 64 * 1024",
+        "guardBytes: 4 * 1024",
+        "memoryBudgetBytes: 30 * 1024 * 1024",
+        "parseMarkdownWindowDecorations",
+        "parseWindows",
+        "absoluteByteStart",
+        "parseWindow",
+    ] {
+        assert!(
+            parser.contains(expected),
+            "windowed parser must contain `{expected}`"
+        );
+    }
+
+    let load = std::fs::read_to_string("packages/markdown/dist/load.js")
+        .expect("Markdown load runtime must exist");
+    for expected in [
+        "maxWindowBytes: contract.parse.parseWindowBytes",
+        "guardBytes: contract.parse.guardBytes",
+        "memoryBudgetBytes: contract.parse.memoryBudgetBytes",
+        "timeoutMs: contract.parse.timeoutMs",
+    ] {
+        assert!(
+            load.contains(expected),
+            "load runtime must pass `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_windowed_adapter_static_guards_reject_full_text_large_file_path() {
+    let parser = std::fs::read_to_string("packages/markdown/dist/parser.js")
+        .expect("parser adapter must exist");
+    assert!(
+        parser.contains("parseMarkdownWindowSetDecorations")
+            && parser.contains("window.text")
+            && parser.contains("markdownIt.parse(text, {})"),
+        "adapter must parse package-supplied window text, not require full-document text"
+    );
+    assert!(
+        parser.contains("window byte range must match UTF-8 text length"),
+        "window byte ranges must be validated before range translation"
+    );
+    assert!(
+        !parser.contains("serverGetDocumentSnapshot") && !parser.contains("fullDocument"),
+        "Markdown adapter must not request or name a full-document parser path for large files"
     );
 }
 
@@ -593,6 +665,220 @@ fn markdown_sdui_status_update_fits_budget() {
     assert!(
         payload <= SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         "Markdown SDUI update payload {payload} exceeds budget {SDUI_UPDATE_PAYLOAD_BUDGET_BYTES}"
+    );
+}
+
+#[test]
+fn markdown_large_file_policy_declares_thresholds_and_states() {
+    let index = std::fs::read_to_string("packages/markdown/dist/index.js")
+        .expect("Markdown package index must exist");
+    for expected in [
+        "markdownLargeFilePolicy",
+        "smallFileMaxBytes: 1 * 1024 * 1024",
+        "mediumFileMaxBytes: 5 * 1024 * 1024",
+        "largeFileThresholdBytes: 5 * 1024 * 1024",
+        "parseWindowBytes: 64 * 1024",
+        "memoryBudgetBytes: 30 * 1024 * 1024",
+        "highlightingStates: Object.freeze([\"full\", \"windowed\", \"degraded\", \"plain-text-fallback\"])",
+        "markdownPolicyForDocument",
+    ] {
+        assert!(
+            index.contains(expected),
+            "Markdown policy must contain `{expected}`"
+        );
+    }
+
+    let load = std::fs::read_to_string("packages/markdown/dist/load.js")
+        .expect("Markdown load runtime must exist");
+    for expected in [
+        "markdownLargeFilePolicy.parseWindowBytes",
+        "markdownLargeFilePolicy.guardBytes",
+        "markdownLargeFilePolicy.memoryBudgetBytes",
+        "markdownLargeFilePolicy.timeoutMs",
+        "fallbackMode: markdownLargeFilePolicy.fallbackMode",
+    ] {
+        assert!(
+            load.contains(expected),
+            "load runtime must use `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_large_file_configuration_options_have_custom_properties_or_fixed_defaults() {
+    let configuration_doc = std::fs::read_to_string("docs/reference/clay-js-api/configuration.md")
+        .expect("configuration reference must exist");
+    let package_docs = std::fs::read_to_string("packages/markdown/docs/index.md")
+        .expect("Markdown package docs must exist");
+    let package_reference = std::fs::read_to_string("docs/reference/packages/markdown.md")
+        .expect("Markdown package reference must exist");
+    let parse_docs = std::fs::read_to_string(
+        "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
+    )
+    .expect("parse handler API docs must exist");
+    let package_json = markdown_package_json();
+    let package_index = std::fs::read_to_string("packages/markdown/dist/index.js")
+        .expect("Markdown package index must exist");
+    let package_load = std::fs::read_to_string("packages/markdown/dist/load.js")
+        .expect("Markdown package load runtime must exist");
+
+    for expected in [
+        "Phase 18.5 large-file Markdown configuration review",
+        "fixed defaults",
+        "not hidden `init.js` keys",
+        "serverRegisterParseHandler",
+        "custom_properties",
+        "setPackageOption",
+        "setParsePolicy",
+        "remain unavailable stubs",
+    ] {
+        assert!(
+            configuration_doc.contains(expected),
+            "configuration docs must record Phase 18.5 fixed-default review phrase `{expected}`"
+        );
+    }
+
+    for expected in [
+        "fixed package-owned defaults",
+        "declares no `contributions.configuration` entries",
+        "does not request `package-configuration`",
+        "serverRegisterParseHandler",
+        "custom_properties",
+    ] {
+        assert!(
+            package_docs.contains(expected) || package_reference.contains(expected),
+            "Markdown docs/reference must explain fixed-default configuration status `{expected}`"
+        );
+    }
+
+    let clay = package_json
+        .get("clay")
+        .and_then(serde_json::Value::as_object)
+        .expect("package clay metadata must be an object");
+    let permissions = clay
+        .get("permissions")
+        .and_then(serde_json::Value::as_array)
+        .expect("package permissions must be an array");
+    assert!(
+        !permissions
+            .iter()
+            .any(|permission| permission == "package-configuration"),
+        "Markdown fixed defaults must not request package-configuration until user settings exist"
+    );
+    let contributions = clay
+        .get("contributions")
+        .and_then(serde_json::Value::as_object)
+        .expect("package contributions must be an object");
+    assert!(
+        !contributions.contains_key("configuration"),
+        "Markdown fixed defaults must not be hidden package configuration entries"
+    );
+    assert!(
+        !package_index.contains("contributions.configuration")
+            && !package_load.contains("setPackageOption")
+            && !package_load.contains("setParsePolicy"),
+        "Markdown load path must not invent ad hoc configuration APIs"
+    );
+
+    for property in [
+        "viewportPriority",
+        "timeoutMs",
+        "maxWindowBytes",
+        "guardBytes",
+        "memoryBudgetBytes",
+        "parseUnits",
+    ] {
+        assert!(
+            parse_docs.contains(property),
+            "parse handler docs must expose behavior-changing parse policy property `{property}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_large_file_configuration_does_not_grant_package_authority() {
+    let configuration_doc = std::fs::read_to_string("docs/reference/clay-js-api/configuration.md")
+        .expect("configuration reference must exist");
+    let package_docs = std::fs::read_to_string("packages/markdown/docs/index.md")
+        .expect("Markdown package docs must exist");
+    let configuration_runtime = std::fs::read_to_string("runtime/js/configuration.ts")
+        .expect("configuration facade must exist");
+
+    for denied in [
+        "package enable/disable",
+        "filesystem",
+        "network",
+        "shell",
+        "extension loading",
+        "AI mutation",
+        "workspace",
+        "WASM",
+        "client-side JavaScript",
+    ] {
+        assert!(
+            configuration_doc.contains(denied),
+            "configuration docs must deny authority `{denied}`"
+        );
+    }
+    for denied in ["install", "enable", "disable", "grant new permissions"] {
+        assert!(
+            package_docs.contains(denied),
+            "Markdown package docs must deny configuration authority `{denied}`"
+        );
+    }
+    assert!(configuration_runtime.contains("plannedConfigurationApi"));
+    assert!(configuration_runtime.contains("setPackageOption"));
+    assert!(configuration_runtime.contains("setParsePolicy"));
+}
+
+#[test]
+fn markdown_large_file_status_reports_windowed_highlighting() {
+    let sdui = std::fs::read_to_string("packages/markdown/dist/sdui.js")
+        .expect("package SDUI adapter must exist");
+    for expected in [
+        "markdownStatusForPolicy",
+        "windowed visible syntax current",
+        "visible and near-viewport chunks current",
+        "degraded; visible syntax refresh delayed",
+        "plain text fallback; Markdown parser paused",
+        "Highlighting: ${model.status.highlightingState}",
+    ] {
+        assert!(
+            sdui.contains(expected),
+            "SDUI status must contain `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_large_file_budget_exhaustion_falls_back_to_plain_text_static_guard() {
+    let parser = std::fs::read_to_string("packages/markdown/dist/parser.js")
+        .expect("parser adapter must exist");
+    for expected in [
+        "plainTextFallbackReason",
+        "syntaxBudgetExceeded",
+        "memoryBudgetExceeded",
+        "fallbackMode === \"plain-text-fallback\"",
+        "plain text fallback; syntax decorations cleared",
+        "if (plainTextFallbackReason(options)) return []",
+    ] {
+        assert!(
+            parser.contains(expected),
+            "parser fallback must contain `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn markdown_degraded_status_contains_no_document_text_or_paths_static_guard() {
+    let sdui = std::fs::read_to_string("packages/markdown/dist/sdui.js")
+        .expect("package SDUI adapter must exist");
+    assert!(sdui.contains("sanitizeStatusText"));
+    assert!(sdui.contains("sanitizeDocumentLabel"));
+    assert!(sdui.contains("[path]"));
+    assert!(
+        !sdui.contains("options.diagnostic") && !sdui.contains("options.documentText"),
+        "Markdown status model must not include raw diagnostics or document text"
     );
 }
 
