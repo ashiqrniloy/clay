@@ -29,6 +29,8 @@ export interface DocumentMetadata {
   path: string;
 }
 
+export type ClientOpenFileDialogCommandId = "clay.documents.clientOpenFileDialog";
+
 export interface OpenDocumentOptions {
   workspaceRootId: WorkspaceRootId;
   path: string;
@@ -97,6 +99,10 @@ export async function serverGetDocumentSnapshot(documentId: DocumentId): Promise
 export async function serverGetDocumentLease(documentId: DocumentId): Promise<DocumentLease> {
   void documentId;
   plannedApi("clay.documents.serverGetDocumentLease");
+}
+
+export function clientOpenFileDialog(): ClientOpenFileDialogCommandId {
+  return "clay.documents.clientOpenFileDialog";
 }
 
 export async function serverOpenDocument(options: OpenDocumentOptions): Promise<OpenDocumentResult> {

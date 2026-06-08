@@ -374,6 +374,200 @@ fn package_configuration_cannot_grant_prohibited_authority() {
 }
 
 #[test]
+fn open_file_dialog_keybinding_is_configured_through_init_js() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture =
+        fs::read_to_string(root.join("tests/fixtures/configuration/windows-markdown-open/init.js"))
+            .expect("read Windows Markdown open fixture");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let editor_widget_source =
+        fs::read_to_string(root.join("src/masonry_editor.rs")).expect("read editor widget");
+    let keybinding_source = fs::read_to_string(root.join("src/server/ops/keybindings.rs"))
+        .expect("read keybinding ops");
+
+    for text in [&fixture, &bind_key_doc] {
+        assert!(text.contains("import { bindKey } from \"clay:keybindings\";"));
+        assert!(text.contains(
+            "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });"
+        ));
+    }
+    assert!(keybinding_source.contains("clay.documents.clientOpenFileDialog"));
+    assert!(keybinding_source.contains("RoutingPolicy::ClientUiCommand"));
+    assert!(
+        !editor_widget_source.contains("Ctrl+O"),
+        "EditorWidget must not hard-code Ctrl+O; the binding must come from init.js/behavior manifests"
+    );
+}
+
+#[test]
+fn open_file_dialog_configuration_does_not_grant_broad_filesystem_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let fixture =
+        fs::read_to_string(root.join("tests/fixtures/configuration/windows-markdown-open/init.js"))
+            .expect("read Windows Markdown open fixture");
+
+    for text in [&configuration_doc, &bind_key_doc] {
+        for denied in denied_configuration_authorities() {
+            assert!(
+                text.contains(denied),
+                "open-dialog configuration docs must deny {denied} authority"
+            );
+        }
+    }
+    for required in [
+        "selected-file-only server validation/granting",
+        "does not grant arbitrary filesystem authority",
+        "workspace expansion",
+        "raw Deno ops",
+    ] {
+        assert!(
+            configuration_doc.contains(required) || bind_key_doc.contains(required),
+            "Phase 19 configuration docs must cover `{required}`"
+        );
+    }
+    assert!(
+        !fixture.contains("Deno.core.ops")
+            && !fixture.contains("rawOp")
+            && !fixture.contains("clientOpenFileDialog(")
+            && !fixture.contains("dialogFilter")
+            && !fixture.contains("defaultDirectory"),
+        "fixture must not expose hidden dialog configuration keys or callable client hooks"
+    );
+}
+
+#[test]
+fn configuration_docs_cover_open_file_dialog_defaults_or_options() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let dialog_source =
+        fs::read_to_string(root.join("src/client/file_dialog.rs")).expect("read dialog source");
+    let entries = inventory_entries();
+    let bind_key = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.keybindings.bindKey")
+        .expect("bindKey inventory entry");
+
+    for property in ["key", "command", "scope", "when"] {
+        assert!(
+            inventory_custom_property_names(bind_key.get("custom_properties"))
+                .contains(&property.to_string()),
+            "bindKey custom_properties must include {property}"
+        );
+    }
+    for required in [
+        "Phase 19 Windows open-dialog configuration review",
+        "did **not** promote a new dialog-settings configuration API",
+        "fixed defaults, not hidden `init.js` keys",
+        ".md",
+        ".markdown",
+        ".mdown",
+        "all-files fallback",
+        "No default `Ctrl+O` shortcut in Rust",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document `{required}`"
+        );
+    }
+    assert!(bind_key_doc.contains("fixed Markdown/all-files filter defaults"));
+    assert!(dialog_source.contains("*.md"));
+    assert!(dialog_source.contains("*.markdown"));
+    assert!(dialog_source.contains("*.mdown"));
+    assert!(dialog_source.contains("*.*"));
+    assert!(
+        entries.iter().all(|entry| {
+            !(entry.get("id").starts_with("clay.configuration.")
+                && entry.get("id").contains("FileDialog"))
+        }),
+        "Phase 19 must not add hidden clay.configuration FileDialog settings before real user-tunable settings exist"
+    );
+}
+
+#[test]
+fn client_open_file_dialog_api_is_documented_indexed_and_facade_backed() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = public_inventory_entries();
+    let entry = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.documents.clientOpenFileDialog")
+        .expect("client open file dialog API inventory entry");
+    let linked_paths = docs_index_registry_links();
+    let doc_path = entry.get("documentation_path");
+    let doc_text = fs::read_to_string(root.join(doc_path)).expect("read client dialog API doc");
+
+    assert_eq!(entry.get("js_module"), "clay:documents");
+    assert_eq!(entry.get("js_export"), "clientOpenFileDialog");
+    assert_eq!(entry.get("status"), "runtime-backed-command");
+    assert_eq!(entry.get("key_bindings"), "[]");
+    assert_eq!(entry.get("custom_properties"), "[]");
+    assert!(linked_paths.contains(doc_path));
+    assert!(facade_exports_function(
+        entry.get("facade_path"),
+        entry.get("js_export")
+    ));
+
+    for required in [
+        "Stable ID: `clay.documents.clientOpenFileDialog`",
+        "Module/export: `clay:documents` / `clientOpenFileDialog`",
+        "bindKey(\"Ctrl+O\", clientOpenFileDialog(), { scope: \"editor\" })",
+        "fixed Markdown filters",
+        "Windows-only native dialog support",
+        "selected-file-only server validation",
+        "ordinary editing remains delta-based",
+        "background, viewport-bounded work",
+    ] {
+        assert!(
+            doc_text.contains(required),
+            "client open file dialog API docs must mention {required:?}"
+        );
+    }
+}
+
+#[test]
+fn open_dialog_api_security_notes_cover_selected_file_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let doc_text = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/documents/client-open-file-dialog.md"),
+    )
+    .expect("read client open file dialog API doc");
+    let entry = public_inventory_entries()
+        .into_iter()
+        .find(|entry| entry.get("id") == "clay.documents.clientOpenFileDialog")
+        .expect("client open file dialog API inventory entry");
+
+    for required in [
+        "native dialog execution requires explicit user key routing",
+        "server-validated as single-file grants",
+        "sanitizes diagnostics",
+        "grants at most that selected file",
+        "raw Deno ops",
+        "broad filesystem/workspace authority",
+    ] {
+        assert!(
+            doc_text.contains(required) || entry.get("security_notes").contains(required),
+            "open-dialog API security notes must cover {required:?}"
+        );
+    }
+    for denied in denied_configuration_authorities() {
+        assert!(doc_text.contains(denied));
+        assert!(entry.get("security_notes").contains(denied));
+    }
+}
+
+#[test]
 fn api_inventory_has_required_fields() {
     let entries = inventory_entries();
     let required_fields = [

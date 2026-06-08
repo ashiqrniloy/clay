@@ -7,14 +7,15 @@
 
 ## Overview
 
-Phase 9 introduces a server-owned workspace/open-document model alongside the existing server-canonical `DocumentState`. The model records authorized workspace roots, canonical file paths, open document identity, duplicate-open behavior, file-backed dirty state, and server-side path authorization without giving the native client filesystem authority.
+Phase 9 introduces a server-owned workspace/open-document model alongside the existing server-canonical `DocumentState`. Phase 19 extends the same model with selected-file single-file grants for native file-open dialogs. The model records authorized workspace roots, selected-file grants, canonical file paths, open document identity, duplicate-open behavior, file-backed dirty state, and server-side path authorization without giving the native client filesystem authority.
 
 ## Responsibilities
 
-- `WorkspaceState` owns workspace roots, canonical path-to-document mapping, document ID allocation, path validation, file type checks, and per-document `Arc<Mutex<DocumentState>>` handles.
+- `WorkspaceState` owns workspace roots, selected-file single-file grants, canonical path-to-document mapping, document ID allocation, path validation, file type checks, and per-document `Arc<Mutex<DocumentState>>` handles.
 - `DocumentState` still owns canonical rope text, versions, edit validation, leases, region locks, and now the dirty flag for accepted edits.
 - `ServerConfig::workspace_roots` records server startup workspace roots; `IpcServer::try_new` validates them into `WorkspaceState` before protocol dispatch integration.
 - `WorkspaceState::open_existing_file` performs server-side UTF-8 file loading through Tokio async file IO and registers loaded files in the open-document registry.
+- `WorkspaceState::open_selected_file` canonicalizes an explicit user-selected path, rejects directories/special files/invalid UTF-8, creates a single-file grant only after successful UTF-8 loading, and registers the opened document without authorizing sibling paths.
 - `WorkspaceState::save_document` writes the current canonical document text to the authorized file path, checks stale on-disk metadata before overwriting, and marks the document clean only after a successful save.
 - `WorkspaceState::reload_document` refreshes clean documents from disk, rejects dirty reloads unless forced, updates canonical text/version state, and keeps reload authorization server-side.
 - `WorkspaceState::document_metadata`, `list_documents`, `list_root_metadata`, `document_handle`, and `release_client_access` provide the minimal connection-dispatch and runtime-op surface for protocol open/save/reload/status/list messages and Clay JS document/workspace facade calls without exposing canonical host paths to clients.
@@ -26,16 +27,17 @@ Phase 9 introduces a server-owned workspace/open-document model alongside the ex
 2. `open_existing_file` and `register_loaded_file` canonicalize a requested relative or absolute path after joining relative paths to the authorized root. Canonicalization resolves `..` segments and symlinks before authorization.
 3. The canonical file must still start with the canonical root. Escaping traversal and symlinks return `WorkspaceError::OutsideRoot` before a document entry exists.
 4. The canonical path must be a regular file. Directories return `WorkspaceError::DirectoryOpen`; sockets and other non-ordinary file types return `WorkspaceError::UnsupportedFileType`.
-5. Valid paths build `FileDocumentState` metadata with the root ID, canonical path, workspace-relative display path, and last-known file metadata for stale-save checks.
+5. Valid paths build `FileDocumentState` metadata with the root/grant ID, canonical path, display path, and last-known file metadata for stale-save checks.
 6. If the canonical path is already open, the registry returns the existing document ID and document handle without re-reading disk. The existing `DocumentState::acquire_access` lease rules decide whether the caller receives editable or read-only access.
 7. If the path is not open, `open_existing_file` reads the file with `tokio::fs::read`, rejects invalid UTF-8 as `WorkspaceError::InvalidUtf8`, and only then registers a clean version-1 `DocumentState`.
-8. `register_loaded_file` keeps the test/protocol-ready path for callers that have already obtained trusted UTF-8 text after the same canonical path validation.
-9. Accepted edits in `DocumentState::apply_edit` increment the document version and mark the document dirty.
-10. `save_document` reauthorizes the canonical file path, compares current file metadata with the last-known metadata, rejects stale external changes with `WorkspaceError::StaleFileMetadata`, writes `DocumentState::text()` through `tokio::fs::write`, updates last-known metadata, and clears dirty state only if no newer in-memory edit changed the document version during the save.
-11. `reload_document` rejects dirty documents with `WorkspaceError::DirtyDocument` unless `force` is true. It reauthorizes the file path, reads UTF-8 text from disk, replaces the canonical rope through `DocumentState::replace_text_from_storage`, increments the document version when disk text differs, marks the document clean, and updates last-known metadata.
-12. Connection dispatch maps workspace operations to protocol messages: open/reload return full snapshots, save/status/list return metadata only, and `WorkspaceError::diagnostic` maps failures to stable `FileErrorCode` values plus user-facing messages and container/toolbox/distrobox hints.
-13. Phase 13 runtime ops in `src/server/ops/documents.rs` and `src/server/ops/workspace.rs` reuse the same `WorkspaceState` helpers for `clay:documents` and `clay:workspace` configuration calls. They serialize facade results as JSON, expose IDs as strings for the Clay JS API, and convert workspace diagnostics into JavaScript errors without exposing raw op names as the public API.
-14. Startup root validation in `IpcServer::try_new` uses the same diagnostics, so a missing or inaccessible configured root reports that the path is not visible to the Clay server process and suggests mounting or choosing a root inside the server environment.
+8. `open_selected_file` performs the same regular-file/UTF-8 validation for an explicit selected absolute path, but creates a `WorkspaceAuthority::SingleFile` grant whose reauthorization accepts only that canonical file. Single-file grants are not returned by `list_root_metadata`, so they do not masquerade as broad configured workspace roots.
+9. `register_loaded_file` keeps the test/protocol-ready path for callers that have already obtained trusted UTF-8 text after the same canonical path validation.
+10. Accepted edits in `DocumentState::apply_edit` increment the document version and mark the document dirty.
+11. `save_document` reauthorizes the canonical file path, compares current file metadata with the last-known metadata, rejects stale external changes with `WorkspaceError::StaleFileMetadata`, writes `DocumentState::text()` through `tokio::fs::write`, updates last-known metadata, and clears dirty state only if no newer in-memory edit changed the document version during the save.
+12. `reload_document` rejects dirty documents with `WorkspaceError::DirtyDocument` unless `force` is true. It reauthorizes the file path, reads UTF-8 text from disk, replaces the canonical rope through `DocumentState::replace_text_from_storage`, increments the document version when disk text differs, marks the document clean, and updates last-known metadata.
+13. Connection dispatch maps workspace operations to protocol messages: open/reload return full snapshots, selected-file open returns the same `DocumentOpened` snapshot shape, save/status/list return metadata only, and `WorkspaceError::diagnostic` maps failures to stable `FileErrorCode` values plus user-facing messages and container/toolbox/distrobox hints.
+14. Phase 13 runtime ops in `src/server/ops/documents.rs` and `src/server/ops/workspace.rs` reuse the same `WorkspaceState` helpers for `clay:documents` and `clay:workspace` configuration calls. They serialize facade results as JSON, expose IDs as strings for the Clay JS API, and convert workspace diagnostics into JavaScript errors without exposing raw op names as the public API.
+15. Startup root validation in `IpcServer::try_new` uses the same diagnostics, so a missing or inaccessible configured root reports that the path is not visible to the Clay server process and suggests mounting or choosing a root inside the server environment.
 
 ## Code Examples
 
@@ -55,10 +57,10 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - The server is the only component that owns workspace roots, canonical paths, file-backed document handles, and dirty state.
 - Duplicate opens are keyed by canonical path and reuse one `DocumentState`, preserving one editable lease with read-only observers.
 - Ordinary edit application mutates only per-document state and does not perform file IO, workspace scans, JavaScript execution, AI work, or full-document IPC.
-- File paths outside registered workspace roots are rejected before a file-backed document entry is created.
+- File paths outside registered workspace roots or outside a selected-file single-file grant are rejected before a file-backed document entry is created.
 - Symlinks are authorized by their canonical target, not their link location, so an in-root symlink to an outside file is denied and an in-root symlink to an in-root file maps to the target's canonical relative path.
 - Directory, special-file, read, and UTF-8 validation failures happen only at open/register boundaries, never during ordinary edit application or client painting/input.
-- Invalid UTF-8 files do not create or poison registry entries; a later valid open can still use the same canonical path.
+- Invalid UTF-8 files do not create or poison registry entries; selected-file grants are not created until UTF-8 validation succeeds, and a later valid open can still use the same canonical path.
 - Save and reload reauthorize the stored canonical path before file IO so deleted/replaced/symlinked paths cannot bypass workspace-root authorization.
 - Dirty reloads are rejected unless explicitly forced, preventing silent loss of accepted in-memory edits.
 - Stale on-disk metadata is a save conflict, not an implicit overwrite; the in-memory document stays dirty so the caller can decide whether to reload, force a later operation, or surface a conflict.
@@ -72,6 +74,8 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - `src/server/workspace.rs`: `open_existing_file_loads_utf8_text` verifies server-side file loading creates a clean version-1 document snapshot.
 - `src/server/workspace.rs`: `duplicate_open_reuses_loaded_document_and_lease_policy` verifies duplicate opens reuse the existing in-memory document without re-reading changed disk contents.
 - `src/server/workspace.rs`: `open_invalid_utf8_reports_file_io_error_without_document_entry` verifies invalid UTF-8 is reported and leaves registry indexes empty.
+- `src/server/workspace.rs`: `selected_file_open_grants_only_the_selected_file` verifies an explicit selected-file open creates a single-file grant that rejects sibling paths.
+- `src/server/workspace.rs`: `selected_file_open_rejects_directory_and_invalid_utf8_without_document_entry` and `selected_file_open_rejects_special_file_without_document_entry` verify selected directories, special files, and invalid UTF-8 files do not create document entries or grants.
 - `src/server/workspace.rs`: `workspace_rejects_path_traversal_outside_root` verifies `..` traversal cannot authorize a sibling file outside the root.
 - `src/server/workspace.rs`: `workspace_rejects_directory_and_special_file_open` verifies directories and Unix socket files are rejected as document opens.
 - `src/server/workspace.rs`: `workspace_canonicalizes_symlink_before_authorization` verifies escaping symlinks are denied and in-root symlinks canonicalize consistently.

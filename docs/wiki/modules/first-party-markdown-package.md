@@ -12,10 +12,16 @@
 - `packages/markdown/docs/index.md`
 - `docs/reference/packages/markdown.md`
 - `src/packages/record.rs`
+- `src/server/connection.rs`
+- `src/server/js_runtime.rs`
+- `src/server/ops/sdui.rs`
+- `src/server/sdui.rs`
 - `tests/package_loading.rs`
 - `tests/fixtures/markdown/sample.md`
 - `tests/fixtures/configuration/markdown-mode/init.js`
 - `tests/fixtures/configuration/markdown-mode/workspace/sample.md`
+- `tests/fixtures/configuration/windows-markdown-open/init.js`
+- `tests/fixtures/configuration/windows-markdown-open/workspace/sample.md`
 
 ## Overview
 
@@ -40,6 +46,10 @@ The scaffold is intentionally contract-first: it records package identity, permi
 
 The deterministic configuration fixture in `tests/fixtures/configuration/markdown-mode/init.js` exercises the full workflow without a package-manager process: it validates the package manifest, opens `workspace/sample.md` when a test supplies the workspace root, registers/activates Markdown mode, registers package commands and parse/decorations providers, publishes representative decorations, and publishes the Markdown preview/status SDUI tree. The fixture falls back to document `1` when no workspace root exists so manual `cargo run -- smoke-gui --config-fixture markdown-mode` stays deterministic and does not grant broader filesystem authority.
 
+The Phase 19 development fixture in `tests/fixtures/configuration/windows-markdown-open/init.js` reuses the same first-party Markdown load/activation/decorations/status path and adds `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })`. Manual `cargo run -- smoke-gui --config-fixture windows-markdown-open` therefore exercises the selected-file dialog path with normal configuration APIs: the native command is inert manifest data until the user presses `Ctrl+O`, package JavaScript remains server-side, and the selected file still receives only a server-validated single-file grant.
+
+Phase 19 extends the same package-owned path to native selected-file opens. When `clay.documents.clientOpenFileDialog` opens a selected `.md`, `.markdown`, or `.mdown` file and the active server behavior manifest shows that `@clay/markdown` has already been loaded, `src/server/connection.rs` runs a document-open activation pass in the server-side runtime. That pass copies only the first-party Markdown ESM files into a temporary local configuration root, calls `loadMarkdownPackage()` for the opened document ID/path, executes `publishMarkdownDecorations()` with a UTF-8-bound initial parse window capped at 64 KiB, and publishes `publishMarkdownPreviewStatus()` for the opened document. Rust classifies only the file extension and prepares bounded document-open input; heading/list/inline-code/strong/emphasis parsing remains in `packages/markdown/dist/parser.js` through markdown-it and `serverPublishDecorations` validation. The follow-up protocol messages after `DocumentOpened` are the opened document's Markdown `BehaviorManifest`, a validated `DecorationSet`, and a document-bound `SduiSnapshot` status tree. Ordinary edits after open continue through existing delta IPC and local cached decoration rendering.
+
 ## Invariants and Constraints
 
 - Installing or recording `@clay/markdown` does not execute package JavaScript.
@@ -52,6 +62,7 @@ The deterministic configuration fixture in `tests/fixtures/configuration/markdow
 - Package-owned SDUI actions must target commands that are already registered in the runtime command registry; disabling or invalidating the package removes enabled package records and the plain-text fallback manifest contains no `markdown.*` command/keybinding authority.
 - Large-file policy is evaluated during load/open/reload/configuration or explicit viewport/policy refresh work. Keypress and paint handlers use already-installed behavior manifests and local decoration chunks only.
 - Status diagnostics are fixed or sanitized package strings. Absolute paths, raw diagnostics, and document text are not embedded in Markdown SDUI status labels.
+- Selected-file Markdown activation runs only after a user-selected server-authorized file open and only when the Markdown package has already contributed active Markdown commands; it does not load Markdown for arbitrary files or execute package JavaScript from keypress, paint, scroll, layout, or text-event handlers.
 
 ## Performance, Smoke, and Tests
 
@@ -86,6 +97,11 @@ Relevant tests:
 - `markdown_parser_adapter_publishes_protocol_spans_without_parser_data`
 - `markdown_it_adapter_has_token_stream_range_fixtures`
 - `server::js_runtime::tests::markdown_package_runtime_loads_markdown_it_workflow`
+- `server::js_runtime::tests::windows_markdown_open_config_fixture_loads_markdown_and_binds_ctrl_o`
+- `windows_markdown_open_fixture_binds_ctrl_o_without_hardcoding`
+- `windows_markdown_open_fixture_loads_markdown_package`
+- `server::connection::tests::selected_markdown_file_publishes_manifest_decorations_and_status`
+- `server::connection::tests::markdown_open_runtime_uses_bounded_parse_window_for_large_file`
 - `markdown_package_declares_sdui_preview_status_adapter`
 - `markdown_sdui_status_reports_markdown_it_parse_state`
 - `markdown_disabled_falls_back_to_plain_text_after_rewrite`

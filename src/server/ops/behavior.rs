@@ -58,6 +58,7 @@ fn runtime_path(policy: &RoutingPolicy) -> &'static str {
             "client-first"
         }
         RoutingPolicy::ServerFirst | RoutingPolicy::ServerFirstWithLock { .. } => "server-first",
+        RoutingPolicy::ClientUiCommand => "client-ui-command",
         RoutingPolicy::UiReactivePriority | RoutingPolicy::Background => "background",
     }
 }
@@ -66,6 +67,7 @@ fn authority_name(authority: &CommandAuthority) -> &'static str {
     match authority {
         CommandAuthority::BuiltInClientEdit => "built-in-client-edit",
         CommandAuthority::ServerIntent => "server-intent",
+        CommandAuthority::ClientUi => "client-ui",
     }
 }
 

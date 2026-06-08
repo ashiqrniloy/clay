@@ -27,6 +27,7 @@ use super::{
 };
 
 const CONTROLLED_MAIN_SPECIFIER: &str = "clay://runtime/main.js";
+const MARKDOWN_IT_MODULE_SPECIFIER: &str = "clay://vendor/markdown-it.js";
 
 fn clay_facade_source(specifier: &str) -> Option<&'static str> {
     match specifier {
@@ -228,7 +229,7 @@ impl ClayJsRuntimeService {
         task::spawn_blocking(move || {
             let recorder = global_recorder();
             let _scope = recorder.scope("runtime.evaluate_controlled_module");
-            evaluate_module_on_runtime(RuntimeEntry::ControlledSource(source), None)
+            evaluate_module_on_runtime(RuntimeEntry::ControlledSource(source), None, 1)
         })
         .await
         .map_err(ClayRuntimeError::Join)?
@@ -246,7 +247,7 @@ impl ClayJsRuntimeService {
         task::spawn_blocking(move || {
             let recorder = global_recorder();
             let _scope = recorder.scope("runtime.load_configuration");
-            evaluate_module_on_runtime(RuntimeEntry::ConfigurationRoot(config_root), None)
+            evaluate_module_on_runtime(RuntimeEntry::ConfigurationRoot(config_root), None, 1)
         })
         .await
         .map_err(ClayRuntimeError::Join)?
@@ -268,6 +269,30 @@ impl ClayJsRuntimeService {
             evaluate_module_on_runtime(
                 RuntimeEntry::ConfigurationRoot(config_root),
                 Some(workspace),
+                1,
+            )
+        })
+        .await
+        .map_err(ClayRuntimeError::Join)?
+        .inspect(|_| {
+            evaluations.fetch_add(1, Ordering::Relaxed);
+        })
+    }
+
+    pub(crate) async fn load_configuration_from_root_for_document(
+        &self,
+        config_root: impl Into<PathBuf> + Send + 'static,
+        runtime_document_id: crate::protocol::DocumentId,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        let config_root = config_root.into();
+        let evaluations = Arc::clone(&self.evaluations);
+        task::spawn_blocking(move || {
+            let recorder = global_recorder();
+            let _scope = recorder.scope("runtime.load_configuration_for_document");
+            evaluate_module_on_runtime(
+                RuntimeEntry::ConfigurationRoot(config_root),
+                None,
+                runtime_document_id,
             )
         })
         .await
@@ -441,11 +466,12 @@ enum RuntimeEntry {
 fn evaluate_module_on_runtime(
     entry: RuntimeEntry,
     workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
+    runtime_document_id: crate::protocol::DocumentId,
 ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
-    let op_state =
-        Arc::new(ClayOpState::new(workspace.unwrap_or_else(|| {
-            Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()))
-        })));
+    let op_state = Arc::new(ClayOpState::new_for_document(
+        workspace.unwrap_or_else(|| Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()))),
+        runtime_document_id,
+    ));
     let loaded_configuration = match entry {
         RuntimeEntry::ControlledSource(source) => LoadedRuntimeEntry {
             main_specifier: ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER)
@@ -568,6 +594,10 @@ impl ModuleLoader for ClayModuleLoader {
             return ModuleSpecifier::parse(specifier)
                 .map_err(|error| Self::denied(&error.to_string()).into());
         }
+        if specifier == "markdown-it" {
+            return ModuleSpecifier::parse(MARKDOWN_IT_MODULE_SPECIFIER)
+                .map_err(|error| Self::denied(&error.to_string()).into());
+        }
         if let Some(configuration) = &self.configuration {
             return configuration
                 .resolve_module(specifier, referrer)
@@ -603,6 +633,17 @@ impl ModuleLoader for ClayModuleLoader {
             )));
         }
 
+        if module_specifier.as_str() == MARKDOWN_IT_MODULE_SPECIFIER {
+            return ModuleLoadResponse::Sync(markdown_it_module_source().map(|source| {
+                ModuleSource::new(
+                    ModuleType::JavaScript,
+                    ModuleSourceCode::String(source.into()),
+                    module_specifier,
+                    None,
+                )
+            }));
+        }
+
         if let Some(configuration) = &self.configuration {
             return ModuleLoadResponse::Sync(
                 configuration
@@ -621,6 +662,25 @@ impl ModuleLoader for ClayModuleLoader {
 
         ModuleLoadResponse::Sync(Err(Self::denied(module_specifier.as_str()).into()))
     }
+}
+
+fn markdown_it_module_source() -> Result<String, ModuleLoaderError> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("packages")
+        .join("markdown")
+        .join("node_modules")
+        .join("markdown-it")
+        .join("dist")
+        .join("markdown-it.js");
+    let bundled = std::fs::read_to_string(&path).map_err(|error| {
+        ClayModuleLoader::denied(&format!(
+            "markdown-it bundle could not be loaded from {} ({error})",
+            path.display()
+        ))
+    })?;
+    Ok(format!(
+        "{bundled}\nconst MarkdownIt = globalThis.markdownit;\nexport default MarkdownIt;\nexport {{ MarkdownIt }};\n"
+    ))
 }
 
 #[cfg(test)]
@@ -887,6 +947,65 @@ mod tests {
         let manifest = result
             .behavior_manifest
             .expect("markdown behavior manifest");
+        assert!(
+            manifest
+                .commands
+                .iter()
+                .any(|command| command.command_id == "markdown.togglePreview")
+        );
+    }
+
+    #[tokio::test]
+    async fn windows_markdown_open_config_fixture_loads_markdown_and_binds_ctrl_o() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("configuration")
+            .join("windows-markdown-open");
+        let workspace_root = root.join("workspace");
+        let mut workspace = WorkspaceState::new();
+        workspace
+            .add_root(&workspace_root)
+            .expect("Windows Markdown open fixture root must register");
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root_with_workspace(root, Arc::new(Mutex::new(workspace)))
+            .await
+            .unwrap();
+
+        let tree = result.published_sdui_tree.expect("published SDUI tree");
+        assert!(tree.nodes.iter().any(|node| matches!(
+            &node.kind,
+            crate::protocol::SduiNodeKind::Panel { title, .. }
+                if title == "Windows Markdown Open Dialog Smoke"
+        )));
+        assert!(tree.nodes.iter().any(|node| matches!(
+            &node.kind,
+            crate::protocol::SduiNodeKind::Label { text }
+                if text == "Open: Ctrl+O native Markdown dialog"
+        )));
+        assert_eq!(result.parse_handlers.len(), 1);
+        assert_eq!(result.parse_handlers[0].package_prefix, "markdown");
+        assert!(result.published_decoration_set.is_some());
+        let manifest = result
+            .behavior_manifest
+            .expect("Windows Markdown open behavior manifest");
+        assert!(manifest.keymaps.iter().any(|rule| {
+            rule.sequence
+                == vec![crate::protocol::KeyStroke {
+                    key: crate::protocol::KeyCode::Character("o".to_string()),
+                    modifiers: crate::protocol::KeyModifiers {
+                        control: true,
+                        ..crate::protocol::KeyModifiers::NONE
+                    },
+                }]
+                && rule.command_id == "clay.documents.clientOpenFileDialog"
+                && rule.routing_policy == crate::protocol::RoutingPolicy::ClientUiCommand
+        }));
+        assert!(manifest.commands.iter().any(|command| {
+            command.command_id == "clay.documents.clientOpenFileDialog"
+                && command.authority == crate::protocol::CommandAuthority::ClientUi
+        }));
         assert!(
             manifest
                 .commands
@@ -1250,6 +1369,41 @@ mod tests {
         assert!(manifest.keymaps.iter().any(|rule| {
             rule.command_id == "clay.documents.serverSaveDocument"
                 && rule.routing_policy == crate::protocol::RoutingPolicy::ServerFirst
+        }));
+    }
+
+    #[tokio::test]
+    async fn configuration_bind_ctrl_o_to_client_open_file_dialog() {
+        let service = ClayJsRuntimeService::default();
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, listKeyBindings } from "clay:keybindings";
+                import { listBehaviorRoutes } from "clay:behavior";
+                const bound = bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+                const bindings = listKeyBindings("editor");
+                const routes = await listBehaviorRoutes();
+                const route = routes.find((candidate) => candidate.apiId === "clay.documents.clientOpenFileDialog");
+                Deno.core.ops.op_clay_runtime_record(`${bound.key}:${bound.command}:${bindings.length}:${route.runtimePath}:${route.authority}`);
+                "#,
+            )
+            .await
+            .unwrap();
+        let manifest = result
+            .behavior_manifest
+            .expect("published behavior manifest");
+
+        assert_eq!(
+            result.op_records,
+            vec!["Ctrl+O:clay.documents.clientOpenFileDialog:3:client-ui-command:client-ui"]
+        );
+        assert!(manifest.keymaps.iter().any(|rule| {
+            rule.command_id == "clay.documents.clientOpenFileDialog"
+                && rule.routing_policy == crate::protocol::RoutingPolicy::ClientUiCommand
+        }));
+        assert!(manifest.commands.iter().any(|command| {
+            command.command_id == "clay.documents.clientOpenFileDialog"
+                && command.authority == crate::protocol::CommandAuthority::ClientUi
         }));
     }
 
@@ -2154,6 +2308,45 @@ mod tests {
                 crate::client::behavior::ServerIntentRoute {
                     command_id: "clay.documents.serverSaveDocument".to_string(),
                     routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn keypress_routing_can_reach_client_ui_command_without_js() {
+        let manifest = {
+            let service = ClayJsRuntimeService::default();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime
+                .block_on(service.evaluate_controlled_module(
+                    r#"
+                    import { bindKey } from "clay:keybindings";
+                    bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+                    "#,
+                ))
+                .unwrap()
+                .behavior_manifest
+                .unwrap()
+        };
+        let state = crate::client::behavior::ClientBehaviorState::new(manifest).unwrap();
+        let routed = state.route_key(&crate::protocol::KeyStroke {
+            key: crate::protocol::KeyCode::Character("o".to_string()),
+            modifiers: crate::protocol::KeyModifiers {
+                control: true,
+                ..crate::protocol::KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            crate::client::behavior::RoutedBehavior::ClientUiCommand(
+                crate::client::behavior::ClientUiCommandRoute {
+                    command_id: "clay.documents.clientOpenFileDialog".to_string(),
+                    routing_policy: crate::protocol::RoutingPolicy::ClientUiCommand,
                 }
             )
         );

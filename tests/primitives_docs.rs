@@ -823,6 +823,13 @@ fn phase18_large_file_markdown_primitive_review() -> String {
     .expect("read Phase 18.5 large-file Markdown primitive review")
 }
 
+fn phase19_windows_file_open_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase19-windows-file-open-primitive-review.md",
+    ))
+    .expect("read Phase 19 Windows file-open primitive review")
+}
+
 #[test]
 fn phase18_markdown_primitive_review_records_existing_inventory() {
     let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
@@ -961,6 +968,77 @@ fn phase18_large_file_review_links_reference_and_wiki_docs() {
         assert!(
             review.contains(required),
             "large-file primitive review must link related reference/wiki doc: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase19_file_open_primitive_review_records_existing_inventory() {
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let review = phase19_windows_file_open_primitive_review();
+
+    assert!(
+        index.contains("modules/phase19-windows-file-open-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 19 Windows file-open primitive review"
+    );
+    for required in [
+        "Keybinding and configuration",
+        "Behavior manifests and client key routing",
+        "Client command routing and GUI event bridge",
+        "IPC document open messages",
+        "Server workspace validation",
+        "Client snapshot/document replacement",
+        "Mode activation",
+        "Parse handler registration and adapter scheduling",
+        "Decoration transport and native rendering",
+        "SDUI and status",
+        "Markdown package adapters",
+        "Configuration-time",
+        "Explicit UI-command time",
+        "Server file-open time",
+        "Document-open/background time",
+        "Hot-path typing/paint/text-event work",
+        "Windows file dialog",
+        "selected-file IPC request",
+        "server single-file grant/open",
+        "no socket reads or writes in paint/text handlers",
+        "full-text transfer limited to initial open/resync snapshots",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 19 file-open primitive review must record inventory/timing text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase19_file_open_primitive_review_records_generic_gaps_only() {
+    let review = phase19_windows_file_open_primitive_review();
+
+    for required in [
+        "ClientUiCommandIntent",
+        "SelectedFileOpenRequest",
+        "SelectedFileGrant",
+        "DocumentOpenApplied",
+        "DocumentOpenActivation",
+        "ParserAdapterExecution",
+        "ClientFileDialogBackend",
+        "clay.documents.clientOpenFileDialog",
+        "not to a hard-coded `Ctrl+O` branch",
+        "at most that canonical file",
+        "must not add the parent directory as a workspace root",
+        "same GUI-safe snapshot replacement boundary used by startup/resync",
+        "not by `if extension == \".md\"` or `if mode == \"markdown\"` branches",
+        "Do not add `MarkdownOpenParser`",
+        "MarkdownSelectedFileGrant",
+        "MarkdownItToken",
+        "Windows-specific code is acceptable only inside the dialog backend/module",
+        "ordinary edits must continue through `Edit` deltas and bounded queues",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 19 file-open primitive review must record generic-only gap guidance: {required}"
         );
     }
 }

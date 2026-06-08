@@ -20,6 +20,9 @@ cargo run -- smoke-gui --config-fixture runtime-sdui
 # Markdown mode smoke: validates the first-party package SDUI preview/status workflow.
 cargo run -- smoke-gui --config-fixture markdown-mode
 
+# Windows Markdown open-dialog smoke: loads Markdown and binds Ctrl+O through init.js.
+cargo run -- smoke-gui --config-fixture windows-markdown-open
+
 # Foreground default server, useful for watching server diagnostics.
 cargo run -- server
 
@@ -67,6 +70,48 @@ The Markdown smoke path uses `tests/fixtures/configuration/markdown-mode/init.js
 
 Expected visible SDUI text includes `Markdown Preview`, `Mode: markdown`, `Parse: markdown-it registered`, `Decorations: published`, and `Preview: decorated editor`. Ordinary typing remains local; preview/status publication is configuration/load-time work, not keypress, paint, or scroll work.
 
+### `cargo run -- smoke-gui --config-fixture windows-markdown-open`
+
+The Windows Markdown open-dialog smoke path uses `tests/fixtures/configuration/windows-markdown-open/init.js`. The fixture loads `@clay/markdown`, registers the Markdown mode/parser/decorations/status workflow, and binds `Ctrl+O` to `clay.documents.clientOpenFileDialog` through the normal `bindKey` configuration API. It does not add a Rust shortcut, install packages, fetch network resources, execute shell commands, or broaden workspace authority.
+
+Manual Windows 11 verification:
+
+1. Run `cargo run -- smoke-gui --config-fixture windows-markdown-open`.
+2. Confirm the side panel shows `Windows Markdown Open Dialog Smoke`, `Mode: markdown`, `Parse: markdown-it registered`, `Decorations: published`, and `Open: Ctrl+O native Markdown dialog`.
+3. Press `Ctrl+O`, select a regular UTF-8 `.md`, `.markdown`, or `.mdown` file in the native Windows file browser, and confirm the selected file replaces the editor buffer.
+4. Confirm Markdown decorations/status are visible for the opened file. Decoration refresh may arrive asynchronously; ordinary typing should remain responsive and local.
+5. Type a small edit in the opened document, then close/discard it. Do not test save in Phase 19.
+
+### Phase 19 Windows Markdown open-dialog smoke contract
+
+Phase 19 starts from this baseline:
+
+- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `clay.documents.clientOpenFileDialog` client UI command, the Windows native dialog backend that filters for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
+- Save exists for Phase 9 workspace documents, but saving a file picked through the Phase 19 dialog is not part of this manual smoke contract.
+
+The in-scope manual Windows 11 smoke scenario is edit-only:
+
+1. Load the first-party Markdown package and configure the key binding through `~/.config/clay/init.js`, or use the repository fixture with `cargo run -- smoke-gui --config-fixture windows-markdown-open`:
+
+   ```js
+   import { bindKey } from "clay:keybindings";
+
+   bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+   ```
+
+2. Launch Clay with the normal command-first GUI path or the fixture command above.
+3. Press the configured `Ctrl+O` binding. On Windows 11, Clay should open the OS file browser with Markdown filters for `.md`, `.markdown`, and `.mdown` plus an all-files fallback.
+4. Select a regular UTF-8 Markdown file. Cancellation should be a non-error no-op.
+5. Clay should send the selected path to the server as an explicit user-selected open request. The server validates and grants only that file, opens it as a Clay document, replaces the current buffer snapshot, activates Markdown mode when `@clay/markdown` is loaded, and publishes viewport-bounded Markdown decorations/status.
+6. Type in the opened document and confirm local editing remains responsive while decoration refresh may arrive asynchronously.
+7. Do not test save for this phase; close or discard the smoke document after editing.
+
+Out of scope for Phase 19 smoke: saving the selected file, full HTML preview or browser/webview rendering, non-Windows native dialogs, Windows Explorer file associations, double-click-to-open behavior, drag-and-drop, recent-files lists, directory opens, package installation, network fetches, shell execution, workspace expansion to the selected file's parent directory, and client-side package JavaScript.
+
+Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
+
+On non-Windows platforms during Phase 19, the command should report an unsupported diagnostic/status without panics; non-Windows native dialogs are intentionally not part of the smoke contract.
+
 ### Foreground server plus clients
 
 Use the default server/client commands to validate second-client observer behavior without endpoint arguments:
@@ -102,7 +147,7 @@ Default and smoke launch paths use only local IPC transports:
 - Windows: local named pipes.
 - Unix: Unix domain sockets.
 
-Normal GUI smoke validation does not open a remote TCP listener, does not use shell-mediated IPC, and does not require user-managed endpoints. Child servers are launched with `std::process::Command`-style direct executable arguments rather than through a shell. The `--config-fixture runtime-sdui` and `--config-fixture markdown-mode` development options resolve only named repository fixtures under `tests/fixtures/configuration/`; they do not enable package installs, network fetches, shell execution, arbitrary client JavaScript, WASM, AI mutation, or direct client filesystem authority. The Markdown fixture registers only the package commands it uses before publishing SDUI actions.
+Normal GUI smoke validation does not open a remote TCP listener, does not use shell-mediated IPC, and does not require user-managed endpoints. Child servers are launched with `std::process::Command`-style direct executable arguments rather than through a shell. The `--config-fixture runtime-sdui`, `--config-fixture markdown-mode`, and `--config-fixture windows-markdown-open` development options resolve only named repository fixtures under `tests/fixtures/configuration/`; they do not enable package installs, network fetches, shell execution, arbitrary client JavaScript, WASM, AI mutation, or direct client filesystem authority. The Markdown fixtures register only the package commands they use before publishing SDUI actions; the Windows Markdown open fixture also binds the native dialog command through inert keybinding configuration.
 
 Advanced endpoint arguments are optional debugging aids only, for example when reproducing a specific bind/listen problem or inspecting a custom endpoint. They are not part of normal GUI smoke validation.
 

@@ -240,12 +240,22 @@ impl CommandDeclaration {
             authority: CommandAuthority::ServerIntent,
         }
     }
+
+    pub fn client_ui(command_id: impl Into<String>, display_name: impl Into<String>) -> Self {
+        Self {
+            command_id: command_id.into(),
+            display_name: display_name.into(),
+            routing_policy: RoutingPolicy::ClientUiCommand,
+            authority: CommandAuthority::ClientUi,
+        }
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum CommandAuthority {
     BuiltInClientEdit,
     ServerIntent,
+    ClientUi,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -254,6 +264,7 @@ pub enum RoutingPolicy {
     ClientFirstRequiresAck,
     ServerFirst,
     ServerFirstWithLock { lock_scope: LockScope },
+    ClientUiCommand,
     UiReactivePriority,
     Background,
 }
@@ -473,6 +484,10 @@ pub enum ClientMessage {
         client_id: ClientId,
         workspace_root_id: WorkspaceRootId,
         path: String,
+    },
+    OpenSelectedFile {
+        client_id: ClientId,
+        selected_path: String,
     },
     SaveDocument {
         client_id: ClientId,

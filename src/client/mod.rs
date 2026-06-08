@@ -1,7 +1,14 @@
 pub(crate) mod behavior;
+pub mod file_dialog;
+
+pub use behavior::ClientUiCommandRoute;
+pub use file_dialog::{
+    FileDialogFilter, FileDialogResult, markdown_file_dialog_filters, open_markdown_file_dialog,
+};
 
 use std::{
     collections::VecDeque,
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -10,8 +17,9 @@ use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
     BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, DecorationSet, DocumentAccess,
-    DocumentId, DocumentVersion, EditOperation, EditRejection, PROTOCOL_VERSION, ProtocolErrorCode,
-    RuntimeDiagnostic, SduiActionIntent, SduiTree, SduiTreeUpdate, ServerMessage, TransactionId,
+    DocumentId, DocumentMetadata, DocumentVersion, EditOperation, EditRejection, FileErrorCode,
+    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
+    SduiTreeUpdate, ServerMessage, TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -260,6 +268,16 @@ impl ClientEditQueue {
         })
     }
 
+    pub fn enqueue_open_selected_file(
+        &self,
+        selected_path: PathBuf,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::OpenSelectedFile {
+            client_id: self.client_id,
+            selected_path: selected_path.to_string_lossy().into_owned(),
+        })
+    }
+
     pub fn sync_snapshot(&self) -> ClientSyncSnapshot {
         self.sync_state
             .lock()
@@ -278,6 +296,16 @@ impl ClientEditQueue {
     pub fn with_confirmed_version(mut self, confirmed_version: DocumentVersion) -> Self {
         self.sync_state = Arc::new(Mutex::new(ClientSyncState::new(confirmed_version)));
         self
+    }
+
+    #[doc(hidden)]
+    pub fn update_opened_document_authority(
+        &mut self,
+        access: &DocumentAccess,
+        confirmed_version: DocumentVersion,
+    ) {
+        self.lease_id = access.lease_id();
+        self.sync_state = Arc::new(Mutex::new(ClientSyncState::new(confirmed_version)));
     }
 }
 
@@ -309,6 +337,16 @@ pub enum ClientConnectionEvent {
         reason: String,
     },
     ResyncSnapshot(ClientResyncSnapshot),
+    DocumentOpened {
+        metadata: DocumentMetadata,
+        text: String,
+    },
+    FileOperationFailed {
+        code: FileErrorCode,
+        message: String,
+        workspace_root_id: Option<WorkspaceRootId>,
+        document_id: Option<DocumentId>,
+    },
     SduiSnapshot {
         client_id: ClientId,
         tree: SduiTree,
@@ -649,6 +687,22 @@ async fn run_connection<S>(
                             .apply_resync_snapshot(snapshot.clone());
                         let _ = events.send(ClientConnectionEvent::ResyncSnapshot(snapshot)).await;
                     }
+                    Ok(ServerMessage::DocumentOpened { metadata, text }) => {
+                        sync_state
+                            .lock()
+                            .expect("client sync state poisoned")
+                            .apply_resync_snapshot(ClientResyncSnapshot {
+                                document_id: metadata.document_id,
+                                version: metadata.version,
+                                text: text.clone(),
+                                access: metadata.access.clone(),
+                                lease_id: metadata.lease_id,
+                            });
+                        let _ = events.send(ClientConnectionEvent::DocumentOpened { metadata, text }).await;
+                    }
+                    Ok(ServerMessage::FileOperationFailed { code, message, workspace_root_id, document_id }) => {
+                        let _ = events.send(ClientConnectionEvent::FileOperationFailed { code, message, workspace_root_id, document_id }).await;
+                    }
                     Ok(ServerMessage::SduiSnapshot { client_id, tree }) => {
                         let _ = events.send(ClientConnectionEvent::SduiSnapshot { client_id, tree }).await;
                     }
@@ -709,6 +763,7 @@ async fn run_connection<S>(
 mod tests {
     #[cfg(unix)]
     use std::fs;
+    use std::path::PathBuf;
     #[cfg(any(unix, windows))]
     use std::time::SystemTime;
 
@@ -730,8 +785,9 @@ mod tests {
     use crate::protocol::EditRejection;
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess, EditOperation,
-        PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding,
-        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage, codec::Codec,
+        FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource,
+        SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage,
+        codec::Codec,
     };
     #[cfg(any(unix, windows))]
     use crate::server::{IpcServer, ServerConfig};
@@ -935,6 +991,25 @@ mod tests {
         assert!(queue.enqueue_edit_event(event.clone(), 1).is_ok());
         assert!(queue.enqueue_edit_event(event, 2).is_err());
         assert_eq!(queue.sync_snapshot().pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn selected_file_open_request_emits_non_edit_message() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
+        let selected_path = PathBuf::from("C:/Users/test/Documents/note.md");
+
+        queue
+            .enqueue_open_selected_file(selected_path.clone())
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::OpenSelectedFile {
+                client_id: 42,
+                selected_path: selected_path.to_string_lossy().into_owned(),
+            }
+        );
     }
 
     #[tokio::test]
@@ -1496,6 +1571,145 @@ mod tests {
                 tree: expected_tree,
             }
         );
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_applies_document_opened_snapshot_from_selected_file() {
+        let (client, mut server) = duplex(4096);
+        let codec = Codec::default();
+        let metadata = crate::protocol::DocumentMetadata {
+            document_id: 42,
+            version: 5,
+            access: DocumentAccess::Editable { lease_id: 8 },
+            lease_id: Some(8),
+            dirty: false,
+            workspace_root_id: 77,
+            path: "note.md".to_string(),
+        };
+        let expected_metadata = metadata.clone();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 2,
+                        version: 3,
+                        text: "scratch".to_string(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::DocumentOpened {
+                        metadata,
+                        text: "# opened\n".to_string(),
+                    },
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::DocumentOpened {
+                metadata: expected_metadata,
+                text: "# opened\n".to_string(),
+            }
+        );
+        let snapshot = session.edit_queue.sync_snapshot();
+        assert_eq!(snapshot.confirmed_version, 5);
+        assert_eq!(snapshot.optimistic_version, 5);
+        assert!(snapshot.pending.is_empty());
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_receives_file_operation_failed_event() {
+        let (client, mut server) = duplex(4096);
+        let codec = Codec::default();
+        let server_task = tokio::spawn(async move {
+            let _hello = codec.read_client_message(&mut server).await.unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::Welcome {
+                        client_id: 1,
+                        protocol_version: PROTOCOL_VERSION,
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::InitialDocument {
+                        document_id: 2,
+                        version: 3,
+                        text: String::new(),
+                        access: DocumentAccess::Editable { lease_id: 1 },
+                        lease_id: Some(1),
+                    },
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::FileOperationFailed {
+                        code: FileErrorCode::InvalidUtf8,
+                        message: "workspace file <requested path> is not valid UTF-8 text"
+                            .to_string(),
+                        workspace_root_id: None,
+                        document_id: None,
+                    },
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+
+        assert!(matches!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::FileOperationFailed {
+                code: FileErrorCode::InvalidUtf8,
+                workspace_root_id: None,
+                document_id: None,
+                ..
+            }
+        ));
         server_task.await.unwrap();
     }
 

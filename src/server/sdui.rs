@@ -84,7 +84,16 @@ impl StaticSduiState {
         &mut self,
         tree: SduiTree,
     ) -> Result<(), SduiValidationError> {
-        validate_runtime_tree(&tree, self.document_id)?;
+        self.replace_for_document_with_runtime_tree(self.document_id, tree)
+    }
+
+    pub(crate) fn replace_for_document_with_runtime_tree(
+        &mut self,
+        document_id: u64,
+        tree: SduiTree,
+    ) -> Result<(), SduiValidationError> {
+        validate_runtime_tree(&tree, document_id)?;
+        self.document_id = document_id;
         self.tree = tree;
         Ok(())
     }

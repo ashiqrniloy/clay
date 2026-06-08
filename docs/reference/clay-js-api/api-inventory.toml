@@ -1209,3 +1209,26 @@ permissions = []
 security_notes = "Sets bounded parse scheduling preferences through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, parse-document, access beyond open document content, package installation, or enable/disable authority."
 current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/parse_coordinator.rs::ParseCoordinator"
 registry_public = false
+
+[[api]]
+id = "clay.documents.clientOpenFileDialog"
+category = "client-open-file-dialog"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:documents"
+js_export = "clientOpenFileDialog"
+user_facing_name = "Open File Dialog"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "Binding/routing is a local behavior-manifest lookup; dialog/open work happens only after an explicit user command, selected-file opening sends one initial UTF-8 snapshot, Markdown parse/decorations are background and viewport-bounded, and ordinary editing remains delta-based."
+facade_path = "runtime/js/documents.ts::clientOpenFileDialog"
+backing_rust = "src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/documents/client-open-file-dialog.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; native dialog execution requires explicit user key routing, selected files are server-validated as single-file grants, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, broad filesystem/workspace authority, or client-side JavaScript authority."
+current_rust_owner = "src/client/file_dialog.rs; src/main.rs::handle_client_ui_command; src/client/behavior.rs::ClientBehaviorState::route_key; src/server/workspace.rs::WorkspaceState::open_selected_file"
+registry_public = true

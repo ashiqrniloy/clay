@@ -143,6 +143,7 @@ fn routing_policy_name(policy: &RoutingPolicy) -> &'static str {
         RoutingPolicy::ServerFirst => "server-first",
         RoutingPolicy::Background => "background",
         RoutingPolicy::UiReactivePriority => "ui-reactive-priority",
+        RoutingPolicy::ClientUiCommand => "client-ui-command",
         RoutingPolicy::ClientFirstPredictable => "client-first-predictable",
         RoutingPolicy::ClientFirstRequiresAck => "client-first-requires-ack",
         RoutingPolicy::ServerFirstWithLock { .. } => "server-first-with-lock",

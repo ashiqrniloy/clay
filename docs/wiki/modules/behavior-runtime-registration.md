@@ -26,12 +26,15 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
 
 `op_clay_keybindings_bind_key` parses a single key chord, maps `editor` or `global` scope into `KeyBindingContext`, rejects unsupported conditional `when` expressions, and checks the command against the runtime-bindable command allowlist. Server-first Clay API commands are declared as `CommandAuthority::ServerIntent`; built-in predictable text commands keep built-in client-edit authority. The op mutates `ClayOpState` by cloning the active manifest, replacing any existing rule for the same chord/context, adding a command declaration if needed, and publishing through `ActiveBehaviorManifest::publish_replacement` so validation and behavior-version advancement are reused.
 
+`clay.documents.clientOpenFileDialog` is the first runtime-bindable client UI command. `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` records a `RoutingPolicy::ClientUiCommand` route with `CommandAuthority::ClientUi`; keypress handling later remains a native manifest lookup and submits an app-driver action, not JavaScript execution or a server-first request.
+
 `op_clay_keybindings_unbind_key` removes the matching chord/context and publishes another validated manifest replacement. `listKeyBindings`, `getActiveBehaviorManifest`, and `listBehaviorRoutes` are read-only facades over the same server-owned manifest state. `ClayRuntimeEvaluation` returns a behavior manifest only when configuration changed it; server startup applies that manifest to the process-wide `ActiveBehaviorManifest`, allowing normal connection bootstrap and replacement publication to keep using existing protocol paths.
 
 ## Invariants and Constraints
 
 - JavaScript registration is configuration/startup work only; ordinary keypress routing remains native client manifest lookup.
 - Behavior manifests stay inert data: no client-side JavaScript, executable action payloads, shell/network/package/WASM/AI authority, or direct filesystem access is embedded in a rule.
+- Client UI command routes grant only native app UI intent routing. `clay.documents.clientOpenFileDialog` may later open a user-mediated file picker, but the binding itself does not scan files, read file contents, install packages, enable shell/network/AI/WASM/raw-op access, or broaden workspace authority.
 - Unknown command IDs and malformed chords/scopes are rejected before a manifest can be published.
 - Manifest versioning is atomic and server-owned through `ActiveBehaviorManifest::publish_replacement`.
 - Client routing continues through `src/client/behavior.rs::ClientBehaviorState::route_key`, so server-first bindings become intent routes instead of synchronous JavaScript calls.
@@ -41,7 +44,9 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
 - `configuration_bind_key_updates_behavior_manifest`: verifies `bindKey` creates a versioned manifest route for a Clay API command.
 - `configuration_unbind_key_updates_behavior_manifest`: verifies `unbindKey` removes the route through another atomic manifest update.
 - `unknown_command_binding_is_rejected`: verifies unregistered/permission-bearing command IDs fail safely.
+- `configuration_bind_ctrl_o_to_client_open_file_dialog`: verifies `bindKey` can publish `Ctrl+O` as a client UI route with `client-ui` authority.
 - `keypress_routing_uses_manifest_not_js`: installs the runtime-generated manifest in `ClientBehaviorState` and routes `Ctrl+S` locally as a server intent.
+- `keypress_routing_can_reach_client_ui_command_without_js`: installs the runtime-generated manifest and routes `Ctrl+O` locally as `ClientUiCommandRoute`.
 - Command: `cargo test js_runtime --quiet`
 
 ## Related

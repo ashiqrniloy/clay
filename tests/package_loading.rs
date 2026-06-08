@@ -1108,6 +1108,12 @@ fn keypress_routing_uses_manifest_without_javascript() {
                     cmd.command_id
                 );
             }
+            RoutingPolicy::ClientUiCommand => {
+                panic!(
+                    "package manifest command `{}` must not request native client UI authority",
+                    cmd.command_id
+                );
+            }
         }
     }
 

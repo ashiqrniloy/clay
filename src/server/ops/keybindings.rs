@@ -196,6 +196,7 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "document.focus_active"
             | "document.open_recent"
             | "clay.documents.serverOpenDocument"
+            | "clay.documents.clientOpenFileDialog"
             | "clay.documents.serverSaveDocument"
             | "clay.documents.serverReloadDocument"
             | "clay.documents.serverGetDocumentStatus"
@@ -209,6 +210,8 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
         Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
     } else if command_id == "completion.trigger" {
         Ok(crate::protocol::RoutingPolicy::UiReactivePriority)
+    } else if command_id == "clay.documents.clientOpenFileDialog" {
+        Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
         Ok(crate::protocol::RoutingPolicy::ServerFirst)
     }

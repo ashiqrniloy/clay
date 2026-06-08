@@ -40,6 +40,22 @@ Those values are documented package defaults, not hidden `init.js` keys. The pac
 
 Configuration evaluation remains load-time or explicit setting-change work only. Markdown large-file policy must not be recomputed from user JavaScript during keypress, paint, scroll, layout, text-event handling, or parse-result publication. The existing planned `setPackageOption`, `setModePreference`, `setDecorationTheme`, and `setParsePolicy` facades remain unavailable stubs and do not grant package enable/disable, filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, raw-op, or client-side JavaScript authority.
 
+## Phase 19 Windows open-dialog configuration review
+
+Phase 19 reviewed the Windows Markdown open-dialog smoke path and did **not** promote a new dialog-settings configuration API. The configurable behavior is the key binding itself, expressed through the existing [`bindKey`](keybindings/bind-key.md) Clay JS API:
+
+```js
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+```
+
+`clay.documents.clientOpenFileDialog` is a fixed Clay command ID that can be routed by inert behavior manifests after configuration evaluation. No default `Ctrl+O` shortcut in Rust exists; without an `init.js` binding or fixture binding, `Ctrl+O` is not treated as the open-file command.
+
+Dialog behavior in this phase uses fixed defaults, not hidden `init.js` keys: Windows-only native dialog support, Markdown filters for `.md`, `.markdown`, and `.mdown`, an all-files fallback, cancellation as a non-error no-op, selected-file-only server validation/granting, and edit-only selected-file behavior with save out of scope. The `windows-markdown-open` development fixture uses normal package, SDUI, parse/decorations, and `bindKey` APIs; it does not introduce ad hoc keys such as dialog filters, default directories, package enablement settings, or callable client-side hooks.
+
+Configuration remains server startup/load-time work. Pressing the configured key uses client-local manifest routing and then an explicit native UI command; ordinary keypress, paint, scroll, layout, text-event, edit acknowledgement, and Markdown decoration rendering paths do not execute configuration JavaScript. This configuration route does not grant arbitrary filesystem authority, package installation or enable/disable authority, shell, network, AI, WASM, raw Deno ops, workspace expansion, or client-side JavaScript authority.
+
 ## Example Configuration
 
 ```js

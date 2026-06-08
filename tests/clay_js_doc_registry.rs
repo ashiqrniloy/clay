@@ -315,6 +315,56 @@ fn generated_registry_contains_phase9_file_workspace_apis() {
 }
 
 #[test]
+fn generated_registry_contains_client_open_file_dialog_command_api() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let entry = registry
+        .by_id("clay.documents.clientOpenFileDialog")
+        .expect("generated registry is missing clientOpenFileDialog");
+
+    assert_eq!(entry.js_module, "clay:documents");
+    assert_eq!(entry.js_export, "clientOpenFileDialog");
+    assert_eq!(
+        entry.js_facade,
+        "runtime/js/documents.ts::clientOpenFileDialog"
+    );
+    assert_eq!(entry.stability, "runtime-backed-command");
+    assert!(entry.key_bindings.is_empty());
+    assert!(entry.custom_properties.is_empty());
+    assert!(entry.permissions.is_empty());
+    for required in [
+        "explicit user key routing",
+        "single-file grants",
+        "raw Deno ops",
+        "broad filesystem/workspace authority",
+        "client-side JavaScript",
+    ] {
+        assert!(
+            entry.security.contains(required),
+            "clientOpenFileDialog security metadata must mention {required:?}"
+        );
+    }
+    assert!(
+        registry
+            .by_js_export("clay:documents", "clientOpenFileDialog")
+            .is_some()
+    );
+    assert!(
+        registry
+            .by_lookup_tag("open-dialog")
+            .iter()
+            .any(|entry| entry.id == "clay.documents.clientOpenFileDialog"),
+        "open-dialog lookup should find the file dialog command API"
+    );
+    assert!(
+        registry
+            .by_lookup_tag("keybindings")
+            .iter()
+            .any(|entry| entry.id == "clay.documents.clientOpenFileDialog"),
+        "keybinding lookup should find the bindable file dialog command API"
+    );
+}
+
+#[test]
 fn generated_registry_contains_primitive_gate_runtime_apis() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 

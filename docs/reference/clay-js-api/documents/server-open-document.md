@@ -37,6 +37,8 @@ Open an authorized workspace text file through the runtime-backed `clay:document
 
 Authority: `server-authoritative-file-open`. Runtime path: `server-first-file-io`. Opening a file is an explicit server command that may read a full UTF-8 snapshot once; ordinary keypress-to-paint editing remains asynchronous and does not call JavaScript, workspace validation, or file IO.
 
+`serverOpenDocument` opens files under configured workspace roots. The Phase 19 native file dialog uses the separate bindable [`clientOpenFileDialog`](client-open-file-dialog.md) command ID followed by private selected-file IPC and a server single-file grant; do not pass arbitrary host paths to `serverOpenDocument` to emulate user-selected files.
+
 ## When to use
 
 Use this API when JavaScript configuration, extensions, or future Clay automation need the documented `Open Document` behavior. Do not use lower-level protocol structures, Rust functions, or raw `Deno.core.ops` bindings for this capability.
@@ -86,6 +88,8 @@ Requires: `workspace-read, document-read`.
 Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 
 The server owns filesystem/workspace authority and canonical documents. The client and Clay JS facade receive sanitized metadata, snapshots for explicit open/reload/resync paths, and typed errors; they do not receive raw host filesystem authority.
+
+For native file-dialog opens, [`clientOpenFileDialog`](client-open-file-dialog.md) routes through user-mediated client UI and selected-file-only server validation rather than broad workspace expansion. That selected-file grant is internal server authority, not a public `serverOpenDocument` option.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect arbitrary user files, access the network, or expose runtime user content beyond the requested authorized document metadata/snapshot.
 

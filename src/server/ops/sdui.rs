@@ -27,7 +27,6 @@ const SUPPORTED_NODE_KINDS: &[&str] = &[
     "flex",
     "stack",
 ];
-const DEFAULT_RUNTIME_DOCUMENT_ID: u64 = 1;
 const DEFAULT_RUNTIME_UI_VERSION: u64 = 1;
 
 #[op2]
@@ -76,7 +75,11 @@ pub(super) fn op_clay_sdui_publish_tree(
     #[string] tree_json: String,
 ) -> Result<(), JsErrorBox> {
     let op_state = state.borrow::<Arc<ClayOpState>>();
-    let tree = runtime_tree_from_json(&tree_json, op_state.registered_command_ids())?;
+    let tree = runtime_tree_from_json(
+        &tree_json,
+        op_state.registered_command_ids(),
+        op_state.runtime_document_id(),
+    )?;
     op_state.publish_sdui_tree(tree);
     Ok(())
 }
@@ -84,6 +87,7 @@ pub(super) fn op_clay_sdui_publish_tree(
 fn runtime_tree_from_json(
     tree_json: &str,
     registered_command_ids: Vec<String>,
+    runtime_document_id: crate::protocol::DocumentId,
 ) -> Result<SduiTree, JsErrorBox> {
     let root = serde_json::from_str::<Value>(tree_json).map_err(|error| {
         sdui_error(format!(
@@ -100,8 +104,7 @@ fn runtime_tree_from_json(
         root_id,
         nodes: builder.nodes,
     };
-    sdui::validate_runtime_tree(&tree, DEFAULT_RUNTIME_DOCUMENT_ID)
-        .map_err(runtime_validation_error)?;
+    sdui::validate_runtime_tree(&tree, runtime_document_id).map_err(runtime_validation_error)?;
     Ok(tree)
 }
 

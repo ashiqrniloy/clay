@@ -37,6 +37,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `clay.decorations.serverPublishDecorations`
 - [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `clay.configuration.getConfigurationState`
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `clay.configuration.loadConfigurationModule`
+- [clientOpenFileDialog](reference/clay-js-api/documents/client-open-file-dialog.md) — `clay.documents.clientOpenFileDialog`
 - [serverGetDocumentLease](reference/clay-js-api/documents/server-get-document-lease.md) — `clay.documents.serverGetDocumentLease`
 - [serverGetDocumentSnapshot](reference/clay-js-api/documents/server-get-document-snapshot.md) — `clay.documents.serverGetDocumentSnapshot`
 - [serverGetDocumentStatus](reference/clay-js-api/documents/server-get-document-status.md) — `clay.documents.serverGetDocumentStatus`

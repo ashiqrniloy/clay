@@ -64,6 +64,73 @@ impl AppDriver for Driver {
                         }
                     });
             }
+            EditorAction::ClientUiCommand(command) => match handle_client_ui_command(&command) {
+                ClientUiCommandResult::None => {}
+                ClientUiCommandResult::ConnectionEvent(event) => {
+                    ctx.render_root(window_id)
+                        .edit_widget(widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let changed = editor.widget.apply_connection_event(event);
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
+                ClientUiCommandResult::SelectedFile(path) => {
+                    ctx.render_root(window_id)
+                        .edit_widget(widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let changed =
+                                    editor.widget.request_selected_file_open(path).is_some_and(
+                                        |event| editor.widget.apply_connection_event(event),
+                                    );
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
+            },
+        }
+    }
+}
+
+enum ClientUiCommandResult {
+    None,
+    ConnectionEvent(ClientConnectionEvent),
+    SelectedFile(PathBuf),
+}
+
+fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
+    match command.command_id.as_str() {
+        "clay.documents.clientOpenFileDialog" => client_open_file_dialog_result_to_command_result(
+            clay::client::open_markdown_file_dialog(),
+        ),
+        _ => ClientUiCommandResult::None,
+    }
+}
+
+fn client_open_file_dialog_result_to_command_result(
+    result: clay::client::FileDialogResult,
+) -> ClientUiCommandResult {
+    match result {
+        clay::client::FileDialogResult::Selected(path) => ClientUiCommandResult::SelectedFile(path),
+        clay::client::FileDialogResult::Cancelled => ClientUiCommandResult::None,
+        clay::client::FileDialogResult::Unsupported { message } => {
+            ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(
+                clay::protocol::RuntimeDiagnostic::error(
+                    "clay.client.file_dialog.unsupported",
+                    message,
+                ),
+            ))
+        }
+        clay::client::FileDialogResult::Failed { message } => {
+            ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(
+                clay::protocol::RuntimeDiagnostic::error("clay.client.file_dialog.failed", message),
+            ))
         }
     }
 }
@@ -997,11 +1064,13 @@ fn connection_event_user_event(
 mod tests {
     use std::{ffi::OsString, path::PathBuf};
 
+    #[cfg(not(windows))]
+    use super::handle_client_ui_command;
     use super::{
-        ClayCommand, FixtureKind, LaunchDiagnostic, LaunchReadinessFailure,
-        background_server_command, connect_with_retry, connect_with_retry_while,
-        connection_event_user_event, extract_profile_perf_flag, managed_server_command,
-        parse_command,
+        ClayCommand, ClientUiCommandResult, FixtureKind, LaunchDiagnostic, LaunchReadinessFailure,
+        background_server_command, client_open_file_dialog_result_to_command_result,
+        connect_with_retry, connect_with_retry_while, connection_event_user_event,
+        extract_profile_perf_flag, managed_server_command, parse_command,
     };
     use clay::client::{ClientBootstrapError, ClientConnectionEvent};
     use clay::editor::{EditorSurface, is_printable_text};
@@ -1304,6 +1373,66 @@ mod tests {
         assert!(diagnostic.contains("local fallback editor"));
         assert!(diagnostic.contains("TransportUnavailable"));
         assert!(diagnostic.contains(&endpoint.to_string()));
+    }
+
+    #[test]
+    fn file_dialog_cancellation_is_a_no_op() {
+        let result = client_open_file_dialog_result_to_command_result(
+            clay::client::FileDialogResult::Cancelled,
+        );
+
+        assert!(matches!(result, ClientUiCommandResult::None));
+    }
+
+    #[test]
+    fn file_dialog_result_conversion_reports_selected_and_sanitized_failures() {
+        let selected_path = PathBuf::from(r"C:\Users\tester\note.md");
+        let selected = client_open_file_dialog_result_to_command_result(
+            clay::client::FileDialogResult::Selected(selected_path.clone()),
+        );
+        assert!(
+            matches!(selected, ClientUiCommandResult::SelectedFile(path) if path == selected_path)
+        );
+
+        let unsupported = client_open_file_dialog_result_to_command_result(
+            clay::client::FileDialogResult::Unsupported {
+                message: "Windows only".to_string(),
+            },
+        );
+        assert!(matches!(
+            unsupported,
+            ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
+                if diagnostic.code == "clay.client.file_dialog.unsupported"
+                    && diagnostic.message == "Windows only"
+        ));
+
+        let failed = client_open_file_dialog_result_to_command_result(
+            clay::client::FileDialogResult::Failed {
+                message: "dialog failed".to_string(),
+            },
+        );
+        assert!(matches!(
+            failed,
+            ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
+                if diagnostic.code == "clay.client.file_dialog.failed"
+                    && diagnostic.message == "dialog failed"
+        ));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_client_open_file_dialog_command_reports_status_diagnostic() {
+        let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.documents.clientOpenFileDialog".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+
+        assert!(matches!(
+            result,
+            ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
+                if diagnostic.code == "clay.client.file_dialog.unsupported"
+                    && diagnostic.message.contains("Windows only")
+        ));
     }
 
     #[test]

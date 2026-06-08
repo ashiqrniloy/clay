@@ -76,6 +76,22 @@ impl ClientBehaviorState {
                     _ => RoutedBehavior::Unhandled,
                 }
             }
+            RoutingPolicy::ClientUiCommand => {
+                let authority = self
+                    .active
+                    .commands
+                    .iter()
+                    .find(|command| command.command_id == rule.command_id)
+                    .map(|command| command.authority.clone());
+                if authority == Some(CommandAuthority::ClientUi) {
+                    RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
+                        command_id: rule.command_id.clone(),
+                        routing_policy: rule.routing_policy.clone(),
+                    })
+                } else {
+                    RoutedBehavior::Unhandled
+                }
+            }
             RoutingPolicy::ServerFirst
             | RoutingPolicy::ServerFirstWithLock { .. }
             | RoutingPolicy::UiReactivePriority
@@ -131,6 +147,7 @@ fn tab_text(manifest: &BehaviorManifest) -> String {
 pub(crate) enum RoutedBehavior {
     ClientEdit(ClientLocalEdit),
     ServerIntent(ServerIntentRoute),
+    ClientUiCommand(ClientUiCommandRoute),
     Unhandled,
 }
 
@@ -147,6 +164,12 @@ pub(crate) struct ServerIntentRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientUiCommandRoute {
+    pub command_id: String,
+    pub routing_policy: RoutingPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AutocompleteTriggerRoute {
     pub(crate) trigger: String,
     pub(crate) routing_policy: RoutingPolicy,
@@ -155,8 +178,8 @@ pub(crate) struct AutocompleteTriggerRoute {
 #[cfg(test)]
 mod tests {
     use super::{
-        AutocompleteTriggerRoute, ClientBehaviorState, ClientLocalEdit, RoutedBehavior,
-        ServerIntentRoute,
+        AutocompleteTriggerRoute, ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute,
+        RoutedBehavior, ServerIntentRoute,
     };
     use crate::protocol::{
         BehaviorManifest, CommandDeclaration, KeyBindingContext, KeyBindingRule, KeyCode,
@@ -297,5 +320,58 @@ mod tests {
                 routing_policy: RoutingPolicy::ServerFirst,
             })
         );
+    }
+
+    #[test]
+    fn client_routes_open_file_dialog_as_client_ui_intent() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.commands.push(CommandDeclaration::client_ui(
+            "clay.documents.clientOpenFileDialog",
+            "Open File Dialog",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.documents.clientOpenFileDialog".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("o".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("o".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
+                command_id: "clay.documents.clientOpenFileDialog".to_string(),
+                routing_policy: RoutingPolicy::ClientUiCommand,
+            })
+        );
+    }
+
+    #[test]
+    fn open_file_dialog_binding_is_not_hard_coded() {
+        let state = ClientBehaviorState::new(BehaviorManifest::minimal_text_editing(1)).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("o".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(routed, RoutedBehavior::Unhandled);
     }
 }

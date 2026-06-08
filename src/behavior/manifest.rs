@@ -69,6 +69,7 @@ fn validate_command(command: &CommandDeclaration) -> Result<(), ManifestValidati
             | RoutingPolicy::Background,
             CommandAuthority::ServerIntent,
         ) => Ok(()),
+        (RoutingPolicy::ClientUiCommand, CommandAuthority::ClientUi) => Ok(()),
         _ => Err(ManifestValidationError::ExecutableOrSideEffectAuthority {
             command_id: command.command_id.clone(),
         }),
@@ -181,6 +182,7 @@ mod tests {
             RoutingPolicy::ServerFirstWithLock {
                 lock_scope: LockScope::Document,
             },
+            RoutingPolicy::ClientUiCommand,
             RoutingPolicy::UiReactivePriority,
             RoutingPolicy::Background,
         ];
@@ -192,6 +194,7 @@ mod tests {
                 RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck => {
                     CommandAuthority::BuiltInClientEdit
                 }
+                RoutingPolicy::ClientUiCommand => CommandAuthority::ClientUi,
                 _ => CommandAuthority::ServerIntent,
             };
             manifest.commands.push(CommandDeclaration {

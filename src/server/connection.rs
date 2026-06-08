@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -14,6 +17,7 @@ use crate::protocol::{
 use super::{
     behavior::ActiveBehaviorManifest,
     document::DocumentState,
+    js_runtime::ClayJsRuntimeService,
     sdui::{StaticSduiState, sdui_action_response},
     workspace::{WorkspaceError, WorkspaceState},
 };
@@ -197,6 +201,23 @@ where
                         .await?;
                 }
             }
+            ClientMessage::OpenSelectedFile {
+                client_id,
+                selected_path,
+            } => {
+                let response =
+                    open_selected_file_response(&workspace, selected_path, client_id).await;
+                codec.write_server_message(&mut stream, &response).await?;
+                if let ServerMessage::DocumentOpened { metadata, text } = &response {
+                    let messages = selected_file_open_followup_messages(
+                        client_id, metadata, text, &behavior, &sdui,
+                    )
+                    .await;
+                    for message in messages {
+                        codec.write_server_message(&mut stream, &message).await?;
+                    }
+                }
+            }
             ClientMessage::SaveDocument {
                 client_id: _,
                 document_id,
@@ -360,6 +381,37 @@ async fn open_document_response(
     }
 }
 
+async fn open_selected_file_response(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    selected_path: String,
+    client_id: ClientId,
+) -> ServerMessage {
+    let opened = match workspace
+        .lock()
+        .await
+        .open_selected_file(std::path::PathBuf::from(&selected_path), client_id)
+        .await
+    {
+        Ok(opened) => opened,
+        Err(error) => return file_operation_failed(error, None, None),
+    };
+
+    let document = opened.document.lock().await;
+    let metadata = DocumentMetadata {
+        document_id: opened.document_id,
+        version: document.version(),
+        lease_id: opened.access.lease_id(),
+        access: opened.access,
+        dirty: document.is_dirty(),
+        workspace_root_id: opened.file_state.workspace_root_id(),
+        path: opened.file_state.display_path(),
+    };
+    ServerMessage::DocumentOpened {
+        metadata,
+        text: document.text(),
+    }
+}
+
 async fn save_document_response(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
@@ -444,6 +496,207 @@ fn file_operation_failed(
     }
 }
 
+async fn selected_file_open_followup_messages(
+    client_id: ClientId,
+    metadata: &DocumentMetadata,
+    text: &str,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+) -> Vec<ServerMessage> {
+    if !is_markdown_path(&metadata.path) || !markdown_package_is_loaded(behavior).await {
+        return vec![behavior.lock().await.manifest_message()];
+    }
+
+    match evaluate_markdown_open(metadata, text).await {
+        Ok(evaluation) => {
+            let mut messages = Vec::new();
+            if let Some(manifest) = evaluation.behavior_manifest {
+                match behavior.lock().await.publish_replacement(manifest.clone()) {
+                    Ok(installed) => messages.push(ServerMessage::BehaviorManifest(installed)),
+                    Err(_) => {
+                        messages.push(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                            "clay.markdown.invalid_open_manifest",
+                            "Markdown behavior manifest for the opened document failed validation.",
+                        )))
+                    }
+                }
+            } else {
+                messages.push(behavior.lock().await.manifest_message());
+            }
+
+            if let Some(set) = evaluation.published_decoration_set {
+                messages.push(ServerMessage::DecorationSet(set));
+            }
+
+            if let Some(tree) = evaluation.published_sdui_tree {
+                match sdui
+                    .lock()
+                    .await
+                    .replace_for_document_with_runtime_tree(metadata.document_id, tree.clone())
+                {
+                    Ok(()) => messages.push(ServerMessage::SduiSnapshot { client_id, tree }),
+                    Err(_) => {
+                        messages.push(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                            "clay.markdown.invalid_open_sdui",
+                            "Markdown status UI for the opened document failed validation.",
+                        )))
+                    }
+                }
+            }
+            messages
+        }
+        Err(error) => vec![
+            behavior.lock().await.manifest_message(),
+            ServerMessage::RuntimeDiagnostic(error.diagnostic()),
+        ],
+    }
+}
+
+async fn markdown_package_is_loaded(behavior: &Arc<Mutex<ActiveBehaviorManifest>>) -> bool {
+    behavior
+        .lock()
+        .await
+        .manifest()
+        .commands
+        .iter()
+        .any(|command| command.command_id.starts_with("markdown."))
+}
+
+fn is_markdown_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "md" | "markdown" | "mdown"
+            )
+        })
+        .unwrap_or(false)
+}
+
+async fn evaluate_markdown_open(
+    metadata: &DocumentMetadata,
+    text: &str,
+) -> Result<super::js_runtime::ClayRuntimeEvaluation, super::js_runtime::ClayRuntimeError> {
+    let config_root = create_markdown_open_runtime_root(metadata, text)?;
+    let result = ClayJsRuntimeService::default()
+        .load_configuration_from_root_for_document(config_root.clone(), metadata.document_id)
+        .await;
+    let _ = std::fs::remove_dir_all(config_root);
+    result
+}
+
+fn create_markdown_open_runtime_root(
+    metadata: &DocumentMetadata,
+    text: &str,
+) -> Result<PathBuf, super::js_runtime::ClayRuntimeError> {
+    let config_root = unique_markdown_open_runtime_root();
+    std::fs::create_dir_all(&config_root)
+        .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
+    let dist_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("packages")
+        .join("markdown")
+        .join("dist");
+    for file_name in ["index.js", "load.js", "parser.js", "sdui.js"] {
+        std::fs::copy(dist_root.join(file_name), config_root.join(file_name))
+            .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
+    }
+
+    let (window_text, window_byte_end) = bounded_utf8_prefix(text, 64 * 1024);
+    let init_source =
+        markdown_open_init_source(metadata, text.len() as u64, window_text, window_byte_end);
+    std::fs::write(config_root.join("init.js"), init_source)
+        .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
+    Ok(config_root)
+}
+
+fn unique_markdown_open_runtime_root() -> PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "clay-markdown-open-runtime-{}-{unique}",
+        std::process::id()
+    ))
+}
+
+fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
+    if text.len() <= max_bytes {
+        return (text, text.len() as u64);
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], end as u64)
+}
+
+fn markdown_open_init_source(
+    metadata: &DocumentMetadata,
+    document_byte_length: u64,
+    window_text: &str,
+    window_byte_end: u64,
+) -> String {
+    let document_id = metadata.document_id;
+    let document_version = metadata.version;
+    let document_path = serde_json::to_string(&metadata.path).expect("path serializes");
+    let window_text = serde_json::to_string(window_text).expect("text serializes");
+    format!(
+        r#"
+import * as commands from "clay:commands";
+import * as decorations from "clay:decorations";
+import * as modes from "clay:modes";
+import * as packages from "clay:packages";
+import * as parse from "clay:parse";
+import * as sdui from "clay:sdui";
+import {{ getActiveBehaviorManifest }} from "clay:behavior";
+import {{ loadMarkdownPackage }} from "./load.js";
+import {{ publishMarkdownDecorations }} from "./parser.js";
+import {{ publishMarkdownPreviewStatus }} from "./sdui.js";
+
+const clay = {{ commands, decorations, modes, packages, parse, sdui }};
+const documentId = {document_id};
+const documentVersion = {document_version};
+const documentPath = {document_path};
+const windowText = {window_text};
+const documentByteLength = {document_byte_length};
+const viewport = {{ byteStart: 0, byteEnd: {window_byte_end} }};
+
+await loadMarkdownPackage(clay, {{ documentId, path: documentPath }});
+const manifest = getActiveBehaviorManifest(documentId);
+const behaviorVersion = Number(manifest.behaviorVersion ?? manifest.behavior_version ?? manifest.version ?? 2);
+await publishMarkdownDecorations(clay, {{
+  documentId,
+  documentVersion,
+  currentDocumentVersion: documentVersion,
+  behaviorVersion,
+  documentByteLength,
+  fileSizeBytes: documentByteLength,
+  viewport,
+  parseWindows: [{{
+    documentId,
+    documentVersion,
+    packagePrefix: "markdown",
+    mode: "markdown",
+    byteStart: 0,
+    byteEnd: {window_byte_end},
+    baseLine: 0,
+    text: windowText
+  }}]
+}});
+await publishMarkdownPreviewStatus(clay, {{
+  documentId,
+  documentVersion,
+  documentPath,
+  documentByteLength,
+  fileSizeBytes: documentByteLength
+}});
+"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf, sync::Arc, time::SystemTime};
@@ -478,9 +731,9 @@ mod tests {
     }
     use crate::{
         protocol::{
-            BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
-            EditRejection, FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiNodeKind,
-            ServerMessage, codec::Codec,
+            BehaviorManifest, ClientMessage, CommandDeclaration, DecorationKind, DocumentAccess,
+            DocumentMetadata, EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION,
+            RuntimeDiagnostic, SduiNodeKind, ServerMessage, codec::Codec,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState, sdui::StaticSduiState,
@@ -1140,6 +1393,266 @@ mod tests {
         drop(client);
         server_task.await.unwrap().unwrap();
         let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn selected_markdown_file_publishes_manifest_decorations_and_status() {
+        let root = temp_workspace("selected-markdown-runtime");
+        let selected = root.join("note.md");
+        fs::write(
+            &selected,
+            "# Opened note\n\n- item with `code`\n\n**strong** and *emphasis*\n",
+        )
+        .unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        workspace_state_value.reserve_document_ids_from(2);
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+
+        let mut loaded_markdown_manifest = BehaviorManifest::minimal_text_editing(7);
+        loaded_markdown_manifest
+            .commands
+            .push(CommandDeclaration::server_intent(
+                "markdown.togglePreview",
+                "Toggle Markdown Preview",
+            ));
+        let behavior = Arc::new(Mutex::new(
+            ActiveBehaviorManifest::new(loaded_markdown_manifest).unwrap(),
+        ));
+
+        let (client, server) = duplex(16 * 1024 * 1024);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            sdui_state(),
+            runtime_diagnostics(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::OpenSelectedFile {
+                    client_id: 99,
+                    selected_path: selected.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::DocumentOpened { metadata, text } => {
+                assert_eq!(metadata.document_id, 2);
+                assert_eq!(metadata.path, "note.md");
+                assert_eq!(
+                    text,
+                    "# Opened note\n\n- item with `code`\n\n**strong** and *emphasis*\n"
+                );
+            }
+            message => panic!("expected selected Markdown DocumentOpened, got {message:?}"),
+        }
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => {
+                assert_eq!(manifest.manifest_id, "markdown.markdown");
+                assert!(
+                    manifest
+                        .commands
+                        .iter()
+                        .any(|command| { command.command_id == "markdown.togglePreview" })
+                );
+            }
+            message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
+        }
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::DecorationSet(set) => {
+                assert_eq!(set.document_id, 2);
+                assert!(set.spans.iter().any(|span| {
+                    span.kind == DecorationKind::Syntax && span.style_token == "markup.heading.1"
+                }));
+                assert!(set.spans.iter().any(|span| {
+                    span.kind == DecorationKind::Syntax && span.style_token == "markup.list-marker"
+                }));
+                assert!(set.spans.iter().any(|span| {
+                    span.kind == DecorationKind::Syntax && span.style_token == "markup.inline-code"
+                }));
+            }
+            message => panic!("expected Markdown DecorationSet, got {message:?}"),
+        }
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::SduiSnapshot { tree, .. } => {
+                assert!(tree.nodes.iter().any(|node| matches!(
+                    &node.kind,
+                    SduiNodeKind::Panel { title, .. } if title == "Markdown Preview"
+                )));
+                assert!(tree.nodes.iter().any(|node| matches!(
+                    &node.kind,
+                    SduiNodeKind::Label { text } if text == "Mode: markdown"
+                )));
+            }
+            message => panic!("expected Markdown SDUI snapshot, got {message:?}"),
+        }
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(selected);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn markdown_open_runtime_uses_bounded_parse_window_for_large_file() {
+        let mut text = "# Top\n\n".to_string();
+        text.push_str(&"a".repeat(80 * 1024));
+        text.push_str("\n# Outside initial window\n");
+        let metadata = DocumentMetadata {
+            document_id: 1,
+            version: 1,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: 1,
+            path: "large.md".to_string(),
+        };
+
+        let evaluation = super::evaluate_markdown_open(&metadata, &text)
+            .await
+            .expect("Markdown open runtime should evaluate");
+        let set = evaluation
+            .published_decoration_set
+            .expect("Markdown decorations should publish");
+
+        assert_eq!(set.document_id, 1);
+        assert_eq!(set.viewport_byte_start, 0);
+        assert_eq!(set.viewport_byte_end, 64 * 1024);
+        assert!(set.spans.iter().all(|span| span.byte_end <= 64 * 1024));
+        assert!(
+            set.spans
+                .iter()
+                .any(|span| span.style_token == "markup.heading.1" && span.byte_start == 0)
+        );
+        assert!(!set.spans.iter().any(|span| span.byte_start > 64 * 1024));
+    }
+
+    #[tokio::test]
+    async fn connection_open_selected_file_sends_snapshot_and_single_file_grant() {
+        let root = temp_workspace("selected-dispatch");
+        let selected = root.join("note.md");
+        let sibling = root.join("sibling.md");
+        fs::write(&selected, "# selected\n").unwrap();
+        fs::write(&sibling, "# sibling\n").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            Arc::clone(&workspace),
+            sdui_state(),
+            runtime_diagnostics(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::OpenSelectedFile {
+                    client_id: 99,
+                    selected_path: selected.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let selected_root_id = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::DocumentOpened { metadata, text } => {
+                assert_eq!(metadata.document_id, 1);
+                assert_eq!(metadata.version, 1);
+                assert_eq!(metadata.access, DocumentAccess::Editable { lease_id: 1 });
+                assert_eq!(metadata.path, "note.md");
+                assert_eq!(text, "# selected\n");
+                metadata.workspace_root_id
+            }
+            message => panic!("expected selected DocumentOpened, got {message:?}"),
+        };
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))
+        );
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::OpenDocument {
+                    client_id: 99,
+                    workspace_root_id: selected_root_id,
+                    path: sibling.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::OutsideRoot,
+                workspace_root_id: Some(id),
+                document_id: None,
+                ..
+            } if id == selected_root_id
+        ));
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(selected);
+        let _ = fs::remove_file(sibling);
         let _ = fs::remove_dir(root);
     }
 

@@ -15,7 +15,7 @@ The protocol module defines the shared client/server IPC message contract. It us
 
 - Represent handshake messages: `Hello`, `Welcome`, `InitialDocument`, inert behavior manifests, document access, edit deltas/intents, acknowledgements, transactions, and errors.
 - Represent Phase 5 synchronization metadata: client IDs, editable lease IDs, base document versions, behavior versions, confirmed server versions, stale-edit/read-only/lease/region-lock rejections, and resync snapshots.
-- Represent Phase 9 file/workspace commands and results: open, save, reload, status, list, document metadata, and typed file-operation failures.
+- Represent Phase 9/19 file/workspace commands and results: workspace-root open, selected-file open, save, reload, status, list, document metadata, and typed file-operation failures.
 - Represent Phase 12 SDUI bootstrap/update/action messages: `SduiSnapshot`, `SduiUpdate`, and `SduiAction`.
 - Represent Phase 13 runtime diagnostics with severity, stable code, and sanitized message fields.
 - Represent Phase 18 handoff decoration updates as bounded `DecorationSet` messages.
@@ -30,7 +30,7 @@ The protocol module defines the shared client/server IPC message contract. It us
 
 `DocumentAccess::Editable { lease_id }` records the editable lease in the access state, while read-only observers use `DocumentAccess::ReadOnly`. Region-lock conflicts are described by `RegionLockConflict` and `LockOwner` metadata so later UI/AI phases can explain why an overlapping edit was rejected without granting AI, extension, file, shell, or network authority.
 
-Phase 9 adds server-first file/workspace variants. `ClientMessage::OpenDocument`, `SaveDocument`, `ReloadDocument`, `GetDocumentStatus`, and `ListDocuments` carry client/document/workspace IDs and relative paths for server validation. `ServerMessage::DocumentOpened` and `DocumentReloaded` are the only file/workspace success responses that carry full text snapshots; `DocumentSaved`, `DocumentStatus`, and `DocumentList` carry metadata only. `ServerMessage::FileOperationFailed` uses `FileErrorCode` so callers can branch on stable errors such as `NotFound`, `OutsideRoot`, `InvalidUtf8`, `PermissionDenied`, `UnsupportedFileType`, `DirtyDocument`, and `StaleFileMetadata` without string matching.
+Phase 9 adds server-first file/workspace variants. `ClientMessage::OpenDocument`, `SaveDocument`, `ReloadDocument`, `GetDocumentStatus`, and `ListDocuments` carry client/document/workspace IDs and relative paths for server validation. Phase 19 adds `ClientMessage::OpenSelectedFile { client_id, selected_path }` for explicit user-selected native dialog results; the server still canonicalizes and validates the path before opening it. `ServerMessage::DocumentOpened` and `DocumentReloaded` are the only file/workspace success responses that carry full text snapshots; `DocumentSaved`, `DocumentStatus`, and `DocumentList` carry metadata only. `ServerMessage::FileOperationFailed` uses `FileErrorCode` so callers can branch on stable errors such as `NotFound`, `OutsideRoot`, `InvalidUtf8`, `PermissionDenied`, `UnsupportedFileType`, `DirtyDocument`, and `StaleFileMetadata` without string matching.
 
 Phase 12 adds SDUI protocol variants without a second serialization path. `ServerMessage::SduiSnapshot` carries a validated static `SduiTree` after bootstrap, `ServerMessage::SduiUpdate` carries bounded tree operations with base/new UI versions, and `ClientMessage::SduiAction` carries an inert action intent back to the server. Editor views bind by document ID/version; SDUI messages do not include full document text.
 
@@ -61,7 +61,7 @@ let message = codec.decode_client_message(&frame)?;
 - `DEFAULT_MAX_FRAME_SIZE` is 1 MiB to prevent accidental unbounded allocation from malformed IPC frames.
 - The 4-byte frame prefix is not part of the archived payload, so decode realigns payload bytes before validation.
 - Behavior manifests are inert declarations of built-in behavior and do not execute JavaScript, WASM, extensions, commands, or filesystem/network operations.
-- File/workspace protocol messages carry workspace-relative display paths and typed error codes; server-side workspace validation remains the authority for canonical host paths.
+- File/workspace protocol messages carry workspace-relative or selected-file display paths and typed error codes; server-side workspace validation remains the authority for canonical host paths and selected-file grants.
 - SDUI protocol messages are inert declarative state or server-routed action intents; validation lives in server helpers, while codec validation remains byte/frame focused.
 - Decoration protocol messages are inert span data; decoration validation lives in `src/server/decorations.rs`, while codec validation remains byte/frame focused.
 - Parse protocol shapes are inert server-side data; parse validation/scheduling lives in `src/server/parse_coordinator.rs`, and parse results are not sent over the hot edit-ack path.
@@ -69,7 +69,7 @@ let message = codec.decode_client_message(&frame)?;
 
 ## Tests
 
-- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, region-lock rejection metadata, file/workspace commands, workspace result messages, typed file-operation failures, SDUI snapshot/update/action messages, and runtime diagnostic messages.
+- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, region-lock rejection metadata, file/workspace commands including `OpenSelectedFile`, workspace result messages, typed file-operation failures, SDUI snapshot/update/action messages, and runtime diagnostic messages.
 - `tests/decoration_transport.rs::decoration_transport_round_trips_through_protocol_codec`: verifies `ServerMessage::DecorationSet` uses the shared codec boundary.
 - `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, and invalid server/manifest archived bytes.
 - Relevant command: `cargo test protocol`.

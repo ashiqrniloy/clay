@@ -29,7 +29,13 @@ pub(crate) type WorkspaceRootId = u64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceRoot {
     id: WorkspaceRootId,
-    canonical_path: PathBuf,
+    authority: WorkspaceAuthority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkspaceAuthority {
+    Directory { canonical_path: PathBuf },
+    SingleFile { canonical_path: PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,7 +160,13 @@ impl WorkspaceState {
 
         let id = self.next_root_id;
         self.next_root_id = self.next_root_id.saturating_add(1);
-        self.roots.insert(id, WorkspaceRoot { id, canonical_path });
+        self.roots.insert(
+            id,
+            WorkspaceRoot {
+                id,
+                authority: WorkspaceAuthority::Directory { canonical_path },
+            },
+        );
         Ok(id)
     }
 
@@ -162,14 +174,18 @@ impl WorkspaceState {
         let mut roots = self
             .roots
             .values()
-            .map(|root| WorkspaceRootMetadata {
-                workspace_root_id: root.id,
-                display_name: root
-                    .canonical_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| root.canonical_path.to_string_lossy().into_owned()),
-                display_path: display_authorized_path(&root.canonical_path),
+            .filter_map(|root| {
+                let WorkspaceAuthority::Directory { canonical_path } = &root.authority else {
+                    return None;
+                };
+                Some(WorkspaceRootMetadata {
+                    workspace_root_id: root.id,
+                    display_name: canonical_path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| canonical_path.to_string_lossy().into_owned()),
+                    display_path: display_authorized_path(canonical_path),
+                })
             })
             .collect::<Vec<_>>();
         roots.sort_by_key(|root| root.workspace_root_id);
@@ -197,6 +213,42 @@ impl WorkspaceState {
             path: file_state.workspace_relative_path.clone(),
             source,
         })?;
+        self.register_canonical_file(file_state, text, client_id)
+            .await
+    }
+
+    pub(crate) async fn open_selected_file(
+        &mut self,
+        selected_path: impl AsRef<Path>,
+        client_id: ClientId,
+    ) -> Result<OpenDocumentLease, WorkspaceError> {
+        let selected_path = selected_path.as_ref();
+        let (canonical_path, metadata, display_path) = canonical_selected_file(selected_path)?;
+        if let Some(existing) = self
+            .existing_document_lease_by_canonical_path(&canonical_path, client_id)
+            .await
+        {
+            return Ok(existing);
+        }
+
+        let bytes = tokio_fs::read(&canonical_path).await.map_err(|source| {
+            WorkspaceError::FileUnavailable {
+                path: selected_path.to_path_buf(),
+                source,
+            }
+        })?;
+        let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
+            path: selected_path.to_path_buf(),
+            source,
+        })?;
+
+        let root_id = self.add_single_file_grant(canonical_path.clone());
+        let file_state = FileDocumentState {
+            workspace_root_id: root_id,
+            canonical_path,
+            workspace_relative_path: display_path,
+            last_known_metadata: metadata,
+        };
         self.register_canonical_file(file_state, text, client_id)
             .await
     }
@@ -375,10 +427,16 @@ impl WorkspaceState {
         file_state: &FileDocumentState,
         client_id: ClientId,
     ) -> Option<OpenDocumentLease> {
-        let document_id = self
-            .path_to_document
-            .get(&file_state.canonical_path)
-            .copied()?;
+        self.existing_document_lease_by_canonical_path(&file_state.canonical_path, client_id)
+            .await
+    }
+
+    async fn existing_document_lease_by_canonical_path(
+        &self,
+        canonical_path: &Path,
+        client_id: ClientId,
+    ) -> Option<OpenDocumentLease> {
+        let document_id = self.path_to_document.get(canonical_path).copied()?;
         let open_document = self
             .documents
             .get(&document_id)
@@ -394,6 +452,19 @@ impl WorkspaceState {
             file_state: open_document.file_state.clone(),
             document: Arc::clone(&open_document.document),
         })
+    }
+
+    fn add_single_file_grant(&mut self, canonical_path: PathBuf) -> WorkspaceRootId {
+        let id = self.next_root_id;
+        self.next_root_id = self.next_root_id.saturating_add(1);
+        self.roots.insert(
+            id,
+            WorkspaceRoot {
+                id,
+                authority: WorkspaceAuthority::SingleFile { canonical_path },
+            },
+        );
+        id
     }
 
     async fn register_canonical_file(
@@ -434,35 +505,76 @@ impl WorkspaceState {
             .roots
             .get(&root_id)
             .ok_or(WorkspaceError::UnknownRoot { root_id })?;
-        let joined = if file_path.is_absolute() {
-            file_path.to_path_buf()
-        } else {
-            root.canonical_path.join(file_path)
-        };
-        let canonical_path =
-            fs::canonicalize(&joined).map_err(|source| WorkspaceError::FileUnavailable {
-                path: file_path.to_path_buf(),
-                source,
-            })?;
-        if !canonical_path.starts_with(&root.canonical_path) {
-            return Err(WorkspaceError::OutsideRoot);
+        match &root.authority {
+            WorkspaceAuthority::Directory {
+                canonical_path: root_path,
+            } => {
+                let joined = if file_path.is_absolute() {
+                    file_path.to_path_buf()
+                } else {
+                    root_path.join(file_path)
+                };
+                let canonical_path = fs::canonicalize(&joined).map_err(|source| {
+                    WorkspaceError::FileUnavailable {
+                        path: file_path.to_path_buf(),
+                        source,
+                    }
+                })?;
+                if !canonical_path.starts_with(root_path) {
+                    return Err(WorkspaceError::OutsideRoot);
+                }
+                let metadata = fs::metadata(&canonical_path).map_err(|source| {
+                    WorkspaceError::FileUnavailable {
+                        path: file_path.to_path_buf(),
+                        source,
+                    }
+                })?;
+                validate_regular_file_metadata(&metadata)?;
+                let relative_path = canonical_path
+                    .strip_prefix(root_path)
+                    .map_err(|_| WorkspaceError::OutsideRoot)?
+                    .to_path_buf();
+                Ok(FileDocumentState {
+                    workspace_root_id: root_id,
+                    canonical_path,
+                    workspace_relative_path: relative_path,
+                    last_known_metadata: FileMetadata::from_fs_metadata(&metadata),
+                })
+            }
+            WorkspaceAuthority::SingleFile {
+                canonical_path: granted_path,
+            } => {
+                let requested = if file_path.is_absolute() {
+                    file_path.to_path_buf()
+                } else {
+                    granted_path
+                        .parent()
+                        .map_or_else(|| file_path.to_path_buf(), |parent| parent.join(file_path))
+                };
+                let canonical_path = fs::canonicalize(&requested).map_err(|source| {
+                    WorkspaceError::FileUnavailable {
+                        path: file_path.to_path_buf(),
+                        source,
+                    }
+                })?;
+                if canonical_path != *granted_path {
+                    return Err(WorkspaceError::OutsideRoot);
+                }
+                let metadata = fs::metadata(&canonical_path).map_err(|source| {
+                    WorkspaceError::FileUnavailable {
+                        path: file_path.to_path_buf(),
+                        source,
+                    }
+                })?;
+                validate_regular_file_metadata(&metadata)?;
+                Ok(FileDocumentState {
+                    workspace_root_id: root_id,
+                    workspace_relative_path: selected_file_display_path(&canonical_path),
+                    canonical_path,
+                    last_known_metadata: FileMetadata::from_fs_metadata(&metadata),
+                })
+            }
         }
-        let metadata =
-            fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
-                path: file_path.to_path_buf(),
-                source,
-            })?;
-        validate_regular_file_metadata(&metadata)?;
-        let relative_path = canonical_path
-            .strip_prefix(&root.canonical_path)
-            .map_err(|_| WorkspaceError::OutsideRoot)?
-            .to_path_buf();
-        Ok(FileDocumentState {
-            workspace_root_id: root_id,
-            canonical_path,
-            workspace_relative_path: relative_path,
-            last_known_metadata: FileMetadata::from_fs_metadata(&metadata),
-        })
     }
 
     fn reauthorize_open_file(
@@ -486,8 +598,21 @@ impl WorkspaceState {
                     source,
                 }
             })?;
-        if !canonical_path.starts_with(&root.canonical_path) {
-            return Err(WorkspaceError::OutsideRoot);
+        match &root.authority {
+            WorkspaceAuthority::Directory {
+                canonical_path: root_path,
+            } => {
+                if !canonical_path.starts_with(root_path) {
+                    return Err(WorkspaceError::OutsideRoot);
+                }
+            }
+            WorkspaceAuthority::SingleFile {
+                canonical_path: granted_path,
+            } => {
+                if canonical_path != *granted_path {
+                    return Err(WorkspaceError::OutsideRoot);
+                }
+            }
         }
         let metadata =
             fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
@@ -500,6 +625,10 @@ impl WorkspaceState {
 }
 
 impl FileDocumentState {
+    pub(crate) fn workspace_root_id(&self) -> WorkspaceRootId {
+        self.workspace_root_id
+    }
+
     pub(crate) fn display_path(&self) -> String {
         self.workspace_relative_path
             .to_string_lossy()
@@ -532,6 +661,34 @@ impl FileMetadata {
             modified: metadata.modified().ok(),
         }
     }
+}
+
+fn canonical_selected_file(
+    selected_path: &Path,
+) -> Result<(PathBuf, FileMetadata, PathBuf), WorkspaceError> {
+    let canonical_path =
+        fs::canonicalize(selected_path).map_err(|source| WorkspaceError::FileUnavailable {
+            path: selected_path.to_path_buf(),
+            source,
+        })?;
+    let metadata =
+        fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
+            path: selected_path.to_path_buf(),
+            source,
+        })?;
+    validate_regular_file_metadata(&metadata)?;
+    Ok((
+        canonical_path.clone(),
+        FileMetadata::from_fs_metadata(&metadata),
+        selected_file_display_path(&canonical_path),
+    ))
+}
+
+fn selected_file_display_path(canonical_path: &Path) -> PathBuf {
+    canonical_path
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("selected-file"))
 }
 
 fn validate_regular_file_metadata(metadata: &fs::Metadata) -> Result<(), WorkspaceError> {
@@ -896,6 +1053,86 @@ mod tests {
         assert!(workspace.path_to_document.is_empty());
 
         let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn selected_file_open_grants_only_the_selected_file() {
+        let root = temp_workspace("selected-single-grant");
+        let selected = root.join("note.md");
+        let sibling = root.join("sibling.md");
+        fs::write(&selected, "# selected\n").unwrap();
+        fs::write(&sibling, "# sibling\n").unwrap();
+        let mut workspace = WorkspaceState::new();
+
+        let opened = workspace.open_selected_file(&selected, 1).await.unwrap();
+
+        assert_eq!(opened.document_id, 1);
+        assert_eq!(
+            opened.file_state.workspace_relative_path,
+            PathBuf::from("note.md")
+        );
+        assert_eq!(opened.access, DocumentAccess::Editable { lease_id: 1 });
+        assert!(workspace.list_root_metadata().is_empty());
+
+        let sibling_error = workspace
+            .open_existing_file(opened.file_state.workspace_root_id, &sibling, 2)
+            .await
+            .unwrap_err();
+        assert!(matches!(sibling_error, WorkspaceError::OutsideRoot));
+
+        let duplicate = workspace.open_selected_file(&selected, 2).await.unwrap();
+        assert_eq!(duplicate.document_id, opened.document_id);
+        assert_eq!(duplicate.access, DocumentAccess::ReadOnly);
+
+        let _ = fs::remove_file(selected);
+        let _ = fs::remove_file(sibling);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn selected_file_open_rejects_directory_and_invalid_utf8_without_document_entry() {
+        let root = temp_workspace("selected-rejections");
+        let directory = root.join("folder");
+        let invalid = root.join("bad.md");
+        fs::create_dir(&directory).unwrap();
+        fs::write(&invalid, [0xff, 0xfe, b'x']).unwrap();
+        let mut workspace = WorkspaceState::new();
+
+        let directory_error = workspace
+            .open_selected_file(&directory, 1)
+            .await
+            .unwrap_err();
+        let invalid_error = workspace.open_selected_file(&invalid, 1).await.unwrap_err();
+
+        assert!(matches!(directory_error, WorkspaceError::DirectoryOpen));
+        assert!(matches!(invalid_error, WorkspaceError::InvalidUtf8 { .. }));
+        assert!(workspace.documents.is_empty());
+        assert!(workspace.path_to_document.is_empty());
+        assert!(workspace.list_root_metadata().is_empty());
+
+        let _ = fs::remove_file(invalid);
+        let _ = fs::remove_dir(directory);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn selected_file_open_rejects_special_file_without_document_entry() {
+        let root = temp_workspace("selected-special-file");
+        let socket = root.join("document.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut workspace = WorkspaceState::new();
+
+        let error = workspace.open_selected_file(&socket, 1).await.unwrap_err();
+
+        assert!(matches!(error, WorkspaceError::UnsupportedFileType));
+        assert!(workspace.documents.is_empty());
+        assert!(workspace.path_to_document.is_empty());
+        assert!(workspace.list_root_metadata().is_empty());
+
+        drop(listener);
+        let _ = fs::remove_file(socket);
         let _ = fs::remove_dir(root);
     }
 

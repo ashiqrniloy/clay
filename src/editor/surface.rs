@@ -5,7 +5,7 @@ use masonry::kurbo::{Affine, Circle, Point, Rect};
 use masonry::peniko::{Color, Fill};
 
 use crate::client::behavior::{
-    ClientBehaviorState, ClientLocalEdit, RoutedBehavior, ServerIntentRoute,
+    ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, RoutedBehavior, ServerIntentRoute,
 };
 use crate::perf::{
     budgets::{DECORATION_NEAR_VIEWPORT_GUARD_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
@@ -86,6 +86,7 @@ pub struct EditorCommandOutcome {
 pub(crate) struct EditorKeyOutcome {
     pub(crate) command_outcome: EditorCommandOutcome,
     pub(crate) server_intent: Option<ServerIntentRoute>,
+    pub(crate) client_ui_command: Option<ClientUiCommandRoute>,
 }
 
 impl EditorKeyOutcome {
@@ -93,6 +94,7 @@ impl EditorKeyOutcome {
         Self {
             command_outcome,
             server_intent: None,
+            client_ui_command: None,
         }
     }
 
@@ -100,6 +102,15 @@ impl EditorKeyOutcome {
         Self {
             command_outcome: EditorCommandOutcome::unchanged(),
             server_intent: Some(server_intent),
+            client_ui_command: None,
+        }
+    }
+
+    fn client_ui(client_ui_command: ClientUiCommandRoute) -> Self {
+        Self {
+            command_outcome: EditorCommandOutcome::unchanged(),
+            server_intent: None,
+            client_ui_command: Some(client_ui_command),
         }
     }
 
@@ -361,6 +372,7 @@ impl EditorSurface {
                 EditorKeyOutcome::client(self.insert_newline_with_event())
             }
             RoutedBehavior::ServerIntent(intent) => EditorKeyOutcome::server(intent),
+            RoutedBehavior::ClientUiCommand(command) => EditorKeyOutcome::client_ui(command),
             RoutedBehavior::Unhandled => EditorKeyOutcome::unhandled(),
         }
     }
@@ -1165,7 +1177,7 @@ mod tests {
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
         BehaviorManifest, CommandDeclaration, DocumentAccess, EditOperation, KeyBindingContext,
-        KeyBindingRule, KeyCode, KeyStroke, RoutingPolicy, TabMode,
+        KeyBindingRule, KeyCode, KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
     };
 
     fn generated_lines(line_count: usize) -> String {
@@ -1333,6 +1345,51 @@ mod tests {
         assert!(!outcome.command_outcome.changed);
         assert_eq!(editor.visible_text(), "");
         assert_eq!(outcome.server_intent.unwrap().command_id, "workspace.save");
+    }
+
+    #[test]
+    fn editor_routes_client_ui_command_without_local_mutation() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.commands.push(CommandDeclaration::client_ui(
+            "clay.documents.clientOpenFileDialog",
+            "Open File Dialog",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.documents.clientOpenFileDialog".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("o".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        editor.install_behavior_manifest(manifest);
+
+        let outcome = editor.route_key_with_event(&KeyStroke {
+            key: KeyCode::Character("o".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert!(!outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "");
+        assert_eq!(outcome.server_intent, None);
+        assert_eq!(
+            outcome.client_ui_command.unwrap().command_id,
+            "clay.documents.clientOpenFileDialog"
+        );
     }
 
     #[test]

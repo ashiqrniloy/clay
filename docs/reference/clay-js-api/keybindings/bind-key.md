@@ -63,18 +63,20 @@ Use this API when JavaScript configuration, extensions, or future Clay automatio
 import { bindKey } from "clay:keybindings";
 
 bindKey("Ctrl+I", "clay.editor.serverInsertText", { scope: "editor" });
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
 ## Example
 
 ```ts
-bindKey("Ctrl+I", "clay.editor.serverInsertText", { scope: "editor" });
+// Configure the Phase 19 native file-open dialog route from ~/.config/clay/init.js.
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
 ## Options
 
 - `key` (`string`): Key chord, for example `"Ctrl+I"`.
-- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"clay.editor.serverInsertText"`; future extension commands must be registered and permissioned before they can be bound.
+- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"clay.editor.serverInsertText"` or `"clay.documents.clientOpenFileDialog"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 
@@ -103,7 +105,7 @@ The runtime fails if arguments are malformed, the referenced document or editor 
 
 No additional permission is required beyond access to the running editor session.
 
-May bind only documented Clay command/API IDs unless a future permissioned extension command is registered; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+May bind only documented Clay command/API IDs unless a future permissioned extension command is registered. Binding `clay.documents.clientOpenFileDialog` grants only an inert client UI command route; the dialog still uses fixed Markdown/all-files filter defaults and the server validates any selected file before granting only that file. `bindKey` does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 

@@ -248,6 +248,12 @@ fn validate_package_command(
             "package command registration cannot grant built-in client edit authority",
         ));
     }
+    if matches!(declaration.routing_policy, RoutingPolicy::ClientUiCommand) {
+        return Err(context.diagnostic(
+            CommandValidationRule::InvalidMetadata,
+            "package command registration cannot grant native client UI authority",
+        ));
+    }
 
     let mut seen_permissions = HashSet::new();
     for permission in &declaration.permissions {

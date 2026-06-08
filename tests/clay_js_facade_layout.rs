@@ -35,6 +35,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         &[
             "serverGetDocumentSnapshot",
             "serverGetDocumentLease",
+            "clientOpenFileDialog",
             "serverOpenDocument",
             "serverSaveDocument",
             "serverReloadDocument",

@@ -259,6 +259,58 @@ fn rust_visibility_mapping_has_no_unmapped_public_primitive_functions() {
 }
 
 #[test]
+fn open_dialog_internal_helpers_are_private_or_inventory_mapped() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory_text = inventory_rust_mapping_text();
+    let file_dialog_source = std::fs::read_to_string(root.join("src/client/file_dialog.rs"))
+        .expect("read client file dialog source");
+    let main_source = std::fs::read_to_string(root.join("src/main.rs")).expect("read main source");
+    let workspace_source = std::fs::read_to_string(root.join("src/server/workspace.rs"))
+        .expect("read workspace source");
+    let connection_source = std::fs::read_to_string(root.join("src/server/connection.rs"))
+        .expect("read connection source");
+
+    for mapped in [
+        "runtime/js/documents.ts::clientOpenFileDialog",
+        "src/client/file_dialog.rs::FileDialogResult",
+        "src/client/file_dialog.rs::open_markdown_file_dialog",
+        "src/main.rs::handle_client_ui_command",
+        "op_clay_keybindings_bind_key",
+    ] {
+        assert!(
+            inventory_text.contains(mapped),
+            "open-dialog public command/Rust boundary {mapped} must be mapped in the Clay JS API inventory"
+        );
+    }
+
+    for private_helper in [
+        "fn show_file_open_dialog",
+        "fn set_markdown_filters",
+        "fn wide_null",
+        "fn is_cancelled",
+    ] {
+        assert!(
+            file_dialog_source.contains(private_helper),
+            "expected helper {private_helper} in file dialog source"
+        );
+        assert!(
+            !file_dialog_source.contains(&format!("pub {private_helper}")),
+            "{private_helper} must remain private implementation detail"
+        );
+    }
+    assert!(main_source.contains("fn handle_client_ui_command"));
+    assert!(
+        !main_source.contains("pub fn handle_client_ui_command"),
+        "native command dispatch must not become a public Rust API"
+    );
+    assert!(workspace_source.contains("pub(crate) async fn open_selected_file"));
+    assert!(workspace_source.contains("enum WorkspaceAuthority"));
+    assert!(!workspace_source.contains("pub enum WorkspaceAuthority"));
+    assert!(connection_source.contains("async fn open_selected_file_response"));
+    assert!(!connection_source.contains("pub async fn open_selected_file_response"));
+}
+
+#[test]
 fn docs_public_items_are_internal_registry_infrastructure() {
     let allowlisted_docs_infrastructure: BTreeSet<&str> = [
         "src/docs/registry.rs::GENERATED_REGISTRY_PATH",

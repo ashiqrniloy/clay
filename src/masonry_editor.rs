@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
@@ -10,7 +12,9 @@ use masonry::parley::style::{LineHeight, StyleProperty};
 use masonry::peniko::{Color, Fill};
 use masonry::vello::Scene;
 
-use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
+use crate::client::{
+    ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientUiCommandRoute,
+};
 use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, background_color};
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::perf::metrics::global_recorder;
@@ -28,6 +32,7 @@ const STATUS_TEXT_COLOR: Color = Color::from_rgb8(0xd7, 0xd2, 0xe8);
 pub enum EditorAction {
     ExitRequested,
     ClientConnection(ClientConnectionEvent),
+    ClientUiCommand(ClientUiCommandRoute),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +269,31 @@ impl EditorWidget {
                 ));
                 true
             }
+            ClientConnectionEvent::DocumentOpened { metadata, text } => {
+                self.editor.load_snapshot(
+                    metadata.document_id,
+                    metadata.version,
+                    text,
+                    metadata.access.clone(),
+                );
+                if let Some(queue) = self.edit_queue.as_mut() {
+                    queue.update_opened_document_authority(&metadata.access, metadata.version);
+                }
+                self.set_status(EditorStatus::connected(
+                    metadata.document_id,
+                    metadata.version,
+                    metadata.access,
+                ));
+                true
+            }
+            ClientConnectionEvent::FileOperationFailed { code, message, .. } => {
+                let mut next_status = self.status.clone();
+                next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
+                    format!("clay.file.{code:?}"),
+                    message,
+                ));
+                self.set_status(next_status)
+            }
             ClientConnectionEvent::BehaviorManifestInstalled { manifest, .. } => {
                 self.editor.install_behavior_manifest(manifest);
                 false
@@ -314,6 +344,23 @@ impl EditorWidget {
         self.editor.decoration_span_count()
     }
 
+    pub fn request_selected_file_open(&self, path: PathBuf) -> Option<ClientConnectionEvent> {
+        let Some(queue) = &self.edit_queue else {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.selected_file_open.unavailable",
+                    "Cannot open the selected file because this editor is not connected to a Clay server.",
+                ),
+            ));
+        };
+        queue.enqueue_open_selected_file(path).err().map(|error| {
+            ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                "clay.client.selected_file_open.queue_failed",
+                format!("Failed to send selected-file open request to the Clay server: {error}"),
+            ))
+        })
+    }
+
     fn set_status(&mut self, status: EditorStatus) -> bool {
         if self.status == status {
             return false;
@@ -341,7 +388,10 @@ impl EditorWidget {
     fn local_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
         let outcome = self.editor.route_key_with_event(&key);
         self.finish_local_outcome(ctx, outcome.command_outcome);
-        if outcome.server_intent.is_some() {
+        if let Some(command) = outcome.client_ui_command {
+            ctx.submit_action::<EditorAction>(EditorAction::ClientUiCommand(command));
+            ctx.set_handled();
+        } else if outcome.server_intent.is_some() {
             ctx.set_handled();
         }
     }
@@ -416,6 +466,13 @@ fn key_stroke(key: KeyCode, key_event: &KeyboardEvent) -> KeyStroke {
             alt: key_event.modifiers.alt(),
             super_key: key_event.modifiers.meta(),
         },
+    }
+}
+
+fn character_key_stroke(key_event: &KeyboardEvent) -> Option<KeyStroke> {
+    match &key_event.key {
+        Key::Character(text) => Some(key_stroke(KeyCode::Character(text.to_string()), key_event)),
+        _ => None,
     }
 }
 
@@ -548,13 +605,10 @@ impl Widget for EditorWidget {
                         };
                         self.local_command(ctx, command);
                     }
-                    Key::Character(text)
-                        if !key_event.modifiers.ctrl() && !key_event.modifiers.meta() =>
-                    {
-                        self.local_key(
-                            ctx,
-                            key_stroke(KeyCode::Character(text.to_string()), key_event),
-                        );
+                    Key::Character(_) => {
+                        if let Some(stroke) = character_key_stroke(key_event) {
+                            self.local_key(ctx, stroke);
+                        }
                     }
                     _ => {}
                 }
@@ -633,13 +687,17 @@ impl Widget for EditorWidget {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorStatus, EditorWidget, SduiStatusObservation};
-    use crate::client::{ClientConnectionEvent, ClientInitialState, ClientResyncSnapshot};
+    use super::{EditorStatus, EditorWidget, SduiStatusObservation, character_key_stroke};
+    use crate::client::{
+        ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientResyncSnapshot,
+    };
     use crate::editor::EditorCommand;
     use crate::protocol::{
-        BehaviorManifest, DocumentAccess, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection,
-        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+        BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation, KeyCode,
+        KeyModifiers, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode,
+        SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
+    use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Modifiers};
 
     fn sdui_tree(label_text: &str) -> SduiTree {
         SduiTree {
@@ -681,6 +739,29 @@ mod tests {
             access,
             behavior_manifest: BehaviorManifest::minimal_text_editing(3),
         }
+    }
+
+    #[test]
+    fn control_character_key_is_available_for_manifest_routing() {
+        let event = KeyboardEvent {
+            state: KeyState::Down,
+            key: Key::Character("o".into()),
+            code: Code::KeyO,
+            modifiers: Modifiers::CONTROL,
+            ..KeyboardEvent::default()
+        };
+
+        let stroke = character_key_stroke(&event)
+            .expect("control-modified character should produce a routeable stroke");
+
+        assert_eq!(stroke.key, KeyCode::Character("o".to_string()));
+        assert_eq!(
+            stroke.modifiers,
+            KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            }
+        );
     }
 
     #[test]
@@ -892,6 +973,89 @@ mod tests {
         assert_eq!(
             widget.editor.document_state().access,
             DocumentAccess::ReadOnly
+        );
+    }
+
+    #[test]
+    fn document_opened_event_replaces_editor_snapshot() {
+        let mut widget = EditorWidget::default();
+        widget.editor.command(EditorCommand::Insert("local"));
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "# opened\n".to_string(),
+            })
+        );
+
+        assert_eq!(widget.editor.visible_text(), "# opened\n");
+        assert_eq!(widget.editor.document_state().document_id, 42);
+        assert_eq!(widget.editor.document_state().document_version, 5);
+        assert_eq!(
+            widget.editor.document_state().access,
+            DocumentAccess::Editable { lease_id: 8 }
+        );
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connected — Editable — doc 42 — v5"
+        );
+    }
+
+    #[tokio::test]
+    async fn opened_file_edits_continue_as_deltas() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(4);
+        let queue = queue
+            .with_authority(11, &DocumentAccess::Editable { lease_id: 1 })
+            .with_confirmed_version(3);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 1 },
+            3,
+        ))
+        .with_edit_queue(queue);
+
+        widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+            metadata: DocumentMetadata {
+                document_id: 42,
+                version: 5,
+                access: DocumentAccess::Editable { lease_id: 8 },
+                lease_id: Some(8),
+                dirty: false,
+                workspace_root_id: 77,
+                path: "note.md".to_string(),
+            },
+            text: "# opened\n".to_string(),
+        });
+        let outcome = widget.editor.command_with_event(EditorCommand::Insert("!"));
+        let edit_event = outcome.edit_event.expect("insert emits an edit event");
+        widget
+            .edit_queue
+            .as_ref()
+            .unwrap()
+            .enqueue_edit_event(edit_event, 99)
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::Edit {
+                document_id: 42,
+                client_id: 11,
+                lease_id: Some(8),
+                base_version: 5,
+                behavior_version: 3,
+                transaction_id: 99,
+                operation: EditOperation::Insert {
+                    byte_offset: 0,
+                    text: "!".to_string(),
+                },
+            }
         );
     }
 

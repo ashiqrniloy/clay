@@ -64,6 +64,7 @@ pub(crate) struct ClayOpState {
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
     workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
+    runtime_document_id: crate::protocol::DocumentId,
 }
 
 impl Default for ClayOpState {
@@ -78,6 +79,13 @@ impl ClayOpState {
     pub(crate) fn new(
         workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
     ) -> Self {
+        Self::new_for_document(workspace, 1)
+    }
+
+    pub(crate) fn new_for_document(
+        workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
+        runtime_document_id: crate::protocol::DocumentId,
+    ) -> Self {
         Self {
             runtime_records: Mutex::new(Vec::new()),
             published_sdui_tree: Mutex::new(None),
@@ -88,6 +96,7 @@ impl ClayOpState {
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
             workspace,
+            runtime_document_id,
         }
     }
 
@@ -95,6 +104,10 @@ impl ClayOpState {
         &self,
     ) -> Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>> {
         Arc::clone(&self.workspace)
+    }
+
+    pub(super) fn runtime_document_id(&self) -> crate::protocol::DocumentId {
+        self.runtime_document_id
     }
 
     pub(crate) fn records(&self) -> Vec<String> {
@@ -377,6 +390,9 @@ fn command_for_rule(rule: &KeyBindingRule) -> CommandDeclaration {
         }
         crate::protocol::RoutingPolicy::UiReactivePriority => {
             CommandDeclaration::ui_reactive(rule.command_id.clone(), display_name(&rule.command_id))
+        }
+        crate::protocol::RoutingPolicy::ClientUiCommand => {
+            CommandDeclaration::client_ui(rule.command_id.clone(), display_name(&rule.command_id))
         }
         _ => CommandDeclaration::server_intent(
             rule.command_id.clone(),

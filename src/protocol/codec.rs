@@ -538,6 +538,10 @@ mod tests {
             workspace_root_id: 2,
             path: "src/main.rs".to_string(),
         };
+        let selected = ClientMessage::OpenSelectedFile {
+            client_id: 9,
+            selected_path: "C:/Users/test/Documents/note.md".to_string(),
+        };
         let save = ClientMessage::SaveDocument {
             client_id: 9,
             document_id: 7,
@@ -550,7 +554,7 @@ mod tests {
             force: true,
         };
 
-        for message in [open, save, reload] {
+        for message in [open, selected, save, reload] {
             let frame = codec.encode_client_message(&message).unwrap();
             let decoded = codec.decode_client_message(&frame).unwrap();
             assert_eq!(decoded, message);

@@ -564,6 +564,53 @@ fn markdown_fixture_activates_with_markdown_it_adapter() {
 }
 
 #[test]
+fn windows_markdown_open_fixture_binds_ctrl_o_without_hardcoding() {
+    let fixture =
+        std::fs::read_to_string("tests/fixtures/configuration/windows-markdown-open/init.js")
+            .expect("Windows Markdown open fixture must exist");
+    let launch_doc = std::fs::read_to_string("docs/development/launch-and-gui-smoke.md")
+        .expect("launch smoke docs must exist");
+
+    assert!(fixture.contains("import { bindKey } from \"clay:keybindings\";"));
+    assert!(fixture.contains(
+        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });"
+    ));
+    assert!(
+        !fixture.contains("Deno.core.ops") && !fixture.contains("clientOpenFileDialog("),
+        "fixture must use public Clay JS configuration APIs, not raw ops or callable dialog hooks"
+    );
+    assert!(launch_doc.contains("cargo run -- smoke-gui --config-fixture windows-markdown-open"));
+}
+
+#[test]
+fn windows_markdown_open_fixture_loads_markdown_package() {
+    let fixture =
+        std::fs::read_to_string("tests/fixtures/configuration/windows-markdown-open/init.js")
+            .expect("Windows Markdown open fixture must exist");
+    let sample = std::fs::read_to_string(
+        "tests/fixtures/configuration/windows-markdown-open/workspace/sample.md",
+    )
+    .expect("Windows Markdown open workspace sample must exist");
+
+    assert!(sample.contains("# Clay Markdown Fixture"));
+    for expected in [
+        "@clay/markdown",
+        "serverLoadPackage(markdownPackage)",
+        "serverRegisterModePattern(markdownPackage",
+        "serverRegisterParseHandler({",
+        "serverPublishDecorations({",
+        "extensions: [\"md\", \"markdown\", \"mdown\"]",
+        "Windows Markdown Open Dialog Smoke",
+        "Open: Ctrl+O native Markdown dialog",
+    ] {
+        assert!(
+            fixture.contains(expected),
+            "Windows Markdown open fixture must include `{expected}`"
+        );
+    }
+}
+
+#[test]
 fn markdown_package_declares_sdui_preview_status_adapter() {
     let package = markdown_package_json();
     assert_eq!(

@@ -83,6 +83,14 @@ cargo run -- client
 cargo run -- client
 ```
 
+For Phase 19, the Windows-specific Markdown open-dialog smoke contract is documented in [Launch and GUI Smoke Validation](launch-and-gui-smoke.md#phase-19-windows-markdown-open-dialog-smoke-contract). Use the repeatable fixture command when validating the full Markdown path:
+
+```powershell
+cargo run -- smoke-gui --config-fixture windows-markdown-open
+```
+
+The fixture loads `@clay/markdown` and binds `Ctrl+O` to `clay.documents.clientOpenFileDialog` through `init.js`. The route opens the Windows native file browser with Markdown filters (`.md`, `.markdown`, `.mdown`) plus an all-files fallback; cancellation is a non-error no-op. Selecting a regular UTF-8 file sends an explicit selected-file open request to the server, which validates and grants only that file before replacing the GUI buffer. When `@clay/markdown` is loaded, selected `.md`, `.markdown`, and `.mdown` files also activate Markdown mode and receive viewport-bounded Markdown decorations/status for manual smoke validation. Type in the opened file to confirm local editing remains responsive, then skip save for this phase.
+
 Windows-specific expected behavior:
 
 - All normal startup paths use local named pipes and do not require copying or typing a `\\.\pipe\...` value.
