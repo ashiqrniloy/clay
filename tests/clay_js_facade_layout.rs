@@ -61,6 +61,17 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "publishTree",
         ],
     ),
+    (
+        "runtime/js/ui.ts",
+        &[
+            "serverRegisterPanelContribution",
+            "serverRegisterComponentContribution",
+            "serverRegisterTransientOverlayContribution",
+            "serverRegisterInputContribution",
+            "serverRegisterUiStateScope",
+            "serverRegisterThemeToken",
+        ],
+    ),
     ("runtime/js/application.ts", &["quit"]),
     (
         "runtime/js/packages.ts",

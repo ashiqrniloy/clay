@@ -26,6 +26,15 @@ pub enum PackageConflictKind {
     ConfigurationKeyCollision,
     SduiRegionCollision,
     DecorationPrimitiveCollision,
+    UiPanelCollision,
+    UiFixedSlotCollision,
+    UiComponentCollision,
+    UiOverlayCollision,
+    ThemeTokenCollision,
+    InputContributionCollision,
+    UiStateScopeCollision,
+    LayoutOverrideCollision,
+    PackageOptionCollision,
     BehaviorManifestEntryCollision,
 }
 
@@ -75,6 +84,15 @@ pub fn check_enabled_packages<'a>(
     let mut config_keys = BTreeMap::new();
     let mut sdui_regions = BTreeMap::new();
     let mut decorations = BTreeMap::new();
+    let mut ui_panels = BTreeMap::new();
+    let mut ui_fixed_slots = BTreeMap::new();
+    let mut ui_components = BTreeMap::new();
+    let mut ui_overlays = BTreeMap::new();
+    let mut theme_tokens = BTreeMap::new();
+    let mut input_contributions = BTreeMap::new();
+    let mut ui_state_scopes = BTreeMap::new();
+    let mut layout_overrides = BTreeMap::new();
+    let mut package_options = BTreeMap::new();
     let mut behavior_entries = BTreeMap::new();
 
     for record in records {
@@ -154,6 +172,85 @@ pub fn check_enabled_packages<'a>(
                 prov.clone(),
                 PackageConflictKind::DecorationPrimitiveCollision,
                 "decoration/render primitive collision",
+            )?;
+        }
+        for panel in &record.contributions.ui_panels {
+            insert_unique(
+                &mut ui_panels,
+                panel.id.clone(),
+                prov.clone(),
+                PackageConflictKind::UiPanelCollision,
+                "package UI panel ID collision",
+            )?;
+            insert_unique(
+                &mut ui_fixed_slots,
+                panel.slot.clone(),
+                prov.clone(),
+                PackageConflictKind::UiFixedSlotCollision,
+                "package UI fixed slot collision",
+            )?;
+        }
+        for component in &record.contributions.ui_components {
+            insert_unique(
+                &mut ui_components,
+                component.id.clone(),
+                prov.clone(),
+                PackageConflictKind::UiComponentCollision,
+                "package UI component ID collision",
+            )?;
+        }
+        for overlay in &record.contributions.ui_overlays {
+            insert_unique(
+                &mut ui_overlays,
+                overlay.id.clone(),
+                prov.clone(),
+                PackageConflictKind::UiOverlayCollision,
+                "package UI overlay ID collision",
+            )?;
+        }
+        for token in &record.contributions.theme_tokens {
+            insert_unique(
+                &mut theme_tokens,
+                token.token.clone(),
+                prov.clone(),
+                PackageConflictKind::ThemeTokenCollision,
+                "package theme token collision",
+            )?;
+        }
+        for input in &record.contributions.input_contributions {
+            insert_unique(
+                &mut input_contributions,
+                input.id.clone(),
+                prov.clone(),
+                PackageConflictKind::InputContributionCollision,
+                "package input contribution collision",
+            )?;
+        }
+        for state in &record.contributions.ui_state_scopes {
+            insert_unique(
+                &mut ui_state_scopes,
+                state.id.clone(),
+                prov.clone(),
+                PackageConflictKind::UiStateScopeCollision,
+                "package UI state scope collision",
+            )?;
+        }
+        for layout in &record.contributions.layout_overrides {
+            insert_unique(
+                &mut layout_overrides,
+                format!("{}:{}", layout.target_id, layout.property),
+                prov.clone(),
+                PackageConflictKind::LayoutOverrideCollision,
+                "package layout override collision",
+            )?;
+        }
+        for option in &record.contributions.package_options {
+            insert_unique(
+                &mut package_options,
+                option.option.clone(),
+                prov.clone(),
+                PackageConflictKind::PackageOptionCollision,
+                "package option schema collision",
             )?;
         }
         for transform in &record.contributions.text_transforms {

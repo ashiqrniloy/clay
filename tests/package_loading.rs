@@ -94,6 +94,159 @@ fn first_party_markdown_package_json() -> Value {
     serde_json::from_str(&text).expect("first-party Markdown package.json must be valid JSON")
 }
 
+fn phase18_3_slot_ui_fixture(package_name: &str, prefix: &str, slot: &str) -> Value {
+    let command_id = format!("{prefix}.togglePreview");
+    json!({
+        "name": package_name,
+        "version": "0.1.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": prefix,
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "permissions": ["mode-registration", "mode-activation", "command-registration"],
+            "modes": [prefix],
+            "docs": "./docs/index.md",
+            "apiDependencies": [
+                "clay.commands.serverRegisterCommand",
+                "clay.ui.serverRegisterPanelContribution",
+                "clay.ui.serverRegisterComponentContribution",
+                "clay.ui.serverRegisterTransientOverlayContribution",
+                "clay.ui.serverRegisterThemeToken"
+            ],
+            "contributions": {
+                "commands": [{
+                    "id": command_id,
+                    "displayName": "Toggle Preview",
+                    "routingPolicy": "server-first"
+                }],
+                "themeTokens": [{
+                    "token": format!("{prefix}.preview.background"),
+                    "type": "color-role",
+                    "fallback": "surface.panel",
+                    "description": "Preview panel background"
+                }],
+                "ui": {
+                    "components": [{
+                        "kind": "label",
+                        "id": format!("{prefix}.preview.empty"),
+                        "text": "Preview unavailable",
+                        "style": { "contentColor": "text.muted", "typography": "typography.body" }
+                    }],
+                    "panels": [{
+                        "id": format!("{prefix}.preview"),
+                        "slot": slot,
+                        "kind": "fixed",
+                        "defaultVisibility": "hidden",
+                        "actionTargets": [command_id],
+                        "component": {
+                            "kind": "panel",
+                            "id": format!("{prefix}.preview.root"),
+                            "title": "Preview",
+                            "style": { "background": format!("{prefix}.preview.background"), "padding": "spacing.panel" },
+                            "children": [{
+                                "kind": "button",
+                                "id": format!("{prefix}.preview.toggle"),
+                                "label": "Toggle",
+                                "action": { "commandId": command_id }
+                            }]
+                        }
+                    }],
+                    "overlays": [{
+                        "id": format!("{prefix}.quickOpen"),
+                        "anchor": "working-area",
+                        "focusPolicy": "restore",
+                        "dismissalPolicy": "escape",
+                        "component": {
+                            "kind": "panel",
+                            "id": format!("{prefix}.quickOpen.root"),
+                            "title": "Quick Open",
+                            "children": []
+                        }
+                    }]
+                }
+            }
+        }
+    })
+}
+
+fn phase18_4_input_state_config_fixture(package_name: &str, prefix: &str) -> Value {
+    let command_id = format!("{prefix}.focusPreview");
+    json!({
+        "name": package_name,
+        "version": "0.1.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": prefix,
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "permissions": ["mode-registration", "mode-activation", "command-registration", "package-configuration"],
+            "modes": [prefix],
+            "docs": "./docs/index.md",
+            "apiDependencies": [
+                "clay.commands.serverRegisterCommand",
+                "clay.ui.serverRegisterInputContribution",
+                "clay.ui.serverRegisterUiStateScope",
+                "clay.ui.serverSetLayoutOverride",
+                "clay.configuration.setPackageOption"
+            ],
+            "contributions": {
+                "commands": [{
+                    "id": command_id,
+                    "displayName": "Focus Preview",
+                    "routingPolicy": "server-first"
+                }],
+                "themeTokens": [{
+                    "token": format!("{prefix}.preview.background"),
+                    "type": "color-role",
+                    "fallback": "surface.panel",
+                    "description": "Preview background"
+                }],
+                "input": [{
+                    "id": format!("{prefix}.preview.input"),
+                    "scope": "component",
+                    "componentId": format!("{prefix}.preview.root"),
+                    "pointer": { "click": "action", "action": command_id, "drag": "select" },
+                    "focus": { "policy": "restore-editor" },
+                    "selectionPolicy": "component-local",
+                    "context": { "modes": [prefix] },
+                    "actionTargets": [format!("{prefix}.focusPreview")]
+                }],
+                "uiStateScopes": [{
+                    "id": format!("{prefix}.preview.visibility"),
+                    "scope": "pane",
+                    "targetId": format!("{prefix}.preview"),
+                    "owner": "shell",
+                    "lifetime": "session",
+                    "persistence": "client-local",
+                    "implementationStatus": "implemented",
+                    "valueSchema": { "kind": "enum", "values": ["visible", "hidden"] }
+                }],
+                "layoutOverrides": [{
+                    "targetId": format!("{prefix}.preview"),
+                    "property": "inputDefault",
+                    "value": { "inputId": format!("{prefix}.preview.input") },
+                    "source": "package-default"
+                }, {
+                    "targetId": format!("{prefix}.preview"),
+                    "property": "themeToken",
+                    "value": { "token": format!("{prefix}.preview.background"), "fallback": "surface.panel" },
+                    "source": "package-default"
+                }],
+                "packageOptions": [{
+                    "option": format!("{prefix}.layout.defaultVisibility"),
+                    "type": "string",
+                    "default": "hidden"
+                }, {
+                    "option": format!("{prefix}.input.default"),
+                    "type": "string",
+                    "default": format!("{prefix}.preview.input")
+                }]
+            }
+        }
+    })
+}
+
 // ── Task 1 tests ──────────────────────────────────────────────────────────────
 
 /// A complete Markdown-style package record validates with provenance retained.
@@ -232,6 +385,293 @@ fn markdown_package_does_not_execute_on_install() {
         .expect("installed package can be inspected without enable/load execution");
     assert!(!inspection.is_enabled);
     assert_eq!(inspection.api_prefix, "markdown");
+}
+
+#[test]
+fn package_manifest_accepts_phase18_3_ui_contribution_metadata() {
+    let record = assemble_package_record(&phase18_3_slot_ui_fixture(
+        "@clay/markdown",
+        "markdown",
+        "right",
+    ))
+    .expect("Phase 18.3 slot UI metadata should validate at package load time");
+
+    assert!(
+        record
+            .api_dependencies
+            .iter()
+            .any(|dependency| dependency.api_id == "clay.ui.serverRegisterPanelContribution")
+    );
+    assert_eq!(record.contributions.theme_tokens.len(), 1);
+    assert_eq!(
+        record.contributions.theme_tokens[0].token,
+        "markdown.preview.background"
+    );
+    assert_eq!(record.contributions.ui_panels.len(), 1);
+    assert_eq!(record.contributions.ui_panels[0].id, "markdown.preview");
+    assert_eq!(record.contributions.ui_panels[0].slot, "right");
+    assert_eq!(record.contributions.ui_components.len(), 1);
+    assert_eq!(
+        record.contributions.ui_components[0].id,
+        "markdown.preview.empty"
+    );
+    assert_eq!(
+        record.contributions.ui_components[0].style_variable_count,
+        2
+    );
+    assert_eq!(record.contributions.ui_overlays.len(), 1);
+    assert_eq!(record.contributions.ui_overlays[0].id, "markdown.quickOpen");
+}
+
+#[test]
+fn package_manifest_rejects_invalid_slot_ui_contribution_metadata() {
+    let mut unknown_dependency = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    unknown_dependency["clay"]["apiDependencies"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("clay.ui.serverMutateMasonryWidget"));
+    let err = assemble_package_record(&unknown_dependency).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidApiDependency);
+    assert_eq!(
+        err.contribution_id.as_deref(),
+        Some("clay.ui.serverMutateMasonryWidget")
+    );
+
+    let mut duplicate_slot = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    let second_panel = json!({
+        "id": "markdown.outline",
+        "slot": "right",
+        "kind": "fixed",
+        "component": { "kind": "panel", "id": "markdown.outline.root", "children": [] }
+    });
+    duplicate_slot["clay"]["contributions"]["ui"]["panels"]
+        .as_array_mut()
+        .unwrap()
+        .push(second_panel);
+    let err = assemble_package_record(&duplicate_slot).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::DuplicateContributionId);
+    assert!(err.message.contains("same shell slot"));
+
+    let mut invalid_action = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    invalid_action["clay"]["contributions"]["ui"]["panels"][0]["actionTargets"] =
+        json!(["markdown.missing"]);
+    let err = assemble_package_record(&invalid_action).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert_eq!(err.contribution_id.as_deref(), Some("markdown.missing"));
+
+    let mut invalid_fallback = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    invalid_fallback["clay"]["contributions"]["themeTokens"][0]["fallback"] =
+        json!("spacing.panel");
+    let err = assemble_package_record(&invalid_fallback).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("same type"));
+
+    let mut raw_style = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    raw_style["clay"]["contributions"]["ui"]["panels"][0]["component"]["style"]["background"] =
+        json!("#ffffff");
+    let err = assemble_package_record(&raw_style).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("raw CSS") || err.message.contains("raw colors"));
+
+    let mut unsupported_component =
+        phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    unsupported_component["clay"]["contributions"]["ui"]["panels"][0]["component"]["children"][0]
+        ["kind"] = json!("modal");
+    let err = assemble_package_record(&unsupported_component).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("reserved for a later"));
+
+    let mut oversize = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
+    oversize["clay"]["contributions"]["ui"]["panels"][0]["estimatedPayloadBytes"] = json!(4097);
+    let err = assemble_package_record(&oversize).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::PayloadBudgetExceeded);
+}
+
+#[test]
+fn enabled_package_conflicts_reject_duplicate_slot_ui_ids_and_slots() {
+    let first = assemble_package_record(&phase18_3_slot_ui_fixture(
+        "@clay/markdown",
+        "markdown",
+        "right",
+    ))
+    .unwrap();
+    let second = assemble_package_record(&phase18_3_slot_ui_fixture(
+        "@clay/asciidoc",
+        "asciidoc",
+        "right",
+    ))
+    .unwrap();
+
+    let err = check_enabled_packages([&first, &second]).unwrap_err();
+    assert_eq!(err.kind, PackageConflictKind::UiFixedSlotCollision);
+    assert_eq!(err.contribution_id, "right");
+}
+
+#[test]
+fn package_manifest_accepts_phase18_4_input_state_config_metadata() {
+    let record = assemble_package_record(&phase18_4_input_state_config_fixture(
+        "@clay/markdown",
+        "markdown",
+    ))
+    .expect("Phase 18.4 input/state/config metadata should validate at package load time");
+
+    assert!(
+        record
+            .api_dependencies
+            .iter()
+            .any(|dependency| dependency.api_id == "clay.ui.serverRegisterInputContribution")
+    );
+    assert_eq!(record.contributions.input_contributions.len(), 1);
+    assert_eq!(
+        record.contributions.input_contributions[0].id,
+        "markdown.preview.input"
+    );
+    assert_eq!(
+        record.contributions.input_contributions[0].scope,
+        "component"
+    );
+    assert_eq!(record.contributions.ui_state_scopes.len(), 1);
+    assert_eq!(
+        record.contributions.ui_state_scopes[0].id,
+        "markdown.preview.visibility"
+    );
+    assert_eq!(
+        record.contributions.ui_state_scopes[0].value_schema_kind,
+        "enum"
+    );
+    assert_eq!(record.contributions.layout_overrides.len(), 2);
+    assert_eq!(record.contributions.package_options.len(), 2);
+    assert_eq!(
+        record.contributions.package_options[0].option,
+        "markdown.layout.defaultVisibility"
+    );
+}
+
+#[test]
+fn package_manifest_rejects_invalid_phase18_4_metadata() {
+    let mut missing_permission = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    missing_permission["clay"]["permissions"] = json!([
+        "mode-registration",
+        "mode-activation",
+        "command-registration"
+    ]);
+    let err = assemble_package_record(&missing_permission).unwrap_err();
+    assert_eq!(
+        err.rule,
+        PackageRecordRule::UndeclaredPermissionForContribution
+    );
+    assert!(err.message.contains("package-configuration"));
+
+    let mut hidden_state = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    hidden_state["clay"]["contributions"]["uiStateScopes"][0]["id"] = json!("markdown._secret");
+    let err = assemble_package_record(&hidden_state).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("hidden"));
+
+    let mut bad_input = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    bad_input["clay"]["contributions"]["input"][0]["pointer"]["action"] = json!("markdown.missing");
+    let err = assemble_package_record(&bad_input).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert_eq!(err.contribution_id.as_deref(), Some("markdown.missing"));
+
+    let mut hidden_option = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    hidden_option["clay"]["contributions"]["packageOptions"][0]["option"] =
+        json!("markdown._layout.defaultVisibility");
+    let err = assemble_package_record(&hidden_option).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("hidden"));
+
+    let mut raw_layout = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    raw_layout["clay"]["contributions"]["layoutOverrides"][0]["nativeHandle"] =
+        json!("native-preview");
+    let err = assemble_package_record(&raw_layout).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("native widgets"));
+
+    let mut bad_option_type = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    bad_option_type["clay"]["contributions"]["packageOptions"][0]["type"] = json!("number");
+    let err = assemble_package_record(&bad_option_type).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(err.message.contains("must declare type `string`"));
+}
+
+#[test]
+fn enabled_package_conflicts_reject_duplicate_input_state_config_targets() {
+    let first = assemble_package_record(&phase18_4_input_state_config_fixture(
+        "@clay/markdown",
+        "markdown",
+    ))
+    .unwrap();
+    let mut second_input = phase18_4_input_state_config_fixture("@clay/markdown-alt", "markdown");
+    second_input["clay"]["modes"] = json!(["markdown.alt"]);
+    second_input["clay"]["contributions"]["commands"][0]["id"] = json!("markdown.focusAlt");
+    second_input["clay"]["contributions"]["input"][0]["pointer"]["action"] =
+        json!("markdown.focusAlt");
+    second_input["clay"]["contributions"]["input"][0]["actionTargets"] =
+        json!(["markdown.focusAlt"]);
+    second_input["clay"]["contributions"]["input"][0]["context"]["modes"] = json!(["markdown.alt"]);
+    second_input["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("themeTokens");
+    second_input["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("uiStateScopes");
+    second_input["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("layoutOverrides");
+    second_input["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("packageOptions");
+    let second = assemble_package_record(&second_input).unwrap();
+    let err = check_enabled_packages([&first, &second]).unwrap_err();
+    assert_eq!(err.kind, PackageConflictKind::InputContributionCollision);
+    assert_eq!(err.contribution_id, "markdown.preview.input");
+
+    let mut second_option =
+        phase18_4_input_state_config_fixture("@clay/markdown-options", "markdown");
+    second_option["clay"]["modes"] = json!(["markdown.options"]);
+    second_option["clay"]["contributions"]["commands"][0]["id"] = json!("markdown.focusOptions");
+    second_option["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("themeTokens");
+    second_option["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("input");
+    second_option["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("uiStateScopes");
+    second_option["clay"]["contributions"]
+        .as_object_mut()
+        .unwrap()
+        .remove("layoutOverrides");
+    let second = assemble_package_record(&second_option).unwrap();
+    let err = check_enabled_packages([&first, &second]).unwrap_err();
+    assert_eq!(err.kind, PackageConflictKind::PackageOptionCollision);
+    assert_eq!(err.contribution_id, "markdown.layout.defaultVisibility");
+}
+
+#[test]
+fn phase18_4_diagnostics_preserve_package_provenance() {
+    let mut package = phase18_4_input_state_config_fixture("@clay/markdown", "markdown");
+    package["clay"]["contributions"]["uiStateScopes"][0]["valueSchema"]["defaultValue"] =
+        json!("hidden");
+
+    let err = assemble_package_record(&package).unwrap_err();
+    assert_eq!(err.package_name.as_deref(), Some("@clay/markdown"));
+    assert_eq!(err.package_version.as_deref(), Some("0.1.0"));
+    assert_eq!(err.api_prefix.as_deref(), Some("markdown"));
+    assert_eq!(
+        err.contribution_id.as_deref(),
+        Some("markdown.preview.visibility")
+    );
+    assert!(err.message.contains("state values"));
 }
 
 #[test]

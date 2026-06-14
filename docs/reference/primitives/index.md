@@ -1,12 +1,13 @@
 # Clay Primitives Reference
 
-This directory is the Phase 16 architecture source for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18.
+This directory is the Phase 16 architecture source for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18, including Phase 18.3 runtime-backed slot-aware package UI contribution primitives and Phase 18.4 runtime-backed package input/state/layout-override/configuration primitives.
 
 ## Documents
 
 - [Existing Primitive Audit](audit.md) — existing behavior manifest, SDUI, configuration, document/workspace, editor, and observability primitives.
 - [Primitive Registry Schema](registry.md) — canonical primitive taxonomy, schema vocabulary, authority boundaries, performance budgets, and planned Clay JS API shape stubs.
 - [Rendering Customization Strategy](rendering-strategy.md) — inert decoration/layout/render declarations and SDUI reuse for package rendering.
+- [Clay Shell and Package UI/Layout Strategy](shell-layout-strategy.md) — Phase 18.1/18.2 architecture and runtime status plus Phase 18.3 runtime-backed package panel/component/overlay/theme-token contribution status and Phase 18.4 runtime-backed input/state-scope/layout-override/package-option status for the working area, pane/split tree, pane slots, package UI/state/style declarations, and Masonry boundary.
 - [Incremental Parse and Background Parse Update Strategy](parse-update-strategy.md) — server-side parse task lifecycle, cancellation, viewport filtering, and fallback behavior.
 - [Markdown Mode POC Requirements](markdown-mode-requirements.md) — Phase 18 readiness checklist for `@clay/markdown`.
 - [Package Primitive Security and Provenance Requirements](package-security.md) — package prefix, permission, validation, conflict, and prohibited-authority baseline.
@@ -24,3 +25,4 @@ Phase 17 should implement package loading and mode primitives before Phase 18 st
 4. Package contributions preserve prefix/provenance and reject duplicate mode names, duplicate command IDs, ambiguous key bindings, and undeclared permissions deterministically.
 5. Per-document/per-mode behavior manifest selection can atomically install client-safe `ClientFirstPredictable` text transforms and server-routed commands.
 6. Phase 18 primitives (`DecorationRange`, `IncrementalParseUpdate`, and Markdown SDUI/keybinding extensions) have explicit handoff entries in [backlog.md](backlog.md).
+7. Phase 18.2 shell runtime primitives (`WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout`) are implemented as internal Rust foundations; Phase 18.3 package UI primitives (`PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration`) are runtime-backed inventory APIs through `clay:ui`; Phase 18.4 package input, UI state-scope, layout override, and package option APIs are runtime-backed through documented Clay JS APIs; working-area/split/direct slot mutation, durable state-value persistence, pane selector, multi-panel ordering, overlay z-order, cross-window layout, and package enable/disable remain planned/deferred.

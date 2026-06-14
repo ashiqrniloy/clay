@@ -3,17 +3,22 @@
 ## Source
 
 - `src/masonry_editor.rs`
+- `src/masonry_shell.rs`
 - `src/client/mod.rs`
 
 ## Overview
 
 `EditorWidget` composes the native editor surface, server-driven UI overlay, and bottom status chrome. The status chrome reflects connection state, document access, confirmed sync version, and the latest sanitized runtime diagnostic forwarded by `ClientConnectionEvent::RuntimeDiagnostic`.
 
+After Phase 18.2, `EditorWidget` is no longer the top-level application layout. `src/masonry_shell.rs::ClayShellWidget` owns the Masonry root and working-area geometry, registers `EditorWidget` as the shell's editor child, and routes focus/action handling back to that child. `EditorWidget` remains responsible for local text input, caret/selection/viewport state, edit queue emission, SDUI event application/rendering, status chrome, and accessibility.
+
 Phase 15 adds `SduiStatusObservation`, a `pub(crate)` headless observability struct for tests and internal agent inspection. It is not a Clay JS API surface; it only exposes strings and version metadata already visible in GUI chrome.
 
 ## Responsibilities
 
 - Apply `ClientConnectionEvent` values on the GUI thread and update editor, SDUI, or status state without blocking paint/input paths.
+- Act as the shell-owned editor component under `ClayShellWidget`; it is not responsible for working-area, split-tree, or pane-slot ownership.
+- Keep focus/action routed events client-first and editor-local after the shell forwards them to the registered editor child.
 - Render and expose accessible status text for connection, access, document, version, and runtime diagnostics.
 - Provide `EditorWidget::status_observation()` so tests can assert status chrome state without opening a window or painting.
 - Keep diagnostics sanitized by displaying only the `RuntimeDiagnostic` code/message supplied by the server protocol.
@@ -55,7 +60,8 @@ assert_eq!(observation.sync_version, Some(5));
 - `SduiStatusObservation` remains `pub(crate)` internal test/agent infrastructure, not a public Clay JS API.
 - The observation is a pure `&self` read and allocates only the visible status strings it returns.
 - Runtime diagnostic text must remain limited to sanitized protocol diagnostics; no source snippets, secrets, absolute paths, or server process internals are added by the GUI.
-- Ordinary text input and paint do not wait for IPC, server work, JavaScript, or diagnostic processing.
+- Ordinary text input and paint do not wait for IPC, server work, JavaScript, shell layout validation, or diagnostic processing.
+- Shell layout and pane/slot state do not grant packages native widget handles, raw CSS, raw ops, Vello/Parley callbacks, or client-side JavaScript authority over the editor component.
 
 ## Tests
 
@@ -67,6 +73,7 @@ assert_eq!(observation.sync_version, Some(5));
 
 ## Related
 
+- [Masonry Shell Runtime](masonry-shell.md)
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - `src/client/mod.rs`

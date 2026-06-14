@@ -24,6 +24,8 @@ The Clay JS documentation registry turns the Markdown files linked under `docs/i
 - Verify key binding configuration APIs (`clay.keybindings.bindKey`, `clay.keybindings.unbindKey`, and `clay.keybindings.listKeyBindings`) as planned server-side configuration/query APIs with empty default key-binding lists, queryable `key`/`command`/`scope`/`when` custom properties, command ID validation notes, and no external authority.
 - Verify initial editor customization metadata for `clay.editor.clientSetCursorStyle`, including generated `color`, `blinking`, and `type` custom properties with types, defaults, allowed values where relevant, lookup coverage, and no document-mutation or external authority.
 - Include Phase 13 SDUI schema helper/publication APIs under `clay:sdui` (`definePanel`, `defineLabel`, `defineButton`, `defineList`, `defineEditorView`, `defineFlex`, `defineStack`, and `publishTree`) so app/help/agent lookup can discover runtime-backed inert server-driven UI construction without exposing raw protocol DTOs, native observability internals, or client-side script authority.
+- Include Phase 18.3 package UI contribution APIs under `clay:ui` (`serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and `serverRegisterThemeToken`) so app/help/agent lookup can discover runtime-backed inert fixed panel, component, transient overlay, and theme-token declarations without exposing raw ops, Masonry widgets, native handles, raw CSS, or client-side JavaScript authority.
+- Include Phase 18.4 public programmatic APIs (`clay.ui.serverRegisterInputContribution`, `clay.ui.serverRegisterUiStateScope`, `clay.ui.serverSetLayoutOverride`, and `clay.configuration.setPackageOption`) with Markdown docs, docs-index links, inventory rows, generated registry entries, custom-property lookup, app/help visibility, facade/op/Rust metadata, and security notes while keeping working-area, pane-split, and direct pane-slot mutation APIs planned and absent from the generated registry.
 - Keep Phase 15 SDUI observability helpers (`SduiObservableSnapshot`, `SduiStatusObservation`, and their extraction methods) crate-internal unless a future dedicated Clay JS API adds docs, facade, op, inventory, and generated-registry metadata.
 - Produce deterministic JSON ordered by stable API ID.
 - Load the checked-in generated JSON with `ClayJsApiRegistry::from_generated` for app/help/agent discovery without reading source Markdown during normal lookup.
@@ -72,6 +74,7 @@ let configurable_color_apis = registry.by_custom_property("color");
 - File/workspace entries are contract metadata only until future `deno_core` op wrappers exist. The docs record required server-side validation, workspace root authorization, path traversal rejection, typed file errors, and no raw host filesystem authority; the generated registry does not perform IO or broaden workspace permissions.
 - Editor customization entries are metadata contracts only. Cursor style remains configuration/customization UI state, while viewport sizing remains a planned client-local layout API rather than user configuration; neither path grants document mutation or routes ordinary typing through JavaScript.
 - SDUI helper entries describe inert native UI nodes, action intents, and explicit validated publication; they do not expose native observability snapshots/status structs, execute client scripts, grant document/file/workspace authority, or run in Masonry paint/input hot paths.
+- `clay:ui` contribution entries describe inert package UI declarations and explicit server validation; they do not expose raw `op_clay_ui_*` calls, native widgets, Masonry handles, raw CSS/style strings, raw colors outside typed token contracts, renderer callbacks, external authorities, or client-side JavaScript hooks. Phase 18.4 layout overrides are public only through the documented `serverSetLayoutOverride` typed override API and remain configuration/package-update work, not direct pane/working-area mutation.
 - Security metadata records authority boundaries only; it does not grant permissions or execute configuration.
 - Configuration-relevant APIs must deny implicit filesystem, network, shell, extension loading, AI mutation, workspace, package loading, WASM, and client-side JavaScript execution authority in both source documentation and generated registry metadata.
 
@@ -81,6 +84,8 @@ let configurable_color_apis = registry.by_custom_property("color");
 - `tests/clay_js_doc_registry.rs::generated_registry_contains_all_indexed_public_apis`: verifies master-index coverage and unique stable IDs.
 - `tests/clay_js_doc_registry.rs::generated_registry_preserves_configuration_metadata`: verifies key binding, custom property, permission, security, facade, op, Rust owner, and lookup-tag metadata survives generation.
 - `tests/clay_js_doc_registry.rs::generated_registry_contains_phase13_sdui_runtime_apis`: verifies Phase 13 SDUI helper/publication docs are generated under `clay:sdui`, keep empty default key bindings, preserve runtime-backed sync/async metadata, deny external authority, and are discoverable by SDUI lookup tags/custom properties.
+- `tests/clay_js_doc_registry.rs::planned_shell_layout_apis_are_not_generated_registry_entries`: verifies planned shell/layout/state override APIs stay out of the public generated registry while implemented package UI contribution docs are generated under `clay:ui` with UI documentation paths.
+- `tests/clay_js_doc_registry.rs::generated_registry_contains_phase18_4_public_apis`: verifies Phase 18.4 input, UI state-scope, layout override, and package-option APIs are generated, app/help visible, lookup-tagged, custom-property queryable, and keep no-authority security metadata.
 - `tests/clay_js_doc_registry.rs::lookup_finds_api_by_stable_id_and_export`: verifies ID, JS module/export, user-facing name, kind/owner, and tag lookups over generated data.
 - `tests/clay_js_doc_registry.rs::lookup_finds_configuration_by_custom_property`: verifies custom property discovery for cursor style configuration metadata.
 - `tests/clay_js_doc_registry.rs::cursor_style_custom_properties_are_complete`: verifies `color`, `blinking`, and `type` include type/default metadata and that the enum documents `block`, `bar`, and `underline`.
@@ -104,6 +109,7 @@ let configurable_color_apis = registry.by_custom_property("color");
 ## Related
 
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)
+- [Slot-Aware Package UI](slot-aware-package-ui.md)
 - `docs/reference/clay-js-api/schema.md`
 - `docs/reference/clay-js-api/inventory.md`
 - `plans/009-Phase8-Configuration-Foundation.md`

@@ -256,6 +256,58 @@
       "async": true
     },
     {
+      "id": "clay.configuration.setPackageOption",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/configuration/set-package-option.md",
+      "js_module": "clay:configuration",
+      "js_export": "setPackageOption",
+      "js_facade": "runtime/js/configuration.ts::setPackageOption",
+      "backing_rust": "src/server/configuration.rs::ConfigurationRuntime::set_package_option",
+      "deno_op": "op_clay_configuration_set_package_option",
+      "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_set_package_option",
+      "name": "setPackageOption",
+      "user_facing_name": "Set Package Option",
+      "summary": "Register a validated package-owned configuration option from `~/.config/clay/init.js`.",
+      "owner": "server",
+      "phase": "Phase 18.4",
+      "visibility": "public",
+      "permissions": ["package-configuration"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "required",
+          "description": "Package apiPrefix that owns the option."
+        },
+        {
+          "name": "option",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Supported package-prefixed option name."
+        },
+        {
+          "name": "value",
+          "type": "json",
+          "default": "required",
+          "description": "Typed bounded option value."
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "default": "init-js",
+          "description": "One of `init-js`, `package-default`, or `clay-default`."
+        }
+      ],
+      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden option keys, direct Masonry widgets, native widget handles, raw CSS, callbacks, or state-value authority.",
+      "agent_guidance": "Use only documented typed override/configuration records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.",
+      "lookup_tags": ["configuration", "package-options", "init-js", "clay-js-api", "phase18.4", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.decorations.serverPublishDecorations",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/decorations/server-publish-decorations.md",
@@ -1674,6 +1726,472 @@
       "help_visible": true,
       "stability": "runtime-backed",
       "async": true
+    },
+    {
+      "id": "clay.ui.serverRegisterComponentContribution",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-register-component-contribution.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRegisterComponentContribution",
+      "js_facade": "runtime/js/ui.ts::serverRegisterComponentContribution",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::register_component",
+      "deno_op": "op_clay_ui_register_component_contribution",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_register_component_contribution",
+      "name": "serverRegisterComponentContribution",
+      "user_facing_name": "Register Component Contribution",
+      "summary": "Register a bounded inert Clay component tree for package UI through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.3",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Root component ID that must use the package API prefix."
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "default": "required",
+          "description": "Supported Phase 18.3 component kind such as `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, or `editorView`."
+        },
+        {
+          "name": "deferredKinds",
+          "type": "enum",
+          "default": "table|dropdown|collapse|modal",
+          "description": "Explicitly deferred component kinds that are rejected until later phases."
+        },
+        {
+          "name": "children",
+          "type": "ComponentContributionDefinition[]",
+          "default": "[]",
+          "description": "Bounded child component declarations."
+        },
+        {
+          "name": "styleTokens",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Typed style-variable token references resolved through Clay core or package theme tokens."
+        },
+        {
+          "name": "actionTargets",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Registered package-prefixed command IDs referenced by component action intents."
+        }
+      ],
+      "security": "Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.",
+      "agent_guidance": "Use `clay.ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.",
+      "lookup_tags": ["ui", "package-ui", "component-catalog", "style-tokens", "clay-js-api", "phase18.3", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverRegisterInputContribution",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRegisterInputContribution",
+      "js_facade": "runtime/js/ui.ts::serverRegisterInputContribution",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::register_input",
+      "deno_op": "op_clay_ui_register_input_contribution",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_register_input_contribution",
+      "name": "serverRegisterInputContribution",
+      "user_facing_name": "Register Input Contribution",
+      "summary": "Register bounded package-owned pointer, focus, and component action metadata through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.4",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Package-prefixed input contribution ID such as `markdown.preview.input`."
+        },
+        {
+          "name": "scope",
+          "type": "enum",
+          "default": "required",
+          "description": "Input scope, one of `component`, `panel`, or `overlay`."
+        },
+        {
+          "name": "componentId",
+          "type": "string",
+          "default": "required",
+          "description": "Package-prefixed component, panel, or overlay component ID receiving the inert policy."
+        },
+        {
+          "name": "pointer.click",
+          "type": "enum",
+          "default": "none",
+          "description": "Pointer click policy, one of `none`, `focus`, `action`, or `select`."
+        },
+        {
+          "name": "pointer.action",
+          "type": "string",
+          "default": "none",
+          "description": "Registered package command emitted when `pointer.click` is `action`."
+        },
+        {
+          "name": "pointer.drag",
+          "type": "enum",
+          "default": "none",
+          "description": "Pointer drag policy, one of `none`, `select`, or `pan`."
+        },
+        {
+          "name": "focus.policy",
+          "type": "enum",
+          "default": "restore-editor",
+          "description": "Focus policy, one of `none`, `restore-editor`, `focus-component`, or `trap`."
+        },
+        {
+          "name": "selectionPolicy",
+          "type": "enum",
+          "default": "preserve-editor",
+          "description": "Selection policy, one of `preserve-editor`, `component-local`, or `disabled`."
+        },
+        {
+          "name": "context.modes",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Optional manifest-declared mode conditions for this input policy."
+        },
+        {
+          "name": "actionTargets",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Registered package command IDs allowed for component-scoped actions."
+        }
+      ],
+      "security": "Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.",
+      "agent_guidance": "Use `clay.ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.",
+      "lookup_tags": ["ui", "package-ui", "input", "focus", "action-routing", "clay-js-api", "phase18.4", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverRegisterPanelContribution",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-register-panel-contribution.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRegisterPanelContribution",
+      "js_facade": "runtime/js/ui.ts::serverRegisterPanelContribution",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::register_panel",
+      "deno_op": "op_clay_ui_register_panel_contribution",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_register_panel_contribution",
+      "name": "serverRegisterPanelContribution",
+      "user_facing_name": "Register Panel Contribution",
+      "summary": "Register a package-prefixed fixed panel contribution for a Clay pane slot through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.3",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Package-prefixed panel contribution ID such as `markdown.preview`."
+        },
+        {
+          "name": "slot",
+          "type": "enum",
+          "default": "required",
+          "description": "Fixed pane slot target, one of `left`, `right`, `top`, or `bottom`."
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "default": "fixed",
+          "description": "Panel contribution kind; Phase 18.3 accepts `fixed` and uses transient overlays for overlay UI."
+        },
+        {
+          "name": "defaultVisibility",
+          "type": "enum",
+          "default": "visible",
+          "description": "Initial panel visibility, one of `visible`, `hidden`, or `collapsed`."
+        },
+        {
+          "name": "component",
+          "type": "ComponentContributionDefinition",
+          "default": "required",
+          "description": "Bounded inert component tree rendered by Clay-owned native UI code."
+        },
+        {
+          "name": "actionTargets",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Package-prefixed command IDs that panel components may emit as inert action intents."
+        }
+      ],
+      "security": "Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
+      "agent_guidance": "Use `clay.ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.",
+      "lookup_tags": ["ui", "package-ui", "panel", "slot-layout", "clay-js-api", "phase18.3", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverRegisterThemeToken",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-register-theme-token.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRegisterThemeToken",
+      "js_facade": "runtime/js/ui.ts::serverRegisterThemeToken",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::register_theme_token",
+      "deno_op": "op_clay_ui_register_theme_token",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_register_theme_token",
+      "name": "serverRegisterThemeToken",
+      "user_facing_name": "Register Theme Token",
+      "summary": "Register a package-prefixed typed theme token declaration through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.3",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "token",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Semantic package token name such as `markdown.preview.background`."
+        },
+        {
+          "name": "type",
+          "type": "enum",
+          "default": "required",
+          "description": "Token type, one of `color-role`, `spacing`, `radius`, `typography`, or `opacity`."
+        },
+        {
+          "name": "fallback",
+          "type": "string",
+          "default": "clay-core-token-same-type",
+          "description": "Same-type Clay core token used when no future user override is present."
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "default": "required",
+          "description": "Human-readable semantic purpose for diagnostics, help, and future configuration UIs."
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "default": "package",
+          "description": "Provenance source for the declaration; Phase 18.3 accepts package declarations."
+        }
+      ],
+      "security": "Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, arbitrary GPU draw authority, or external authority.",
+      "agent_guidance": "Use `clay.ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.",
+      "lookup_tags": ["ui", "package-ui", "theme-token", "style-tokens", "clay-js-api", "phase18.3", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverRegisterTransientOverlayContribution",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-register-transient-overlay-contribution.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRegisterTransientOverlayContribution",
+      "js_facade": "runtime/js/ui.ts::serverRegisterTransientOverlayContribution",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::register_overlay",
+      "deno_op": "op_clay_ui_register_transient_overlay_contribution",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_register_transient_overlay_contribution",
+      "name": "serverRegisterTransientOverlayContribution",
+      "user_facing_name": "Register Transient Overlay Contribution",
+      "summary": "Register a package-prefixed transient overlay contribution through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.3",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Package-prefixed overlay contribution ID."
+        },
+        {
+          "name": "anchor",
+          "type": "enum",
+          "default": "working-area",
+          "description": "Overlay anchor, one of `working-area`, `active-pane`, `main`, or `pointer`."
+        },
+        {
+          "name": "component",
+          "type": "ComponentContributionDefinition",
+          "default": "required",
+          "description": "Bounded inert component tree rendered by Clay in the overlay layer."
+        },
+        {
+          "name": "focusPolicy",
+          "type": "enum",
+          "default": "none",
+          "description": "Focus behavior, one of `none`, `restore`, or `trap`."
+        },
+        {
+          "name": "dismissalPolicy",
+          "type": "enum",
+          "default": "manual",
+          "description": "Dismissal behavior, one of `manual`, `escape`, `outside`, or `escape-or-outside`."
+        },
+        {
+          "name": "actionTargets",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Registered package-prefixed command IDs that overlay components may emit."
+        }
+      ],
+      "security": "Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
+      "agent_guidance": "Use `clay.ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.",
+      "lookup_tags": ["ui", "package-ui", "overlay", "focus-policy", "clay-js-api", "phase18.3", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverRegisterUiStateScope",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRegisterUiStateScope",
+      "js_facade": "runtime/js/ui.ts::serverRegisterUiStateScope",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::register_ui_state_scope",
+      "deno_op": "op_clay_ui_register_ui_state_scope",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_register_ui_state_scope",
+      "name": "serverRegisterUiStateScope",
+      "user_facing_name": "Register UI State Scope",
+      "summary": "Register bounded package-owned UI state scope schemas and lifecycle metadata through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.4",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Package-prefixed state scope ID such as `markdown.preview.visibility`."
+        },
+        {
+          "name": "scope",
+          "type": "enum",
+          "default": "required",
+          "description": "One of `package-global`, `user-config`, `workspace`, `document`, `pane`, `component`, or `transient-overlay`."
+        },
+        {
+          "name": "owner",
+          "type": "enum",
+          "default": "required",
+          "description": "State owner, one of `package`, `shell`, or `server`."
+        },
+        {
+          "name": "lifetime",
+          "type": "enum",
+          "default": "required",
+          "description": "State lifetime, one of `session`, `workspace`, `document`, or `transient`."
+        },
+        {
+          "name": "persistence",
+          "type": "enum",
+          "default": "required",
+          "description": "Persistence contract, one of `none`, `client-local`, `server-canonical`, or `deferred`."
+        },
+        {
+          "name": "implementationStatus",
+          "type": "enum",
+          "default": "deferred",
+          "description": "Whether the scope lifecycle is currently `implemented` or explicitly `deferred`."
+        },
+        {
+          "name": "targetId",
+          "type": "string",
+          "default": "required for pane/component/transient-overlay",
+          "description": "Package-prefixed target ID for targeted shell/UI state scopes."
+        },
+        {
+          "name": "valueSchema.kind",
+          "type": "enum",
+          "default": "required",
+          "description": "Bounded schema kind, one of `boolean`, `number`, `string`, `enum`, or `object`."
+        }
+      ],
+      "security": "Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.",
+      "agent_guidance": "Use `clay.ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.",
+      "lookup_tags": ["ui", "package-ui", "state", "lifecycle", "clay-js-api", "phase18.4", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverSetLayoutOverride",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-set-layout-override.md",
+      "js_module": "clay:ui",
+      "js_export": "serverSetLayoutOverride",
+      "js_facade": "runtime/js/ui.ts::serverSetLayoutOverride",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::set_layout_override",
+      "deno_op": "op_clay_ui_set_layout_override",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_set_layout_override",
+      "name": "serverSetLayoutOverride",
+      "user_facing_name": "Set Layout Override",
+      "summary": "Set a validated package UI layout/configuration override through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 18.4",
+      "visibility": "public",
+      "permissions": ["package-configuration"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "targetId",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Package-prefixed panel/component/input/token target ID."
+        },
+        {
+          "name": "property",
+          "type": "enum",
+          "default": "required",
+          "description": "One of `slot`, `visibility`, `splitRatio`, `themeToken`, `inputDefault`, `actionDefault`, or `fallback`."
+        },
+        {
+          "name": "value",
+          "type": "json",
+          "default": "required",
+          "description": "Typed value validated for the selected property."
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "default": "user-config",
+          "description": "One of `user-config`, `active-major-mode`, `compatible-minor-mode`, `global-package`, or `package-default`."
+        }
+      ],
+      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callbacks.",
+      "agent_guidance": "Use only documented typed override/configuration records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.",
+      "lookup_tags": ["ui", "package-ui", "layout-overrides", "configuration", "clay-js-api", "phase18.4", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
     },
     {
       "id": "clay.workspace.serverListWorkspaceRoots",

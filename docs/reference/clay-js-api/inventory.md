@@ -1,6 +1,6 @@
 # Clay JS API Current Functionality Inventory
 
-This inventory classifies the current editor, protocol, behavior, key binding, configuration, and application functionality for Phase 7. The machine-readable source is `docs/reference/clay-js-api/api-inventory.toml`.
+This inventory classifies the current editor, protocol, behavior, key binding, configuration, package UI, and application functionality. The machine-readable source is `docs/reference/clay-js-api/api-inventory.toml`.
 
 ## Phase boundary
 
@@ -8,7 +8,7 @@ This inventory classifies the current editor, protocol, behavior, key binding, c
 - Current ordinary typing, newline handling, deletion, cursor movement, selection, scrolling, resize/viewport updates, and paint remain Rust-native client work.
 - Server-owned document mutation, leases, versions, and region locks remain authoritative on the Rust server.
 - Behavior manifests are inert data owned by the server and executed locally by the client for predictable hot-path behavior.
-- Phase 7 does not execute arbitrary JavaScript in the Rust client, load user configuration, grant filesystem/network/shell/workspace/package/AI authority, or implement runtime op wiring.
+- Current Clay does not execute arbitrary JavaScript in the Rust client, grant filesystem/network/shell/workspace/package/AI authority by default, expose Masonry/native handles to packages, or let raw `Deno.core.ops.op_*` names become the user-facing API.
 
 ## Runtime path classes
 
@@ -19,6 +19,7 @@ This inventory classifies the current editor, protocol, behavior, key binding, c
 | `client-local-layout-paint` | Local viewport/layout/paint behavior, including resize-derived visible-line calculations. | Visible extraction and viewport line count. |
 | `server-first-op-wrapper` | Future Clay JS facade calls a server-side op before mutating canonical document state. | Programmatic text insertion. |
 | `server-first-query` | Future Clay JS facade queries server-owned document/lease state. | Document snapshots and lease queries. |
+| `server-first-op-wrapper-runtime` | Runtime-backed Clay JS facade validates a server-side package/programmatic declaration through an explicit op wrapper. | `clay.ui.serverRegisterPanelContribution`, `clay.ui.serverRegisterComponentContribution`, `clay.ui.serverRegisterTransientOverlayContribution`, `clay.ui.serverRegisterInputContribution`, `clay.ui.serverRegisterUiStateScope`, `clay.ui.serverRegisterThemeToken`. |
 | `server-side-configuration-to-behavior-manifest` | Future `~/.config/clay/init.js` configuration updates manifest/key binding metadata on the server side. | `bindKey`, `unbindKey`. |
 | `background-query` | Help/agent/configuration inspection that must not block editing. | Behavior route and manifest queries. |
 | `client-local-application-action` | Native application lifecycle action. | Escape/quit. |
@@ -38,6 +39,7 @@ This inventory classifies the current editor, protocol, behavior, key binding, c
 | Cursor style/customization | `clay.editor.clientSetCursorStyle` | Configuration-driven client UI state | Planned configuration metadata affects paint-time UI only. |
 | Key binding management | `clay.keybindings.bindKey`, `clay.keybindings.unbindKey`, `clay.keybindings.listKeyBindings` | Configuration API | Future configuration produces inert manifests; keypresses do not run JavaScript. |
 | Behavior manifest routing | `clay.behavior.getActiveBehaviorManifest`, `clay.behavior.listBehaviorRoutes` | Server-owned behavior query | Query/inspection only; local route decisions use installed manifests. |
+| Slot-aware package UI contribution | `clay.ui.serverRegisterPanelContribution`, `clay.ui.serverRegisterComponentContribution`, `clay.ui.serverRegisterTransientOverlayContribution`, `clay.ui.serverRegisterInputContribution`, `clay.ui.serverRegisterUiStateScope`, `clay.ui.serverRegisterThemeToken` | Server-validated package UI declaration | Runtime-backed public APIs validate package-prefixed inert panels, component trees, overlays, input/focus/action metadata, UI state-scope lifecycle metadata, and typed theme tokens at package load/config/update time; they are not Masonry hot-path work and now have per-API Markdown docs and generated registry coverage. |
 | Lease/read-only state | `clay.documents.serverGetDocumentSnapshot`, `clay.documents.serverGetDocumentLease` | Server-owned document/lease state | Explicit queries outside paint/input; editing is lease-validated server-side. |
 | Escape/quit/application actions | `clay.application.quit` | Client application lifecycle | Escape currently submits a native action without IPC/JavaScript. |
 
@@ -53,4 +55,4 @@ These records exist so validation and future audits can distinguish intentional 
 
 ## Security summary
 
-Every public/planned entry records permissions and a negative authority statement. The current inventory grants no filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript execution authority. Schema metadata is descriptive; runtime permissions and `deno_core` op wrappers remain future work.
+Every public/planned entry records permissions and a negative authority statement. The current inventory grants no filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript execution authority. Runtime-backed entries must use curated facade modules and explicit `deno_core` op wrappers rather than exposing raw op names.

@@ -54,6 +54,14 @@ pub(super) fn op_clay_packages_load_package(
             "textTransforms": record.contributions.text_transforms.len(),
             "sdui": record.contributions.sdui.len(),
             "decorations": record.contributions.decorations.len(),
+            "uiPanels": record.contributions.ui_panels.len(),
+            "uiComponents": record.contributions.ui_components.len(),
+            "uiOverlays": record.contributions.ui_overlays.len(),
+            "themeTokens": record.contributions.theme_tokens.len(),
+            "input": record.contributions.input_contributions.len(),
+            "uiStateScopes": record.contributions.ui_state_scopes.len(),
+            "layoutOverrides": record.contributions.layout_overrides.len(),
+            "packageOptions": record.contributions.package_options.len(),
         }
     }))
     .map_err(serialize_error("clay.packages.load_failed"))

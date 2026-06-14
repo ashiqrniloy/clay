@@ -7,13 +7,14 @@
 
 ## Overview
 
-The command registry is the Phase 16.5 server-side primitive gate for package-owned command metadata and behavior-manifest contributions. It validates package-prefixed command declarations, load/activation-time key routing data, and inert text-transform metadata before any future package command execution path exists.
+The command registry is the Phase 16.5 server-side primitive gate for package-owned command metadata and behavior-manifest contributions. It validates package-prefixed command declarations, load/activation-time key routing data, and inert text-transform metadata before any future package command execution path exists. Phase 18.4 package input declarations and component-scoped action metadata reuse this registry boundary: input/action records may reference only already-registered package command IDs, and declaring input metadata does not create command execution authority.
 
 ## Responsibilities
 
 - Register package-owned command declarations with package name, version, prefix, routing policy, user-facing label, custom properties, key binding metadata, permissions, and provenance.
 - Validate behavior-manifest contributions by composing package declarations into the existing inert `BehaviorManifest` schema and reusing `validate_manifest` for duplicate command and ambiguous key binding checks.
 - Reject command registration without `command-registration`, invalid or reserved command IDs, undeclared command permissions, client-first package command authority, executable text transform fields, duplicate command IDs, and ambiguous key bindings.
+- Provide the registered-command source of truth used by Phase 18.4 `PackageInputContribution` and layout/action defaults so component-scoped actions remain inert command intents rather than package callbacks.
 
 It does not execute package JavaScript, install command handlers, grant filesystem/workspace/AI/shell/network authority, or add any synchronous package work to the keypress hot path.
 
@@ -65,6 +66,7 @@ cargo test --test package_primitive_gate
 - [Behavior Manifests](behavior-manifests.md)
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Mode Registry](mode-registry.md)
+- [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
 - `docs/reference/primitives/registry.md#CommandDeclaration`
 - `docs/reference/primitives/registry.md#KeyRoutingOverride`
 - `docs/reference/primitives/registry.md#TextTransform`

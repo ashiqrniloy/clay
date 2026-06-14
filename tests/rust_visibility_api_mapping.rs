@@ -259,6 +259,238 @@ fn rust_visibility_mapping_has_no_unmapped_public_primitive_functions() {
 }
 
 #[test]
+fn phase18_1_shell_layout_has_no_unmapped_runtime_or_rust_surfaces() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let shell_layout_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.get("id").starts_with("clay.ui."))
+        .collect();
+
+    assert_eq!(
+        shell_layout_entries.len(),
+        10,
+        "Phase 18.4 should have ten shell/layout clay:ui surfaces after input contribution promotion"
+    );
+    assert!(
+        root.join("runtime/js/ui.ts").exists(),
+        "Phase 18.3 adds a runtime clay:ui contribution facade and public docs for contribution APIs"
+    );
+
+    let lib_source = std::fs::read_to_string(root.join("src/lib.rs")).expect("read src/lib.rs");
+    let shell_strategy =
+        std::fs::read_to_string(root.join("docs/reference/primitives/shell-layout-strategy.md"))
+            .expect("read shell layout strategy");
+    assert!(
+        root.join("src/shell").exists(),
+        "Phase 18.2 should have internal shell runtime Rust modules"
+    );
+    assert!(
+        lib_source.contains("pub(crate) mod shell"),
+        "Phase 18.2 shell runtime must stay crate-private until public clay:ui APIs ship"
+    );
+    for required in [
+        "**Still planned/package-facing after Phase 18.3:** public callable working-area, pane-split, and pane-slot layout mutation/default APIs",
+        "Planned-only `clay.ui.*` inventory entries remain `status = \"planned\"`, `registry_public = false`",
+        "the four Phase 18.3 contribution entries are `status = \"runtime-backed\"`, `registry_public = true`",
+        "both Phase 18.4 entries are `status = \"runtime-backed\"`, `registry_public = true`",
+    ] {
+        assert!(
+            shell_strategy.contains(required),
+            "shell layout docs must explain crate-private runtime vs planned public API status: {required}"
+        );
+    }
+
+    for entry in shell_layout_entries {
+        let id = entry.get("id");
+        assert!(
+            entry.get("facade_path").starts_with("runtime/js/ui.ts::"),
+            "{id} keeps the clay:ui facade namespace"
+        );
+        if matches!(
+            id,
+            "clay.ui.serverRegisterPanelContribution"
+                | "clay.ui.serverRegisterComponentContribution"
+                | "clay.ui.serverRegisterTransientOverlayContribution"
+                | "clay.ui.serverRegisterInputContribution"
+                | "clay.ui.serverRegisterUiStateScope"
+                | "clay.ui.serverSetLayoutOverride"
+                | "clay.ui.serverRegisterThemeToken"
+        ) {
+            assert_eq!(
+                entry.get("registry_public"),
+                "true",
+                "{id} is generated after per-API Markdown docs are linked"
+            );
+            assert_eq!(
+                entry.get("status"),
+                "runtime-backed",
+                "{id} is runtime-backed after its implementation phase"
+            );
+            assert!(entry.get("deno_op").starts_with("op_clay_ui_"));
+            assert!(
+                entry
+                    .get("backing_rust")
+                    .starts_with("src/server/ui.rs::PackageUiRegistry")
+            );
+        } else {
+            assert_eq!(
+                entry.get("registry_public"),
+                "false",
+                "{id} must not be generated before implementation and per-API Markdown docs are linked"
+            );
+            assert_eq!(entry.get("status"), "planned", "{id} remains planned-only");
+            assert_eq!(
+                entry.get("deno_op"),
+                "op_clay_runtime_unavailable",
+                "{id} must not claim an implemented op"
+            );
+            assert!(
+                entry.get("backing_rust").starts_with("planned:"),
+                "{id} backing Rust must stay marked planned until a runtime surface ships"
+            );
+        }
+    }
+
+    let server_public_items = public_server_items().join("\n");
+    for forbidden in [
+        "WorkingAreaLayout",
+        "PaneSplitTree",
+        "PaneSlotLayout",
+        "PanelContribution",
+    ] {
+        assert!(
+            !server_public_items.contains(forbidden),
+            "Phase 18.2 must not introduce public server-side Rust shell/layout primitive {forbidden} without a runtime-backed Clay JS API mapping"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_public_rust_surfaces_have_clay_js_mapping_or_internal_visibility() {
+    let inventory_text = inventory_rust_mapping_text();
+
+    for required_mapping in [
+        "src/server/ui.rs::PackageUiRegistry::register_input",
+        "src/server/ui.rs::PackageUiRegistry::register_ui_state_scope",
+        "src/server/ui.rs::PackageUiRegistry::set_layout_override",
+        "src/server/configuration.rs::ConfigurationRuntime::set_package_option",
+        "op_clay_ui_register_input_contribution",
+        "op_clay_ui_register_ui_state_scope",
+        "op_clay_ui_set_layout_override",
+        "op_clay_configuration_set_package_option",
+        "runtime/js/ui.ts::serverRegisterInputContribution",
+        "runtime/js/ui.ts::serverRegisterUiStateScope",
+        "runtime/js/ui.ts::serverSetLayoutOverride",
+        "runtime/js/configuration.ts::setPackageOption",
+    ] {
+        assert!(
+            inventory_text.contains(required_mapping),
+            "Phase 18.4 public programmatic surface must be mapped through Clay JS API inventory: {required_mapping}"
+        );
+    }
+
+    let server_public_items = public_server_items().join("\n");
+    for internal_type in [
+        "PackageInputContribution",
+        "PackageUiStateScope",
+        "PackageLayoutOverride",
+        "PackageOwnedConfiguration",
+    ] {
+        assert!(
+            !server_public_items.contains(internal_type),
+            "{internal_type} must not become a raw public server Rust API outside the Clay JS facade/registry contract"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_native_public_items_are_binary_only_or_crate_private() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_public_items = public_items_in_dir("src");
+    let shell_native_public: BTreeSet<_> = root_public_items
+        .into_iter()
+        .filter(|item| item.contains("masonry_shell.rs"))
+        .collect();
+    let expected_shell_native_public = BTreeSet::from([
+        "src/masonry_shell.rs::ClayShellWidget".to_string(),
+        "src/masonry_shell.rs::ClayShellWidget::editor_widget_id".to_string(),
+        "src/masonry_shell.rs::ClayShellWidget::focus_fallback_widget_id".to_string(),
+        "src/masonry_shell.rs::ClayShellWidget::single_editor".to_string(),
+    ]);
+
+    assert_eq!(
+        shell_native_public, expected_shell_native_public,
+        "Phase 18.2 may expose only the doc-hidden native shell constructor/focus accessors needed by the package binary boundary"
+    );
+
+    let inventory_text = inventory_rust_mapping_text();
+    for binary_only in &expected_shell_native_public {
+        assert!(
+            !inventory_text.contains(binary_only),
+            "{binary_only} is a native binary-boundary helper, not a Clay JS API mapping"
+        );
+    }
+
+    let lib_source = std::fs::read_to_string(root.join("src/lib.rs")).expect("read src/lib.rs");
+    let shell_source =
+        std::fs::read_to_string(root.join("src/masonry_shell.rs")).expect("read shell source");
+    let shell_layout_source =
+        std::fs::read_to_string(root.join("src/shell/layout.rs")).expect("read shell layout");
+    let strategy =
+        std::fs::read_to_string(root.join("docs/reference/primitives/shell-layout-strategy.md"))
+            .expect("read shell layout strategy");
+
+    assert!(lib_source.contains("#[doc(hidden)]"));
+    assert!(lib_source.contains("pub mod masonry_shell;"));
+    assert!(shell_source.contains("#[doc(hidden)]"));
+    assert!(shell_source.contains("pub struct ClayShellWidget"));
+    for internal_surface in [
+        "pub(crate) fn apply_layout_update",
+        "pub(crate) fn observable_snapshot",
+        "pub(crate) struct ShellObservableSnapshot",
+        "pub(crate) struct WorkingAreaLayout",
+        "pub(crate) struct WorkingAreaLayoutUpdate",
+        "pub(crate) struct WorkingAreaLayoutObservation",
+        "pub(crate) struct PaneSplitTree",
+        "pub(crate) struct PaneSlotLayout",
+    ] {
+        assert!(
+            shell_source.contains(internal_surface)
+                || shell_layout_source.contains(internal_surface),
+            "expected internal shell surface {internal_surface} to stay crate-private"
+        );
+    }
+    for forbidden_public in [
+        "pub fn apply_layout_update",
+        "pub fn observable_snapshot",
+        "pub struct WorkingAreaLayout",
+        "pub struct WorkingAreaLayoutUpdate",
+        "pub struct WorkingAreaLayoutObservation",
+        "pub struct PaneSplitTree",
+        "pub struct PaneSlotLayout",
+    ] {
+        assert!(
+            !shell_source.contains(forbidden_public)
+                && !shell_layout_source.contains(forbidden_public),
+            "{forbidden_public} must not bypass Clay JS API docs/facade/registry coverage"
+        );
+    }
+    for required in [
+        "Rust visibility audit",
+        "introduces no new public server-side Rust shell/layout functions",
+        "binary/library boundary",
+        "not package-extensibility APIs",
+        "remain `pub(crate)`",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell strategy must document native Rust visibility rationale: {required}"
+        );
+    }
+}
+
+#[test]
 fn open_dialog_internal_helpers_are_private_or_inventory_mapped() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let inventory_text = inventory_rust_mapping_text();

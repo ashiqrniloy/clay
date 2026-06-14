@@ -281,26 +281,43 @@ fn phase17_configuration_apis_cover_reviewed_package_surfaces() {
             .iter()
             .find(|entry| entry.get("id") == id)
             .unwrap_or_else(|| panic!("missing Phase 17 configuration API review entry {id}"));
+        let expected_status = if id == "clay.configuration.setPackageOption" {
+            "runtime-backed"
+        } else {
+            "planned"
+        };
         assert_eq!(
             entry.get("status"),
-            "planned",
-            "{id} remains planned until concrete validators/settings are promoted"
+            expected_status,
+            "{id} status must match promoted validators/settings"
         );
         assert_eq!(entry.get("js_module"), "clay:configuration");
+        let expected_registry_public = if id == "clay.configuration.setPackageOption" {
+            "true"
+        } else {
+            "false"
+        };
         assert_eq!(
             entry.get("registry_public"),
-            "false",
-            "{id} must not enter the public registry until docs/op/runtime are promoted"
+            expected_registry_public,
+            "{id} registry visibility must match docs/op/runtime promotion"
         );
         assert!(
             entry.get("hot_path_policy").contains("not")
                 || entry.get("hot_path_policy").contains("never"),
             "{id} must document that configuration stays off typing/rendering hot paths"
         );
-        assert!(
-            entry.get("runtime_path").contains("planned"),
-            "{id} runtime path must remain explicit planned metadata"
-        );
+        if id == "clay.configuration.setPackageOption" {
+            assert!(
+                entry.get("runtime_path").contains("runtime"),
+                "{id} runtime path must record promoted runtime metadata"
+            );
+        } else {
+            assert!(
+                entry.get("runtime_path").contains("planned"),
+                "{id} runtime path must remain explicit planned metadata"
+            );
+        }
         for property in custom_properties {
             assert!(
                 inventory_custom_property_names(entry.get("custom_properties"))
@@ -370,6 +387,789 @@ fn package_configuration_cannot_grant_prohibited_authority() {
                 "{id} security_notes must deny {denied} authority"
             );
         }
+    }
+}
+
+#[test]
+fn phase18_2_shell_layout_configuration_surfaces_are_planned_or_documented() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing shell/layout configuration inventory entry {id}"))
+    };
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let shell_layout_doc =
+        fs::read_to_string(root.join("docs/reference/primitives/shell-layout-strategy.md"))
+            .expect("read shell/layout strategy");
+    let docs_index = fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    let registry_links = docs_index_registry_links();
+
+    assert!(
+        docs_index.contains("reference/clay-js-api/configuration.md"),
+        "docs/index.md must link the configuration overview"
+    );
+    assert!(
+        docs_index.contains("reference/primitives/shell-layout-strategy.md"),
+        "docs/index.md must link the shell/layout strategy"
+    );
+
+    for id in [
+        "clay.configuration.setPackageOption",
+        "clay.ui.serverSetLayoutOverride",
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(entry.get("status"), "runtime-backed", "{id} is promoted");
+        assert_eq!(
+            entry.get("registry_public"),
+            "true",
+            "{id} must enter the public registry after runtime validation and API docs ship"
+        );
+        assert!(
+            configuration_doc.contains(id) || shell_layout_doc.contains(id),
+            "configuration or shell/layout docs must record planned surface {id}"
+        );
+    }
+
+    let layout_override = entry_by_id("clay.ui.serverSetLayoutOverride");
+    assert_eq!(layout_override.get("js_module"), "clay:ui");
+    assert_eq!(
+        layout_override.get("documentation_path"),
+        "docs/reference/clay-js-api/ui/server-set-layout-override.md"
+    );
+    assert_eq!(
+        layout_override.get("deno_op"),
+        "op_clay_ui_set_layout_override"
+    );
+    assert!(
+        layout_override
+            .get("runtime_path")
+            .contains("configuration")
+            && layout_override
+                .get("hot_path_policy")
+                .contains("no-hot-path"),
+        "layout override planning metadata must keep configuration off Masonry/editor hot paths"
+    );
+    assert!(
+        registry_links.contains("docs/reference/clay-js-api/ui/server-set-layout-override.md"),
+        "runtime-backed clay:ui layout override docs must be linked as public registry docs after implementation"
+    );
+    assert!(
+        registry_links.contains("docs/reference/clay-js-api/configuration/set-package-option.md"),
+        "runtime-backed setPackageOption docs must be linked as public registry docs after concrete shell/layout settings ship"
+    );
+    for planned_ui_doc in [
+        "docs/reference/clay-js-api/ui/server-register-working-area-layout.md",
+        "docs/reference/clay-js-api/ui/server-register-pane-split-tree.md",
+        "docs/reference/clay-js-api/ui/server-set-pane-slot-layout.md",
+    ] {
+        assert!(
+            !registry_links.contains(planned_ui_doc),
+            "planned clay:ui layout/state/config docs must not be linked as public registry docs before implementation: {planned_ui_doc}"
+        );
+    }
+    for implemented_ui_doc in [
+        "docs/reference/clay-js-api/ui/server-register-panel-contribution.md",
+        "docs/reference/clay-js-api/ui/server-register-component-contribution.md",
+        "docs/reference/clay-js-api/ui/server-register-transient-overlay-contribution.md",
+        "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
+        "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
+        "docs/reference/clay-js-api/ui/server-register-theme-token.md",
+    ] {
+        assert!(
+            registry_links.contains(implemented_ui_doc),
+            "runtime-backed Phase 18.3 clay:ui contribution docs must be linked: {implemented_ui_doc}"
+        );
+    }
+
+    assert!(
+        root.join("runtime/js/ui.ts").exists(),
+        "Phase 18.3 adds a clay:ui facade for contribution declarations while configuration/override APIs remain planned"
+    );
+    let js_runtime =
+        fs::read_to_string(root.join("src/server/js_runtime.rs")).expect("read server JS runtime");
+    assert!(
+        js_runtime.contains("\"clay:ui\""),
+        "Phase 18.3 runtime must allow importing runtime-backed clay:ui contribution APIs"
+    );
+
+    for required in [
+        "Phase 18.2/18.3 shell/layout and package UI configuration review",
+        "Phase 18.2 does **not** promote any new runtime-backed or user-visible shell/layout configuration API",
+        "Phase 18.3 promotes package UI declaration APIs",
+        "does not promote user-visible panel visibility, default-slot, component-style, theme-token override, or layout behavior configuration APIs",
+        "`clay.ui.serverSetLayoutOverride` is the planned `PackageLayoutOverride` surface",
+        "`clay.configuration.setPackageOption` remains the planned package-owned option surface",
+        "Phase 18.3 promotes `clay.ui.serverRegisterThemeToken` to a runtime-backed package declaration API",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must record shell/layout planned-vs-implemented status text: {required}"
+        );
+    }
+    for required in [
+        "Configuration and User Override Surfaces",
+        "Phase 18.2 still does not introduce a callable shell/layout configuration API",
+        "`clay.ui.serverSetLayoutOverride` / `PackageLayoutOverride`",
+        "`clay.configuration.setPackageOption`",
+        "`clay.ui.serverRegisterThemeToken` / `PackageThemeTokenDeclaration`",
+        "`clay.ui.serverRegisterUiStateScope` / `PackageUiStateScope`",
+    ] {
+        assert!(
+            shell_layout_doc.contains(required),
+            "shell/layout strategy must record planned configuration surface text: {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_configuration_inventory_records_metadata() {
+    let entries = inventory_entries();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing shell/layout configuration inventory entry {id}"))
+    };
+
+    for (id, required_properties) in [
+        (
+            "clay.ui.serverSetLayoutOverride",
+            ["targetId", "property", "value", "source"].as_slice(),
+        ),
+        (
+            "clay.configuration.setPackageOption",
+            ["packagePrefix", "option", "value", "source"].as_slice(),
+        ),
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(entry.get("status"), "runtime-backed");
+        assert_eq!(entry.get("key_bindings"), "[]");
+        assert_eq!(entry.get("registry_public"), "true");
+        assert!(
+            entry.get("authority").contains("configuration")
+                || entry.get("category").contains("configuration"),
+            "{id} must be classified as configuration-relevant"
+        );
+        assert!(
+            entry.get("hot_path_policy").contains("not")
+                || entry.get("hot_path_policy").contains("never")
+                || entry.get("hot_path_policy").contains("no-hot-path"),
+            "{id} must keep configuration work off hot paths"
+        );
+        for property in required_properties {
+            assert!(
+                inventory_custom_property_names(entry.get("custom_properties"))
+                    .contains(&property.to_string()),
+                "{id} custom_properties must include {property}"
+            );
+        }
+        for denied in denied_configuration_authorities() {
+            assert!(
+                entry.get("security_notes").contains(denied),
+                "{id} security_notes must deny {denied} authority"
+            );
+        }
+        for denied in ["raw Deno ops", "enable/disable"] {
+            assert!(
+                entry.get("security_notes").contains(denied),
+                "{id} security_notes must deny {denied} authority"
+            );
+        }
+    }
+
+    let layout_override = entry_by_id("clay.ui.serverSetLayoutOverride");
+    assert_eq!(
+        parse_toml_string_list(layout_override.get("permissions")),
+        vec!["package-configuration".to_string()],
+        "behavior-changing shell/layout overrides require package-configuration permission metadata"
+    );
+    for denied in [
+        "hidden JSON/TOML layout keys",
+        "native widget handles",
+        "direct Masonry widgets",
+        "raw CSS",
+        "renderer callback",
+    ] {
+        assert!(
+            layout_override.get("security_notes").contains(denied),
+            "layout override inventory security notes must deny {denied}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_clay_ui_and_configuration_api_inventory_status_matches_runtime() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let registry_links = docs_index_registry_links();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing Phase 18.4 API inventory entry {id}"))
+    };
+
+    for (id, module, export, op, rust, required_properties) in [
+        (
+            "clay.ui.serverRegisterInputContribution",
+            "clay:ui",
+            "serverRegisterInputContribution",
+            "op_clay_ui_register_input_contribution",
+            "src/server/ui.rs::PackageUiRegistry::register_input",
+            [
+                "id",
+                "scope",
+                "componentId",
+                "pointer.click",
+                "actionTargets",
+            ]
+            .as_slice(),
+        ),
+        (
+            "clay.ui.serverRegisterUiStateScope",
+            "clay:ui",
+            "serverRegisterUiStateScope",
+            "op_clay_ui_register_ui_state_scope",
+            "src/server/ui.rs::PackageUiRegistry::register_ui_state_scope",
+            [
+                "id",
+                "scope",
+                "owner",
+                "lifetime",
+                "persistence",
+                "valueSchema.kind",
+            ]
+            .as_slice(),
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "clay:ui",
+            "serverSetLayoutOverride",
+            "op_clay_ui_set_layout_override",
+            "src/server/ui.rs::PackageUiRegistry::set_layout_override",
+            ["targetId", "property", "value", "source"].as_slice(),
+        ),
+        (
+            "clay.configuration.setPackageOption",
+            "clay:configuration",
+            "setPackageOption",
+            "op_clay_configuration_set_package_option",
+            "src/server/configuration.rs::ConfigurationRuntime::set_package_option",
+            ["packagePrefix", "option", "value", "source"].as_slice(),
+        ),
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(entry.get("status"), "runtime-backed", "{id} status");
+        assert_eq!(entry.get("registry_public"), "true", "{id} visibility");
+        assert_eq!(entry.get("js_module"), module);
+        assert_eq!(entry.get("js_export"), export);
+        assert_eq!(entry.get("deno_op"), op);
+        assert_eq!(entry.get("backing_rust"), rust);
+        assert_eq!(entry.get("key_bindings"), "[]");
+        assert!(facade_exports_function(entry.get("facade_path"), export));
+        assert!(registry_links.contains(entry.get("documentation_path")));
+        assert!(
+            root.join(entry.get("documentation_path")).exists(),
+            "{id} documentation_path must exist"
+        );
+        assert!(
+            entry.get("hot_path_policy").contains("no-hot-path")
+                || entry.get("hot_path_policy").contains("not")
+                || entry.get("hot_path_policy").contains("never")
+        );
+        for property in required_properties {
+            assert!(
+                inventory_custom_property_names(entry.get("custom_properties"))
+                    .contains(&property.to_string()),
+                "{id} custom_properties must include {property}"
+            );
+        }
+        for denied in [
+            "filesystem",
+            "network",
+            "shell",
+            "extension loading",
+            "AI mutation",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "direct Masonry widgets",
+            "native widget handles",
+        ] {
+            assert!(
+                entry.get("security_notes").contains(denied),
+                "{id} security_notes must deny {denied}"
+            );
+        }
+    }
+
+    for id in [
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(entry.get("status"), "planned", "{id} remains deferred");
+        assert_eq!(entry.get("registry_public"), "false");
+        assert_eq!(entry.get("deno_op"), "op_clay_runtime_unavailable");
+        assert_eq!(
+            entry.get("documentation_path"),
+            "docs/reference/primitives/shell-layout-strategy.md"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_planned_api_inventory_status_is_explicit() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let strategy =
+        fs::read_to_string(root.join("docs/reference/primitives/shell-layout-strategy.md"))
+            .expect("read shell/layout strategy");
+    let docs_index = fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    let registry_links = docs_index_registry_links();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing shell/layout planned API inventory entry {id}"))
+    };
+
+    let planned = [
+        (
+            "WorkingAreaLayout",
+            "clay.ui.serverRegisterWorkingAreaLayout",
+            "serverRegisterWorkingAreaLayout",
+            "Register Working Area Layout",
+        ),
+        (
+            "PaneSplitTree",
+            "clay.ui.serverRegisterPaneSplitTree",
+            "serverRegisterPaneSplitTree",
+            "Register Pane Split Tree",
+        ),
+        (
+            "PaneSlotLayout",
+            "clay.ui.serverSetPaneSlotLayout",
+            "serverSetPaneSlotLayout",
+            "Set Pane Slot Layout",
+        ),
+    ];
+
+    for (primitive, id, js_export, user_facing_name) in planned {
+        let entry = entry_by_id(id);
+        assert_eq!(entry.get("status"), "planned", "{id} remains planned");
+        assert_eq!(
+            entry.get("visibility"),
+            "public",
+            "{id} is a future public surface"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "{id} must not be lookup-visible before implementation"
+        );
+        assert_eq!(
+            entry.get("js_module"),
+            "clay:ui",
+            "{id} keeps the planned module specifier"
+        );
+        assert_eq!(
+            entry.get("js_export"),
+            js_export,
+            "{id} keeps its planned callable/export name"
+        );
+        assert!(
+            is_lower_camel_case(js_export),
+            "{id} export {js_export} must be lower camel case"
+        );
+        assert_eq!(
+            entry.get("user_facing_name"),
+            user_facing_name,
+            "{id} keeps its searchable user-facing name"
+        );
+        assert_eq!(
+            entry.get("deno_op"),
+            "op_clay_runtime_unavailable",
+            "{id} must not claim a runtime op yet"
+        );
+        assert_eq!(
+            entry.get("documentation_path"),
+            "docs/reference/primitives/shell-layout-strategy.md"
+        );
+        assert_eq!(
+            entry.get("key_bindings"),
+            "[]",
+            "planned {id} has no default key binding"
+        );
+        assert_ne!(
+            entry.get("custom_properties"),
+            "[]",
+            "planned {id} must list future metadata/custom properties"
+        );
+        assert!(
+            entry
+                .get("facade_path")
+                .contains(&format!("runtime/js/ui.ts::{js_export}"))
+        );
+        assert!(
+            entry.get("backing_rust").starts_with("planned:"),
+            "{id} must identify backing Rust as planned only"
+        );
+        assert!(
+            entry.get("current_rust_owner").contains("planned:"),
+            "{id} must not imply implemented Rust ownership"
+        );
+        assert!(
+            entry.get("hot_path_policy").contains("no-hot-path"),
+            "{id} must preserve no-hot-path policy"
+        );
+        assert!(
+            entry.get("hot_path_policy").contains("hot"),
+            "{id} must explain why planned shell/layout work stays off runtime hot paths"
+        );
+        assert!(
+            strategy.contains(primitive),
+            "strategy must link planned API {id} to primitive {primitive}"
+        );
+        assert!(
+            strategy.contains(id),
+            "strategy must name planned API stable ID {id}"
+        );
+        assert!(
+            strategy.contains(js_export),
+            "strategy must name planned API export {js_export}"
+        );
+
+        for denied in [
+            "filesystem",
+            "network",
+            "shell",
+            "extension loading",
+            "AI mutation",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "direct Masonry widgets",
+            "native widget handles",
+            "raw CSS",
+        ] {
+            assert!(
+                entry.get("security_notes").contains(denied),
+                "{id} security notes must deny {denied} authority"
+            );
+        }
+        for forbidden_name in ["opClay", "op_clay_", "Rust", "Masonry"] {
+            assert!(
+                !js_export.contains(forbidden_name),
+                "{id} JavaScript export must not expose implementation naming layer {forbidden_name}"
+            );
+        }
+    }
+
+    for (id, deno_op, backing) in [
+        (
+            "clay.ui.serverRegisterPanelContribution",
+            "op_clay_ui_register_panel_contribution",
+            "src/server/ui.rs::PackageUiRegistry::register_panel",
+        ),
+        (
+            "clay.ui.serverRegisterComponentContribution",
+            "op_clay_ui_register_component_contribution",
+            "src/server/ui.rs::PackageUiRegistry::register_component",
+        ),
+        (
+            "clay.ui.serverRegisterTransientOverlayContribution",
+            "op_clay_ui_register_transient_overlay_contribution",
+            "src/server/ui.rs::PackageUiRegistry::register_overlay",
+        ),
+        (
+            "clay.ui.serverRegisterThemeToken",
+            "op_clay_ui_register_theme_token",
+            "src/server/ui.rs::PackageUiRegistry::register_theme_token",
+        ),
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(
+            entry.get("status"),
+            "runtime-backed",
+            "{id} is runtime-backed in Phase 18.3"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "true",
+            "{id} is registry-public after the Phase 18.3 API docs task"
+        );
+        assert!(
+            entry
+                .get("documentation_path")
+                .starts_with("docs/reference/clay-js-api/ui/"),
+            "{id} must point at its public clay:ui API Markdown page"
+        );
+        assert_eq!(entry.get("deno_op"), deno_op);
+        assert_eq!(
+            entry.get("deno_op_path"),
+            format!("src/server/ops/ui.rs::{deno_op}")
+        );
+        assert_eq!(entry.get("backing_rust"), backing);
+        assert!(facade_exports_function(
+            entry.get("facade_path"),
+            entry.get("js_export")
+        ));
+        assert!(
+            entry
+                .get("security_notes")
+                .contains("Runtime-backed Clay JS API")
+        );
+        assert!(entry.get("hot_path_policy").contains("no-hot-path"));
+    }
+
+    for required in [
+        "Clay JS API Inventory Status",
+        "runtime-backed `clay:ui` contribution facade",
+        "module specifier groups imports",
+        "lower-camel-case export",
+        "stable registry ID",
+        "user-facing name",
+        "Package-owned shell/layout IDs",
+        "must use package prefixes",
+        "raw-op denial",
+        "native-widget denial",
+        "client-JS denial",
+        "style-token constraint",
+        "action-target validation",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "strategy must record public API inventory status detail: {required}"
+        );
+    }
+    for id in [
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.ui.serverRegisterComponentContribution",
+        "clay.ui.serverRegisterTransientOverlayContribution",
+        "clay.ui.serverRegisterThemeToken",
+    ] {
+        let entry = entry_by_id(id);
+        assert!(registry_links.contains(entry.get("documentation_path")));
+        assert!(docs_index.contains(entry.get("documentation_path").trim_start_matches("docs/")));
+    }
+}
+
+#[test]
+fn phase18_2_shell_layout_api_inventory_status_matches_runtime() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing Phase 18.2 shell/layout inventory entry {id}"))
+    };
+    let strategy =
+        fs::read_to_string(root.join("docs/reference/primitives/shell-layout-strategy.md"))
+            .expect("read shell/layout strategy");
+    let lib_source = fs::read_to_string(root.join("src/lib.rs")).expect("read src/lib.rs");
+    let shell_mod_source =
+        fs::read_to_string(root.join("src/shell/mod.rs")).expect("read src/shell/mod.rs");
+    let shell_layout_source =
+        fs::read_to_string(root.join("src/shell/layout.rs")).expect("read src/shell/layout.rs");
+    let masonry_shell_source =
+        fs::read_to_string(root.join("src/masonry_shell.rs")).expect("read src/masonry_shell.rs");
+
+    for (id, rust_owner) in [
+        (
+            "clay.ui.serverRegisterWorkingAreaLayout",
+            "src/shell/layout.rs::WorkingAreaLayout",
+        ),
+        (
+            "clay.ui.serverRegisterPaneSplitTree",
+            "src/shell/layout.rs::PaneSplitTree",
+        ),
+        (
+            "clay.ui.serverSetPaneSlotLayout",
+            "src/shell/layout.rs::PaneSlotLayout",
+        ),
+    ] {
+        let entry = entry_by_id(id);
+        assert_eq!(entry.get("status"), "planned", "{id} remains planned");
+        assert_eq!(entry.get("registry_public"), "false");
+        assert_eq!(entry.get("deno_op"), "op_clay_runtime_unavailable");
+        assert_eq!(
+            entry.get("deno_op_path"),
+            "src/server/ops/planned.rs::op_clay_runtime_unavailable"
+        );
+        assert_eq!(
+            entry.get("documentation_path"),
+            "docs/reference/primitives/shell-layout-strategy.md"
+        );
+        assert!(
+            entry.get("facade_path").starts_with("runtime/js/ui.ts::"),
+            "{id} must keep only a planned facade namespace"
+        );
+        assert!(
+            entry.get("backing_rust").contains(rust_owner),
+            "{id} must point planned backing metadata at the actual internal runtime owner {rust_owner}"
+        );
+        assert!(
+            entry
+                .get("current_rust_owner")
+                .contains("internal runtime implemented"),
+            "{id} current_rust_owner must say the Rust runtime exists while the public API is unavailable"
+        );
+        for required in [
+            "server validation",
+            "bounded",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "direct Masonry widgets",
+            "native widget handles",
+            "raw CSS",
+        ] {
+            assert!(
+                entry.get("security_notes").contains(required)
+                    || entry.get("hot_path_policy").contains(required),
+                "{id} inventory metadata must preserve {required:?}"
+            );
+        }
+    }
+
+    assert!(
+        root.join("runtime/js/ui.ts").exists(),
+        "Phase 18.3 promotes callable clay:ui contribution facade while layout override APIs stay planned"
+    );
+    assert!(
+        root.join("docs/reference/clay-js-api/ui").exists(),
+        "Phase 18.3 API docs task adds public docs for runtime-backed clay:ui contribution APIs"
+    );
+    assert!(
+        lib_source.contains("#[doc(hidden)]") && lib_source.contains("pub mod masonry_shell;"),
+        "masonry_shell is Rust-public only for the package binary boundary and must stay hidden from public Rust docs"
+    );
+    assert!(shell_mod_source.contains("pub(crate) mod layout"));
+    for forbidden_public_layout in [
+        "pub struct WorkingAreaLayout",
+        "pub enum PaneSplitNode",
+        "pub struct PaneSplitTree",
+        "pub struct PaneSlotLayout",
+        "pub struct WorkingAreaLayoutUpdate",
+        "pub struct WorkingAreaLayoutObservation",
+    ] {
+        assert!(
+            !shell_layout_source.contains(forbidden_public_layout),
+            "{forbidden_public_layout} must stay crate-private unless a Clay JS API is promoted"
+        );
+    }
+
+    assert!(masonry_shell_source.contains("#[doc(hidden)]"));
+    assert!(masonry_shell_source.contains("pub struct ClayShellWidget"));
+    for binary_only_method in [
+        "pub fn single_editor",
+        "pub fn editor_widget_id",
+        "pub fn focus_fallback_widget_id",
+    ] {
+        assert!(
+            masonry_shell_source.contains(binary_only_method),
+            "expected binary-only native shell method {binary_only_method}"
+        );
+    }
+    for internal_method in ["apply_layout_update", "observable_snapshot"] {
+        assert!(
+            masonry_shell_source.contains(&format!("pub(crate) fn {internal_method}")),
+            "{internal_method} must remain crate-internal"
+        );
+        assert!(
+            !masonry_shell_source.contains(&format!("pub fn {internal_method}")),
+            "{internal_method} must not become a public Rust API without Clay JS facade/docs/registry coverage"
+        );
+    }
+
+    for required in [
+        "Rust visibility audit",
+        "introduces no new public server-side Rust shell/layout functions",
+        "Rust-public only for the Cargo package's binary/library boundary",
+        "not backed by a `deno_core` op",
+        "generated registry entry",
+        "remain `pub(crate)`",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell/layout strategy must record Phase 18.2 API audit rationale: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_docs_reject_hidden_layout_config_keys() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let shell_layout_doc =
+        fs::read_to_string(root.join("docs/reference/primitives/shell-layout-strategy.md"))
+            .expect("read shell/layout strategy");
+    let package_guide =
+        fs::read_to_string(root.join("docs/reference/packages/creating-packages.md"))
+            .expect("read package guide");
+
+    for (name, text) in [
+        ("configuration overview", configuration_doc.as_str()),
+        ("shell/layout strategy", shell_layout_doc.as_str()),
+        ("package guide", package_guide.as_str()),
+    ] {
+        assert!(
+            text.contains("hidden JSON/TOML/ad hoc")
+                || text.contains("Do not add hidden JSON/TOML/ad hoc keys"),
+            "{name} must reject hidden JSON/TOML/ad hoc shell/layout configuration keys"
+        );
+        assert!(
+            text.contains("documented Clay JS APIs"),
+            "{name} must route shell/layout configuration through documented Clay JS APIs"
+        );
+        for denied in ["raw CSS", "native widget", "client-side JavaScript"] {
+            assert!(
+                text.contains(denied),
+                "{name} must deny {denied} authority for shell/layout configuration"
+            );
+        }
+    }
+
+    for required_key in [
+        "layout.preview.defaultSlot",
+        "layout.preview.defaultVisibility",
+        "preview.position",
+        "preview.defaultVisibility",
+        "theme.markdown.heading.1",
+    ] {
+        assert!(
+            configuration_doc.contains(required_key) && shell_layout_doc.contains(required_key),
+            "configuration and shell/layout docs must identify planned key {required_key} as API-mediated, not hidden config"
+        );
+    }
+    for denied in [
+        "filesystem",
+        "network",
+        "shell",
+        "extension loading",
+        "AI mutation",
+        "workspace mutation",
+        "package enable/disable",
+        "WASM",
+        "raw Deno ops",
+        "native widget handles",
+        "direct Masonry widgets",
+        "renderer callbacks",
+        "client-side JavaScript",
+    ] {
+        assert!(
+            configuration_doc.contains(denied) && shell_layout_doc.contains(denied),
+            "shell/layout configuration docs must deny {denied} authority"
+        );
     }
 }
 
@@ -992,7 +1792,7 @@ fn clay_js_api_names_follow_project_conventions() {
         assert!(
             !js_export.contains("clay")
                 && !js_export.contains("Clay")
-                && !js_export.contains("op")
+                && (!js_export.contains("op") || js_export == "serverRegisterUiStateScope")
                 && !js_export.contains("Rust"),
             "{id} js_export {js_export} must not expose Clay/project, raw op, or Rust implementation names"
         );

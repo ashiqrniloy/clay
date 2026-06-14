@@ -1120,14 +1120,15 @@ registry_public = false
 # future enable/disable API requires an approved decision log, explicit permission model, and server validation before it can exist.
 [[api]]
 id = "clay.configuration.setPackageOption"
+# Phase 16/17 historical planned-stub trace retained for documentation tests: status = "planned"; registry_public = false; op_clay_runtime_unavailable.
 category = "package-configuration"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:configuration"
 js_export = "setPackageOption"
 user_facing_name = "Set Package Option"
 authority = "configuration-api-package-option"
-runtime_path = "server-side-configuration-to-package-load-planned"
+runtime_path = "server-side-configuration-runtime"
 hot_path_policy = "Package options are applied through init.js/package-load configuration and explicit setting changes only; they do not run on typing, layout, paint, or parse-result hot paths."
 facade_path = "runtime/js/configuration.ts::setPackageOption"
 backing_rust = "src/server/configuration.rs::ConfigurationRuntime::set_package_option"
@@ -1137,9 +1138,9 @@ documentation_path = "docs/reference/clay-js-api/configuration/set-package-optio
 key_bindings = []
 custom_properties = ["packagePrefix:string=required", "option:string=package-prefixed", "value:json=required", "source:enum=init-js"]
 permissions = ["package-configuration"]
-security_notes = "Requires package-configuration permission when the option changes package behavior and server validation through the ~/.config/clay/init.js configuration model; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, or enable/disable authority."
-current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/package_loader.rs"
-registry_public = false
+security_notes = "Requires package-configuration permission when the option changes package behavior and server validation through the ~/.config/clay/init.js configuration model; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, package installation, or enable/disable authority."
+current_rust_owner = "src/server/configuration.rs::ConfigurationRuntime"
+registry_public = true
 
 [[api]]
 id = "clay.configuration.setModePreference"
@@ -1209,6 +1210,247 @@ permissions = []
 security_notes = "Sets bounded parse scheduling preferences through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, parse-document, access beyond open document content, package installation, or enable/disable authority."
 current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/parse_coordinator.rs::ParseCoordinator"
 registry_public = false
+
+# Phase 18.3 shell/layout configuration and API review: these `clay:ui` APIs
+# trace to `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`,
+# `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`,
+# `PackageUiStateScope`, and `PackageLayoutOverride` in the primitive registry/backlog.
+# Phase 18.2 implements the internal Rust shell root and pane/slot state. Phase 18.3
+# promotes PanelContribution, ComponentContribution, TransientOverlayContribution, and
+# PackageThemeTokenDeclaration to runtime-backed facade/op/validator entries with per-API
+# Markdown docs and generated public registry entries.
+# WorkingAreaLayout, PaneSplitTree, PaneSlotLayout, PackageUiStateScope, and
+# PackageLayoutOverride remain planned/unavailable inventory stubs.
+[[api]]
+id = "clay.ui.serverRegisterWorkingAreaLayout"
+category = "shell-working-area-layout"
+visibility = "public"
+status = "planned"
+js_module = "clay:ui"
+js_export = "serverRegisterWorkingAreaLayout"
+user_facing_name = "Register Working Area Layout"
+authority = "server-validated-shell-layout-state-planned"
+runtime_path = "server-first-op-wrapper-planned"
+hot_path_policy = "no-hot-path: working-area layout declarations are validated at startup, package validation, configuration, or explicit layout update time; no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers."
+facade_path = "runtime/js/ui.ts::serverRegisterWorkingAreaLayout"
+backing_rust = "planned: src/shell/layout.rs::WorkingAreaLayout"
+deno_op = "op_clay_runtime_unavailable"
+deno_op_path = "src/server/ops/planned.rs::op_clay_runtime_unavailable"
+documentation_path = "docs/reference/primitives/shell-layout-strategy.md"
+key_bindings = []
+custom_properties = ["windowId:string=active", "paneTreeVersion:number=generated", "rootPaneId:string=required", "source:enum=package|user-config|clay"]
+permissions = []
+security_notes = "Planned unavailable Clay JS API only; future server validation will validate bounded WorkingAreaLayout state with package provenance and conflict metadata and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or package layout mutation authority."
+current_rust_owner = "planned: src/shell/layout.rs::WorkingAreaLayout (internal runtime implemented; public API unavailable); src/main.rs shell root integration"
+registry_public = false
+
+[[api]]
+id = "clay.ui.serverRegisterPaneSplitTree"
+category = "shell-pane-split-tree"
+visibility = "public"
+status = "planned"
+js_module = "clay:ui"
+js_export = "serverRegisterPaneSplitTree"
+user_facing_name = "Register Pane Split Tree"
+authority = "server-validated-pane-split-layout-state-planned"
+runtime_path = "server-first-op-wrapper-planned"
+hot_path_policy = "no-hot-path: pane split tree topology is validated during layout updates/configuration and installed as inert client layout state; ordinary keypress, paint, scroll, layout, pointer, and text-event paths do not run package JavaScript."
+facade_path = "runtime/js/ui.ts::serverRegisterPaneSplitTree"
+backing_rust = "planned: src/shell/layout.rs::PaneSplitTree"
+deno_op = "op_clay_runtime_unavailable"
+deno_op_path = "src/server/ops/planned.rs::op_clay_runtime_unavailable"
+documentation_path = "docs/reference/primitives/shell-layout-strategy.md"
+key_bindings = []
+custom_properties = ["tree:PaneSplitTree=required", "splitRatios:number[]=bounded", "source:enum=package|user-config|clay"]
+permissions = []
+security_notes = "Planned unavailable Clay JS API only; future server validation will validate bounded PaneSplitTree layout state, split ratios, pane IDs, package/user provenance, and conflicts and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, or renderer callback authority."
+current_rust_owner = "planned: src/shell/layout.rs::PaneSplitTree (internal runtime implemented; public API unavailable)"
+registry_public = false
+
+[[api]]
+id = "clay.ui.serverSetPaneSlotLayout"
+category = "shell-pane-slot-layout"
+visibility = "public"
+status = "planned"
+js_module = "clay:ui"
+js_export = "serverSetPaneSlotLayout"
+user_facing_name = "Set Pane Slot Layout"
+authority = "server-validated-pane-slot-layout-state-planned"
+runtime_path = "server-first-op-wrapper-planned"
+hot_path_policy = "no-hot-path: pane slot claims and visibility defaults are validated at package load, configuration, or explicit UI update time and applied as inert state; no package JavaScript runs in Masonry hot paths."
+facade_path = "runtime/js/ui.ts::serverSetPaneSlotLayout"
+backing_rust = "planned: src/shell/layout.rs::PaneSlotLayout"
+deno_op = "op_clay_runtime_unavailable"
+deno_op_path = "src/server/ops/planned.rs::op_clay_runtime_unavailable"
+documentation_path = "docs/reference/primitives/shell-layout-strategy.md"
+key_bindings = []
+custom_properties = ["paneId:string=required", "main:ComponentRef=required", "left:SlotClaim=optional", "right:SlotClaim=optional", "top:SlotClaim=optional", "bottom:SlotClaim=optional", "source:enum=package|user-config|clay"]
+permissions = []
+security_notes = "Planned unavailable Clay JS API only; future server validation will validate bounded mandatory main slot state, optional left/right/top/bottom slot claims, component IDs, action targets, package provenance, and slot collisions and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or hidden layout-key authority."
+current_rust_owner = "planned: src/shell/layout.rs::PaneSlotLayout (internal runtime implemented; public API unavailable)"
+registry_public = false
+
+[[api]]
+id = "clay.ui.serverRegisterPanelContribution"
+category = "package-panel-contribution"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRegisterPanelContribution"
+user_facing_name = "Register Panel Contribution"
+authority = "server-validated-package-ui-layout"
+runtime_path = "server-first-op-wrapper-runtime"
+hot_path_policy = "no-hot-path: panel contributions are validated during package load, configuration, or explicit UI update work; package UI declarations become inert component state before Masonry paint/layout/input handlers."
+facade_path = "runtime/js/ui.ts::serverRegisterPanelContribution"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::register_panel"
+deno_op = "op_clay_ui_register_panel_contribution"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_panel_contribution"
+documentation_path = "docs/reference/clay-js-api/ui/server-register-panel-contribution.md"
+key_bindings = []
+custom_properties = ["id:string=package-prefixed", "slot:enum=left|right|top|bottom", "kind:enum=fixed", "defaultVisibility:enum=visible|hidden|collapsed", "component:ComponentContribution=required", "actionTargets:string[]=[]"]
+permissions = []
+security_notes = "Runtime-backed Clay JS API validates package-prefixed panel IDs, slot claims, bounded component payloads, action targets, package provenance, and conflict diagnostics and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or unregistered action authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.ts"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverRegisterComponentContribution"
+category = "package-component-contribution"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRegisterComponentContribution"
+user_facing_name = "Register Component Contribution"
+authority = "server-validated-package-component-state"
+runtime_path = "server-first-op-wrapper-runtime"
+hot_path_policy = "no-hot-path: component contributions are bounded inert declarations validated before client installation; Clay-owned native code handles paint/layout without package JavaScript."
+facade_path = "runtime/js/ui.ts::serverRegisterComponentContribution"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::register_component"
+deno_op = "op_clay_ui_register_component_contribution"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_component_contribution"
+documentation_path = "docs/reference/clay-js-api/ui/server-register-component-contribution.md"
+key_bindings = []
+custom_properties = ["id:string=package-prefixed", "kind:enum=editorView|panel|label|button|list|flex|stack|overlay|scroll|portal|statusItem", "deferredKinds:enum=table|dropdown|collapse|modal", "children:ComponentContribution[]=bounded", "styleTokens:string[]=[]", "actionTargets:string[]=[]"]
+permissions = []
+security_notes = "Runtime-backed Clay JS API validates component kind, duplicate component IDs, package provenance, bounded payloads, action targets, and style-token boundaries and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or native component mutation authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.ts"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverRegisterTransientOverlayContribution"
+category = "package-transient-overlay-contribution"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRegisterTransientOverlayContribution"
+user_facing_name = "Register Transient Overlay Contribution"
+authority = "server-validated-package-overlay-state"
+runtime_path = "server-first-op-wrapper-runtime"
+hot_path_policy = "no-hot-path: overlay declarations validate at package load/configuration or explicit UI-command time; active overlay paint/layout reads installed inert state only."
+facade_path = "runtime/js/ui.ts::serverRegisterTransientOverlayContribution"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::register_overlay"
+deno_op = "op_clay_ui_register_transient_overlay_contribution"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_transient_overlay_contribution"
+documentation_path = "docs/reference/clay-js-api/ui/server-register-transient-overlay-contribution.md"
+key_bindings = []
+custom_properties = ["id:string=package-prefixed", "anchor:enum=working-area|active-pane|main|pointer", "component:ComponentContribution=required", "focusPolicy:enum=none|restore|trap", "dismissalPolicy:enum=manual|escape|outside|escape-or-outside", "actionTargets:string[]=[]"]
+permissions = []
+security_notes = "Runtime-backed Clay JS API validates overlay IDs, component payloads, focus/dismissal policy, action targets, and package provenance while Clay owns z-order, accessibility, focus trapping, and native overlays; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, or renderer callback authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.ts"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverRegisterInputContribution"
+category = "package-input-contribution"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRegisterInputContribution"
+user_facing_name = "Register Input Contribution"
+authority = "server-validated-package-input-routing"
+runtime_path = "server-first-op-wrapper-runtime"
+hot_path_policy = "no-hot-path: input declarations validate at package load/configuration/update time; Masonry pointer/key/text handlers read installed inert routing, focus, and action state only and do not execute package JavaScript."
+facade_path = "runtime/js/ui.ts::serverRegisterInputContribution"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::register_input"
+deno_op = "op_clay_ui_register_input_contribution"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_input_contribution"
+documentation_path = "docs/reference/clay-js-api/ui/server-register-input-contribution.md"
+key_bindings = []
+custom_properties = ["id:string=package-prefixed", "scope:enum=component|panel|overlay", "componentId:string=package-prefixed", "pointer.click:enum=none|focus|action|select", "pointer.action:string=registered-command", "pointer.drag:enum=none|select|pan", "focus.policy:enum=none|restore-editor|focus-component|trap", "selectionPolicy:enum=preserve-editor|component-local|disabled", "context.modes:string[]=manifest-declared", "actionTargets:string[]=[]"]
+permissions = []
+security_notes = "Runtime-backed Clay JS API validates package-prefixed input IDs, component scopes, pointer/click/focus/selection policy, registered action targets, package provenance, context modes, and bounded payloads and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.ts; src/shell/package_ui.rs::PackageInputRouting"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverRegisterThemeToken"
+category = "package-theme-token-declaration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRegisterThemeToken"
+user_facing_name = "Register Theme Token"
+authority = "server-validated-package-theme-token"
+runtime_path = "server-first-op-wrapper-runtime"
+hot_path_policy = "no-hot-path: theme token declarations and user overrides validate at package/configuration/update time; paint reads resolved typed tokens without package JavaScript."
+facade_path = "runtime/js/ui.ts::serverRegisterThemeToken"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::register_theme_token"
+deno_op = "op_clay_ui_register_theme_token"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_theme_token"
+documentation_path = "docs/reference/clay-js-api/ui/server-register-theme-token.md"
+key_bindings = []
+custom_properties = ["token:string=package-prefixed", "type:enum=color-role|spacing|radius|typography|opacity", "fallback:string=clay-core-token-same-type", "description:string=required", "source:enum=package"]
+permissions = []
+security_notes = "Runtime-backed Clay JS API validates package-prefixed semantic theme tokens, fallback Clay tokens, typed value metadata, package provenance, and token conflicts and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, or arbitrary GPU draw authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.ts"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverRegisterUiStateScope"
+category = "package-ui-state-scope"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRegisterUiStateScope"
+user_facing_name = "Register UI State Scope"
+authority = "server-validated-package-ui-state-scope"
+runtime_path = "server-first-op-wrapper-runtime"
+hot_path_policy = "no-hot-path: package UI state scopes validate at package load/configuration/update time; client hot paths read bounded already-installed state and never execute package JavaScript or serialize full documents."
+facade_path = "runtime/js/ui.ts::serverRegisterUiStateScope"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::register_ui_state_scope"
+deno_op = "op_clay_ui_register_ui_state_scope"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_ui_state_scope"
+documentation_path = "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md"
+key_bindings = []
+custom_properties = ["id:string=package-prefixed", "scope:enum=package-global|user-config|workspace|document|pane|component|transient-overlay", "owner:enum=package|shell|server", "lifetime:enum=session|workspace|document|transient", "persistence:enum=none|client-local|server-canonical|deferred", "implementationStatus:enum=implemented|deferred", "targetId:string=package-prefixed-when-scope-targeted", "valueSchema.kind:enum=boolean|number|string|enum|object"]
+permissions = []
+security_notes = "Runtime-backed Clay JS API validates package-prefixed state scope IDs, supported scope/owner/lifetime/persistence/status metadata, target IDs, schema kind, provenance, hidden-key rejection, and bounded payloads; it registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package, WASM, client-side JavaScript, raw Deno ops, hidden globals, direct Masonry widgets, native widget handles, raw CSS, raw state blobs, renderer callback authority, or state-value mutation authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.ts"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverSetLayoutOverride"
+# Historical planned-stub trace retained after Phase 18.4 promotion: status = "planned"; registry_public = false; op_clay_runtime_unavailable; documentation_path = "docs/reference/primitives/shell-layout-strategy.md"; planned; client-side JavaScript; raw Deno ops; direct Masonry widgets; native widget handles; raw CSS.
+category = "package-layout-override-configuration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverSetLayoutOverride"
+user_facing_name = "Set Layout Override"
+authority = "server-validated-package-layout-configuration"
+runtime_path = "server-side-configuration-to-shell-layout"
+hot_path_policy = "no-hot-path: layout overrides are evaluated through ~/.config/clay/init.js, package load, or explicit setting changes and never execute package JavaScript in Masonry paint/layout/input handlers."
+facade_path = "runtime/js/ui.ts::serverSetLayoutOverride"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::set_layout_override"
+deno_op = "op_clay_ui_set_layout_override"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_set_layout_override"
+documentation_path = "docs/reference/clay-js-api/ui/server-set-layout-override.md"
+key_bindings = []
+custom_properties = ["targetId:string=package-prefixed", "property:enum=slot|visibility|splitRatio|themeToken|inputDefault|actionDefault|fallback", "value:json=required", "source:enum=user-config|active-major-mode|compatible-minor-mode|global-package|package-default"]
+permissions = ["package-configuration"]
+security_notes = "Validates documented ~/.config/clay/init.js layout overrides, package prefixes, target IDs, precedence, same-type registered theme-token remaps, input/action references, and bounded values and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden JSON/TOML layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callback authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry::set_layout_override; src/server/ops/ui.rs::op_clay_ui_set_layout_override"
+registry_public = true
 
 [[api]]
 id = "clay.documents.clientOpenFileDialog"

@@ -25,6 +25,51 @@ Place this task after entry-gate/baseline tasks and before implementation or cle
 
 Decision source: `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`.
 
+## Package Default Loading Task
+
+Each Clay phase plan that implements or materially changes a JS package, package runtime capability, editor mode package, package loader, or package configuration surface must include acceptance criteria and/or a dedicated task for the package's end-user `init.js` loading experience.
+
+The task should require:
+
+- The package is explicitly loaded from `~/.config/clay/init.js`; packages should not become behavior-changing defaults silently.
+- The preferred default setup is a one-line explicit load command, such as `loadPackage("@clay/markdown")` or the implemented equivalent.
+- Normal package defaults should work after the one-line load command without requiring copied package manifests, low-level Clay facade plumbing, manual primitive registration, test-only SDUI, or representative decoration publication in user config.
+- Package/mode customization may be exposed through documented Clay/package JS APIs, but customization is optional for common use unless a specific package has a documented reason.
+- If one-line default loading is not currently possible, the plan must identify the generic Clay primitive/API gap and document any longer setup as a temporary fallback or limitation, not as the preferred convention.
+- Tests and docs should cover both the default package-load path and any supported customization path.
+
+Recommended task title when a separate task is useful:
+
+```markdown
+- [ ] Define and verify the package default init.js loading experience
+```
+
+Place this task after the primitive-review task and before broad implementation cleanup tasks, or fold the requirements into package implementation tasks when the phase is small.
+
+Decision source: `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`.
+
+## Package UI/Layout and Authoring Documentation Task
+
+Each Clay phase plan that implements or materially changes package UI, mode UI, SDUI, layout, pane/window behavior, component primitives, input routing, package actions, package state/data, styling/theme tokens, or package configuration must include acceptance criteria and/or a dedicated task for the package authoring contract.
+
+The task should require:
+
+- Clay remains the owner of the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token model, and native Masonry widget implementation.
+- Packages declare inert UI/layout/input/action/data/style contributions through documented Clay/package JS APIs; they must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- Any new UI/layout primitive is generic and reusable across packages/modes, not Markdown-specific or package-specific Rust branching.
+- Fixed vs transient panel behavior, slot ownership, package/user override precedence, action routing, focus/input routing, and style token mapping are documented and tested when introduced or changed.
+- `docs/reference/packages/creating-packages.md` is updated in the same phase with implemented APIs, examples, limitations, migration notes, permissions, testing guidance, and any temporary fallback paths.
+
+Recommended task title when a separate task is useful:
+
+```markdown
+- [ ] Update the package UI/layout authoring contract and package guide
+```
+
+Place this task near package UI/layout implementation tasks and before final documentation/wiki verification.
+
+Decision source: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`.
+
 ## Clay JS API Task
 
 Each Clay plan document must include a separate task near the end of the plan to create or verify Clay JavaScript APIs for public programmatic behavior and Rust public functions introduced or changed by the plan.

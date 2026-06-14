@@ -33,6 +33,7 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
     match specifier {
         "clay:configuration" => Some(CLAY_FACADE_CONFIGURATION),
         "clay:sdui" => Some(CLAY_FACADE_SDUI),
+        "clay:ui" => Some(CLAY_FACADE_UI),
         "clay:documents" => Some(CLAY_FACADE_DOCUMENTS),
         "clay:workspace" => Some(CLAY_FACADE_WORKSPACE),
         "clay:keybindings" => Some(CLAY_FACADE_KEYBINDINGS),
@@ -64,7 +65,9 @@ export function getConfigurationState() {
   return JSON.parse(ops.op_clay_configuration_get_state());
 }
 
-export function setPackageOption(options) { void options; unavailable("clay.configuration.setPackageOption"); }
+export function setPackageOption(options) {
+  return JSON.parse(ops.op_clay_configuration_set_package_option(JSON.stringify(options ?? null)));
+}
 export function setModePreference(options) { void options; unavailable("clay.configuration.setModePreference"); }
 export function setDecorationTheme(options) { void options; unavailable("clay.configuration.setDecorationTheme"); }
 export function setParsePolicy(options) { void options; unavailable("clay.configuration.setParsePolicy"); }
@@ -86,6 +89,33 @@ export function defineFlex(options) { return defineNode("flex", options); }
 export function defineStack(options) { return defineNode("stack", options); }
 export async function publishTree(tree) {
   ops.op_clay_sdui_publish_tree(JSON.stringify(tree ?? null));
+}
+"#;
+
+const CLAY_FACADE_UI: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+const encode = (value) => JSON.stringify(value ?? null);
+export function serverRegisterPanelContribution(packageManifest, declaration) {
+  return parse(ops.op_clay_ui_register_panel_contribution(encode(packageManifest), encode(declaration)));
+}
+export function serverRegisterComponentContribution(packageManifest, declaration) {
+  return parse(ops.op_clay_ui_register_component_contribution(encode(packageManifest), encode(declaration)));
+}
+export function serverRegisterTransientOverlayContribution(packageManifest, declaration) {
+  return parse(ops.op_clay_ui_register_transient_overlay_contribution(encode(packageManifest), encode(declaration)));
+}
+export function serverRegisterInputContribution(packageManifest, declaration) {
+  return parse(ops.op_clay_ui_register_input_contribution(encode(packageManifest), encode(declaration)));
+}
+export function serverRegisterUiStateScope(packageManifest, declaration) {
+  return parse(ops.op_clay_ui_register_ui_state_scope(encode(packageManifest), encode(declaration)));
+}
+export function serverSetLayoutOverride(declaration) {
+  return parse(ops.op_clay_ui_set_layout_override(encode(declaration)));
+}
+export function serverRegisterThemeToken(packageManifest, declaration) {
+  return parse(ops.op_clay_ui_register_theme_token(encode(packageManifest), encode(declaration)));
 }
 "#;
 
@@ -345,6 +375,7 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) published_decoration_set: Option<crate::protocol::DecorationSet>,
     pub(crate) parse_handlers: Vec<crate::server::parse_coordinator::ParseHandlerMeta>,
     pub(crate) behavior_manifest: Option<crate::protocol::BehaviorManifest>,
+    pub(crate) ui_contributions: crate::server::ui::PackageUiRegistrySnapshot,
 }
 
 #[derive(Debug)]
@@ -423,6 +454,9 @@ fn runtime_error_diagnostic(message: &str) -> RuntimeDiagnostic {
         }
         "clay.keybindings.unknown_command" => {
             "Key binding references an unknown or unsupported command."
+        }
+        code if code.starts_with("clay.ui.") => {
+            "Package UI contribution registration failed server validation."
         }
         code if code.starts_with("clay.documents.") => {
             "Document/workspace operation failed server validation."
@@ -543,6 +577,7 @@ fn evaluate_module_on_runtime(
                 parse_handlers: op_state.parse_handlers(),
                 behavior_manifest: (behavior_manifest.behavior_version > 1)
                     .then_some(behavior_manifest),
+                ui_contributions: op_state.ui_contributions(),
             })
         })
 }
@@ -798,6 +833,123 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.op_records, vec!["panel:Runtime:root"]);
+    }
+
+    #[tokio::test]
+    async fn runtime_imports_clay_ui_facade_and_registers_contributions() {
+        let service = ClayJsRuntimeService::default();
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterCommand } from "clay:commands";
+                import {
+                  serverRegisterComponentContribution,
+                  serverRegisterPanelContribution,
+                  serverRegisterThemeToken,
+                  serverRegisterTransientOverlayContribution,
+                } from "clay:ui";
+
+                const manifest = {
+                  name: "@clay/markdown",
+                  version: "0.1.0",
+                  clay: {
+                    apiPrefix: "markdown",
+                    entry: "./dist/index.js",
+                    permissions: ["command-registration"],
+                    modes: ["markdown"],
+                  },
+                };
+                serverRegisterCommand(manifest, {
+                  commandId: "markdown.togglePreview",
+                  displayName: "Toggle Markdown Preview",
+                  routingPolicy: "server-first",
+                });
+                const token = serverRegisterThemeToken(manifest, {
+                  token: "markdown.preview.background",
+                  type: "color-role",
+                  fallback: "surface.panel",
+                  description: "Markdown preview background",
+                });
+                const component = serverRegisterComponentContribution(manifest, {
+                  kind: "label",
+                  id: "markdown.preview.empty",
+                  text: "Preview unavailable",
+                });
+                const panel = serverRegisterPanelContribution(manifest, {
+                  id: "markdown.preview",
+                  slot: "right",
+                  kind: "fixed",
+                  defaultVisibility: "hidden",
+                  actionTargets: ["markdown.togglePreview"],
+                  component: {
+                    kind: "panel",
+                    id: "markdown.preview.root",
+                    title: "Preview",
+                    children: [{
+                      kind: "button",
+                      id: "markdown.preview.toggle",
+                      label: "Toggle",
+                      action: { commandId: "markdown.togglePreview" },
+                    }],
+                  },
+                });
+                const overlay = serverRegisterTransientOverlayContribution(manifest, {
+                  id: "markdown.preview.overlay",
+                  anchor: "working-area",
+                  focusPolicy: "restore",
+                  dismissalPolicy: "escape",
+                  component: { kind: "panel", id: "markdown.preview.overlay.root", title: "Overlay", children: [] },
+                });
+                Deno.core.ops.op_clay_runtime_record(`${panel.slot}:${component.rootKind}:${overlay.focusPolicy}:${token.type}:${panel.provenance.apiPrefix}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.op_records,
+            vec!["right:label:restore:color-role:markdown"]
+        );
+        assert_eq!(result.ui_contributions.panels.len(), 1);
+        assert_eq!(result.ui_contributions.components.len(), 1);
+        assert_eq!(result.ui_contributions.overlays.len(), 1);
+        assert_eq!(result.ui_contributions.theme_tokens.len(), 1);
+        assert_eq!(
+            result.ui_contributions.panels[0].provenance.package_name,
+            "@clay/markdown"
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_clay_ui_rejects_invalid_prefix_unregistered_action_and_raw_css() {
+        let service = ClayJsRuntimeService::default();
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterPanelContribution } from "clay:ui";
+                const manifest = {
+                  name: "@clay/markdown",
+                  version: "0.1.0",
+                  clay: {
+                    apiPrefix: "markdown",
+                    entry: "./dist/index.js",
+                    permissions: ["command-registration"],
+                    modes: ["markdown"],
+                  },
+                };
+                serverRegisterPanelContribution(manifest, {
+                  id: "other.preview",
+                  slot: "right",
+                  rawCss: "color: red",
+                  component: { kind: "button", id: "other.preview.button", label: "Run", action: { commandId: "markdown.missing" } },
+                });
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ClayRuntimeError::Runtime(_)));
+        assert!(error.to_string().contains("clay.ui.registration_failed"));
     }
 
     #[tokio::test]
@@ -1536,7 +1688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn primitive_configuration_facades_remain_explicitly_planned() {
+    async fn primitive_configuration_facades_promote_package_options_only() {
         let error = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
                 r#"
@@ -1544,7 +1696,7 @@ mod tests {
                 if ([setPackageOption, setModePreference, setDecorationTheme, setParsePolicy].some((api) => typeof api !== "function")) {
                   throw new Error("configuration primitive facade export missing");
                 }
-                setPackageOption({ packagePrefix: "markdown", option: "preview", value: true });
+                setModePreference({ modeId: "markdown", source: "init-js" });
                 "#,
             )
             .await
@@ -1554,7 +1706,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("clay.configuration.setPackageOption is planned")
+                .contains("clay.configuration.setModePreference is planned")
         );
     }
 

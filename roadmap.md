@@ -538,6 +538,125 @@ Expected outcome:
 - The primitive registry gains real coverage from a mode POC and becomes the basis for additional modes.
 - Markdown-mode UI coverage either includes deterministic pixel snapshots or records that the Phase 15 structural snapshot approach remains the supported regression strategy until the rendering stack can provide CI-friendly offscreen captures.
 
+## Phase 18.1: Clay Shell, Working Area, and Package UI/Layout Architecture Gate
+
+Before further Markdown-mode product work, hot reload work, or daily-editing hardening begins, define and document the Clay-owned application shell and package UI/layout contribution model approved in `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`.
+
+Entry gate:
+
+- Treat this phase as mandatory immediately after Phase 18. Phase 19 and later roadmap work must not start until the Phase 18.1-18.5 shell/package-authoring sequence has either completed or been explicitly superseded by a later approved decision.
+- Use Masonry documentation as implementation evidence: Masonry is the native widget-tree/rendering substrate, while Clay owns the package-facing working-area, pane, container, component, action, input, and style abstractions.
+
+Focus areas:
+
+- Define the public vocabulary and architecture: working area, pane/split tree, pane/window layout, mandatory `main` container, optional `left`/`right`/`top`/`bottom` panel slots, fixed panels, transient panels, components/elements, action intents, package state scopes, and style/theme tokens.
+- Decide and document the boundary between Clay package declarations and Masonry implementation details. Packages must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, call raw `Deno.core.ops`, or provide Vello/Parley callbacks.
+- Inventory the current implementation gaps: `EditorWidget` as root widget, fixed-sidebar SDUI paint path, lack of pane/split tree protocol, lack of slot-aware component layout, lack of package style token declarations, lack of package state/data schema, and underdefined mouse/input declarations.
+- Extend the primitive registry/backlog with shell/layout primitives: `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, and package UI/state contribution categories as needed.
+- Define conflict and precedence rules for package/default/user layout: Clay shell safety rules, user configuration, active major mode, compatible minor modes, and global packages.
+- Define the documentation/test contract for package UI/layout primitives, including `docs/reference/packages/creating-packages.md` as the package-author guide that must be updated in every shell/layout/package phase.
+- Update `docs/reference/packages/creating-packages.md` with the architecture vocabulary, current implementation status, planned shell/layout APIs, and examples marked as implemented vs planned.
+
+Expected outcome:
+
+- Clay has a documented shell/layout/package UI architecture before implementation starts.
+- Future package/mode plans have clear vocabulary and primitive targets instead of relying on Markdown-specific SDUI fixtures.
+- The package authoring guide explains the new architecture and records which parts are available now versus planned.
+
+## Phase 18.2: Masonry Clay Shell and Pane Runtime Foundation
+
+Implement the native Clay shell foundation on top of Masonry so Clay, not `EditorWidget`, owns the top-level application layout.
+
+Entry gate:
+
+- Do not start until Phase 18.1 has defined the shell/layout primitives, Masonry boundary, package-authoring documentation expectations, and conflict rules.
+
+Focus areas:
+
+- Introduce a Clay-owned root shell/working-area widget above the editor, using Masonry's `RenderRoot` as the implementation substrate and keeping `EditorWidget`/editor surface as an editor component inside the shell.
+- Implement the initial pane tree with one leaf pane taking the whole working area, plus generic horizontal/vertical split support that can map to Masonry `Split` or a Clay-owned split container.
+- Implement a leaf pane/window layout with mandatory `main` and optional `left`, `right`, `top`, and `bottom` slots, preserving focus, viewport, caret, status, and editor input behavior.
+- Model fixed panel sizing, min/max constraints, collapse/visibility state, and user resize behavior as Clay layout state rather than package-owned native widget mutation.
+- Apply layout state through Masonry mutation/update/layout passes; do not add/remove children during layout and do not run package JavaScript in paint, layout, pointer, scroll, keypress, or text-event handlers.
+- Keep protocol/update payloads inert, versioned, bounded, and testable; add structural shell observability similar to the Phase 15 SDUI snapshot strategy.
+- Update `docs/reference/packages/creating-packages.md` with the implemented shell/pane/slot runtime behavior, examples, limitations, and testing guidance.
+
+Expected outcome:
+
+- Clay launches through a shell/working-area root and can represent at least one editor pane through the generic pane/slot model.
+- The editor remains responsive and behavior-manifest input routing continues to work while the shell owns layout composition.
+- Tests cover the shell root, pane layout, split layout, no-hot-path package execution invariant, and documentation updates.
+
+## Phase 18.3: Slot-Aware Package UI Components, Panels, and Theme Tokens
+
+Evolve package UI from fixed-sidebar SDUI snapshots into slot-aware Clay components that packages can declare and Clay can compose consistently.
+
+Entry gate:
+
+- Do not start until Phase 18.2 has a Clay shell/working-area root and leaf pane slot layout.
+
+Focus areas:
+
+- Extend or replace the current SDUI publication path so package UI contributions target explicit Clay slots (`main`, `left`, `right`, `top`, `bottom`, or transient overlay) rather than assuming a fixed left/sidebar paint path.
+- Define the first stable Clay component catalog for package authors: editor view, panel, label, button, list, flex, stack/overlay, scroll/portal, status item, and any minimal table/dropdown/collapse/modal primitives justified by implementation scope.
+- Preserve action safety: buttons, list items, dropdown selections, panel controls, and modal actions emit inert command intents targeting registered commands.
+- Define fixed versus transient panel behavior, including layout participation, overlay behavior, dismissal, focus policy, accessibility role, and conflict handling.
+- Replace hardcoded SDUI colors/sizes with Clay theme tokens and typed component style variables that map to Masonry properties/native styles. Raw CSS remains unsupported.
+- Add package semantic theme token declarations and user override hooks only where implemented through documented Clay/package JS APIs.
+- Update package metadata validation, conflict checks, payload budgets, docs/registry coverage, and structural UI tests for slot-aware package UI contributions.
+- Update `docs/reference/packages/creating-packages.md` with implemented component APIs, slot examples, style/theme token examples, action examples, and anti-patterns.
+
+Expected outcome:
+
+- Packages can contribute slot-aware, inert UI components without direct Masonry access.
+- Clay can render fixed and transient package panels consistently across modes.
+- The package authoring guide contains accurate component, panel, style, and action examples.
+
+## Phase 18.4: Package Input, Actions, State/Data, and Configuration Integration
+
+Complete the package-facing structure around UI by standardizing how packages declare input interests, commands/actions, data/state, and user configuration for shell-aware packages.
+
+Entry gate:
+
+- Do not start until Phase 18.3 has slot-aware component/panel contributions and a first theme/style-token model.
+
+Focus areas:
+
+- Extend package contribution metadata and Clay JS facades for input declarations beyond keybindings where needed: pointer/click interests, component-scoped actions, focus scopes, mouse selection/drag policies, and mode/component context conditions.
+- Preserve behavior manifests for client-first predictable text behavior and key routing; use server/client command intents for side effects, UI commands, file/workspace actions, and package actions.
+- Define package state/data scopes: package-global, user-config, workspace, document, pane, and component/transient state. Decide which scopes are server-canonical, client-local, persisted, or explicitly deferred.
+- Add configuration APIs for package layout/panel/style/input defaults only through documented Clay JS APIs and `~/.config/clay/init.js`, with generated registry coverage when public.
+- Define user override precedence for package defaults: one-line package load, optional package options, user layout overrides, keybindings/actions, theme token overrides, and package fallback behavior.
+- Add diagnostics for conflicts and invalid declarations: duplicate slots, duplicate commands, ambiguous key/mouse routing, invalid state scopes, unregistered action targets, unknown theme tokens, oversize UI payloads, and undeclared permissions.
+- Update `docs/reference/packages/creating-packages.md` with implemented input/action/state/configuration APIs, examples, permission guidance, tests, and troubleshooting.
+
+Expected outcome:
+
+- Package authors have one coherent model for UI, input, actions, logic, data/state, configuration, and styling.
+- Users can configure package defaults and workflows through documented APIs rather than copying fixture scripts or editing hidden settings.
+- Tests cover package contribution validation, user overrides, behavior-manifest compatibility, command/action routing, and docs accuracy.
+
+## Phase 18.5: Replan Markdown End-User Loading After Shell/Layout Work
+
+After the Clay shell/package UI architecture has been implemented, revisit the pending Markdown end-user plan so Markdown consumes the new generic primitives instead of driving architecture from fixture-only behavior.
+
+Entry gate:
+
+- Do not start until Phases 18.1 through 18.4 have landed or their incomplete items have been explicitly deferred with decision-log-backed rationale.
+
+Focus areas:
+
+- Update `plans/023-Phase20-Markdown-Mode-End-User-Loading-and-UI-Cleanup.md` to reflect the implemented shell, pane/slot, component, theme token, input/action, package state, and configuration APIs.
+- Replace any remaining Markdown-specific UI assumptions with generic shell/package primitives, including main editor placement, optional preview/status contributions, no-default-side-panel behavior, and fixed/transient panel choices.
+- Preserve the explicit one-line package loading convention and separate explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` configuration.
+- Update Markdown package docs, package authoring docs, roadmap follow-ups, and wiki/reference links to match the implemented architecture.
+- Re-evaluate tests/manual smoke instructions so the Markdown path validates the actual app package load path rather than large smoke-fixture scripts.
+
+Expected outcome:
+
+- The Markdown end-user loading/UI cleanup plan is current with Clay's implemented shell/package UI architecture.
+- Markdown can proceed as a normal package/mode consumer of Clay primitives rather than a special architectural bootstrap.
+
 ## Phase 19: Hot Reload and Behavior Update Semantics
 
 Make runtime package and mode behavior changes safe and non-janky after the first package/mode path exists.

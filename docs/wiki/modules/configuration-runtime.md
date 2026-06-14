@@ -7,6 +7,7 @@
 - `src/server/mod.rs`
 - `src/server/ops/configuration.rs`
 - `runtime/js/configuration.ts`
+- `docs/wiki/modules/package-input-state-configuration.md`
 - `src/server/js_runtime.rs` tests
 
 ## Overview
@@ -19,7 +20,8 @@ Clay can now evaluate a constrained local configuration entry point from a confi
 - Resolve relative local JavaScript modules without changing the process current directory or invoking shell/package loading behavior.
 - Reject URLs, package specifiers, absolute paths, extensionless imports, and traversal outside the configuration root.
 - Expose `loadConfigurationModule({ path })` and `getConfigurationState()` through Clay-owned ops, not raw user-facing op calls.
-- Preserve Phase 16.5 package/mode configuration review surfaces (`setPackageOption`, `setModePreference`, `setDecorationTheme`, and `setParsePolicy`) as explicit planned `clay:configuration` facade exports rather than ad hoc settings.
+- Runtime-back `setPackageOption` for Phase 18.4 package-owned options while preserving `setModePreference`, `setDecorationTheme`, and `setParsePolicy` as explicit planned `clay:configuration` facade exports rather than ad hoc settings.
+- Runtime-back Phase 18.4 package layout overrides through `clay.ui.serverSetLayoutOverride` while preserving hidden split/slot/panel/style keys as rejected; lower-level working-area/pane mutation APIs and package enable/disable through configuration remain planned.
 
 ## How It Works
 
@@ -33,7 +35,11 @@ Clay can now evaluate a constrained local configuration entry point from a confi
 
 The facade validates `loadConfigurationModule({ path })` through `op_clay_configuration_load_module` before using dynamic `import(path)`. The module loader performs the authoritative canonical path check again when resolving/loading the module, reads the file directly with Rust filesystem APIs, and records successfully loaded local modules in deterministic first-load order. `getConfigurationState()` returns JSON from `op_clay_configuration_get_state`, which the facade parses into `{ entryPoint, loadedModules }`.
 
-The Phase 16.5 primitive gate reviewed package options, mode preferences, decoration theme preferences, and parse policy preferences but did not implement concrete behavior-changing settings. The controlled runtime and static facade source therefore export `setPackageOption`, `setModePreference`, `setDecorationTheme`, and `setParsePolicy` as planned-unavailable APIs routed through `op_clay_runtime_unavailable`. This keeps `~/.config/clay/init.js` as the future configuration entry point while preventing undocumented keys or package enable/disable authority from appearing before a later decision log and server validator define them.
+The Phase 16.5 primitive gate reviewed package options, mode preferences, decoration theme preferences, and parse policy preferences but did not implement concrete behavior-changing settings. Phase 18.4 promotes `setPackageOption` to a runtime-backed API for package-owned options while keeping `setModePreference`, `setDecorationTheme`, and `setParsePolicy` as planned-unavailable APIs routed through `op_clay_runtime_unavailable`. This keeps `~/.config/clay/init.js` as the startup/configuration-change configuration entry point while preventing undocumented keys or package enable/disable authority from appearing without a dedicated server validator.
+
+The Phase 18.2 shell runtime added internal `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, inert update, and observability state, but it did not add a user-visible shell configuration API. Phase 18.3 adds `runtime/js/ui.ts` and server runtime support for `clay:ui` package declaration APIs (`serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and `serverRegisterThemeToken`). Historical Phase 18.3 boundary text remains: `clay:ui` contribution APIs exist for package declarations, no `clay:ui` configuration override API or hidden split/slot/panel/style key system existed yet, and they were not user-visible configuration override APIs for default slots, panel visibility, component style overrides, theme-token remapping, or layout behavior. The historical inventory note was that `clay.ui.serverSetLayoutOverride` and `clay.configuration.setPackageOption` stay non-registry-public inventory rows until promotion. Phase 18.4 adds runtime-backed `serverRegisterInputContribution`, `serverRegisterUiStateScope`, and `serverSetLayoutOverride`. These APIs validate package-owned panel defaults, component style variables, fixed slots, overlays, semantic theme token declarations, input/focus/action metadata, UI state schema/lifecycle metadata, and user/package layout/theme/input/action override records at package-load/configuration/update time. `serverRegisterUiStateScope` is not state-value mutation work, and `serverSetLayoutOverride` is not a low-level pane/working-area mutation API.
+
+Hidden JSON/TOML/ad hoc package UI configuration keys remain rejected; in lowercase policy wording, hidden JSON/TOML/ad hoc keys remain rejected. Examples such as `preview.position`, `preview.defaultVisibility`, `layout.preview.defaultSlot`, `layout.preview.defaultVisibility`, `theme.markdown.heading.1`, raw token override keys, and ad hoc style keys are invalid unless expressed through documented Clay JS APIs with `custom_properties`, allowed values, defaults, errors, security notes, and registry coverage. Phase 18.4's documented APIs use option names such as `layout.defaultVisibility`, `layout.defaultSlot`, `layout.splitRatio`, `input.default`, `action.default`, `themeTokenRemap`, and `fallback` through `setPackageOption`, or layout override properties such as `slot`, `visibility`, `splitRatio`, `themeToken`, `inputDefault`, `actionDefault`, and `fallback` through `serverSetLayoutOverride`.
 
 ## Code Examples
 
@@ -56,7 +62,7 @@ let result = service.load_configuration_from_root(config_root).await?;
 - Module loading is startup/reload work and must stay off Masonry paint, text-event, and ordinary edit acknowledgement hot paths.
 - Only explicit relative `.js` files under the configuration root are loadable. No network, npm/jsr/package, shell, workspace scan, extension loading, WASM, AI mutation, or direct client filesystem authority is introduced.
 - `loadConfigurationModule` does not implement Deno/npm-style resolution: callers must provide the exact `.js` filename.
-- Planned package/mode configuration exports are discoverable facade APIs only; they do not grant package installation, enable/disable mutation, mode activation authority, decoration rendering authority, parse-document authority, or external filesystem/network/shell/AI/workspace access.
+- Runtime-backed package option/layout override APIs do not grant package installation, enable/disable mutation, mode activation authority, decoration rendering authority, parse-document authority, component style override authority beyond typed tokens, raw Deno ops, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, client-side JavaScript, or external filesystem/network/shell/AI/workspace access. Planned package/mode/parse/decor configuration exports remain unavailable stubs until documented validators ship.
 
 ## Tests
 
@@ -67,6 +73,7 @@ let result = service.load_configuration_from_root(config_root).await?;
 
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)
+- [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
 - [Protocol and Performance Pattern](../../../.agents/skills/project-patterns/references/protocol-and-performance.md)
 - `docs/reference/clay-js-api/configuration.md`
 - `plans/014-Phase13-Embedded-JavaScript-Runtime.md`

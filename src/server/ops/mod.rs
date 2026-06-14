@@ -9,6 +9,7 @@ mod packages;
 mod parse;
 mod planned;
 mod sdui;
+mod ui;
 mod workspace;
 
 use std::sync::{Arc, Mutex};
@@ -27,7 +28,10 @@ use crate::{
 use self::{
     behavior::{op_clay_behavior_get_active_manifest, op_clay_behavior_list_routes},
     commands::{op_clay_commands_list_commands, op_clay_commands_register_command},
-    configuration::{op_clay_configuration_get_state, op_clay_configuration_load_module},
+    configuration::{
+        op_clay_configuration_get_state, op_clay_configuration_load_module,
+        op_clay_configuration_set_package_option,
+    },
     decorations::op_clay_decorations_publish_decorations,
     documents::{
         op_clay_documents_get_document_status, op_clay_documents_list_documents,
@@ -49,6 +53,12 @@ use self::{
     parse::op_clay_parse_register_parse_handler,
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
+    ui::{
+        op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
+        op_clay_ui_register_panel_contribution, op_clay_ui_register_theme_token,
+        op_clay_ui_register_transient_overlay_contribution, op_clay_ui_register_ui_state_scope,
+        op_clay_ui_set_layout_override,
+    },
     workspace::op_clay_workspace_list_roots,
 };
 
@@ -63,6 +73,7 @@ pub(crate) struct ClayOpState {
     behavior: Mutex<ActiveBehaviorManifest>,
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
+    ui: Mutex<crate::server::ui::PackageUiRegistry>,
     workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
     runtime_document_id: crate::protocol::DocumentId,
 }
@@ -95,6 +106,7 @@ impl ClayOpState {
             behavior: Mutex::new(ActiveBehaviorManifest::default()),
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
+            ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
             workspace,
             runtime_document_id,
         }
@@ -322,6 +334,114 @@ impl ClayOpState {
             .collect()
     }
 
+    pub(crate) fn ui_contributions(&self) -> crate::server::ui::PackageUiRegistrySnapshot {
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .snapshot()
+    }
+
+    pub(super) fn register_panel_contribution(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredPanelContribution,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        let command_ids = self.registered_command_ids();
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_panel(package, declaration, &command_ids)
+    }
+
+    pub(super) fn register_component_contribution(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredComponentContribution,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        let command_ids = self.registered_command_ids();
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_component(package, declaration, &command_ids)
+    }
+
+    pub(super) fn register_transient_overlay_contribution(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredTransientOverlayContribution,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        let command_ids = self.registered_command_ids();
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_overlay(package, declaration, &command_ids)
+    }
+
+    pub(super) fn register_input_contribution(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredPackageInputContribution,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        let command_ids = self.registered_command_ids();
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_input(package, declaration, &command_ids)
+    }
+
+    pub(super) fn register_ui_state_scope(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredPackageUiStateScope,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_ui_state_scope(package, declaration)
+    }
+
+    pub(super) fn set_layout_override(
+        &self,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredPackageLayoutOverride,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .set_layout_override(declaration)
+    }
+
+    pub(super) fn register_theme_token(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredPackageThemeTokenDeclaration,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_theme_token(package, declaration)
+    }
+
     fn record(&self, value: String) {
         self.runtime_records
             .lock()
@@ -355,8 +475,16 @@ extension!(
         op_clay_runtime_record,
         op_clay_configuration_load_module,
         op_clay_configuration_get_state,
+        op_clay_configuration_set_package_option,
         op_clay_sdui_define_node,
         op_clay_sdui_publish_tree,
+        op_clay_ui_register_panel_contribution,
+        op_clay_ui_register_component_contribution,
+        op_clay_ui_register_transient_overlay_contribution,
+        op_clay_ui_register_theme_token,
+        op_clay_ui_register_input_contribution,
+        op_clay_ui_register_ui_state_scope,
+        op_clay_ui_set_layout_override,
         op_clay_documents_open_document,
         op_clay_documents_save_document,
         op_clay_documents_reload_document,

@@ -14,5 +14,7 @@ You MUST call `library` first to get a valid ID unless the user provides one dir
 
 For version-specific docs, use `/org/project/version` from the `library` output (e.g., `/vercel/next.js/v14.3.0`).
 
+For Rust libraries/crates used by the current project, also verify the version-exact local crate documentation with Cargo. Use commands such as `cargo metadata --format-version 1`, `cargo tree -i <crate>`, and `cargo doc -p <crate> --no-deps` (use a separate `CARGO_TARGET_DIR` if needed to avoid target-directory locks). Prefer the locally resolved crate version's rustdoc/source under the Cargo registry for exact API signatures and examples, and use ctx7 as supplementary current/background documentation rather than the sole source for Rust crate APIs.
+
 If a command fails with a quota error, inform the user and suggest `npx ctx7@latest login` or setting `CONTEXT7_API_KEY` env var for higher limits. Do not silently fall back to training data.
 <!-- context7 -->

@@ -1,0 +1,642 @@
+//! Clay-owned slot-aware package UI runtime state.
+//!
+//! The server validates package `clay:ui` declarations before they reach this
+//! module. This runtime state composes accepted fixed panels and transient
+//! overlays into shell-owned slot geometry without exposing Masonry widget IDs,
+//! native handles, raw CSS, raw ops, renderer callbacks, or executable package
+//! code to packages.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use masonry::kurbo::Rect;
+use serde_json::{Map, Value};
+
+use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
+
+const MAX_FIXED_PANELS: usize = 4;
+const MAX_TRANSIENT_OVERLAYS: usize = 16;
+const MAX_INPUT_ROUTES: usize = 64;
+const DEFAULT_SIDE_PANEL_SIZE: f64 = 240.0;
+const DEFAULT_VERTICAL_PANEL_SIZE: f64 = 120.0;
+const MIN_PANEL_SIZE: f64 = 48.0;
+const MAX_SIDE_PANEL_SIZE: f64 = 480.0;
+const MAX_VERTICAL_PANEL_SIZE: f64 = 240.0;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PackageUiRuntimeState {
+    version: u64,
+    fixed_panels: BTreeMap<FixedSlotId, FixedPackagePanel>,
+    transient_overlays: BTreeMap<String, TransientPackageOverlay>,
+    input_routing: BTreeMap<String, PackageInputRouting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PackageUiRuntimeUpdate {
+    pub(crate) base_version: u64,
+    pub(crate) fixed_panels: Vec<FixedPackagePanel>,
+    pub(crate) transient_overlays: Vec<TransientPackageOverlay>,
+    pub(crate) input_routing: Vec<PackageInputRouting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FixedPackagePanel {
+    pub(crate) id: String,
+    pub(crate) slot_id: FixedSlotId,
+    pub(crate) visibility: PackagePanelVisibility,
+    pub(crate) component: PackageUiComponentTree,
+    pub(crate) action_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackagePanelVisibility {
+    Visible,
+    Hidden,
+    Collapsed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TransientPackageOverlay {
+    pub(crate) id: String,
+    pub(crate) anchor: PackageOverlayAnchor,
+    pub(crate) focus_policy: String,
+    pub(crate) dismissal_policy: String,
+    pub(crate) component: PackageUiComponentTree,
+    pub(crate) action_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackageOverlayAnchor {
+    WorkingArea,
+    ActivePane,
+    Main,
+    Pointer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PackageInputRouting {
+    pub(crate) id: String,
+    pub(crate) scope: String,
+    pub(crate) component_id: String,
+    pub(crate) pointer_click: String,
+    pub(crate) pointer_action: Option<String>,
+    pub(crate) pointer_drag: String,
+    pub(crate) focus_policy: String,
+    pub(crate) selection_policy: String,
+    pub(crate) context_modes: Vec<String>,
+    pub(crate) action_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PackageUiComponentTree {
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) title: Option<String>,
+    pub(crate) text: Option<String>,
+    pub(crate) label: Option<String>,
+    pub(crate) action_command_id: Option<String>,
+    pub(crate) items: Vec<PackageUiListItem>,
+    pub(crate) children: Vec<PackageUiComponentTree>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PackageUiListItem {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) detail: Option<String>,
+    pub(crate) action_command_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PackageUiPanelObservation {
+    pub(crate) id: String,
+    pub(crate) slot_id: FixedSlotId,
+    pub(crate) rect: Rect,
+    pub(crate) component_id: String,
+    pub(crate) component_kind: String,
+    pub(crate) title: Option<String>,
+    pub(crate) visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PackageUiOverlayObservation {
+    pub(crate) id: String,
+    pub(crate) anchor: PackageOverlayAnchor,
+    pub(crate) rect: Rect,
+    pub(crate) component_id: String,
+    pub(crate) component_kind: String,
+    pub(crate) focus_policy: String,
+    pub(crate) dismissal_policy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PackageUiRuntimeError {
+    StaleVersion { expected: u64, actual: u64 },
+    TooManyFixedPanels { count: usize, max: usize },
+    TooManyTransientOverlays { count: usize, max: usize },
+    DuplicateFixedSlot { slot_id: FixedSlotId },
+    DuplicateContributionId { id: String },
+    TooManyInputRoutes { count: usize, max: usize },
+}
+
+impl PackageUiRuntimeState {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub(crate) fn has_fixed_panels(&self) -> bool {
+        !self.fixed_panels.is_empty()
+    }
+
+    pub(crate) fn fixed_panel_for_slot(&self, slot_id: FixedSlotId) -> Option<&FixedPackagePanel> {
+        self.fixed_panels.get(&slot_id)
+    }
+
+    pub(crate) fn transient_overlay_count(&self) -> usize {
+        self.transient_overlays.len()
+    }
+
+    pub(crate) fn apply_update(
+        &mut self,
+        update: PackageUiRuntimeUpdate,
+    ) -> Result<(), PackageUiRuntimeError> {
+        if update.base_version != self.version {
+            return Err(PackageUiRuntimeError::StaleVersion {
+                expected: self.version,
+                actual: update.base_version,
+            });
+        }
+        if update.fixed_panels.len() > MAX_FIXED_PANELS {
+            return Err(PackageUiRuntimeError::TooManyFixedPanels {
+                count: update.fixed_panels.len(),
+                max: MAX_FIXED_PANELS,
+            });
+        }
+        if update.transient_overlays.len() > MAX_TRANSIENT_OVERLAYS {
+            return Err(PackageUiRuntimeError::TooManyTransientOverlays {
+                count: update.transient_overlays.len(),
+                max: MAX_TRANSIENT_OVERLAYS,
+            });
+        }
+        if update.input_routing.len() > MAX_INPUT_ROUTES {
+            return Err(PackageUiRuntimeError::TooManyInputRoutes {
+                count: update.input_routing.len(),
+                max: MAX_INPUT_ROUTES,
+            });
+        }
+
+        let mut ids = BTreeSet::new();
+        let mut fixed_panels = BTreeMap::new();
+        for panel in update.fixed_panels {
+            if !ids.insert(panel.id.clone()) {
+                return Err(PackageUiRuntimeError::DuplicateContributionId { id: panel.id });
+            }
+            let slot_id = panel.slot_id;
+            if fixed_panels.insert(slot_id, panel).is_some() {
+                return Err(PackageUiRuntimeError::DuplicateFixedSlot { slot_id });
+            }
+        }
+
+        let mut transient_overlays = BTreeMap::new();
+        for overlay in update.transient_overlays {
+            if !ids.insert(overlay.id.clone()) {
+                return Err(PackageUiRuntimeError::DuplicateContributionId { id: overlay.id });
+            }
+            if transient_overlays
+                .insert(overlay.id.clone(), overlay.clone())
+                .is_some()
+            {
+                return Err(PackageUiRuntimeError::DuplicateContributionId { id: overlay.id });
+            }
+        }
+
+        let mut input_routing = BTreeMap::new();
+        for route in update.input_routing {
+            if !ids.insert(route.id.clone()) {
+                return Err(PackageUiRuntimeError::DuplicateContributionId { id: route.id });
+            }
+            if input_routing
+                .insert(route.id.clone(), route.clone())
+                .is_some()
+            {
+                return Err(PackageUiRuntimeError::DuplicateContributionId { id: route.id });
+            }
+        }
+
+        self.version = self.version.saturating_add(1);
+        self.fixed_panels = fixed_panels;
+        self.transient_overlays = transient_overlays;
+        self.input_routing = input_routing;
+        Ok(())
+    }
+
+    pub(crate) fn slot_layout(&self) -> PaneSlotLayout {
+        self.fixed_panels
+            .values()
+            .fold(PaneSlotLayout::main_only(), |layout, panel| {
+                layout.with_fixed_slot(panel.fixed_slot_state())
+            })
+    }
+
+    pub(crate) fn fixed_panel_observations(
+        &self,
+        working_area: Rect,
+    ) -> Vec<PackageUiPanelObservation> {
+        let geometry = self.slot_layout().compute_geometry(working_area);
+        self.fixed_panels
+            .iter()
+            .map(|(slot_id, panel)| {
+                let rect = geometry
+                    .fixed_slots
+                    .iter()
+                    .find(|slot| slot.slot_id == *slot_id)
+                    .map_or(Rect::ZERO, |slot| slot.rect);
+                PackageUiPanelObservation {
+                    id: panel.id.clone(),
+                    slot_id: *slot_id,
+                    rect,
+                    component_id: panel.component.id.clone(),
+                    component_kind: panel.component.kind.clone(),
+                    title: panel.component.title.clone(),
+                    visible: panel.visibility == PackagePanelVisibility::Visible,
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn overlay_observations(
+        &self,
+        working_area: Rect,
+    ) -> Vec<PackageUiOverlayObservation> {
+        let slot_geometry = self.slot_layout().compute_geometry(working_area);
+        self.transient_overlays
+            .values()
+            .map(|overlay| PackageUiOverlayObservation {
+                id: overlay.id.clone(),
+                anchor: overlay.anchor,
+                rect: overlay.anchor.rect(working_area, slot_geometry.main_rect),
+                component_id: overlay.component.id.clone(),
+                component_kind: overlay.component.kind.clone(),
+                focus_policy: overlay.focus_policy.clone(),
+                dismissal_policy: overlay.dismissal_policy.clone(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn visible_fixed_panels(
+        &self,
+        working_area: Rect,
+    ) -> Vec<(Rect, &FixedPackagePanel)> {
+        let geometry = self.slot_layout().compute_geometry(working_area);
+        self.fixed_panels
+            .iter()
+            .filter_map(|(slot_id, panel)| {
+                if panel.visibility != PackagePanelVisibility::Visible {
+                    return None;
+                }
+                geometry
+                    .fixed_slots
+                    .iter()
+                    .find(|slot| slot.slot_id == *slot_id)
+                    .map(|slot| (slot.rect, panel))
+            })
+            .collect()
+    }
+
+    pub(crate) fn overlays(&self) -> impl Iterator<Item = &TransientPackageOverlay> {
+        self.transient_overlays.values()
+    }
+
+    pub(crate) fn input_routes(&self) -> impl Iterator<Item = &PackageInputRouting> {
+        self.input_routing.values()
+    }
+}
+
+impl PackageInputRouting {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        id: impl Into<String>,
+        scope: impl Into<String>,
+        component_id: impl Into<String>,
+        pointer_click: impl Into<String>,
+        pointer_action: Option<String>,
+        pointer_drag: impl Into<String>,
+        focus_policy: impl Into<String>,
+        selection_policy: impl Into<String>,
+        context_modes: Vec<String>,
+        action_targets: Vec<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            scope: scope.into(),
+            component_id: component_id.into(),
+            pointer_click: pointer_click.into(),
+            pointer_action,
+            pointer_drag: pointer_drag.into(),
+            focus_policy: focus_policy.into(),
+            selection_policy: selection_policy.into(),
+            context_modes,
+            action_targets,
+        }
+    }
+}
+
+impl FixedPackagePanel {
+    pub(crate) fn new(
+        id: impl Into<String>,
+        slot_id: FixedSlotId,
+        visibility: PackagePanelVisibility,
+        component: PackageUiComponentTree,
+        action_targets: Vec<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            slot_id,
+            visibility,
+            component,
+            action_targets,
+        }
+    }
+
+    fn fixed_slot_state(&self) -> FixedSlotState {
+        let (size, max_size) = match self.slot_id {
+            FixedSlotId::Left | FixedSlotId::Right => {
+                (DEFAULT_SIDE_PANEL_SIZE, MAX_SIDE_PANEL_SIZE)
+            }
+            FixedSlotId::Top | FixedSlotId::Bottom => {
+                (DEFAULT_VERTICAL_PANEL_SIZE, MAX_VERTICAL_PANEL_SIZE)
+            }
+        };
+        FixedSlotState {
+            slot_id: self.slot_id,
+            size,
+            min_size: MIN_PANEL_SIZE,
+            max_size,
+            visible: self.visibility == PackagePanelVisibility::Visible,
+            collapsed: self.visibility == PackagePanelVisibility::Collapsed,
+            resized_by_user: false,
+        }
+    }
+}
+
+impl TransientPackageOverlay {
+    pub(crate) fn new(
+        id: impl Into<String>,
+        anchor: PackageOverlayAnchor,
+        focus_policy: impl Into<String>,
+        dismissal_policy: impl Into<String>,
+        component: PackageUiComponentTree,
+        action_targets: Vec<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            anchor,
+            focus_policy: focus_policy.into(),
+            dismissal_policy: dismissal_policy.into(),
+            component,
+            action_targets,
+        }
+    }
+}
+
+impl PackagePanelVisibility {
+    pub(crate) fn parse(value: &str) -> Self {
+        match value {
+            "visible" => Self::Visible,
+            "collapsed" => Self::Collapsed,
+            _ => Self::Hidden,
+        }
+    }
+}
+
+impl PackageOverlayAnchor {
+    pub(crate) fn parse(value: &str) -> Self {
+        match value {
+            "active-pane" => Self::ActivePane,
+            "main" => Self::Main,
+            "pointer" => Self::Pointer,
+            _ => Self::WorkingArea,
+        }
+    }
+
+    pub(crate) fn rect(self, working_area: Rect, main_rect: Rect) -> Rect {
+        match self {
+            Self::Main => main_rect,
+            Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
+            Self::WorkingArea | Self::ActivePane => working_area,
+        }
+    }
+}
+
+impl PackageUiComponentTree {
+    pub(crate) fn from_declaration(value: &Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "package UI component must be an object".to_string())?;
+        Self::from_object(object)
+    }
+
+    fn from_object(object: &Map<String, Value>) -> Result<Self, String> {
+        let id = required_text(object, "id")?.to_string();
+        let kind = required_text(object, "kind")?.to_string();
+        let title = optional_text(object, "title").map(ToOwned::to_owned);
+        let text = optional_text(object, "text").map(ToOwned::to_owned);
+        let label = optional_text(object, "label").map(ToOwned::to_owned);
+        let action_command_id = object
+            .get("action")
+            .and_then(Value::as_object)
+            .and_then(|action| optional_text(action, "commandId"))
+            .map(ToOwned::to_owned);
+        let items = object
+            .get("items")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(PackageUiListItem::from_value)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let children = object
+            .get("children")
+            .and_then(Value::as_array)
+            .map(|children| {
+                children
+                    .iter()
+                    .map(Self::from_declaration)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Self {
+            id,
+            kind,
+            title,
+            text,
+            label,
+            action_command_id,
+            items,
+            children,
+        })
+    }
+}
+
+impl PackageUiListItem {
+    fn from_value(value: &Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "package UI list items must be objects".to_string())?;
+        Ok(Self {
+            id: required_text(object, "id")?.to_string(),
+            label: required_text(object, "label")?.to_string(),
+            detail: optional_text(object, "detail").map(ToOwned::to_owned),
+            action_command_id: object
+                .get("action")
+                .and_then(Value::as_object)
+                .and_then(|action| optional_text(action, "commandId"))
+                .map(ToOwned::to_owned),
+        })
+    }
+}
+
+fn required_text<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
+    optional_text(object, key).ok_or_else(|| format!("package UI component `{key}` must be text"))
+}
+
+fn optional_text<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn centered_rect(bounds: Rect, width: f64, height: f64) -> Rect {
+    let width = width.min(bounds.width()).max(0.0);
+    let height = height.min(bounds.height()).max(0.0);
+    let x0 = bounds.x0 + (bounds.width() - width) / 2.0;
+    let y0 = bounds.y0 + (bounds.height() - height) / 2.0;
+    Rect::new(x0, y0, x0 + width, y0 + height)
+}
+
+#[cfg(test)]
+mod tests {
+    use masonry::kurbo::Rect;
+    use serde_json::json;
+
+    use super::*;
+
+    fn component(id: &str) -> PackageUiComponentTree {
+        PackageUiComponentTree::from_declaration(&json!({
+            "kind": "panel",
+            "id": id,
+            "title": "Preview",
+            "children": [{
+                "kind": "button",
+                "id": format!("{id}.toggle"),
+                "label": "Toggle",
+                "action": { "commandId": "markdown.togglePreview" }
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn slot_panel_contribution_places_panel_in_requested_slot_and_preserves_main_editor() {
+        let mut runtime = PackageUiRuntimeState::new();
+        runtime
+            .apply_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Right,
+                    PackagePanelVisibility::Visible,
+                    component("markdown.preview.root"),
+                    vec!["markdown.togglePreview".to_string()],
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let geometry = runtime
+            .slot_layout()
+            .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
+        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 660.0, 600.0));
+        assert_eq!(geometry.fixed_slots[0].slot_id, FixedSlotId::Right);
+        assert_eq!(
+            geometry.fixed_slots[0].rect,
+            Rect::new(660.0, 0.0, 900.0, 600.0)
+        );
+    }
+
+    #[test]
+    fn slot_panel_contribution_rejects_duplicate_exclusive_slot_claims() {
+        let mut runtime = PackageUiRuntimeState::new();
+        let error = runtime
+            .apply_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![
+                    FixedPackagePanel::new(
+                        "markdown.preview",
+                        FixedSlotId::Left,
+                        PackagePanelVisibility::Visible,
+                        component("markdown.preview.root"),
+                        Vec::new(),
+                    ),
+                    FixedPackagePanel::new(
+                        "outline.preview",
+                        FixedSlotId::Left,
+                        PackagePanelVisibility::Visible,
+                        component("outline.preview.root"),
+                        Vec::new(),
+                    ),
+                ],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            PackageUiRuntimeError::DuplicateFixedSlot {
+                slot_id: FixedSlotId::Left
+            }
+        );
+    }
+
+    #[test]
+    fn transient_overlay_renders_without_consuming_fixed_slot_geometry() {
+        let mut with_overlay = PackageUiRuntimeState::new();
+        with_overlay
+            .apply_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Bottom,
+                    PackagePanelVisibility::Visible,
+                    component("markdown.preview.root"),
+                    Vec::new(),
+                )],
+                transient_overlays: vec![TransientPackageOverlay::new(
+                    "markdown.preview.quickOpen",
+                    PackageOverlayAnchor::Main,
+                    "restore",
+                    "escape",
+                    component("markdown.preview.quickOpen.root"),
+                    Vec::new(),
+                )],
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let geometry = with_overlay
+            .slot_layout()
+            .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
+        let overlay = with_overlay.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0));
+        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 900.0, 480.0));
+        assert_eq!(overlay[0].rect, geometry.main_rect);
+    }
+}

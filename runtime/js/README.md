@@ -12,12 +12,13 @@ Future import-map/runtime wiring should expose these files with Clay-owned modul
 - `clay:documents` -> `runtime/js/documents.ts`
 - `clay:workspace` -> `runtime/js/workspace.ts`
 - `clay:behavior` -> `runtime/js/behavior.ts`
+- `clay:ui` -> `runtime/js/ui.ts`
 
 `runtime/js/mod.ts` is an aggregate source-tree entry point for organization and deterministic checks. User code should import domain modules rather than raw Rust functions or raw op names.
 
 ## Phase boundary
 
-The facade exports are typed planned stubs. They intentionally throw a planned-runtime error and do not call `Deno.core.ops`, execute arbitrary JavaScript in the Rust client, or add work to Masonry paint/input handlers.
+Most editor-core facade exports are typed planned stubs. Runtime-backed modules such as `clay:ui` call explicit Clay-owned ops behind facade helpers; public exports still do not expose raw `Deno.core.ops`, execute arbitrary JavaScript in the Rust client, or add work to Masonry paint/input handlers.
 
 Phase 11 runtime work is expected to add explicit `#[deno_core::op2]` Rust wrappers registered through `deno_core::extension!`, then bind those wrappers behind these facades. Raw `op_*` names remain implementation details and must not become the public JavaScript API.
 

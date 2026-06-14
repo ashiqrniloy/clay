@@ -90,6 +90,20 @@ fn package_security() -> String {
     .expect("read package security")
 }
 
+fn shell_layout_strategy() -> String {
+    fs::read_to_string(repository_path(
+        "docs/reference/primitives/shell-layout-strategy.md",
+    ))
+    .expect("read shell layout strategy")
+}
+
+fn creating_packages_guide() -> String {
+    fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package authoring guide")
+}
+
 fn implementation_gate() -> String {
     fs::read_to_string(repository_path(
         "docs/reference/primitives/implementation-gate.md",
@@ -828,6 +842,2188 @@ fn phase19_windows_file_open_primitive_review() -> String {
         "docs/wiki/modules/phase19-windows-file-open-primitive-review.md",
     ))
     .expect("read Phase 19 Windows file-open primitive review")
+}
+
+fn phase18_1_shell_layout_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.1-shell-layout-primitive-review.md",
+    ))
+    .expect("read Phase 18.1 shell/layout primitive review")
+}
+
+fn phase18_2_shell_runtime_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.2-shell-runtime-primitive-review.md",
+    ))
+    .expect("read Phase 18.2 shell runtime primitive review")
+}
+
+fn phase18_3_slot_ui_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.3-slot-ui-primitive-review.md",
+    ))
+    .expect("read Phase 18.3 slot-aware package UI primitive review")
+}
+
+fn phase18_4_input_state_config_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.4-input-state-config-primitive-review.md",
+    ))
+    .expect("read Phase 18.4 input/state/config primitive review")
+}
+
+fn phase18_5_markdown_replan_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md",
+    ))
+    .expect("read Phase 18.5 Markdown replan primitive review")
+}
+
+#[test]
+fn phase18_1_shell_layout_primitive_review_records_existing_inventory() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_1_shell_layout_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.1-shell-layout-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.1 shell/layout primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.1-shell-layout-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.1 shell/layout primitive review"
+    );
+    for required in [
+        "SDUI tree publication",
+        "Action intents and command registry",
+        "Editor views and current root widget",
+        "Fixed-sidebar SDUI paint path",
+        "Behavior manifests",
+        "Keybindings",
+        "Configuration runtime",
+        "Package loading and contribution descriptors",
+        "Decoration transport and rendering",
+        "Parse coordinator",
+        "current `EditorWidget` root",
+        "fixed-sidebar SDUI paint path",
+        "`SduiTree` snapshots/updates",
+        "`SduiActionIntent`",
+        "`SIDEBAR_WIDTH`",
+        "`editor_region_for_document`",
+        "`SduiPanelStatusContribution`",
+        "SDUI region collisions",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.1 shell/layout primitive review must record existing inventory text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_1_shell_layout_primitive_review_rejects_mode_specific_rust_layout() {
+    let review = phase18_1_shell_layout_primitive_review();
+
+    for required in [
+        "Do not add Markdown-specific Rust shell branches",
+        "No Markdown-specific or package-specific Rust UI branch is required",
+        "Markdown preview/status behavior should consume future `PanelContribution` / `PaneSlotLayout` primitives",
+        "Acceptable names include `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, `PackageUiStateScope`, and `PackageLayoutOverride`",
+        "Rejected names include `MarkdownPreviewSidebar`, `MarkdownPaneLayout`, `MarkdownMasonryPanel`, `MarkdownThemeCss`, `MarkdownOverlay`, or any `if mode == \"markdown\"` / `if package == \"@clay/markdown\"` Rust shell-layout branch",
+        "only generic reusable shell/layout primitives",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.1 shell/layout primitive review must reject mode-specific layout guidance: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_1_shell_layout_primitive_review_records_hot_path_and_security_boundaries() {
+    let review = phase18_1_shell_layout_primitive_review();
+
+    for required in [
+        "Configuration/load time",
+        "Package validation time",
+        "Protocol/update time",
+        "Layout/update time",
+        "Paint time",
+        "Client-first editor hot path",
+        "Proposed package JavaScript remains outside paint/layout/input/text-event handlers",
+        "no package JavaScript in paint/layout/input/text-event handlers",
+        "raw `Deno.core.ops`",
+        "native widget handles",
+        "Masonry widget constructors",
+        "Vello/Parley callbacks",
+        "raw CSS",
+        "client-side JavaScript hooks",
+        "registered package or Clay commands",
+        "Style/theme tokens",
+        "Package state/data declarations",
+        "Package/user overrides",
+        "`~/.config/clay/init.js`",
+        "WorkingAreaLayout",
+        "PaneSplitTree",
+        "PaneSlotLayout",
+        "PanelContribution",
+        "ComponentContribution",
+        "TransientOverlayContribution",
+        "PackageThemeTokenDeclaration",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.1 shell/layout primitive review must record hot-path/security text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_runtime_review_records_existing_inventory() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_2_shell_runtime_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.2-shell-runtime-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.2 shell runtime primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.2-shell-runtime-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.2 shell runtime primitive review"
+    );
+    for required in [
+        "Current application root and driver actions",
+        "Editor component and local input surface",
+        "Fixed SDUI sidebar and editor-region helper",
+        "Behavior manifests and key routing",
+        "Command/action registry and UI command routes",
+        "Configuration runtime",
+        "Package loading and primitive contribution descriptors",
+        "Decoration transport and editor render data",
+        "Parse coordinator and background package work",
+        "Masonry widget/container substrate",
+        "`src/main.rs` (`run_editor`, `Driver::on_start`, `Driver::on_action`, `spawn_client_connection_event_bridge`, `connection_event_user_event`)",
+        "`src/masonry_editor.rs`, `src/editor/surface.rs`",
+        "`src/masonry_sdui.rs` (`SIDEBAR_WIDTH`, `SduiNativeState::paint`, `editor_region`, `editor_region_for_document`, `SduiObservableSnapshot`)",
+        "`src/protocol/mod.rs`, `src/behavior/manifest.rs`, `src/editor/surface.rs`",
+        "`src/packages/commands.rs`, `runtime/js/commands.ts`, `runtime/js/keybindings.ts`, `src/protocol/sdui.rs`, `src/main.rs::handle_client_ui_command`",
+        "`src/server/configuration.rs`, `src/server/ops/configuration.rs`, `runtime/js/configuration.ts`",
+        "`src/packages/record.rs`, `src/packages/service.rs`, `src/packages/conflict.rs`",
+        "`src/protocol/decorations.rs`, `src/server/decorations.rs`, `src/editor/surface.rs`",
+        "`src/server/parse_coordinator.rs`, `src/protocol/parse.rs`, `runtime/js/parse.ts`",
+        "`NewWidget`, `NewWindow`, `AppDriver`, `Widget`, `WidgetId`, `WidgetPod`, `RegisterCtx`, `ChildrenIds`, `LayoutCtx`, `PaintCtx`, `RenderRoot::edit_widget`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.2 shell runtime review must record existing inventory text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_runtime_review_maps_generic_primitives() {
+    let review = phase18_2_shell_runtime_primitive_review();
+
+    for required in [
+        "Generic Runtime Gaps to Implement in Phase 18.2",
+        "### `WorkingAreaLayout`",
+        "### `PaneSplitTree`",
+        "### `PaneSlotLayout`",
+        "### Internal shell observability",
+        "`src/shell/mod.rs`, `src/shell/layout.rs`, `src/masonry_shell.rs`, `src/lib.rs`, and `src/main.rs`",
+        "State should record one native window working area, one active pane tree root, the active pane, a layout version, and the editor component binding",
+        "Model leaf panes and horizontal/vertical split nodes with stable pane IDs, split orientation, bounded ratio/min/max validation",
+        "Every leaf pane has exactly one mandatory `main` slot",
+        "Optional `left`, `right`, `top`, and `bottom` slots",
+        "Existing `SduiNativeState` can be bridged as internal Clay-owned slot content",
+        "layout version, pane count, split count, active pane, visible slots, editor component binding",
+        "Do not parse packages, run package JavaScript, wait on IPC, deserialize full documents, validate package metadata, or mutate Masonry children during layout",
+        "Keypress, text-event, pointer selection, scroll, caret movement, local edit application, and first local paint after input remain client-first",
+        "Hidden JSON/TOML/ad hoc shell layout keys are rejected",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.2 shell runtime review must map generic primitive guidance: {required}"
+        );
+    }
+
+    for deferred in [
+        "`PanelContribution` and `clay.ui.serverRegisterPanelContribution`",
+        "`ComponentContribution` and `clay.ui.serverRegisterComponentContribution`",
+        "`TransientOverlayContribution` and `clay.ui.serverRegisterTransientOverlayContribution`",
+        "`PackageThemeTokenDeclaration` and `clay.ui.serverRegisterThemeToken`",
+        "`PackageUiStateScope` and `clay.ui.serverRegisterUiStateScope`",
+        "`PackageLayoutOverride` and `clay.ui.serverSetLayoutOverride`",
+        "public `clay:ui` configuration APIs remain planned",
+    ] {
+        assert!(
+            review.contains(deferred),
+            "Phase 18.2 shell runtime review must defer later package UI surface: {deferred}"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_runtime_review_rejects_mode_specific_shell_branches() {
+    let review = phase18_2_shell_runtime_primitive_review();
+
+    for required in [
+        "Do not keep `EditorWidget` as the application shell and hide shell state inside it",
+        "Do not fork the fixed sidebar into `MarkdownPreviewSidebar`, `MarkdownPaneLayout`, `MarkdownMasonryPanel`, `MarkdownShellWidget`, or any `if mode == \"markdown\"` / `if package == \"@clay/markdown\"` Rust shell/layout branch",
+        "Do not expose Masonry `Widget`, `WidgetId`, `WidgetPod`, `Split`, `Flex`, native handles, layout callbacks, Vello callbacks, Parley callbacks, or raw op names as package APIs",
+        "Do not add package validation, package parsing, configuration evaluation, JavaScript execution, or blocking IPC to Masonry paint/layout/pointer/scroll/key/text-event handlers",
+        "Do not promote planned `clay:ui` inventory stubs to callable APIs without full Clay JS facade/op/reference docs/registry/test coverage",
+        "Packages must not create Masonry widgets, mutate native layout, provide raw CSS/HTML/scripts, run client-side JavaScript, call raw `Deno.core.ops`, receive native widget IDs/handles, provide Vello/Parley callbacks",
+        "No package JavaScript, package validation, configuration evaluation, package parsing, blocking IPC, or full-document serialization may enter these paths",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.2 shell runtime review must reject unsafe/mode-specific shell branch: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_slot_ui_review_records_existing_inventory() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_3_slot_ui_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.3-slot-ui-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.3 slot UI primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.3-slot-ui-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.3 slot UI primitive review"
+    );
+
+    for required in [
+        "Existing Package UI Primitive Inventory",
+        "SDUI helpers and runtime publication",
+        "Shell slot state and geometry",
+        "Command registry and action validation",
+        "Package manifest, permissions, and provenance",
+        "Package contribution metadata and conflicts",
+        "Clay JS API inventory and documentation registry",
+        "Structural observability",
+        "`runtime/js/sdui.ts`, `src/server/ops/sdui.rs`, `src/server/sdui.rs`, `src/protocol/sdui.rs`",
+        "`src/shell/layout.rs`, `src/masonry_shell.rs`",
+        "`src/masonry_sdui.rs` (`SIDEBAR_WIDTH`, `sdui_panel_left_slot_rect`, `editor_region`, `editor_region_for_document`, `SduiObservableSnapshot`)",
+        "`src/packages/manifest.rs`, `src/packages/permissions.rs`, `src/packages/record.rs`",
+        "`src/packages/record.rs`, `src/packages/conflict.rs`",
+        "panel`, `label`, `button`, `list`, `editorView`, `flex`, and `stack`",
+        "`PANEL_BACKGROUND`, `BUTTON_BACKGROUND`, `LIST_BACKGROUND`, `TEXT_COLOR`, `PANEL_PADDING`, `ROW_HEIGHT`, `TITLE_TEXT_SIZE`, and `BODY_TEXT_SIZE`",
+        "SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES",
+        "SDUI_UPDATE_PAYLOAD_BUDGET_BYTES",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.3 slot UI primitive review must record existing inventory text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_slot_ui_review_maps_generic_primitives() {
+    let review = phase18_3_slot_ui_primitive_review();
+
+    for required in [
+        "Generic Phase 18.3 Primitive Gaps",
+        "### `PanelContribution`",
+        "### `ComponentContribution`",
+        "### `TransientOverlayContribution`",
+        "### `PackageThemeTokenDeclaration`",
+        "`runtime/js/ui.ts`, `src/server/ops/ui.rs`, `src/server/ui.rs` or `src/shell/contributions.rs`, `src/shell/components.rs`, `src/protocol/ui.rs` or `src/protocol/sdui.rs`, `src/masonry_sdui.rs`, `src/masonry_shell.rs`, `src/packages/record.rs`, `src/packages/conflict.rs`, and public docs/tests",
+        "package-prefixed panel ID, target slot (`left`, `right`, `top`, or `bottom`)",
+        "fixed/transient kind separation",
+        "Reuse existing SDUI node semantics for `panel`, `label`, `button`, `list`, `editorView`, `flex`, and `stack`",
+        "Add or explicitly defer `scroll/portal`, `statusItem`, `table`, `dropdown`, `collapse`, and `modal`",
+        "component IDs must be package-prefixed or Clay-owned",
+        "focus policy, dismissal policy, accessibility role/label metadata",
+        "typed semantic package tokens and component style variables",
+        "Package-owned tokens must use the package prefix",
+        "Token declaration and user override validation are package load/config/update work",
+        "Deferred to Phase 18.4 Unless Deliberately Promoted",
+        "`clay.ui.serverRegisterUiStateScope`",
+        "`clay.ui.serverSetLayoutOverride`",
+        "hidden JSON/TOML/ad hoc panel/style/layout configuration keys",
+        "docs/index links, generated registry coverage, key binding metadata, permissions/security notes, backing Rust/op/facade paths, and tests",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.3 slot UI primitive review must map generic primitive guidance: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_slot_ui_review_rejects_mode_specific_ui_branches() {
+    let review = phase18_3_slot_ui_primitive_review();
+
+    for required in [
+        "not a Markdown preview sidebar",
+        "Do not add `MarkdownPreviewSidebar`, `MarkdownPaneLayout`, `MarkdownMasonryPanel`, `MarkdownThemeCss`, `MarkdownOverlay`, or any `if mode == \"markdown\"` / `if package == \"@clay/markdown\"` Rust shell/UI branch",
+        "Do not expose Masonry `Widget`, `WidgetId`, `WidgetPod`, `Flex`, `Portal`, `Split`, native handles, layout callbacks, Vello callbacks, Parley callbacks, or raw op names as package APIs",
+        "Do not promote planned `clay:ui` APIs by wiring only raw ops or inventory rows",
+        "Do not add package validation, package parsing, configuration evaluation, JavaScript execution, or blocking IPC to Masonry paint/layout/pointer/scroll/key/text-event handlers",
+        "Do not treat hidden config keys, raw CSS, raw style strings, or arbitrary color strings as temporary package author APIs",
+        "No package JavaScript, schema validation, package parsing, full-document serialization, raw IPC wait, or child mutation should happen inside Masonry paint/layout/pointer/scroll/key/text-event handlers",
+        "package JavaScript and package validation stay out of Masonry hot paths",
+        "raw CSS, raw ops, native widget handles, direct Masonry widget constructors, client-side JavaScript, renderer callbacks",
+        "Package UI declarations grant no filesystem, network, shell, AI mutation, WASM, package-manager execution, package enable/disable, workspace mutation, raw Deno op, native widget, or client-side JavaScript authority",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.3 slot UI primitive review must reject unsafe/mode-specific UI branch: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_input_state_config_review_records_existing_inventory() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_4_input_state_config_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.4-input-state-config-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.4 input/state/config primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.4-input-state-config-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.4 input/state/config primitive review"
+    );
+
+    for required in [
+        "Existing Package Primitive Inventory",
+        "Behavior manifests and text/key routing",
+        "Keybindings",
+        "Command registry and action intents",
+        "SDUI and Clay component catalog",
+        "Shell `PaneSlotLayout` and internal shell runtime",
+        "Package UI registry and runtime state",
+        "Package manifest and contribution metadata",
+        "Configuration runtime and planned configuration APIs",
+        "Clay JS API inventory and docs registry",
+        "Structural observability",
+        "`src/behavior/manifest.rs`, `src/protocol/mod.rs`, `src/editor/surface.rs`, `runtime/js/keybindings.ts`",
+        "`runtime/js/commands.ts`, `src/server/ops/commands.rs`, `src/packages/commands.rs`, `src/protocol/sdui.rs`",
+        "`runtime/js/sdui.ts`, `src/protocol/sdui.rs`, `src/server/sdui.rs`, `src/server/ops/sdui.rs`, `src/shell/components.rs`, `src/masonry_sdui.rs`",
+        "`src/shell/layout.rs`, `src/masonry_shell.rs`",
+        "`runtime/js/ui.ts`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs`, `src/shell/theme.rs`",
+        "`runtime/js/configuration.ts`, `src/server/configuration.rs`, `src/server/ops/configuration.rs`, `src/server/js_runtime.rs`",
+        "`docs/reference/clay-js-api/api-inventory.toml`, `docs/reference/clay-js-api/`, `docs/generated/clay-js-api-registry.json`",
+        "`SduiActionIntent`",
+        "`serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and `serverRegisterThemeToken`",
+        "`setPackageOption`, `setModePreference`, `setDecorationTheme`, and `setParsePolicy`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.4 primitive review must record existing inventory text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_input_state_config_review_maps_generic_primitives() {
+    let review = phase18_4_input_state_config_primitive_review();
+
+    for required in [
+        "Generic Phase 18.4 Primitive Gaps",
+        "### `PackageInputContribution`",
+        "`clay.ui.serverRegisterInputContribution` / `serverRegisterInputContribution`",
+        "component-scoped action and focus metadata",
+        "pointer click interests, hover/menu hints if needed, mouse selection and drag policies",
+        "behavior manifests for key/text behavior",
+        "command registry for side effects",
+        "### `PackageUiStateScope`",
+        "`clay.ui.serverRegisterUiStateScope` / `serverRegisterUiStateScope`",
+        "`package-global`, `user-config`, `workspace`, `document`, `pane`, `component`, and `transient-overlay`",
+        "### `PackageLayoutOverride`",
+        "`clay.ui.serverSetLayoutOverride` / `serverSetLayoutOverride`",
+        "Precedence remains: Clay shell safety invariants and hard prohibitions, user configuration through documented Clay JS APIs, active major mode layout defaults, compatible minor mode contributions, global package contributions, package fallback/defaults",
+        "### `PackageOwnedConfiguration`",
+        "`clay.configuration.setPackageOption` / `setPackageOption`",
+        "Package options should be available only for package-declared typed option schemas",
+        "Theme-token remaps and package fallback/defaults",
+        "reuse `PackageThemeTokenDeclaration` and `ThemeTokenResolver`",
+        "`~/.config/clay/init.js`",
+        "Configuration/load/update work",
+        "Behavior-manifest update work",
+        "Explicit command/UI update work",
+        "Protocol/client update work",
+        "Paint/layout state read",
+        "Editor hot-path work",
+        "Extend package records/conflicts/provenance for input/state/config/layout metadata",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.4 primitive review must map generic primitive guidance: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_input_state_config_review_rejects_mode_specific_branches() {
+    let review = phase18_4_input_state_config_primitive_review();
+
+    for required in [
+        "Do not add `MarkdownPreviewInput`, `MarkdownPreviewState`, `MarkdownLayoutOverride`, `MarkdownPanelVisibility`, `MarkdownThemeOverride`, `MarkdownPaneSelector`, or any `if mode == \"markdown\"` / `if package == \"@clay/markdown\"` Rust input/state/config/layout branch",
+        "Do not expose Masonry `Widget`, `WidgetId`, `WidgetPod`, native handles, event callbacks, focus callbacks, layout callbacks, Vello callbacks, Parley callbacks, renderer callbacks, or raw op names as package APIs",
+        "Do not implement package input by delivering raw pointer/key/text events to package JavaScript or client-side JavaScript",
+        "Do not run package validation, package parsing, configuration evaluation, JavaScript execution, blocking IPC, full-document serialization, or child mutation from Masonry paint/layout/pointer/scroll/key/text-event handlers",
+        "Do not treat hidden config keys, raw CSS, raw style strings, raw colors, or arbitrary JSON state blobs as temporary package authoring APIs",
+        "Do not promote `clay.ui.serverRegisterUiStateScope`, `clay.ui.serverSetLayoutOverride`, or `clay.configuration.setPackageOption` by wiring only inventory rows or raw ops",
+        "raw native event callbacks",
+        "raw arbitrary native events",
+        "raw `Deno.core.ops`",
+        "direct Masonry widget",
+        "native widget",
+        "raw CSS",
+        "client-side JavaScript",
+        "hidden JSON/TOML/ad hoc layout, style, input, theme, or package option keys",
+        "None of these primitives grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package installation/enable/disable, package-manager execution, WASM",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.4 primitive review must reject unsafe/mode-specific implementation shape: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_5_markdown_replan_primitive_review_records_existing_inventory() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_5_markdown_replan_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.5-markdown-replan-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.5 Markdown replan primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.5-markdown-replan-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.5 Markdown replan primitive review"
+    );
+
+    for required in [
+        "Existing Generic Primitive Inventory",
+        "`WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`",
+        "`src/shell/layout.rs`, `src/masonry_shell.rs`",
+        "`PanelContribution` (`serverRegisterPanelContribution`)",
+        "`ComponentContribution` (`serverRegisterComponentContribution`)",
+        "`TransientOverlayContribution` (`serverRegisterTransientOverlayContribution`)",
+        "`PackageThemeTokenDeclaration` (`serverRegisterThemeToken`)",
+        "`PackageInputContribution` (`serverRegisterInputContribution`)",
+        "`PackageUiStateScope` (`serverRegisterUiStateScope`)",
+        "`PackageLayoutOverride` (`serverSetLayoutOverride`)",
+        "`PackageOwnedConfiguration` (`setPackageOption`)",
+        "`MajorModeActivation` and `DocumentClassification`",
+        "`CommandDeclaration` and behavior-manifest commands",
+        "`serverRegisterParseHandler` and parse coordinator",
+        "`serverPublishDecorations` and decoration transport",
+        "`serverLoadPackage(packageJson)`",
+        "Selected-file open activation (`clientOpenFileDialog` binding, `open_selected_file`, `selected_file_open_followup_messages`)",
+        "`~/.config/clay/init.js` configuration runtime",
+        "Package manifest, permissions, conflict, provenance validation",
+        "Clay JS API inventory, docs registry, generated registry",
+        "Structural observability",
+        "`src/packages/modes.rs`, `src/server/ops/modes.rs`, `runtime/js/modes.ts`",
+        "`runtime/js/parse.ts`, `src/server/parse_coordinator.rs`, `packages/markdown/dist/parser.js`",
+        "`runtime/js/decorations.ts`, `src/server/ops/decorations.rs`",
+        "`runtime/js/packages.ts`, `src/server/ops/packages.rs`, `src/packages/service.rs`",
+        "`bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" })`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.5 Markdown replan primitive review must record existing inventory text: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_5_markdown_replan_primitive_review_maps_markdown_to_generic_primitives() {
+    let review = phase18_5_markdown_replan_primitive_review();
+
+    for required in [
+        "Markdown Needs Mapped to Generic Primitives",
+        "Markdown need                            -> Generic primitive (status)",
+        "Main editor placement                  -> PaneSlotLayout.main (implemented)",
+        "Optional preview panel                 -> PanelContribution targeting `right` slot (implemented)",
+        "No default side panel                  -> Do not publish PanelContribution by default (configuration choice)",
+        "Mode classification                    -> DocumentClassification (implemented)",
+        "Major-mode activation + behavior       -> MajorModeActivation + BehaviorManifest (implemented)",
+        "Package commands and key bindings      -> CommandDeclaration + behavior-manifest keymaps (implemented)",
+        "Client-first editor rules              -> ContinueLineMarkers / PairRule / PreserveFenceBodyIndent (implemented)",
+        "Background parse handler               -> serverRegisterParseHandler (implemented)",
+        "Syntax decorations                     -> serverPublishDecorations (implemented)",
+        "User configuration override            -> setPackageOption / serverSetLayoutOverride (implemented)",
+        "Theme tokens for preview styling       -> PackageThemeTokenDeclaration + ThemeTokenResolver (implemented)",
+        "Selected-file open activation          -> bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\") + open_selected_file (implemented)",
+        "Every Markdown need except one-line end-user package loading maps onto an implemented generic primitive",
+        "No Markdown-specific Rust editor/parser/render/shell branch is required",
+        "Hot-Path Classification",
+        "Configuration/load time",
+        "Package validation time",
+        "Explicit command/UI update time",
+        "Background parse/decor time",
+        "Behavior-manifest update work",
+        "Editor hot-path work",
+        "The no-hot-path-package-JS rule is preserved",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.5 Markdown replan primitive review must map Markdown needs to generic primitives: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_5_markdown_replan_primitive_review_identifies_load_package_gap() {
+    let review = phase18_5_markdown_replan_primitive_review();
+
+    for required in [
+        "Generic Phase 18.5 Primitive Gaps",
+        "### `loadPackage(\"@clay/markdown\")` — generic one-line package specifier resolver",
+        "The only generic gap blocking the Markdown replan is the absence of a generic end-user package loader",
+        "Today only `serverLoadPackage(packageJson)` exists.",
+        "Candidate public API target: `clay.packages.loadPackage` / `loadPackage(\"@clay/markdown\")`",
+        "`runtime/js/packages.ts`",
+        "`op_clay_packages_load_package_by_specifier` in `src/server/ops/packages.rs`",
+        "specifier resolver in `src/packages/service.rs`",
+        "The resolver must remain deny-by-default for arbitrary external specifiers",
+        "Acceptable scope for a safe Phase 18.5 implementation is a constrained first-party resolver for `@clay/*` specifiers",
+        "External package resolution, package-manager execution, registry fetching, and arbitrary specifier expansion remain prohibited",
+        "No Markdown-specific loader primitive is proposed",
+        "the Markdown package does not require a `MarkdownLoader`, `LoadMarkdown`, or any `if package == \"@clay/markdown\"` Rust branch",
+        "Do not add `MarkdownLoader`, `MarkdownLoadEntry`, `MarkdownSidebar`, `MarkdownPreviewPanel`, `MarkdownModeDefault`, `MarkdownPanelVisibility`, `MarkdownPaneSelector`, or any `if mode == \"markdown\"` / `if package == \"@clay/markdown\"` Rust editor/parser/render/shell branch",
+        "Do not implement the one-line loader as a Markdown-specific resolver",
+        "Do not keep the inline package manifest object (`const markdownPackage = { ... }`), the manual per-facade registration imports",
+        "Do not present `serverLoadPackage(packageJson)` as the ordinary end-user one-line setup",
+        "None of these primitives grant filesystem (outside already-open document content and the config root), network, shell, extension loading, AI mutation, workspace mutation, package installation/enable/disable, package-manager execution, WASM",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.5 Markdown replan primitive review must identify the generic loadPackage gap and reject Markdown-specific loaders: {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_strategy_doc_linked_from_docs_indexes() {
+    let docs_index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+    let primitive_index = primitives_index();
+    let package_guide = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package guide");
+
+    for (name, text, link) in [
+        (
+            "docs/index.md",
+            docs_index.as_str(),
+            "reference/primitives/shell-layout-strategy.md",
+        ),
+        (
+            "docs/reference/primitives/index.md",
+            primitive_index.as_str(),
+            "shell-layout-strategy.md",
+        ),
+        (
+            "docs/reference/packages/creating-packages.md",
+            package_guide.as_str(),
+            "../primitives/shell-layout-strategy.md",
+        ),
+    ] {
+        assert!(
+            text.contains(link),
+            "{name} must link the shell/layout architecture reference {link}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_strategy_defines_required_vocabulary() {
+    let strategy = shell_layout_strategy();
+
+    for required in [
+        "Application Shell",
+        "Working Area",
+        "Pane/Split Tree",
+        "pane/window layout",
+        "mandatory `main`",
+        "`left`",
+        "`right`",
+        "`top`",
+        "`bottom`",
+        "Fixed Panels",
+        "Transient Panels and Overlays",
+        "Components and Elements",
+        "Action Intents",
+        "Package State Scopes",
+        "`package-global`",
+        "`user-config`",
+        "`workspace`",
+        "`document`",
+        "`pane`",
+        "`component`",
+        "`transient-overlay`",
+        "Style and Theme Tokens",
+        "WorkingArea",
+        "PaneSplitTree",
+        "PaneSlotLayout",
+        "PanelContribution",
+        "ComponentContribution",
+        "TransientOverlayContribution",
+        "PackageThemeTokenDeclaration",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell layout strategy must define required vocabulary: {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_strategy_records_masonry_boundary_and_prohibitions() {
+    let strategy = shell_layout_strategy();
+
+    for required in [
+        "Masonry remains an implementation substrate",
+        "not stable public package APIs",
+        "RenderRoot",
+        "Widget",
+        "Split",
+        "Flex",
+        "Grid",
+        "ZStack",
+        "Portal",
+        "typed widget properties",
+        "Masonry actions",
+        "no package logic runs during Masonry paint, layout, pointer, scroll, keypress, or text-event handlers",
+        "raw CSS",
+        "arbitrary client JavaScript",
+        "raw `Deno.core.ops`",
+        "direct Masonry widget handles",
+        "Masonry widget constructors",
+        "native widget IDs",
+        "native widget handles",
+        "Vello callbacks",
+        "Parley callbacks",
+        "filesystem",
+        "network",
+        "shell",
+        "AI mutation",
+        "WASM execution",
+        "unregistered action targets",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell layout strategy must record Masonry boundary/prohibition text: {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_strategy_records_precedence_order() {
+    let strategy = shell_layout_strategy();
+    let package_guide = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package guide");
+    let security = package_security();
+
+    let precedence = [
+        "1. Clay shell safety invariants and hard prohibitions",
+        "2. User configuration through documented Clay JS APIs",
+        "3. Active major mode layout defaults",
+        "4. Compatible minor mode contributions",
+        "5. Global package contributions",
+        "6. Package fallback/defaults",
+    ];
+
+    let mut previous = 0;
+    for marker in precedence {
+        let position = strategy
+            .find(marker)
+            .unwrap_or_else(|| panic!("shell layout strategy missing precedence marker {marker}"));
+        assert!(
+            position >= previous,
+            "shell layout strategy precedence marker {marker} is out of order"
+        );
+        previous = position;
+
+        for (name, text) in [
+            ("package guide", package_guide.as_str()),
+            ("package security", security.as_str()),
+        ] {
+            assert!(
+                text.contains(marker),
+                "{name} must repeat shell/layout precedence marker {marker}"
+            );
+        }
+    }
+
+    for required in [
+        "No package wins a shell/layout conflict by load order alone",
+        "duplicate slots",
+        "duplicate component IDs",
+        "duplicate overlay IDs",
+        "duplicate commands/actions",
+        "undeclared permissions",
+        "unregistered action targets",
+        "unsupported state scopes",
+        "unknown style tokens",
+        "oversize layout/component/state payloads",
+        "package/user override bypass attempts",
+    ] {
+        assert!(
+            security.contains(required),
+            "package security must record shell/layout conflict diagnostic category {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_strategy_records_state_scopes_and_action_validation() {
+    let strategy = shell_layout_strategy();
+    let package_guide = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package guide");
+
+    for scope in [
+        "`package-global`",
+        "`user-config`",
+        "`workspace`",
+        "`document`",
+        "`pane`",
+        "`component`",
+        "`transient-overlay`",
+    ] {
+        assert!(
+            strategy.contains(scope),
+            "shell layout strategy must record planned state scope {scope}"
+        );
+        assert!(
+            package_guide.contains(scope.trim_matches('`')),
+            "package guide must record author-facing state scope {scope}"
+        );
+    }
+
+    for required in [
+        "State keys and IDs should be package-prefixed",
+        "Unsupported state scopes",
+        "hidden state keys",
+        "command IDs are registered before UI action targets become active",
+        "UI actions are inert command intents",
+        "action arguments are bounded primitive data",
+        "callbacks, raw op names, native handles, executable code",
+        "stale action intents are rejected or disabled",
+    ] {
+        assert!(
+            package_guide.contains(required),
+            "package guide must record state/action validation text: {required}"
+        );
+    }
+
+    for required in [
+        "Input and Action Contract",
+        "Every action target must resolve to a registered command before the UI declaration becomes active",
+        "Package command IDs must use the package prefix",
+        "Action arguments must be bounded primitive data",
+        "callbacks, raw op names, native handles, filesystem paths",
+        "Stale action intents are rejected or disabled",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell layout strategy must record input/action contract text: {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_strategy_records_style_token_contract() {
+    let strategy = shell_layout_strategy();
+    let package_guide = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package guide");
+    let security = package_security();
+
+    for required in [
+        "Style and Theme Token Contract",
+        "typed tokens and typed component style variables",
+        "Package-owned token names must use the package prefix",
+        "optional fallback token of the same type",
+        "Unknown style tokens",
+        "type-incompatible fallbacks",
+        "raw CSS",
+        "native renderer callbacks",
+        "raw colors without a typed token contract",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell layout strategy must record style/theme token contract text: {required}"
+        );
+    }
+
+    for required in [
+        "Package-owned token names should use the package prefix",
+        "Token declarations should include a semantic description, a token type, an optional same-type fallback, and package provenance",
+        "Unknown style tokens",
+        "duplicate package token names",
+        "type-incompatible fallbacks",
+        "native renderer callbacks",
+        "raw colors without a typed token contract",
+    ] {
+        assert!(
+            package_guide.contains(required),
+            "package guide must record style/theme authoring text: {required}"
+        );
+    }
+
+    for required in [
+        "Unknown style/theme token",
+        "unknown style tokens",
+        "type-incompatible token fallbacks",
+        "raw CSS",
+        "raw style strings",
+        "Vello/Parley/native renderer callbacks",
+    ] {
+        assert!(
+            security.contains(required),
+            "package security must record style/theme rejection text: {required}"
+        );
+    }
+}
+
+#[test]
+fn creating_packages_docs_cover_shell_layout_contract() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "Status markers used in this guide",
+        "Implemented/runtime-backed",
+        "Implemented/internal runtime",
+        "Planned/target",
+        "Fixture-only/current limitation",
+        "Masonry is Clay's internal widget/layout/rendering substrate, not a package author API",
+        "Performance authoring rule",
+        "package load, package validation, configuration evaluation, explicit command handling, or explicit UI update time",
+        "Typing, Masonry paint, Masonry layout, scroll, pointer, keypress, and text-event paths",
+        "Phase 18.2 shell/layout runtime and Phase 18.3 slot-aware package UI",
+        "Clay-owned `ClayShellWidget` root above `EditorWidget`",
+        "Internal `WorkingAreaLayout` state",
+        "Internal `PaneSplitTree` state",
+        "Internal `PaneSlotLayout` state",
+        "working area",
+        "Pane/split tree",
+        "`main` — mandatory",
+        "`left`",
+        "`right`",
+        "`top`",
+        "`bottom`",
+        "fixed panel",
+        "transient panel",
+        "Clay components",
+        "UI actions are inert command intents",
+        "Target state scopes",
+        "Styling and Themes",
+        "Expected shell/layout/package guide updates by phase",
+        "Phase 18.2",
+        "Phase 18.3",
+        "Phase 18.4",
+        "Phase 18.5",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must cover shell/layout authoring contract text: {required}"
+        );
+    }
+}
+
+#[test]
+fn creating_packages_docs_mark_examples_by_status() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "**Planned/target default user load**",
+        "not a callable Phase 18.2 runtime API",
+        "Current implemented package API status",
+        "serverLoadPackage(packageJson)",
+        "Implemented package-record validation helper",
+        "not an end-user install, enable/disable, package-manager, or package-code execution wrapper",
+        "**Planned/target default loader shape**",
+        "**Implemented/runtime-backed SDUI example**",
+        "clay.sdui.publishTree",
+        "The current `clay:sdui` helpers publish bounded inert node trees through server validation",
+        "`clay:ui` inventory targets for the shell/layout contract",
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.ui.serverSetLayoutOverride",
+        "**Implemented/runtime-backed Phase 18.3 slot panel and token example:**",
+        "**Implemented/runtime-backed Phase 18.3 transient overlay example:**",
+        "**Implemented/runtime-backed Phase 18.4 input contribution example:**",
+        "**Planned configuration examples**",
+        "clay.configuration.setPackageOption` and `clay.ui.serverSetLayoutOverride` are inventory stubs,",
+        "not public runtime-backed shell/layout configuration APIs in Phase 18.3",
+        "**Implemented/runtime-backed theme-token declaration example**",
+        "PackageThemeTokenDeclaration` / `clay.ui.serverRegisterThemeToken`",
+        "**Implemented/runtime-backed component style example**",
+        "**Planned/target default user setup**",
+        "fixtures are validation tools, not the long-term user setup or shell/layout authoring convention",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must mark example status accurately: {required}"
+        );
+    }
+}
+
+#[test]
+fn creating_packages_docs_reject_package_ui_antipatterns() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "direct native widget access",
+        "raw Deno ops",
+        "native widget handles",
+        "raw `Deno.core.ops`",
+        "Execute package JavaScript in the Rust client",
+        "Create or mutate Masonry widgets directly from package code",
+        "Provide CSS, HTML, script, draw callbacks, or native handles",
+        "filesystem/network/shell/AI/WASM work without an approved permissioned API",
+        "Add Markdown-specific Rust UI/layout branches for package behavior",
+        "planned working-area/split-tree/slot-layout/state/override `clay:ui` snippets or planned configuration helpers as callable runtime code",
+        "Treat `serverLoadPackage` as ordinary end-user package installation, enablement, or execution authority",
+        "raw CSS, raw style strings, raw ops, native widget handles, Masonry widget constructors, client-side JavaScript, and native renderer callbacks",
+        "It cannot grant permissions, bypass slot safety, expose native widgets, accept raw CSS, or run package JavaScript in the client",
+        "does not grant broad authority",
+        "arbitrary filesystem paths, network, shell, AI mutation, WASM, native widget handles, raw Deno ops, or client-side JavaScript by default",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must reject package UI/layout anti-pattern: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_package_guide_documents_slot_ui_component_panel_and_theme_apis() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "Runtime-backed public APIs in `clay:ui` for Phase 18.3 inert package UI contributions",
+        "serverRegisterPanelContribution(manifest, declaration)",
+        "serverRegisterComponentContribution(manifest, declaration)",
+        "serverRegisterTransientOverlayContribution(manifest, declaration)",
+        "serverRegisterThemeToken(manifest, declaration)",
+        "clay.contributions.ui.panels",
+        "ui.components",
+        "ui.overlays",
+        "themeTokens",
+        "Implemented/runtime-backed Phase 18.3 slot panel and token example",
+        "Implemented/runtime-backed Phase 18.3 transient overlay example",
+        "Phase 18.3 component catalog status",
+        "table` | Planned/deferred",
+        "dropdown` | Planned/deferred",
+        "collapse` | Planned/deferred",
+        "modal` | Planned/deferred",
+        "No package wins a layout conflict by load order alone",
+        "slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must document Phase 18.3 slot UI authoring phrase: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_primitives_docs_mark_slot_ui_rows_runtime_backed() {
+    let strategy = shell_layout_strategy();
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+    let primitives_index = primitives_index();
+    let inventory = api_inventory_text();
+
+    for required in [
+        "Phase 18.3 runtime-backed package UI contribution progress",
+        "**Implemented/runtime-backed public APIs in Phase 18.3:**",
+        "`PanelContribution` / `serverRegisterPanelContribution`",
+        "`ComponentContribution` / `serverRegisterComponentContribution`",
+        "`TransientOverlayContribution` / `serverRegisterTransientOverlayContribution`",
+        "`PackageThemeTokenDeclaration` / `serverRegisterThemeToken`",
+        "registry_public = true",
+        "Accepted fixed panels compose into `PaneSlotLayout` geometry",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell-layout strategy must mark Phase 18.3 runtime-backed status: {required}"
+        );
+    }
+
+    for required in [
+        "Phase 18.3 runtime-backed public API in `runtime/js/ui.ts`",
+        "generated public registry page exists under `docs/reference/clay-js-api/ui/`",
+        "Exists/Extend",
+        "same-type core fallback",
+        "Unknown/deferred component kind rejection",
+    ] {
+        assert!(
+            registry.contains(required),
+            "primitive registry must mark Phase 18.3 rows runtime-backed: {required}"
+        );
+    }
+
+    for required in [
+        "Implemented runtime-backed `runtime/js/ui.ts` facade",
+        "Implemented runtime-backed component schema/catalog validation",
+        "Implemented runtime-backed overlay descriptor validation",
+        "Implemented runtime-backed theme token registry and resolver",
+        "runtime-backed public APIs with facade/op/validator coverage, per-API Markdown docs, and generated registry entries",
+    ] {
+        assert!(
+            backlog.contains(required),
+            "primitive backlog must mark Phase 18.3 rows implemented/runtime-backed: {required}"
+        );
+    }
+
+    assert!(
+        primitives_index.contains("Phase 18.3 package UI primitives")
+            && primitives_index.contains("runtime-backed inventory APIs through `clay:ui`"),
+        "primitives index must summarize Phase 18.3 runtime-backed slot UI primitives"
+    );
+
+    for id in [
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.ui.serverRegisterComponentContribution",
+        "clay.ui.serverRegisterTransientOverlayContribution",
+        "clay.ui.serverRegisterThemeToken",
+    ] {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(block.contains("status = \"runtime-backed\""));
+        assert!(block.contains("registry_public = true"));
+        assert!(block.contains("runtime/js/ui.ts"));
+        assert!(block.contains("src/server/ops/ui.rs"));
+        assert!(block.contains("src/server/ui.rs"));
+    }
+}
+
+#[test]
+fn phase18_3_docs_preserve_security_and_hot_path_contract() {
+    let guide = creating_packages_guide();
+    let strategy = shell_layout_strategy();
+    let security = package_security();
+
+    for source in [guide.as_str(), strategy.as_str(), security.as_str()] {
+        for required in [
+            "raw CSS",
+            "raw style strings",
+            "client-side JavaScript",
+            "native widget handles",
+            "Masonry",
+            "renderer callbacks",
+            "unregistered action",
+            "no package JavaScript",
+        ] {
+            assert!(
+                source.contains(required),
+                "Phase 18.3 docs must preserve security/hot-path phrase `{required}`"
+            );
+        }
+    }
+
+    for required in [
+        "validation/publication timing",
+        "package load, package validation, configuration evaluation, explicit command handling, or explicit UI update time",
+        "Masonry paint/layout, pointer, scroll, keypress, text-event handling, and ordinary editor hot paths read already-validated inert state only",
+        "raw Deno ops",
+        "raw `Deno.core.ops`",
+        "raw colors without typed token contracts",
+        "duplicate fixed slot claims",
+        "unsupported typed style variables",
+    ] {
+        assert!(
+            guide.contains(required) || strategy.contains(required) || security.contains(required),
+            "Phase 18.3 docs must preserve hot-path/security/detail phrase: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_docs_mark_layout_override_surfaces_planned_and_state_scope_promoted_later() {
+    let guide = creating_packages_guide();
+    let strategy = shell_layout_strategy();
+    let inventory = api_inventory_text();
+
+    for required in [
+        "`PackageUiStateScope` | `clay.ui.serverRegisterUiStateScope` | Implemented/runtime-backed public API for inert UI state schema/lifecycle declarations",
+        "`PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.",
+        "user-visible panel visibility/default-slot/theme-token override APIs remain planned inventory stubs",
+        "Durable package UI state values, user/package layout overrides, persisted panel visibility, user theme-token remaps",
+    ] {
+        assert!(
+            guide.contains(required) || strategy.contains(required),
+            "Phase 18.3 docs must mark deferred state/override surface: {required}"
+        );
+    }
+
+    for id in [
+        "clay.ui.serverSetLayoutOverride",
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+    ] {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(block.contains("status = \"planned\""));
+        assert!(block.contains("op_clay_runtime_unavailable"));
+        assert!(block.contains("registry_public = false"));
+    }
+
+    let state_scope = api_inventory_entry_block(&inventory, "clay.ui.serverRegisterUiStateScope");
+    assert!(state_scope.contains("status = \"runtime-backed\""));
+    assert!(state_scope.contains("op_clay_ui_register_ui_state_scope"));
+    assert!(state_scope.contains("registry_public = true"));
+}
+
+#[test]
+fn phase18_3_package_ui_configuration_surfaces_are_planned_or_documented() {
+    let configuration_doc = fs::read_to_string(repository_path(
+        "docs/reference/clay-js-api/configuration.md",
+    ))
+    .expect("read configuration overview");
+    let configuration_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/configuration-runtime.md",
+    ))
+    .expect("read configuration runtime wiki");
+    let strategy = shell_layout_strategy();
+    let guide = creating_packages_guide();
+    let inventory = api_inventory_text();
+
+    for required in [
+        "Phase 18.3 promotes package UI declaration APIs",
+        "does not promote user-visible panel visibility, default-slot, component-style, theme-token override, or layout behavior configuration APIs",
+        "not user-visible override APIs",
+        "Configuration evaluation for shell/layout remains startup, package-load, configuration-change, or explicit setting-change work",
+        "Masonry paint/layout, pointer, scroll, keypress, text-event handling, and editor hot paths read already-validated inert state",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must record Phase 18.3 package UI configuration status: {required}"
+        );
+    }
+
+    for required in [
+        "`clay:ui` contribution APIs exist for package declarations",
+        "not user-visible configuration override APIs for default slots, panel visibility, component style overrides, theme-token remapping, or layout behavior",
+        "`clay.ui.serverSetLayoutOverride` and `clay.configuration.setPackageOption` stay non-registry-public inventory rows",
+    ] {
+        assert!(
+            configuration_wiki.contains(required),
+            "configuration wiki must record Phase 18.3 package UI configuration boundary: {required}"
+        );
+    }
+
+    for required in [
+        "Phase 18.3 package UI configuration surfaces are declarations only",
+        "user-visible panel visibility/default-slot/theme-token override APIs remain planned inventory stubs",
+        "not public runtime-backed shell/layout configuration APIs in Phase 18.3",
+        "Configuration and User Override Surfaces",
+    ] {
+        assert!(
+            guide.contains(required) || strategy.contains(required),
+            "package guide/shell strategy must describe planned-vs-documented configuration surface: {required}"
+        );
+    }
+
+    for id in [
+        "clay.ui.serverSetLayoutOverride",
+        "clay.configuration.setPackageOption",
+    ] {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(
+            block.contains("status = \"planned\""),
+            "{id} must remain planned"
+        );
+        assert!(
+            block.contains("registry_public = false"),
+            "{id} must not be public registry-backed before full configuration docs/tests"
+        );
+        assert!(
+            block.contains("key_bindings = []") && block.contains("custom_properties = ["),
+            "{id} must preserve Clay JS API schema metadata even while planned"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_docs_reject_hidden_panel_style_and_layout_config_keys() {
+    let configuration_doc = fs::read_to_string(repository_path(
+        "docs/reference/clay-js-api/configuration.md",
+    ))
+    .expect("read configuration overview");
+    let configuration_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/configuration-runtime.md",
+    ))
+    .expect("read configuration runtime wiki");
+    let strategy = shell_layout_strategy();
+    let guide = creating_packages_guide();
+
+    for source in [
+        configuration_doc.as_str(),
+        configuration_wiki.as_str(),
+        strategy.as_str(),
+        guide.as_str(),
+    ] {
+        let lower_source = source.to_ascii_lowercase();
+        assert!(
+            lower_source.contains("hidden json/toml/ad hoc")
+                || source.contains("Do not add hidden JSON/TOML/ad hoc keys"),
+            "Phase 18.3 docs/wiki must reject hidden panel/style/layout keys"
+        );
+        assert!(
+            source.contains("documented Clay JS APIs")
+                || source.contains("documented `~/.config/clay/init.js` Clay JS APIs"),
+            "Phase 18.3 docs/wiki must route configuration through documented Clay JS APIs"
+        );
+        for denied in [
+            "raw CSS",
+            "native widget",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "renderer callbacks",
+        ] {
+            assert!(
+                source.contains(denied),
+                "Phase 18.3 docs/wiki must deny {denied} authority for package UI configuration"
+            );
+        }
+    }
+
+    for hidden_key in [
+        "preview.position",
+        "layout.preview.defaultSlot",
+        "preview.defaultVisibility",
+        "layout.preview.defaultVisibility",
+        "theme.markdown.heading.1",
+        "raw token override keys",
+        "ad hoc style keys",
+    ] {
+        assert!(
+            configuration_doc.contains(hidden_key)
+                && configuration_wiki.contains(hidden_key)
+                && (strategy.contains(hidden_key) || guide.contains(hidden_key)),
+            "Phase 18.3 docs/wiki must identify hidden/ad hoc key `{hidden_key}` as rejected or planned-only"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_package_guide_documents_input_action_state_and_configuration_apis() {
+    let guide = creating_packages_guide();
+    let configuration_doc = fs::read_to_string(repository_path(
+        "docs/reference/clay-js-api/configuration.md",
+    ))
+    .expect("read configuration overview");
+
+    for required in [
+        "PackageInputContribution",
+        "serverRegisterInputContribution",
+        "component-scoped action routing",
+        "PackageUiStateScope",
+        "serverRegisterUiStateScope",
+        "schema/lifecycle metadata only",
+        "PackageLayoutOverride",
+        "serverSetLayoutOverride",
+        "clay.configuration.setPackageOption",
+        "layout.defaultVisibility",
+        "layout.defaultSlot",
+        "layout.splitRatio",
+        "input.default",
+        "action.default",
+        "themeTokenRemap",
+        "fallback",
+        "package-configuration",
+        "diagnostics",
+        "Migration note for Phase 18.5 Markdown replanning",
+        "loadPackage(\"@clay/markdown\")",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must document Phase 18.4 authoring contract phrase: {required}"
+        );
+    }
+
+    for required in [
+        "Implemented Phase 18.4 configuration APIs",
+        "clay.configuration.setPackageOption",
+        "clay.ui.serverSetLayoutOverride",
+        "runtime-backed",
+        "registered input/action/theme-token references",
+        "Deferred surfaces remain explicit",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 18.4 configuration phrase: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_primitives_docs_mark_state_config_rows_runtime_backed_or_planned() {
+    let strategy = shell_layout_strategy();
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+    let index = primitives_index();
+    let inventory = api_inventory_text();
+
+    for required in [
+        "Phase 18.4 runtime-backed package input/state/configuration progress",
+        "PackageInputContribution",
+        "PackageUiStateScope",
+        "PackageLayoutOverride",
+        "PackageOwnedConfiguration",
+        "serverSetLayoutOverride",
+        "setPackageOption",
+        "Runtime-backed public API; `op_clay_ui_set_layout_override`; registry-public with per-API docs.",
+        "working-area, split-tree, and direct pane-slot mutation",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell-layout strategy must mark Phase 18.4 runtime/planned status: {required}"
+        );
+    }
+
+    for required in [
+        "Phase 18.4 runtime-backed public API",
+        "src/server/ui.rs::PackageUiRegistry::set_layout_override",
+        "src/server/configuration.rs::ConfigurationRuntime::set_package_option",
+        "per-API Markdown docs and generated registry entry",
+        "Exists/Extend",
+    ] {
+        assert!(
+            registry.contains(required),
+            "primitive registry must mark Phase 18.4 rows runtime-backed: {required}"
+        );
+    }
+
+    for required in [
+        "Implemented runtime-backed `runtime/js/ui.ts`, `src/server/ops/ui.rs`, and `src/server/ui.rs::PackageUiRegistry::set_layout_override`",
+        "Implemented runtime-backed `runtime/js/configuration.ts`, `src/server/ops/configuration.rs`, and `src/server/configuration.rs::ConfigurationRuntime::set_package_option`",
+        "remaining direct shell mutation, durable persistence, pane selector, multi-panel ordering, overlay z-order, cross-window layout, and package enable/disable surfaces stay deferred",
+    ] {
+        assert!(
+            backlog.contains(required),
+            "primitive backlog must mark Phase 18.4 implementation/deferred status: {required}"
+        );
+    }
+
+    assert!(
+        index.contains(
+            "Phase 18.4 runtime-backed package input/state/layout-override/configuration primitives"
+        ),
+        "primitive index must summarize Phase 18.4 runtime-backed primitives"
+    );
+
+    for (id, deno_op) in [
+        (
+            "clay.ui.serverRegisterInputContribution",
+            "op_clay_ui_register_input_contribution",
+        ),
+        (
+            "clay.ui.serverRegisterUiStateScope",
+            "op_clay_ui_register_ui_state_scope",
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "op_clay_ui_set_layout_override",
+        ),
+        (
+            "clay.configuration.setPackageOption",
+            "op_clay_configuration_set_package_option",
+        ),
+    ] {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(block.contains("status = \"runtime-backed\""));
+        assert!(block.contains("registry_public = true"));
+        assert!(block.contains(deno_op));
+        assert!(block.contains("custom_properties = ["));
+    }
+
+    for id in [
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+    ] {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(block.contains("status = \"planned\""));
+        assert!(block.contains("registry_public = false"));
+    }
+}
+
+#[test]
+fn phase18_4_docs_preserve_security_and_hot_path_contract() {
+    let guide = creating_packages_guide();
+    let strategy = shell_layout_strategy();
+    let security = package_security();
+    let package_loading = fs::read_to_string(repository_path(
+        "docs/reference/primitives/package-loading.md",
+    ))
+    .expect("read package loading");
+
+    for source in [
+        guide.as_str(),
+        strategy.as_str(),
+        security.as_str(),
+        package_loading.as_str(),
+    ] {
+        for required in [
+            "raw CSS",
+            "client-side JavaScript",
+            "native widget",
+            "raw ops",
+            "renderer callbacks",
+            "hidden",
+            "unregistered actions",
+            "package enable/disable",
+        ] {
+            assert!(
+                source.contains(required),
+                "Phase 18.4 docs must preserve security phrase `{required}`"
+            );
+        }
+        assert!(
+            source.contains("no package JavaScript") || source.contains("No package JavaScript"),
+            "Phase 18.4 docs must preserve no-package-JS hot-path wording"
+        );
+    }
+
+    for required in [
+        "startup, package load, configuration reload, explicit command handling, or explicit UI update time",
+        "Masonry paint/layout/pointer/scroll/key/text-event hot paths",
+        "validation/publication/configuration work",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must document Phase 18.4 timing phrase: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_docs_mark_deferred_persistence_pane_selector_and_package_enable_surfaces() {
+    let guide = creating_packages_guide();
+    let strategy = shell_layout_strategy();
+    let configuration_doc = fs::read_to_string(repository_path(
+        "docs/reference/clay-js-api/configuration.md",
+    ))
+    .expect("read configuration overview");
+
+    for source in [
+        guide.as_str(),
+        strategy.as_str(),
+        configuration_doc.as_str(),
+    ] {
+        for required in [
+            "durable state-value mutation",
+            "pane selector",
+            "multi-panel ordering",
+            "overlay z-order",
+            "cross-window layout",
+            "package enable/disable",
+            "planned/deferred",
+        ] {
+            assert!(
+                source.contains(required),
+                "Phase 18.4 docs must mark deferred surface `{required}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn phase18_2_shell_runtime_docs_mark_implemented_and_planned_surfaces() {
+    let strategy = shell_layout_strategy();
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+
+    for required in [
+        "## Phase 18.2/18.3 Runtime Status",
+        "**Implemented/runtime-internal in Phase 18.2:**",
+        "`src/main.rs` starts a Clay-owned `ClayShellWidget` as the native root widget",
+        "`src/shell/layout.rs` owns internal Rust `WorkingAreaLayout` state",
+        "`PaneSplitTree` supports the default one-leaf tree plus generic horizontal/vertical split nodes",
+        "`PaneSlotLayout` keeps exactly one mandatory `main` slot and optional fixed `left`, `right`, `top`, and `bottom` slots",
+        "**Implemented/runtime-backed public APIs in Phase 18.3:**",
+        "`PanelContribution` / `serverRegisterPanelContribution`",
+        "`ComponentContribution` / `serverRegisterComponentContribution`",
+        "`TransientOverlayContribution` / `serverRegisterTransientOverlayContribution`",
+        "`PackageThemeTokenDeclaration` / `serverRegisterThemeToken`",
+        "**Still planned/package-facing after Phase 18.3:**",
+        "Implemented/runtime-internal Rust shape, not a package-facing JavaScript API",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell layout strategy must mark implemented/planned Phase 18.2 surface: {required}"
+        );
+    }
+
+    for required in [
+        "Phase 18.2 internal runtime in `src/shell/layout.rs` / `src/masonry_shell.rs`",
+        "Phase 18.2 internal runtime in `src/shell/layout.rs`",
+        "Phase 18.3 runtime-backed public API",
+        "generated public registry page exists under `docs/reference/clay-js-api/ui/`",
+    ] {
+        assert!(
+            registry.contains(required),
+            "primitive registry must mark Phase 18.2 runtime/internal status: {required}"
+        );
+    }
+
+    for required in [
+        "## Phase 18.2 Shell Runtime Implementation Status",
+        "`WorkingAreaLayout` is implemented as an internal runtime foundation",
+        "`PaneSplitTree` is implemented internally with default one-leaf state",
+        "`PaneSlotLayout` is implemented internally with a mandatory `main` slot",
+        "runtime-backed public APIs with facade/op/validator coverage, per-API Markdown docs, and generated registry entries",
+    ] {
+        assert!(
+            backlog.contains(required),
+            "primitive backlog must record Phase 18.2 implementation/planned status: {required}"
+        );
+    }
+}
+
+#[test]
+fn creating_packages_docs_cover_phase18_2_shell_runtime_status() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "current implemented public behavior",
+        "Phase 18.2 internal shell runtime behavior",
+        "Phase 18.3 runtime-backed slot UI contribution behavior",
+        "planned package-facing shell/layout/configuration behavior",
+        "Implemented/internal runtime",
+        "Phase 18.2 shell/layout runtime and Phase 18.3 slot-aware package UI",
+        "Phase 18.2 has implemented internally",
+        "Phase 18.3 now adds runtime-backed public APIs",
+        "Still planned for package authors",
+        "Current Phase 18.3 runtime behavior",
+        "Packages cannot create working areas, mutate pane split ratios, directly set pane-slot layouts, change shell configuration, persist UI state, or override user layout/theme choices through `clay:ui` in Phase 18.3",
+        "Internal Rust runtime implemented; public callable layout-default API planned/unavailable",
+        "Implemented/runtime-backed public API with per-API Markdown and generated registry coverage",
+        "not public runtime-backed shell/layout configuration APIs in Phase 18.3",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must cover Phase 18.2 shell runtime status: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_docs_preserve_security_and_hot_path_contract() {
+    let strategy = shell_layout_strategy();
+    let guide = creating_packages_guide();
+
+    for required in [
+        "no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers",
+        "Masonry paint/layout, pointer, scroll, keypress, text-event handling, and ordinary editor hot paths read already-validated inert state only",
+        "raw CSS",
+        "arbitrary client JavaScript",
+        "raw `Deno.core.ops`",
+        "direct Masonry widget handles",
+        "native widget handles",
+        "Vello callbacks",
+        "Parley callbacks",
+        "unregistered action targets",
+        "oversize payloads",
+    ] {
+        assert!(
+            strategy.contains(required),
+            "shell layout strategy must preserve hot-path/security contract: {required}"
+        );
+    }
+
+    for required in [
+        "Typing, Masonry paint, Masonry layout, scroll, pointer, keypress, and text-event paths read already-validated inert state",
+        "do not run package JavaScript, package parsing, raw IPC waits, or package-authored native widget mutation",
+        "raw `Deno.core.ops`",
+        "native widget handles",
+        "raw CSS, raw style strings, raw ops, native widget handles, Masonry widget constructors, client-side JavaScript, and native renderer callbacks",
+        "It cannot grant permissions, bypass slot safety, expose native widgets, accept raw CSS, or run package JavaScript in the client",
+        "Unsupported state scopes, ad hoc package keys, and package/user override bypass attempts are rejected before state affects the shell",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must preserve hot-path/security contract: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_slot_aware_package_ui_wiki_covers_final_implementation() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let slot_ui_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/slot-aware-package-ui.md",
+    ))
+    .expect("read slot-aware package UI wiki");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let facade_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/clay-js-facade-skeleton.md",
+    ))
+    .expect("read Clay JS facade wiki");
+    let registry_wiki =
+        fs::read_to_string(repository_path("docs/wiki/modules/clay-js-doc-registry.md"))
+            .expect("read Clay JS doc registry wiki");
+
+    assert!(
+        wiki_index.contains("modules/slot-aware-package-ui.md"),
+        "docs/wiki/index.md must link the Phase 18.3 slot-aware package UI implementation page"
+    );
+    assert!(
+        primitive_architecture.contains("slot-aware-package-ui.md"),
+        "primitive architecture wiki must link the slot-aware package UI implementation page"
+    );
+
+    for required in [
+        "`runtime/js/ui.ts`",
+        "`src/server/ops/ui.rs`",
+        "`src/server/ui.rs`",
+        "`src/shell/components.rs`",
+        "`src/shell/theme.rs`",
+        "`src/shell/package_ui.rs`",
+        "`src/masonry_sdui.rs`",
+        "serverRegisterPanelContribution",
+        "serverRegisterComponentContribution",
+        "serverRegisterTransientOverlayContribution",
+        "serverRegisterThemeToken",
+        "PackageUiRegistry",
+        "PackageUiRegistrySnapshot::runtime_update",
+        "PackageUiRuntimeState::slot_layout",
+        "PanelContribution",
+        "ComponentContribution",
+        "TransientOverlayContribution",
+        "PackageThemeTokenDeclaration",
+        "table`, `dropdown`, `collapse`, and `modal` fail with planned/deferred diagnostics",
+        "Masonry hot paths read already-validated inert package UI state only",
+        "Package UI declarations grant no filesystem, network, shell, AI mutation, WASM",
+        "raw Deno op, native widget, client-side JavaScript",
+        "Observability helpers are crate-internal and omit document text",
+        "User-visible layout overrides, default-slot overrides, persisted panel visibility",
+        "CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_api_inventory --quiet",
+    ] {
+        assert!(
+            slot_ui_wiki.contains(required),
+            "slot-aware package UI wiki must explain final implementation detail: {required}"
+        );
+    }
+
+    for required in [
+        "`clay:ui` facade",
+        "serverRegisterPanelContribution",
+        "op_clay_ui_*",
+    ] {
+        assert!(
+            facade_wiki.contains(required) && registry_wiki.contains("`clay:ui`"),
+            "Clay JS facade/registry wikis must record Phase 18.3 UI docs/API coverage: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_package_input_state_configuration_wiki_covers_final_implementation() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let implementation_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/package-input-state-configuration.md",
+    ))
+    .expect("read Phase 18.4 implementation wiki");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let slot_ui_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/slot-aware-package-ui.md",
+    ))
+    .expect("read slot-aware package UI wiki");
+    let configuration_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/configuration-runtime.md",
+    ))
+    .expect("read configuration runtime wiki");
+    let package_loading_wiki =
+        fs::read_to_string(repository_path("docs/wiki/modules/package-loading.md"))
+            .expect("read package loading wiki");
+    let command_registry_wiki =
+        fs::read_to_string(repository_path("docs/wiki/modules/command-registry.md"))
+            .expect("read command registry wiki");
+
+    assert!(
+        wiki_index.contains("modules/package-input-state-configuration.md"),
+        "docs/wiki/index.md must link the Phase 18.4 implementation wiki"
+    );
+    assert!(
+        primitive_architecture.contains("package-input-state-configuration.md"),
+        "primitive architecture wiki must link the Phase 18.4 implementation wiki"
+    );
+
+    for required in [
+        "`runtime/js/ui.ts`",
+        "`runtime/js/configuration.ts`",
+        "`src/server/ops/ui.rs`",
+        "`src/server/ops/configuration.rs`",
+        "`src/server/ui.rs`",
+        "`src/server/configuration.rs`",
+        "`src/shell/package_ui.rs`",
+        "`src/masonry_sdui.rs`",
+        "`src/packages/record.rs`",
+        "`src/packages/conflict.rs`",
+        "clay.ui.serverRegisterInputContribution",
+        "clay.ui.serverRegisterUiStateScope",
+        "clay.ui.serverSetLayoutOverride",
+        "clay.configuration.setPackageOption",
+        "PackageInputRouting",
+        "PackageInputContribution",
+        "PackageUiStateScope",
+        "PackageLayoutOverride",
+        "PackageOwnedConfiguration",
+        "component-scoped action routing",
+        "behavior-manifest compatibility",
+        "layout.defaultVisibility",
+        "layout.defaultSlot",
+        "layout.splitRatio",
+        "input.default",
+        "action.default",
+        "themeTokenRemap",
+        "Durable workspace/document/component state-value persistence",
+        "pane selector APIs",
+        "multi-panel ordering",
+        "overlay z-order",
+        "package enable/disable authority",
+        "Masonry hot paths read already-validated inert package UI/input/configuration state only",
+        "do not run package JavaScript/config evaluation",
+        "do not mutate Masonry children during layout",
+        "Hidden configuration keys are rejected",
+        "raw Masonry/native widget construction, raw CSS, raw Deno ops, renderer callbacks, and client-side JavaScript",
+        "Observability remains crate-internal and privacy-preserving",
+        "CARGO_TARGET_DIR=target/pi-verify cargo test --test performance_budgets --quiet",
+        "tests/manual_smoke_docs.rs",
+    ] {
+        assert!(
+            implementation_wiki.contains(required),
+            "Phase 18.4 implementation wiki must explain final implementation detail: {required}"
+        );
+    }
+
+    for (page_name, page) in [
+        ("slot-aware package UI", slot_ui_wiki.as_str()),
+        ("configuration runtime", configuration_wiki.as_str()),
+        ("package loading", package_loading_wiki.as_str()),
+        ("command registry", command_registry_wiki.as_str()),
+    ] {
+        assert!(
+            page.contains("package-input-state-configuration.md"),
+            "{page_name} wiki must link Phase 18.4 input/state/config implementation coverage"
+        );
+    }
+}
+
+#[test]
+fn phase18_2_shell_runtime_wiki_covers_final_implementation() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let shell_wiki = fs::read_to_string(repository_path("docs/wiki/modules/masonry-shell.md"))
+        .expect("read masonry shell wiki");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let editor_wiki = fs::read_to_string(repository_path("docs/wiki/modules/masonry-editor.md"))
+        .expect("read masonry editor wiki");
+    let sdui_wiki = fs::read_to_string(repository_path("docs/wiki/modules/server-driven-ui.md"))
+        .expect("read server-driven UI wiki");
+    let configuration_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/configuration-runtime.md",
+    ))
+    .expect("read configuration runtime wiki");
+
+    assert!(
+        wiki_index.contains("modules/masonry-shell.md"),
+        "docs/wiki/index.md must link the Phase 18.2 Masonry shell runtime page"
+    );
+    assert!(
+        primitive_architecture.contains("masonry-shell.md"),
+        "primitive architecture wiki must link the Masonry shell runtime implementation page"
+    );
+
+    for required in [
+        "`src/masonry_shell.rs`",
+        "`src/shell/layout.rs`",
+        "`src/main.rs`",
+        "`WorkingAreaLayout`",
+        "`PaneSplitTree`",
+        "`PaneSlotLayout`",
+        "WorkingAreaLayoutUpdate",
+        "ShellObservableSnapshot",
+        "Public API, Configuration, and Package Authoring Boundary",
+        "no package JavaScript",
+        "does not mutate the Masonry child tree",
+        "planned/unavailable inventory rows",
+        "There are no hidden JSON/TOML/ad hoc split, slot, panel, preview-position, or shell style keys in Phase 18.2",
+        "document text",
+        "native handles",
+        "Command: `CARGO_TARGET_DIR=target/pi-verify cargo test --lib shell --quiet`",
+        "Command: `CARGO_TARGET_DIR=target/pi-verify cargo test --lib masonry_shell --quiet`",
+    ] {
+        assert!(
+            shell_wiki.contains(required),
+            "Masonry shell wiki must explain final implementation detail: {required}"
+        );
+    }
+
+    for required in [
+        "`EditorWidget` is no longer the top-level application layout",
+        "Act as the shell-owned editor component under `ClayShellWidget`",
+        "shell layout validation",
+        "Masonry Shell Runtime",
+    ] {
+        assert!(
+            editor_wiki.contains(required),
+            "Masonry editor wiki must record shell-owned editor component boundary: {required}"
+        );
+    }
+
+    for required in [
+        "internal `PaneSlotLayout` bridge in `src/shell/layout.rs`",
+        "temporary left side panel",
+        "Phase 18.3 package-facing panel contributions",
+    ] {
+        assert!(
+            sdui_wiki.contains(required),
+            "SDUI wiki must record shell slot bridge behavior: {required}"
+        );
+    }
+
+    assert!(
+        configuration_wiki.contains("`clay:ui` contribution APIs exist for package declarations")
+            && configuration_wiki.contains("no `clay:ui` configuration override API")
+            && configuration_wiki.contains("hidden split/slot/panel/style key system"),
+        "configuration wiki must record that Phase 18.3 package UI declarations are not user-visible configuration overrides"
+    );
+}
+
+#[test]
+fn shell_layout_primitives_are_recorded_in_registry_and_backlog() {
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+
+    let phase18_2 = ["WorkingAreaLayout", "PaneSplitTree", "PaneSlotLayout"];
+    let phase18_3 = [
+        "PanelContribution",
+        "ComponentContribution",
+        "TransientOverlayContribution",
+        "PackageThemeTokenDeclaration",
+    ];
+    let phase18_4 = ["PackageUiStateScope", "PackageLayoutOverride"];
+
+    for primitive in phase18_2.into_iter().chain(phase18_3).chain(phase18_4) {
+        assert!(
+            registry.contains(primitive),
+            "primitive registry must contain Phase 18.1 shell/layout primitive {primitive}"
+        );
+        assert!(
+            backlog.contains(primitive),
+            "primitive backlog must contain Phase 18.1 shell/layout primitive {primitive}"
+        );
+    }
+
+    for (phase, primitives) in [
+        ("Phase-18.2-shell-runtime", phase18_2.as_slice()),
+        ("Phase-18.3-slot-ui", phase18_3.as_slice()),
+        ("Phase-18.4-state-config", phase18_4.as_slice()),
+    ] {
+        assert!(
+            backlog.contains(phase),
+            "backlog must define priority tier {phase}"
+        );
+        for primitive in primitives {
+            let primitive_pos = backlog
+                .find(primitive)
+                .unwrap_or_else(|| panic!("missing backlog primitive {primitive}"));
+            let phase_pos = backlog[..primitive_pos]
+                .rfind(phase)
+                .unwrap_or_else(|| panic!("{primitive} must be listed under {phase}"));
+            assert!(
+                phase_pos < primitive_pos,
+                "{primitive} must appear after its phase heading {phase}"
+            );
+        }
+    }
+
+    for trace in [
+        "shell-layout-strategy.md",
+        "phase18.1-shell-layout-primitive-review.md",
+        "api-inventory.toml",
+        "Phase 18.1 Shell/Layout Handoff Checklist",
+    ] {
+        assert!(
+            backlog.contains(trace),
+            "shell/layout backlog must cite or checklist {trace}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_primitives_record_hot_path_policy_and_security() {
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+    let security = package_security();
+
+    for required in [
+        "layout-state",
+        "SDUI/component-state",
+        "package-ui/state-data",
+        "configuration-data",
+        "no-hot-path",
+        "Payload:",
+        "package provenance",
+        "conflict/precedence metadata",
+        "deterministic rejection",
+        "raw ops",
+        "native widgets",
+        "raw CSS",
+        "client JS",
+        "direct Masonry mutation",
+        "duplicate slot/component/action IDs",
+        "unknown theme tokens",
+        "unsupported state scopes",
+        "oversize layout/component/state payloads",
+    ] {
+        assert!(
+            registry.contains(required),
+            "shell/layout registry rows must record policy/security text: {required}"
+        );
+    }
+
+    for required in [
+        "no package JavaScript in Masonry paint/layout/input handlers",
+        "raw `Deno.core.ops`",
+        "direct Masonry/native widgets",
+        "raw CSS",
+        "client-side JavaScript",
+        "Vello/Parley callbacks",
+        "unknown tokens/scopes",
+        "duplicate IDs/slots/actions",
+        "oversize payloads",
+    ] {
+        assert!(
+            backlog.contains(required),
+            "shell/layout backlog must record hot-path/security text: {required}"
+        );
+    }
+
+    for required in [
+        "WorkingAreaLayout` / `PaneSplitTree` / `PaneSlotLayout",
+        "PanelContribution` / `ComponentContribution` / `TransientOverlayContribution",
+        "PackageThemeTokenDeclaration",
+        "PackageUiStateScope",
+        "PackageLayoutOverride",
+        "Duplicate shell slot claim",
+        "Duplicate component or overlay ID",
+        "Unknown style/theme token",
+        "Unsupported UI state scope",
+        "direct Masonry widget constructors",
+        "raw CSS, raw style strings, or HTML/script injection",
+    ] {
+        assert!(
+            security.contains(required),
+            "package security doc must record shell/layout validation text: {required}"
+        );
+    }
+}
+
+#[test]
+fn shell_layout_planned_api_inventory_entries_are_traceable() {
+    let inventory = api_inventory_text();
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+
+    let planned = [
+        (
+            "clay.ui.serverRegisterWorkingAreaLayout",
+            "WorkingAreaLayout",
+            "serverRegisterWorkingAreaLayout",
+        ),
+        (
+            "clay.ui.serverRegisterPaneSplitTree",
+            "PaneSplitTree",
+            "serverRegisterPaneSplitTree",
+        ),
+        (
+            "clay.ui.serverSetPaneSlotLayout",
+            "PaneSlotLayout",
+            "serverSetPaneSlotLayout",
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "PackageLayoutOverride",
+            "serverSetLayoutOverride",
+        ),
+    ];
+
+    let runtime_backed = [
+        (
+            "clay.ui.serverRegisterPanelContribution",
+            "PanelContribution",
+            "serverRegisterPanelContribution",
+            "op_clay_ui_register_panel_contribution",
+        ),
+        (
+            "clay.ui.serverRegisterComponentContribution",
+            "ComponentContribution",
+            "serverRegisterComponentContribution",
+            "op_clay_ui_register_component_contribution",
+        ),
+        (
+            "clay.ui.serverRegisterTransientOverlayContribution",
+            "TransientOverlayContribution",
+            "serverRegisterTransientOverlayContribution",
+            "op_clay_ui_register_transient_overlay_contribution",
+        ),
+        (
+            "clay.ui.serverRegisterInputContribution",
+            "PackageInputContribution",
+            "serverRegisterInputContribution",
+            "op_clay_ui_register_input_contribution",
+        ),
+        (
+            "clay.ui.serverRegisterUiStateScope",
+            "PackageUiStateScope",
+            "serverRegisterUiStateScope",
+            "op_clay_ui_register_ui_state_scope",
+        ),
+        (
+            "clay.ui.serverRegisterThemeToken",
+            "PackageThemeTokenDeclaration",
+            "serverRegisterThemeToken",
+            "op_clay_ui_register_theme_token",
+        ),
+    ];
+
+    for (id, primitive, js_export) in planned {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(
+            registry.contains(primitive),
+            "{id} must trace to {primitive} in registry.md"
+        );
+        assert!(backlog.contains(id), "{id} must trace to primitive backlog");
+        assert!(
+            backlog.contains(primitive),
+            "{id} must trace to backlog primitive {primitive}"
+        );
+
+        for required in [
+            "visibility = \"public\"",
+            "status = \"planned\"",
+            "js_module = \"clay:ui\"",
+            "runtime_path = ",
+            "planned",
+            "op_clay_runtime_unavailable",
+            "documentation_path = \"docs/reference/primitives/shell-layout-strategy.md\"",
+            "key_bindings = []",
+            "custom_properties = [",
+            "security_notes = ",
+            "current_rust_owner = ",
+            "registry_public = false",
+            "does not grant filesystem",
+            "network",
+            "shell",
+            "AI mutation",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "direct Masonry widgets",
+            "native widget handles",
+            "raw CSS",
+        ] {
+            assert!(
+                block.contains(required),
+                "{id} planned stub is missing {required}"
+            );
+        }
+        assert!(
+            block.contains(&format!("js_export = \"{js_export}\"")),
+            "{id} must keep the planned JS export {js_export}"
+        );
+    }
+
+    for (id, primitive, js_export, deno_op) in runtime_backed {
+        let block = api_inventory_entry_block(&inventory, id);
+        assert!(registry.contains(primitive));
+        assert!(backlog.contains(id));
+        assert!(backlog.contains(primitive));
+        for required in [
+            "visibility = \"public\"",
+            "status = \"runtime-backed\"",
+            "js_module = \"clay:ui\"",
+            "runtime_path = \"server-first-op-wrapper-runtime\"",
+            "src/server/ui.rs::PackageUiRegistry",
+            "documentation_path = \"docs/reference/clay-js-api/ui/",
+            "key_bindings = []",
+            "custom_properties = [",
+            "security_notes = ",
+            "Runtime-backed Clay JS API",
+            "registry_public = true",
+            "does not grant filesystem",
+            "network",
+            "shell",
+            "AI mutation",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "direct Masonry widgets",
+            "native widget handles",
+            "raw CSS",
+        ] {
+            assert!(
+                block.contains(required),
+                "{id} runtime-backed entry is missing {required}"
+            );
+        }
+        assert!(block.contains(&format!("js_export = \"{js_export}\"")));
+        assert!(block.contains(&format!("deno_op = \"{deno_op}\"")));
+    }
+    assert!(
+        inventory.contains("docs/reference/clay-js-api/ui/"),
+        "Phase 18.3 public clay:ui API docs are linked from runtime-backed inventory entries"
+    );
 }
 
 #[test]

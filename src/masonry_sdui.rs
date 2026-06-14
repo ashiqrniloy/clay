@@ -12,20 +12,21 @@ use masonry::vello::Scene;
 
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
-    DocumentId, SduiActionIntent, SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId,
-    SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
+    DocumentId, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiNode,
+    SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
+};
+use crate::shell::{
+    FixedSlotId, FixedSlotState, PackageUiComponentTree, PackageUiOverlayObservation,
+    PackageUiPanelObservation, PackageUiRuntimeError, PackageUiRuntimeState,
+    PackageUiRuntimeUpdate, PaneSlotLayout, layout::PaneSlotId, theme::SduiThemeStyle,
+};
+
+#[cfg(test)]
+use crate::shell::{
+    FixedPackagePanel, PackageOverlayAnchor, PackagePanelVisibility, TransientPackageOverlay,
 };
 
 const SIDEBAR_WIDTH: f64 = 240.0;
-const PANEL_PADDING: f64 = 14.0;
-const ROW_HEIGHT: f64 = 26.0;
-const TITLE_TEXT_SIZE: f32 = 14.0;
-const BODY_TEXT_SIZE: f32 = 12.0;
-const PANEL_BACKGROUND: Color = Color::from_rgb8(0x21, 0x20, 0x2b);
-const BUTTON_BACKGROUND: Color = Color::from_rgb8(0x39, 0x35, 0x4a);
-const LIST_BACKGROUND: Color = Color::from_rgb8(0x29, 0x28, 0x35);
-const TEXT_COLOR: Color = Color::from_rgb8(0xee, 0xea, 0xff);
-const MUTED_TEXT_COLOR: Color = Color::from_rgb8(0xb9, 0xb2, 0xcf);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SduiObservableListItem {
@@ -52,6 +53,8 @@ pub(crate) struct SduiObservableSnapshot {
     pub editor_bindings: Vec<SduiEditorBinding>,
     pub has_sidebar: bool,
     pub editor_region_non_empty: bool,
+    pub package_fixed_panels: Vec<PackageUiPanelObservation>,
+    pub package_transient_overlays: Vec<PackageUiOverlayObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +64,7 @@ pub struct SduiNativeState {
     nodes: BTreeMap<SduiNodeId, SduiNode>,
     editor_binding: Option<SduiEditorBinding>,
     actions: Vec<SduiVisibleAction>,
+    package_ui: PackageUiRuntimeState,
 }
 
 impl SduiNativeState {
@@ -71,6 +75,7 @@ impl SduiNativeState {
             nodes: BTreeMap::new(),
             editor_binding: None,
             actions: Vec::new(),
+            package_ui: PackageUiRuntimeState::new(),
         }
     }
 
@@ -118,6 +123,19 @@ impl SduiNativeState {
         self.ui_version
     }
 
+    pub(crate) fn apply_package_ui_update(
+        &mut self,
+        update: PackageUiRuntimeUpdate,
+    ) -> Result<(), PackageUiRuntimeError> {
+        self.package_ui.apply_update(update)?;
+        self.actions.clear();
+        Ok(())
+    }
+
+    pub(crate) fn package_ui_version(&self) -> u64 {
+        self.package_ui.version()
+    }
+
     pub fn editor_binding(&self) -> Option<&SduiEditorBinding> {
         self.editor_binding.as_ref()
     }
@@ -156,6 +174,10 @@ impl SduiNativeState {
             editor_bindings: Vec::new(),
             has_sidebar: false,
             editor_region_non_empty: false,
+            package_fixed_panels: self
+                .package_ui
+                .fixed_panel_observations(widget_size.to_rect()),
+            package_transient_overlays: self.package_overlay_observations(widget_size),
         };
 
         if let Some(root_id) = self.root_id {
@@ -169,6 +191,25 @@ impl SduiNativeState {
         snapshot
     }
 
+    fn package_overlay_observations(&self, widget_size: Size) -> Vec<PackageUiOverlayObservation> {
+        let slot_geometry =
+            combined_slot_layout(widget_size, self).compute_geometry(widget_size.to_rect());
+        self.package_ui
+            .overlays()
+            .map(|overlay| PackageUiOverlayObservation {
+                id: overlay.id.clone(),
+                anchor: overlay.anchor,
+                rect: overlay
+                    .anchor
+                    .rect(widget_size.to_rect(), slot_geometry.main_rect),
+                component_id: overlay.component.id.clone(),
+                component_kind: overlay.component.kind.clone(),
+                focus_policy: overlay.focus_policy.clone(),
+                dismissal_policy: overlay.dismissal_policy.clone(),
+            })
+            .collect()
+    }
+
     pub(crate) fn accessibility_nodes(&self) -> Vec<SduiAccessibleNode> {
         let mut nodes = Vec::new();
         if let Some(root_id) = self.root_id {
@@ -178,22 +219,60 @@ impl SduiNativeState {
         nodes
     }
 
-    pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+    #[cfg(test)]
+    fn rebuild_action_regions_for_test(&mut self, size: Size) {
         self.actions.clear();
+        let package_panels: Vec<_> = self
+            .package_ui
+            .visible_fixed_panels(size.to_rect())
+            .into_iter()
+            .map(|(rect, panel)| (rect, panel.clone()))
+            .collect();
+        for (rect, panel) in package_panels {
+            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            self.collect_package_action_regions(
+                &panel.component,
+                0,
+                &mut cursor_y,
+                rect.width(),
+                rect.x0,
+            );
+        }
         let Some(root_id) = self.root_id else {
             return;
         };
-        let size = ctx.size();
-        let sidebar = Rect::new(0.0, 0.0, SIDEBAR_WIDTH.min(size.width), size.height);
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            PANEL_BACKGROUND,
-            None,
-            &sidebar,
-        );
-        let mut cursor_y = PANEL_PADDING;
-        self.paint_node(ctx, scene, root_id, 0, &mut cursor_y, sidebar.width());
+        let Some(sidebar) = sdui_panel_left_slot_rect(size, self) else {
+            return;
+        };
+        let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding;
+        self.collect_action_regions(root_id, 0, &mut cursor_y, sidebar.width(), sidebar.x0);
+    }
+
+    pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        self.actions.clear();
+        self.paint_package_fixed_panels(ctx, scene);
+        if let Some(root_id) = self.root_id {
+            if let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self) {
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    sdui_theme_style().panel_background,
+                    None,
+                    &sidebar,
+                );
+                let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding;
+                self.paint_node(
+                    ctx,
+                    scene,
+                    root_id,
+                    0,
+                    &mut cursor_y,
+                    sidebar.width(),
+                    sidebar.x0,
+                );
+            }
+        }
+        self.paint_package_overlays(ctx, scene);
     }
 
     fn rebuild_derived_state(&mut self) {
@@ -365,6 +444,131 @@ impl SduiNativeState {
         }
     }
 
+    #[cfg(test)]
+    fn collect_action_regions(
+        &mut self,
+        node_id: SduiNodeId,
+        depth: usize,
+        cursor_y: &mut f64,
+        width: f64,
+        origin_x: f64,
+    ) {
+        let Some(node) = self.nodes.get(&node_id).cloned() else {
+            return;
+        };
+        match node.kind {
+            SduiNodeKind::Panel { children, .. } => {
+                *cursor_y += sdui_theme_style().row_height;
+                for child_id in children {
+                    self.collect_action_regions(child_id, depth + 1, cursor_y, width, origin_x);
+                }
+            }
+            SduiNodeKind::Label { .. } | SduiNodeKind::EditorView { .. } => {
+                *cursor_y += sdui_theme_style().row_height;
+            }
+            SduiNodeKind::Button { action, .. } => {
+                self.actions.push(SduiVisibleAction {
+                    rect: row_rect(depth, *cursor_y, width, origin_x),
+                    intent: action,
+                });
+                *cursor_y += sdui_theme_style().row_height + 6.0;
+            }
+            SduiNodeKind::List { items } => {
+                for item in items {
+                    if let Some(action) = item.action {
+                        self.actions.push(SduiVisibleAction {
+                            rect: row_rect(depth, *cursor_y, width, origin_x),
+                            intent: action,
+                        });
+                    }
+                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                }
+            }
+            SduiNodeKind::Flex {
+                direction,
+                children,
+            } => match direction {
+                SduiFlexDirection::Row => {
+                    for child_id in children {
+                        if !matches!(
+                            self.nodes.get(&child_id).map(|node| &node.kind),
+                            Some(SduiNodeKind::EditorView { .. })
+                        ) {
+                            self.collect_action_regions(child_id, depth, cursor_y, width, origin_x);
+                        }
+                    }
+                }
+                SduiFlexDirection::Column => {
+                    for child_id in children {
+                        self.collect_action_regions(child_id, depth, cursor_y, width, origin_x);
+                    }
+                }
+            },
+            SduiNodeKind::Stack { children } => {
+                for child_id in children {
+                    self.collect_action_regions(child_id, depth, cursor_y, width, origin_x);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn collect_package_action_regions(
+        &mut self,
+        component: &PackageUiComponentTree,
+        depth: usize,
+        cursor_y: &mut f64,
+        width: f64,
+        origin_x: f64,
+    ) {
+        match component.kind.as_str() {
+            "panel" => {
+                *cursor_y += sdui_theme_style().row_height;
+                for child in &component.children {
+                    self.collect_package_action_regions(
+                        child,
+                        depth + 1,
+                        cursor_y,
+                        width,
+                        origin_x,
+                    );
+                }
+            }
+            "button" => {
+                if let Some(command_id) = &component.action_command_id {
+                    self.actions.push(SduiVisibleAction {
+                        rect: row_rect(depth, *cursor_y, width, origin_x),
+                        intent: package_action_intent(command_id, &component.id),
+                    });
+                }
+                *cursor_y += sdui_theme_style().row_height + 6.0;
+            }
+            "list" => {
+                for item in &component.items {
+                    if let Some(command_id) = &item.action_command_id {
+                        self.actions.push(SduiVisibleAction {
+                            rect: row_rect(depth, *cursor_y, width, origin_x),
+                            intent: package_action_intent(
+                                command_id,
+                                &format!("{}.{}", component.id, item.id),
+                            ),
+                        });
+                    }
+                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                }
+            }
+            "label" | "statusItem" | "editorView" => {
+                *cursor_y += sdui_theme_style().row_height;
+            }
+            "flex" | "stack" | "overlay" | "scroll" | "portal" => {
+                for child in &component.children {
+                    self.collect_package_action_regions(child, depth, cursor_y, width, origin_x);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn build_accessibility_subtree(
         &self,
         node_id: SduiNodeId,
@@ -420,6 +624,7 @@ impl SduiNativeState {
         depth: usize,
         cursor_y: &mut f64,
         width: f64,
+        origin_x: f64,
     ) {
         let Some(node) = self.nodes.get(&node_id).cloned() else {
             return;
@@ -432,12 +637,13 @@ impl SduiNativeState {
                     &title,
                     depth,
                     *cursor_y,
-                    TITLE_TEXT_SIZE,
-                    TEXT_COLOR,
+                    sdui_theme_style().title_text_size,
+                    sdui_theme_style().text_color,
+                    origin_x,
                 );
-                *cursor_y += ROW_HEIGHT;
+                *cursor_y += sdui_theme_style().row_height;
                 for child_id in children {
-                    self.paint_node(ctx, scene, child_id, depth + 1, cursor_y, width);
+                    self.paint_node(ctx, scene, child_id, depth + 1, cursor_y, width, origin_x);
                 }
             }
             SduiNodeKind::Label { text } => {
@@ -447,17 +653,18 @@ impl SduiNativeState {
                     &text,
                     depth,
                     *cursor_y,
-                    BODY_TEXT_SIZE,
-                    MUTED_TEXT_COLOR,
+                    sdui_theme_style().body_text_size,
+                    sdui_theme_style().muted_text_color,
+                    origin_x,
                 );
-                *cursor_y += ROW_HEIGHT;
+                *cursor_y += sdui_theme_style().row_height;
             }
             SduiNodeKind::Button { label, action } => {
-                let rect = row_rect(depth, *cursor_y, width);
+                let rect = row_rect(depth, *cursor_y, width, origin_x);
                 scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
-                    BUTTON_BACKGROUND,
+                    sdui_theme_style().button_background,
                     None,
                     &rect,
                 );
@@ -471,18 +678,19 @@ impl SduiNativeState {
                     &label,
                     depth,
                     *cursor_y + 4.0,
-                    BODY_TEXT_SIZE,
-                    TEXT_COLOR,
+                    sdui_theme_style().body_text_size,
+                    sdui_theme_style().text_color,
+                    origin_x,
                 );
-                *cursor_y += ROW_HEIGHT + 6.0;
+                *cursor_y += sdui_theme_style().row_height + 6.0;
             }
             SduiNodeKind::List { items } => {
                 for item in items {
-                    let rect = row_rect(depth, *cursor_y, width);
+                    let rect = row_rect(depth, *cursor_y, width, origin_x);
                     scene.fill(
                         Fill::NonZero,
                         Affine::IDENTITY,
-                        LIST_BACKGROUND,
+                        sdui_theme_style().list_background,
                         None,
                         &rect,
                     );
@@ -498,8 +706,9 @@ impl SduiNativeState {
                         &item.label,
                         depth,
                         *cursor_y + 2.0,
-                        BODY_TEXT_SIZE,
-                        TEXT_COLOR,
+                        sdui_theme_style().body_text_size,
+                        sdui_theme_style().text_color,
+                        origin_x,
                     );
                     if let Some(detail) = item.detail {
                         self.paint_text(
@@ -509,10 +718,11 @@ impl SduiNativeState {
                             depth,
                             *cursor_y + 15.0,
                             10.0,
-                            MUTED_TEXT_COLOR,
+                            sdui_theme_style().muted_text_color,
+                            origin_x,
                         );
                     }
-                    *cursor_y += ROW_HEIGHT + 10.0;
+                    *cursor_y += sdui_theme_style().row_height + 10.0;
                 }
             }
             SduiNodeKind::EditorView { binding } => {
@@ -522,10 +732,11 @@ impl SduiNativeState {
                     &format!("Editor view · doc {}", binding.document_id),
                     depth,
                     *cursor_y,
-                    BODY_TEXT_SIZE,
-                    MUTED_TEXT_COLOR,
+                    sdui_theme_style().body_text_size,
+                    sdui_theme_style().muted_text_color,
+                    origin_x,
                 );
-                *cursor_y += ROW_HEIGHT;
+                *cursor_y += sdui_theme_style().row_height;
             }
             SduiNodeKind::Flex {
                 direction,
@@ -537,21 +748,227 @@ impl SduiNativeState {
                             self.nodes.get(&child_id).map(|node| &node.kind),
                             Some(SduiNodeKind::EditorView { .. })
                         ) {
-                            self.paint_node(ctx, scene, child_id, depth, cursor_y, width);
+                            self.paint_node(ctx, scene, child_id, depth, cursor_y, width, origin_x);
                         }
                     }
                 }
                 SduiFlexDirection::Column => {
                     for child_id in children {
-                        self.paint_node(ctx, scene, child_id, depth, cursor_y, width);
+                        self.paint_node(ctx, scene, child_id, depth, cursor_y, width, origin_x);
                     }
                 }
             },
             SduiNodeKind::Stack { children } => {
                 for child_id in children {
-                    self.paint_node(ctx, scene, child_id, depth, cursor_y, width);
+                    self.paint_node(ctx, scene, child_id, depth, cursor_y, width, origin_x);
                 }
             }
+        }
+    }
+
+    fn paint_package_fixed_panels(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        let size = ctx.size();
+        let fixed_panels: Vec<_> = self
+            .package_ui
+            .visible_fixed_panels(size.to_rect())
+            .into_iter()
+            .map(|(rect, panel)| (rect, panel.clone()))
+            .collect();
+        for (rect, panel) in fixed_panels {
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                sdui_theme_style().panel_background,
+                None,
+                &rect,
+            );
+            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            self.paint_package_component(
+                ctx,
+                scene,
+                &panel.component,
+                0,
+                &mut cursor_y,
+                rect.width(),
+                rect.x0,
+            );
+        }
+    }
+
+    fn paint_package_overlays(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        let size = ctx.size();
+        let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
+        let overlays: Vec<_> = self.package_ui.overlays().cloned().collect();
+        for overlay in overlays {
+            let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                sdui_theme_style().panel_background,
+                None,
+                &rect,
+            );
+            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            self.paint_package_component(
+                ctx,
+                scene,
+                &overlay.component,
+                0,
+                &mut cursor_y,
+                rect.width(),
+                rect.x0,
+            );
+        }
+    }
+
+    fn paint_package_component(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        scene: &mut Scene,
+        component: &PackageUiComponentTree,
+        depth: usize,
+        cursor_y: &mut f64,
+        width: f64,
+        origin_x: f64,
+    ) {
+        match component.kind.as_str() {
+            "panel" => {
+                if let Some(title) = &component.title {
+                    self.paint_text(
+                        ctx,
+                        scene,
+                        title,
+                        depth,
+                        *cursor_y,
+                        sdui_theme_style().title_text_size,
+                        sdui_theme_style().text_color,
+                        origin_x,
+                    );
+                    *cursor_y += sdui_theme_style().row_height;
+                }
+                for child in &component.children {
+                    self.paint_package_component(
+                        ctx,
+                        scene,
+                        child,
+                        depth + 1,
+                        cursor_y,
+                        width,
+                        origin_x,
+                    );
+                }
+            }
+            "label" | "statusItem" => {
+                let text = component
+                    .text
+                    .as_deref()
+                    .or(component.label.as_deref())
+                    .unwrap_or(&component.id);
+                self.paint_text(
+                    ctx,
+                    scene,
+                    text,
+                    depth,
+                    *cursor_y,
+                    sdui_theme_style().body_text_size,
+                    sdui_theme_style().muted_text_color,
+                    origin_x,
+                );
+                *cursor_y += sdui_theme_style().row_height;
+            }
+            "button" => {
+                let rect = row_rect(depth, *cursor_y, width, origin_x);
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    sdui_theme_style().button_background,
+                    None,
+                    &rect,
+                );
+                if let Some(command_id) = &component.action_command_id {
+                    self.actions.push(SduiVisibleAction {
+                        rect,
+                        intent: package_action_intent(command_id, &component.id),
+                    });
+                }
+                let label = component.label.as_deref().unwrap_or(&component.id);
+                self.paint_text(
+                    ctx,
+                    scene,
+                    label,
+                    depth,
+                    *cursor_y + 4.0,
+                    sdui_theme_style().body_text_size,
+                    sdui_theme_style().text_color,
+                    origin_x,
+                );
+                *cursor_y += sdui_theme_style().row_height + 6.0;
+            }
+            "list" => {
+                for item in &component.items {
+                    let rect = row_rect(depth, *cursor_y, width, origin_x);
+                    scene.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        sdui_theme_style().list_background,
+                        None,
+                        &rect,
+                    );
+                    if let Some(command_id) = &item.action_command_id {
+                        self.actions.push(SduiVisibleAction {
+                            rect,
+                            intent: package_action_intent(
+                                command_id,
+                                &format!("{}.{}", component.id, item.id),
+                            ),
+                        });
+                    }
+                    self.paint_text(
+                        ctx,
+                        scene,
+                        &item.label,
+                        depth,
+                        *cursor_y + 2.0,
+                        sdui_theme_style().body_text_size,
+                        sdui_theme_style().text_color,
+                        origin_x,
+                    );
+                    if let Some(detail) = &item.detail {
+                        self.paint_text(
+                            ctx,
+                            scene,
+                            detail,
+                            depth,
+                            *cursor_y + 15.0,
+                            10.0,
+                            sdui_theme_style().muted_text_color,
+                            origin_x,
+                        );
+                    }
+                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                }
+            }
+            "editorView" => {
+                self.paint_text(
+                    ctx,
+                    scene,
+                    &format!("Editor view · {}", component.id),
+                    depth,
+                    *cursor_y,
+                    sdui_theme_style().body_text_size,
+                    sdui_theme_style().muted_text_color,
+                    origin_x,
+                );
+                *cursor_y += sdui_theme_style().row_height;
+            }
+            "flex" | "stack" | "overlay" | "scroll" | "portal" => {
+                for child in &component.children {
+                    self.paint_package_component(
+                        ctx, scene, child, depth, cursor_y, width, origin_x,
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
@@ -564,8 +981,11 @@ impl SduiNativeState {
         y: f64,
         size: f32,
         color: Color,
+        origin_x: f64,
     ) {
-        let max_width = (SIDEBAR_WIDTH - PANEL_PADDING * 2.0 - depth as f64 * 10.0).max(1.0) as f32;
+        let max_width =
+            (SIDEBAR_WIDTH - sdui_theme_style().panel_padding * 2.0 - depth as f64 * 10.0).max(1.0)
+                as f32;
         let (font_context, layout_context) = ctx.text_contexts();
         let mut builder = layout_context.ranged_builder(font_context, text, 1.0, true);
         builder.push_default(StyleProperty::FontSize(size));
@@ -575,7 +995,10 @@ impl SduiNativeState {
         layout.break_all_lines(Some(max_width));
         render_text(
             scene,
-            Affine::translate((PANEL_PADDING + depth as f64 * 10.0, y)),
+            Affine::translate((
+                origin_x + sdui_theme_style().panel_padding + depth as f64 * 10.0,
+                y,
+            )),
             &layout,
             &[color.into()],
             true,
@@ -646,11 +1069,9 @@ struct SduiVisibleAction {
 }
 
 pub fn editor_region(size: Size, sdui: &SduiNativeState) -> Rect {
-    if sdui.editor_binding().is_some() && size.width > SIDEBAR_WIDTH + 100.0 {
-        Rect::new(SIDEBAR_WIDTH, 0.0, size.width, size.height)
-    } else {
-        size.to_rect()
-    }
+    sdui_slot_layout(size, sdui)
+        .compute_geometry(size.to_rect())
+        .main_rect
 }
 
 pub fn editor_region_for_document(
@@ -664,9 +1085,80 @@ pub fn editor_region_for_document(
     }
 }
 
-fn row_rect(depth: usize, y: f64, width: f64) -> Rect {
-    let x0 = PANEL_PADDING + depth as f64 * 10.0;
-    Rect::new(x0, y, (width - PANEL_PADDING).max(x0), y + ROW_HEIGHT)
+fn sdui_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
+    let mut layout = sdui.package_ui.slot_layout();
+    if sdui.editor_binding().is_some()
+        && size.width > SIDEBAR_WIDTH + 100.0
+        && !layout.contains_slot(PaneSlotId::Left)
+    {
+        layout = layout.with_fixed_slot(fixed_sdui_left_slot());
+    }
+    layout
+}
+
+fn sdui_panel_slot_layout(sdui: &SduiNativeState) -> PaneSlotLayout {
+    let mut layout = sdui.package_ui.slot_layout();
+    if sdui.root_id.is_some() && !layout.contains_slot(PaneSlotId::Left) {
+        layout = layout.with_fixed_slot(fixed_sdui_left_slot());
+    }
+    layout
+}
+
+fn combined_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
+    sdui_slot_layout(size, sdui)
+}
+
+fn fixed_sdui_left_slot() -> FixedSlotState {
+    FixedSlotState {
+        slot_id: FixedSlotId::Left,
+        size: SIDEBAR_WIDTH,
+        min_size: SIDEBAR_WIDTH,
+        max_size: SIDEBAR_WIDTH,
+        visible: true,
+        collapsed: false,
+        resized_by_user: false,
+    }
+}
+
+fn sdui_panel_left_slot_rect(size: Size, sdui: &SduiNativeState) -> Option<Rect> {
+    sdui_panel_slot_layout(sdui)
+        .compute_geometry(size.to_rect())
+        .fixed_slots
+        .into_iter()
+        .find(|slot| slot.slot_id == FixedSlotId::Left)
+        .map(|slot| slot.rect)
+}
+
+fn sdui_theme_style() -> SduiThemeStyle {
+    SduiThemeStyle::default()
+}
+
+fn row_rect(depth: usize, y: f64, width: f64, origin_x: f64) -> Rect {
+    let x0 = origin_x + sdui_theme_style().panel_padding + depth as f64 * 10.0;
+    Rect::new(
+        x0,
+        y,
+        (origin_x + width - sdui_theme_style().panel_padding).max(x0),
+        y + sdui_theme_style().row_height,
+    )
+}
+
+fn package_action_intent(command_id: &str, source_id: &str) -> SduiActionIntent {
+    SduiActionIntent::command(
+        command_id.to_string(),
+        SduiActionSource::Button {
+            node_id: SduiNodeId(stable_package_source_id(source_id)),
+        },
+    )
+}
+
+fn stable_package_source_id(source_id: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in source_id.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash.max(1)
 }
 
 fn sdui_accessibility_role(kind: &SduiNodeKind) -> Role {
@@ -712,6 +1204,22 @@ mod tests {
         SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNodeKind,
         representative_panel_update, representative_sdui_tree,
     };
+    use serde_json::json;
+
+    fn package_component(id: &str) -> PackageUiComponentTree {
+        PackageUiComponentTree::from_declaration(&json!({
+            "kind": "panel",
+            "id": id,
+            "title": "Preview",
+            "children": [{
+                "kind": "button",
+                "id": format!("{id}.toggle"),
+                "label": "Toggle Preview",
+                "action": { "commandId": "markdown.togglePreview" }
+            }]
+        }))
+        .unwrap()
+    }
 
     fn sample_tree() -> SduiTree {
         let root = SduiNodeId(1);
@@ -823,6 +1331,166 @@ mod tests {
 
         assert_eq!(region.x0, SIDEBAR_WIDTH);
         assert_eq!(region.x1, 900.0);
+    }
+
+    #[test]
+    fn slot_panel_contribution_places_panel_in_requested_slot_and_preserves_main_editor() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Right,
+                    PackagePanelVisibility::Visible,
+                    package_component("markdown.preview.root"),
+                    vec!["markdown.togglePreview".to_string()],
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let region = editor_region_for_document(Size::new(900.0, 600.0), &state, 7);
+        let snapshot = state.observable_snapshot(Size::new(900.0, 600.0));
+
+        assert_eq!(region, Rect::new(SIDEBAR_WIDTH, 0.0, 660.0, 600.0));
+        assert_eq!(snapshot.package_fixed_panels.len(), 1);
+        assert_eq!(snapshot.package_fixed_panels[0].slot_id, FixedSlotId::Right);
+        assert_eq!(
+            snapshot.package_fixed_panels[0].rect,
+            Rect::new(660.0, 0.0, 900.0, 600.0)
+        );
+        assert_eq!(state.package_ui_version(), 1);
+    }
+
+    #[test]
+    fn transient_overlay_renders_without_consuming_fixed_slot_geometry() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Bottom,
+                    PackagePanelVisibility::Visible,
+                    package_component("markdown.preview.root"),
+                    Vec::new(),
+                )],
+                transient_overlays: vec![TransientPackageOverlay::new(
+                    "markdown.preview.quickOpen",
+                    PackageOverlayAnchor::Main,
+                    "restore",
+                    "escape",
+                    package_component("markdown.preview.quickOpen.root"),
+                    Vec::new(),
+                )],
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let region = editor_region_for_document(Size::new(900.0, 600.0), &state, 7);
+        let snapshot = state.observable_snapshot(Size::new(900.0, 600.0));
+
+        assert_eq!(region, Rect::new(SIDEBAR_WIDTH, 0.0, 900.0, 480.0));
+        assert_eq!(snapshot.package_transient_overlays.len(), 1);
+        assert_eq!(snapshot.package_transient_overlays[0].rect, region);
+    }
+
+    #[test]
+    fn slot_ui_actions_emit_registered_command_intents_only() {
+        let mut state = SduiNativeState::empty();
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Left,
+                    PackagePanelVisibility::Visible,
+                    package_component("markdown.preview.root"),
+                    vec!["markdown.togglePreview".to_string()],
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
+
+        let action = state
+            .action_for_point(Point::new(40.0, 45.0))
+            .expect("package button should install an inert command hit region");
+
+        assert_eq!(action.command_id, "markdown.togglePreview");
+        assert!(matches!(action.source, SduiActionSource::Button { .. }));
+    }
+
+    #[test]
+    fn slot_ui_observation_omits_document_text_native_handles_and_raw_authority() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Top,
+                    PackagePanelVisibility::Visible,
+                    package_component("markdown.preview.root"),
+                    vec!["markdown.togglePreview".to_string()],
+                )],
+                transient_overlays: vec![TransientPackageOverlay::new(
+                    "markdown.preview.quickOpen",
+                    PackageOverlayAnchor::Pointer,
+                    "restore",
+                    "escape-or-outside",
+                    package_component("markdown.preview.quickOpen.root"),
+                    Vec::new(),
+                )],
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let debug = format!("{:?}", state.observable_snapshot(Size::new(900.0, 600.0)));
+        for forbidden in [
+            "WidgetId",
+            "nativeHandle",
+            "masonryWidget",
+            "Deno.core.ops",
+            "op_clay_",
+            "rendererCallback",
+            "clientJavaScript",
+            "secret",
+        ] {
+            assert!(!debug.contains(forbidden), "observation leaked {forbidden}");
+        }
+    }
+
+    #[test]
+    fn sdui_actions_still_emit_server_intents_from_slot_geometry() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+
+        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
+        let intent = state
+            .action_for_point(Point::new(30.0, 70.0))
+            .expect("button action should be installed in left slot geometry");
+
+        assert_eq!(intent.command_id, "workspace.refresh");
+    }
+
+    #[test]
+    fn sdui_renderer_uses_resolved_theme_tokens_for_panel_styles() {
+        let style = sdui_theme_style();
+
+        assert_eq!(style.panel_padding, 14.0);
+        assert_eq!(style.row_height, 26.0);
+        assert_eq!(style.title_text_size, 14.0);
+        assert_eq!(style.body_text_size, 12.0);
+        assert_eq!(style.panel_background, Color::from_rgb8(0x21, 0x20, 0x2b));
+        assert_eq!(style.button_background, Color::from_rgb8(0x39, 0x35, 0x4a));
+        assert_eq!(style.list_background, Color::from_rgb8(0x29, 0x28, 0x35));
     }
 
     #[test]

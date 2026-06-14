@@ -64,6 +64,178 @@ fn generated_registry_contains_all_indexed_public_apis() {
 }
 
 #[test]
+fn planned_shell_layout_apis_are_not_generated_registry_entries() {
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let docs_index = std::fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+
+    for id in [
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+    ] {
+        assert!(
+            registry.by_id(id).is_none(),
+            "planned shell/layout API {id} must not appear in generated public registry before public API implementation"
+        );
+    }
+
+    for id in [
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.ui.serverRegisterComponentContribution",
+        "clay.ui.serverRegisterTransientOverlayContribution",
+        "clay.ui.serverRegisterInputContribution",
+        "clay.ui.serverRegisterUiStateScope",
+        "clay.ui.serverRegisterThemeToken",
+        "clay.ui.serverSetLayoutOverride",
+    ] {
+        let entry = registry.by_id(id).unwrap_or_else(|| {
+            panic!(
+                "Phase 18.3 runtime-backed clay:ui API {id} must appear in the generated registry"
+            )
+        });
+        assert_eq!(entry.js_module, "clay:ui");
+        assert!(
+            entry.documentation_path.contains("/clay-js-api/ui/")
+                || entry.documentation_path.contains("clay-js-api/ui/")
+        );
+    }
+
+    for planned_doc in [
+        "reference/clay-js-api/ui/server-register-working-area-layout.md",
+        "reference/clay-js-api/ui/server-register-pane-split-tree.md",
+        "reference/clay-js-api/ui/server-set-pane-slot-layout.md",
+    ] {
+        assert!(
+            !docs_index.contains(planned_doc),
+            "docs/index.md registry source section must not link planned clay:ui API docs before public API implementation: {planned_doc}"
+        );
+    }
+}
+
+#[test]
+fn generated_registry_contains_phase18_4_public_apis() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    for (id, module, export, docs_path, required_properties, required_tags) in [
+        (
+            "clay.ui.serverRegisterInputContribution",
+            "clay:ui",
+            "serverRegisterInputContribution",
+            "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
+            [
+                "id",
+                "scope",
+                "componentId",
+                "pointer.click",
+                "actionTargets",
+            ]
+            .as_slice(),
+            ["input", "action-routing", "phase18.4"].as_slice(),
+        ),
+        (
+            "clay.ui.serverRegisterUiStateScope",
+            "clay:ui",
+            "serverRegisterUiStateScope",
+            "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
+            [
+                "id",
+                "scope",
+                "owner",
+                "lifetime",
+                "persistence",
+                "valueSchema.kind",
+            ]
+            .as_slice(),
+            ["state", "lifecycle", "phase18.4"].as_slice(),
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "clay:ui",
+            "serverSetLayoutOverride",
+            "docs/reference/clay-js-api/ui/server-set-layout-override.md",
+            ["targetId", "property", "value", "source"].as_slice(),
+            ["layout-overrides", "configuration", "phase18.4"].as_slice(),
+        ),
+        (
+            "clay.configuration.setPackageOption",
+            "clay:configuration",
+            "setPackageOption",
+            "docs/reference/clay-js-api/configuration/set-package-option.md",
+            ["packagePrefix", "option", "value", "source"].as_slice(),
+            ["package-options", "configuration", "phase18.4"].as_slice(),
+        ),
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing Phase 18.4 API {id}"));
+        assert_eq!(entry.js_module, module);
+        assert_eq!(entry.js_export, export);
+        assert_eq!(entry.documentation_path, docs_path);
+        assert_eq!(entry.stability, "runtime-backed");
+        assert!(entry.app_visible, "{id} must be app visible");
+        assert!(entry.help_visible, "{id} must be help visible");
+        assert!(entry.key_bindings.is_empty(), "{id} has no default key");
+        assert!(registry.by_js_export(module, export).is_some());
+        for property in required_properties {
+            assert!(
+                entry
+                    .custom_properties
+                    .iter()
+                    .any(|custom_property| custom_property.name == *property),
+                "{id} generated registry entry must preserve custom property {property}"
+            );
+            assert!(
+                registry
+                    .by_custom_property(property)
+                    .iter()
+                    .any(|entry| entry.id == id),
+                "{id} must be discoverable by custom property {property}"
+            );
+        }
+        for tag in required_tags {
+            assert!(
+                entry.lookup_tags.iter().any(|lookup_tag| lookup_tag == tag),
+                "{id} generated registry entry must preserve lookup tag {tag}"
+            );
+            assert!(
+                registry
+                    .by_lookup_tag(tag)
+                    .iter()
+                    .any(|entry| entry.id == id),
+                "{id} must be discoverable by lookup tag {tag}"
+            );
+        }
+        for denied in [
+            "filesystem",
+            "network",
+            "shell",
+            "extension loading",
+            "AI mutation",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+        ] {
+            assert!(
+                entry.security.contains(denied),
+                "{id} security metadata must deny {denied} authority"
+            );
+        }
+    }
+
+    for planned_id in [
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+    ] {
+        assert!(
+            registry.by_id(planned_id).is_none(),
+            "planned Phase 18 shell/layout API {planned_id} must stay out of generated registry"
+        );
+    }
+}
+
+#[test]
 fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
     let root = repository_root();
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");

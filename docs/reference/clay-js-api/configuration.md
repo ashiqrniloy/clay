@@ -32,13 +32,55 @@ Phase 17 reviewed package loading, mode selection, decoration transport, parse c
 - Phase 17 did not introduce concrete user-facing SDUI panel visibility or layout settings. Package-owned SDUI region/layout data remains inert package contribution metadata validated at enable/load time.
 - `clay:sdui.queryUiState` remains deferred. `SduiObservableSnapshot` and `SduiStatusObservation` stay internal observability/test infrastructure until a package-tooling, help, or agent workflow requires a public live-UI query API with full docs, registry, permissions/privacy notes, and tests.
 
+## Phase 18.2/18.3/18.4 shell/layout and package UI configuration review
+
+Compatibility summary for existing guards: Phase 18.2/18.3 shell/layout and package UI configuration review; Phase 18.2 does **not** promote any new runtime-backed or user-visible shell/layout configuration API; Phase 18.3 promotes package UI declaration APIs; Phase 18.3 promotes `clay.ui.serverRegisterThemeToken` to a runtime-backed package declaration API; Phase 18.3 does not promote user-visible panel visibility, default-slot, component-style, theme-token override, or layout behavior configuration APIs; `clay.ui.serverSetLayoutOverride` is the planned `PackageLayoutOverride` surface; `clay.configuration.setPackageOption` remains the planned package-owned option surface.
+
+Phase 18.1 defined the shell/layout architecture contract, and Phase 18.2 implements internal Rust shell layout state for `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, the `ClayShellWidget` root, inert local layout updates, and structural shell observability. Phase 18.2 does **not** promote any new runtime-backed or user-visible shell/layout configuration API. Phase 18.3 promotes package UI declaration APIs for panels, components, overlays, and theme tokens. Historical Phase 18.3 status: Phase 18.3 promotes package UI declaration APIs but does not promote user-visible panel visibility, default-slot, component-style, theme-token override, or layout behavior configuration APIs; those surfaces were not user-visible override APIs and `clay.ui.serverSetLayoutOverride` and `clay.configuration.setPackageOption` stay non-registry-public inventory rows in that phase. Phase 18.4 promotes package input declarations, UI state-scope schema/lifecycle declarations, package layout overrides, and package-owned options. State-value mutation is still not promoted.
+
+Implemented Phase 18.4 configuration APIs:
+
+- [`clay.configuration.setPackageOption`](configuration/set-package-option.md) is runtime-backed for package-prefixed typed options: `layout.defaultVisibility`, `layout.defaultSlot`, `layout.splitRatio`, `input.default`, `action.default`, `themeTokenRemap`, and `fallback`. Its inventory entry is `status = "runtime-backed"`, `registry_public = true`, uses `op_clay_configuration_set_package_option`, lists `custom_properties` for `packagePrefix`, `option`, `value`, and `source`, and is linked from `docs/index.md` and the generated registry.
+- [`clay.ui.serverSetLayoutOverride`](ui/server-set-layout-override.md) is runtime-backed for validated layout/input/action/theme overrides: `slot`, `visibility`, `splitRatio`, `themeToken`, `inputDefault`, `actionDefault`, and `fallback`. It validates source precedence (`user-config`, active major mode, compatible minor mode, global package, package default), target IDs, registered input/action/theme-token references, same-type theme-token remaps, payload size, and prohibited authority.
+- `clay.ui.serverRegisterUiStateScope` remains a runtime-backed inert schema/lifecycle declaration API. It is not a state-value mutation API and does not create durable workspace/document/user-config persistence by itself.
+
+Implemented examples:
+
+```ts
+import { setPackageOption } from "clay:configuration";
+import { serverSetLayoutOverride } from "clay:ui";
+
+setPackageOption({
+  packagePrefix: "markdown",
+  option: "markdown.layout.defaultSlot",
+  value: "right",
+  source: "init-js",
+});
+setPackageOption({
+  packagePrefix: "markdown",
+  option: "markdown.layout.defaultVisibility",
+  value: "hidden",
+  source: "init-js",
+});
+serverSetLayoutOverride({
+  targetId: "markdown.preview",
+  property: "themeToken",
+  value: { token: "markdown.heading.1", fallback: "text.primary" },
+  source: "user-config",
+});
+```
+
+Historical planned examples used hidden-looking names such as `layout.preview.defaultSlot`, `layout.preview.defaultVisibility`, or `theme.markdown.heading.1`; those names are not valid Phase 18.4 package option names unless passed through the documented API with the package-owned prefix and supported option schema. Component style variables, `defaultVisibility`, and slot fields inside package UI declarations are package-load/configuration-time declarations. All hidden JSON/TOML/ad hoc layout, panel, style, input, action, state, or theme keys are rejected by policy, including keys with names such as `layout.preview.defaultSlot`, `layout.preview.defaultVisibility`, `preview.position`, `preview.defaultVisibility`, `theme.markdown.heading.1`, raw token override keys, ad hoc style keys, or unregistered actions when they appear outside documented Clay JS APIs. User configuration cannot implicitly grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw Deno ops / raw ops, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, or client-side JavaScript authority.
+
+Configuration evaluation for shell/layout remains startup, package-load, configuration-change, or explicit setting-change work. Ordinary typing, Masonry paint/layout, pointer, scroll, keypress, text-event handling, and editor hot paths read already-validated inert state and must not execute package JavaScript, wait on IPC, mutate native layout from package code, or recompute layout from user JavaScript. Deferred surfaces remain explicit planned/deferred work: direct working-area/split/pane-slot mutation, pane selector syntax, multi-panel ordering, overlay z-order, cross-window layout, package enable/disable from configuration, durable state-value mutation, and persisted workspace/document/user-config state storage.
+
 ## Phase 18.5 large-file Markdown configuration review
 
 Phase 18.5 reviewed Markdown large-file behavior and did **not** promote any new user-facing configuration API for the first-party Markdown thresholds. The current Markdown package owns fixed defaults for full/windowed/degraded/plain-text-fallback behavior: full highlighting through `1 MiB`, windowed highlighting above `1 MiB`, large-file behavior above `5 MiB`, `64 KiB` parse windows, `4 KiB` guard ranges, `30 MiB` retained syntax/decor cache budget, and `50 ms` parser timeout.
 
-Those values are documented package defaults, not hidden `init.js` keys. The package registers bounded parser metadata through the existing [`serverRegisterParseHandler`](parse/server-register-parse-handler.md) Clay JS API, whose behavior-changing parser policy fields are listed in `custom_properties` and validated by the server before scheduling parser work. File-size thresholds and degraded-mode labels remain package-owned constants until a later phase implements a concrete `clay.configuration.setPackageOption` or `clay.configuration.setParsePolicy` validator with registry docs, custom-property metadata, and explicit security tests.
+Those values are documented package defaults, not hidden `init.js` keys. The package registers bounded parser metadata through the existing [`serverRegisterParseHandler`](parse/server-register-parse-handler.md) Clay JS API, whose behavior-changing parser policy fields are listed in `custom_properties` and validated by the server before scheduling parser work. File-size thresholds and degraded-mode labels remain package-owned constants until a later phase implements concrete Markdown option schemas through the now-runtime-backed `clay.configuration.setPackageOption` or a future concrete `clay.configuration.setParsePolicy` validator with registry docs, custom-property metadata, and explicit security tests.
 
-Configuration evaluation remains load-time or explicit setting-change work only. Markdown large-file policy must not be recomputed from user JavaScript during keypress, paint, scroll, layout, text-event handling, or parse-result publication. The existing planned `setPackageOption`, `setModePreference`, `setDecorationTheme`, and `setParsePolicy` facades remain unavailable stubs and do not grant package enable/disable, filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, raw-op, or client-side JavaScript authority.
+Configuration evaluation remains load-time or explicit setting-change work only. Markdown large-file policy must not be recomputed from user JavaScript during keypress, paint, scroll, layout, text-event handling, or parse-result publication. The existing `setModePreference`, `setDecorationTheme`, and `setParsePolicy` facades remain unavailable stubs; `setPackageOption` is runtime-backed only for the documented Phase 18.4 package option names. None of these APIs grant package enable/disable, filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, raw-op, or client-side JavaScript authority.
 
 ## Phase 19 Windows open-dialog configuration review
 

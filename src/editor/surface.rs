@@ -1131,13 +1131,13 @@ impl EditorSurface {
     }
 
     #[cfg(test)]
-    fn set_caret_for_test(&mut self, caret: usize) {
+    pub(crate) fn set_caret_for_test(&mut self, caret: usize) {
         let caret = self.buffer.clamp_byte_offset(caret);
         self.cursor.set_caret(caret);
     }
 
     #[cfg(test)]
-    fn caret_for_test(&self) -> usize {
+    pub(crate) fn caret_for_test(&self) -> usize {
         self.cursor.caret()
     }
 
@@ -1155,12 +1155,12 @@ impl EditorSurface {
     }
 
     #[cfg(test)]
-    fn visual_scroll_y(&self) -> f64 {
+    pub(crate) fn visual_scroll_y(&self) -> f64 {
         self.visual_scroll_y
     }
 
     #[cfg(test)]
-    fn set_visual_scroll_bounds_for_test(&mut self, max_scroll_y: f64) {
+    pub(crate) fn set_visual_scroll_bounds_for_test(&mut self, max_scroll_y: f64) {
         self.last_visual_max_scroll_y = max_scroll_y.max(0.0);
         self.visual_scroll_y = self
             .visual_scroll_y

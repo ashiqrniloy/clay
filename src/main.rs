@@ -19,6 +19,7 @@ use tokio::sync::mpsc;
 use clay::client::{self, ClientConnectionEvent};
 use clay::ipc::{IpcEndpoint, default_endpoint, smoke_endpoint};
 use clay::masonry_editor::{EditorAction, EditorStatus, EditorWidget};
+use clay::masonry_shell::ClayShellWidget;
 use clay::perf::fixtures::{FixtureKind, FixtureSpec, default_fixture_path, generate_fixture_file};
 use clay::perf::metrics::{PERF_PROFILE_FLAG, PerfConfig, install_global_recorder};
 #[cfg(any(unix, windows))]
@@ -30,6 +31,15 @@ const WINDOW_HEIGHT: f64 = 600.0;
 
 struct Driver {
     editor_widget_id: WidgetId,
+}
+
+impl Driver {
+    fn editor_action_target(&self, _source_widget_id: WidgetId) -> WidgetId {
+        // Phase 18.2 has one editor component under the shell root. Keep
+        // editor-specific actions aimed at that child even if Masonry reports a
+        // shell/root source while the container boundary is settling.
+        self.editor_widget_id
+    }
 }
 
 impl AppDriver for Driver {
@@ -53,8 +63,9 @@ impl AppDriver for Driver {
         match *action {
             EditorAction::ExitRequested => ctx.exit(),
             EditorAction::ClientConnection(event) => {
+                let editor_widget_id = self.editor_action_target(widget_id);
                 ctx.render_root(window_id)
-                    .edit_widget(widget_id, |mut widget| {
+                    .edit_widget(editor_widget_id, |mut widget| {
                         if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
                             let changed = editor.widget.apply_connection_event(event);
                             if changed {
@@ -67,8 +78,9 @@ impl AppDriver for Driver {
             EditorAction::ClientUiCommand(command) => match handle_client_ui_command(&command) {
                 ClientUiCommandResult::None => {}
                 ClientUiCommandResult::ConnectionEvent(event) => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
                     ctx.render_root(window_id)
-                        .edit_widget(widget_id, |mut widget| {
+                        .edit_widget(editor_widget_id, |mut widget| {
                             if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
                                 let changed = editor.widget.apply_connection_event(event);
                                 if changed {
@@ -79,8 +91,9 @@ impl AppDriver for Driver {
                         });
                 }
                 ClientUiCommandResult::SelectedFile(path) => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
                     ctx.render_root(window_id)
-                        .edit_widget(widget_id, |mut widget| {
+                        .edit_widget(editor_widget_id, |mut widget| {
                             if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
                                 let changed =
                                     editor.widget.request_selected_file_open(path).is_some_and(
@@ -992,8 +1005,9 @@ fn run_editor(
     events: Option<mpsc::Receiver<ClientConnectionEvent>>,
     runtime: &tokio::runtime::Runtime,
 ) -> Result<(), Box<dyn Error>> {
-    let root_widget = NewWidget::new(editor_widget);
-    let editor_widget_id = root_widget.id();
+    let shell_widget = ClayShellWidget::single_editor(editor_widget);
+    let editor_widget_id = shell_widget.editor_widget_id();
+    let root_widget = NewWidget::new(shell_widget);
     let window_id = WindowId::next();
     let window_attributes = Window::default_attributes()
         .with_title(WINDOW_TITLE)
@@ -1067,10 +1081,11 @@ mod tests {
     #[cfg(not(windows))]
     use super::handle_client_ui_command;
     use super::{
-        ClayCommand, ClientUiCommandResult, FixtureKind, LaunchDiagnostic, LaunchReadinessFailure,
-        background_server_command, client_open_file_dialog_result_to_command_result,
-        connect_with_retry, connect_with_retry_while, connection_event_user_event,
-        extract_profile_perf_flag, managed_server_command, parse_command,
+        ClayCommand, ClientUiCommandResult, Driver, FixtureKind, LaunchDiagnostic,
+        LaunchReadinessFailure, background_server_command,
+        client_open_file_dialog_result_to_command_result, connect_with_retry,
+        connect_with_retry_while, connection_event_user_event, extract_profile_perf_flag,
+        managed_server_command, parse_command,
     };
     use clay::client::{ClientBootstrapError, ClientConnectionEvent};
     use clay::editor::{EditorSurface, is_printable_text};
@@ -1436,9 +1451,12 @@ mod tests {
     }
 
     #[test]
-    fn connection_event_action_is_dispatched_to_driver() {
+    fn connection_event_action_is_dispatched_to_shell_editor_child() {
         let window_id = WindowId::next();
-        let widget_id = WidgetId::next();
+        let shell = clay::masonry_shell::ClayShellWidget::single_editor(
+            clay::masonry_editor::EditorWidget::default(),
+        );
+        let widget_id = shell.editor_widget_id();
         let event = ClientConnectionEvent::Disconnected;
 
         let user_event = connection_event_user_event(window_id, widget_id, event.clone());
@@ -1459,9 +1477,24 @@ mod tests {
     }
 
     #[test]
+    fn driver_routes_editor_actions_to_shell_editor_child() {
+        let editor_widget_id = WidgetId::next();
+        let shell_or_source_widget_id = WidgetId::next();
+        let driver = Driver { editor_widget_id };
+
+        assert_eq!(
+            driver.editor_action_target(shell_or_source_widget_id),
+            editor_widget_id
+        );
+    }
+
+    #[test]
     fn smoke_launch_routes_sdui_events_to_gui() {
         let window_id = WindowId::next();
-        let widget_id = WidgetId::next();
+        let shell = clay::masonry_shell::ClayShellWidget::single_editor(
+            clay::masonry_editor::EditorWidget::default(),
+        );
+        let widget_id = shell.editor_widget_id();
         let event = ClientConnectionEvent::SduiSnapshot {
             client_id: 1,
             tree: clay::protocol::SduiTree {

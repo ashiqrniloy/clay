@@ -9,6 +9,7 @@ mod js_runtime;
 mod ops;
 pub mod parse_coordinator;
 mod sdui;
+mod ui;
 mod workspace;
 
 use std::{

@@ -340,6 +340,11 @@ impl EditorWidget {
         self.sdui.ui_version()
     }
 
+    #[cfg(test)]
+    pub(crate) fn visible_text_for_test(&self) -> String {
+        self.editor.visible_text()
+    }
+
     pub fn decoration_span_count(&self) -> usize {
         self.editor.decoration_span_count()
     }
@@ -697,6 +702,7 @@ mod tests {
         KeyModifiers, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode,
         SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
+    use crate::shell::{FixedSlotId, FixedSlotState, PaneSlotLayout};
     use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Modifiers};
 
     fn sdui_tree(label_text: &str) -> SduiTree {
@@ -1149,5 +1155,40 @@ mod tests {
                 .sdui_visible_texts()
                 .contains(&"Side panel updated".to_string())
         );
+    }
+
+    #[test]
+    fn shell_preserves_editor_caret_viewport_and_status_after_slot_resize() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget
+            .editor
+            .command(EditorCommand::Insert("\nsecond line\nthird line"));
+        widget.editor.set_caret_for_test(6);
+        widget.editor.set_visual_scroll_bounds_for_test(120.0);
+        assert!(widget.editor.scroll_vertical_pixels(40.0));
+        let before_text = widget.editor.visible_text();
+        let before_caret = widget.editor.caret_for_test();
+        let before_scroll_y = widget.editor.visual_scroll_y();
+        let before_status = widget.status_observation();
+        let narrow_slot = PaneSlotLayout::main_only()
+            .with_fixed_slot(FixedSlotState::new(FixedSlotId::Left, 320.0, 120.0, 360.0).unwrap());
+        let wide_slot = PaneSlotLayout::main_only()
+            .with_fixed_slot(FixedSlotState::new(FixedSlotId::Left, 180.0, 120.0, 360.0).unwrap());
+
+        let narrow_main = narrow_slot
+            .compute_geometry(masonry::kurbo::Rect::new(0.0, 0.0, 900.0, 600.0))
+            .main_rect;
+        let wide_main = wide_slot
+            .compute_geometry(masonry::kurbo::Rect::new(0.0, 0.0, 900.0, 600.0))
+            .main_rect;
+
+        assert_ne!(narrow_main, wide_main);
+        assert_eq!(widget.editor.visible_text(), before_text);
+        assert_eq!(widget.editor.caret_for_test(), before_caret);
+        assert_eq!(widget.editor.visual_scroll_y(), before_scroll_y);
+        assert_eq!(widget.status_observation(), before_status);
     }
 }

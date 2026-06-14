@@ -64,6 +64,172 @@ fn package_loading_keeps_validation_and_parsing_out_of_typing_hot_path() {
 }
 
 #[test]
+fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let facade = read("runtime/js/packages.ts");
+    let embedded_facade = read("src/server/js_runtime.rs");
+    let inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+
+    for source in [&package_guide, &package_loading, &wiki] {
+        assert!(
+            source.contains("loadPackage(\"@clay/markdown\")"),
+            "package loading docs/wiki must preserve the one-line explicit init.js target"
+        );
+    }
+
+    let one_line_loader_is_implemented = facade.contains("export function loadPackage(")
+        || embedded_facade.contains("export function loadPackage(")
+        || inventory.contains("clay.packages.loadPackage");
+    assert!(
+        !one_line_loader_is_implemented,
+        "Phase 18.4 verified the generic one-line package loader remains unimplemented; update this test when loadPackage ships"
+    );
+
+    for source in [&package_guide, &package_loading, &wiki] {
+        for phrase in [
+            "generic one-line loader is not implemented yet",
+            "generic loader/API gap",
+            "resolve an installed package specifier",
+            "enable the package",
+            "loadEntry",
+            "temporary validation/loading gap",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "docs/wiki must identify current one-line loader gap phrase `{phrase}`"
+            );
+        }
+    }
+
+    assert!(
+        package_loading.contains("serverLoadPackage(packageJson)")
+            && package_loading.contains("rather than end-user package installation"),
+        "package loading reference must document serverLoadPackage as a validation helper/gap, not the default loader"
+    );
+    assert!(
+        package_guide.contains("Do not present `serverLoadPackage` as ordinary end-user setup"),
+        "package guide must keep the fixture-only serverLoadPackage fallback clear"
+    );
+    assert!(
+        wiki.contains("not the end-user one-line package loader")
+            && wiki.contains("fixture scripts")
+            && wiki.contains("explicitly temporary"),
+        "package loading wiki must document the default-loader gap"
+    );
+}
+
+#[test]
+fn package_customization_uses_documented_configuration_apis() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let configuration_wiki = read("docs/wiki/modules/configuration-runtime.md");
+
+    for source in [&package_guide, &package_loading, &wiki, &configuration_wiki] {
+        for phrase in [
+            "setPackageOption",
+            "serverSetLayoutOverride",
+            "documented Clay JS APIs",
+            "hidden JSON/TOML/ad hoc",
+            "startup",
+            "package-load",
+            "configuration-change",
+            "Masonry",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "package customization docs/wiki must mention `{phrase}`"
+            );
+        }
+    }
+
+    for phrase in [
+        "layout.defaultVisibility",
+        "layout.defaultSlot",
+        "input.default",
+        "action.default",
+        "themeTokenRemap",
+        "slot",
+        "visibility",
+        "themeToken",
+    ] {
+        assert!(
+            package_guide.contains(phrase) || configuration_wiki.contains(phrase),
+            "customization docs must cover supported option/override `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_3_package_loading_docs_cover_slot_ui_metadata_validation() {
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+
+    for source in [&package_loading, &wiki] {
+        for phrase in [
+            "ui.panels",
+            "ui.components",
+            "ui.overlays",
+            "themeTokens",
+            "typed style variables",
+            "action targets",
+            "same-type core token fallbacks",
+            "duplicate fixed slot claims",
+            "bounded payload",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "package loading docs/wiki must mention Phase 18.3 package UI validation phrase `{phrase}`"
+            );
+        }
+        for prohibition in [
+            "raw CSS",
+            "client JavaScript",
+            "direct Masonry",
+            "native handles",
+        ] {
+            assert!(
+                source.contains(prohibition),
+                "package loading docs/wiki must preserve package UI non-authority `{prohibition}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn phase18_4_package_loading_docs_cover_input_state_config_metadata_validation() {
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let package_security = read("docs/reference/primitives/package-security.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+
+    for source in [&package_loading, &package_security, &package_guide, &wiki] {
+        for phrase in [
+            "input",
+            "uiStateScopes",
+            "layoutOverrides",
+            "packageOptions",
+            "registered actions",
+            "package-configuration",
+            "hidden-key rejection",
+            "state-value rejection",
+            "duplicate input",
+            "duplicate UI state scope",
+            "duplicate layout override",
+            "duplicate package option",
+            "package provenance",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "package loading/security docs must mention Phase 18.4 metadata phrase `{phrase}`"
+            );
+        }
+    }
+}
+
+#[test]
 fn phase18_parse_decoration_apis_are_documented_without_raw_op_exposure() {
     let runtime = read("src/server/js_runtime.rs");
     let decorations = read("runtime/js/decorations.ts");

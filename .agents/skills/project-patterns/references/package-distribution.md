@@ -11,6 +11,9 @@ Decision source: `decision-logs/2026-05-08-1958-clay-js-api-naming-and-package-d
   - Runtime JavaScript executes server-side through Clay's JavaScript runtime.
   - Clients receive validated behavior manifests, SDUI updates, or protocol updates, not arbitrary package JavaScript.
 - Package APIs must declare and use a package name or registered package prefix for exported Clay JS APIs, e.g. `vimEnableMode`, so users and AI agents can identify provenance.
+- Each JS package should be explicitly loaded from `~/.config/clay/init.js`; packages should not become behavior-changing defaults silently.
+- The preferred end-user package setup is a one-line explicit load command, such as `loadPackage("@clay/markdown")` or the implemented equivalent. Package-specific customization may be available, but ordinary defaults should work without copied manifests or primitive-by-primitive boilerplate.
+- If a package cannot support one-line default loading because Clay lacks a required generic primitive, plans should identify the primitive gap and document any longer setup as a temporary fallback/limitation, not the preferred convention.
 - Package metadata should eventually include at least package prefix, runtime entry, load-time/behavior entry when present, permissions, modes, docs, and Clay JS API dependencies.
 - Git, JSR/Deno, local path, tarball, or OCI-backed sources may be considered later, but npm-compatible package management is the default unless superseded by an approved decision.
 - Plans that add package behavior must include documentation-as-code coverage for package APIs, commands, key bindings, configuration options, permissions, modes, and behavior manifest contributions.
