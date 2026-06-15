@@ -1,3 +1,8 @@
+import { serverRegisterCommand } from "clay:commands";
+import { serverActivateMajorMode, serverRegisterModePattern } from "clay:modes";
+import { serverLoadPackage } from "clay:packages";
+import { serverRegisterParseHandler } from "clay:parse";
+
 import {
   apiPrefix,
   behaviorTransforms,
@@ -155,4 +160,20 @@ export async function loadMarkdownPackage(clay, options = {}) {
   });
 
   return contract;
+}
+
+// ponytail: package-owned one-line fallback entry. Imports the Clay facades
+// directly (no caller-supplied `clay` object, no inline manifest) and reuses
+// loadMarkdownPackage. This is the documented temporary fallback while the
+// generic loadPackage("@clay/*") resolver + first-party module-loader bridge
+// remain deferred (see decision-logs/2026-06-15-1015-...). Once that bridge
+// ships, loadPackage("@clay/markdown") will invoke this same default setup.
+export async function markdownLoadMode(options = {}) {
+  const clay = {
+    packages: { serverLoadPackage },
+    modes: { serverActivateMajorMode, serverRegisterModePattern },
+    commands: { serverRegisterCommand },
+    parse: { serverRegisterParseHandler }
+  };
+  return loadMarkdownPackage(clay, options);
 }

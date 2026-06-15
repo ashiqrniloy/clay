@@ -181,3 +181,11 @@ export function markdownPackageManifest() {
     }
   };
 }
+
+// ponytail: re-export the package-owned default load entry at the package root
+// so the documented fallback `import { markdownLoadMode } from "@clay/markdown"`
+// resolves. Appended after all declarations above are initialized so the
+// circular index <-> load re-export stays TDZ-safe (load.js only references
+// these bindings inside functions it does not call at module-eval time).
+// See decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md.
+export { loadMarkdownPackage, markdownLoadMode } from "./load.js";

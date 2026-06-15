@@ -1431,6 +1431,100 @@ fn phase18_5_markdown_replan_primitive_review_identifies_load_package_gap() {
     }
 }
 
+fn replan_023_plan() -> String {
+    fs::read_to_string(repository_path(
+        "plans/023-Phase20-Markdown-Mode-End-User-Loading-and-UI-Cleanup.md",
+    ))
+    .expect("read replanned Plan 023")
+}
+
+#[test]
+fn replan_023_has_no_markdown_specific_rust_ui_branches() {
+    let plan = replan_023_plan();
+
+    // The replanned plan must explicitly reject Markdown-specific Rust
+    // editor/parser/render/shell branches and fixture-only UI assumptions.
+    for required in [
+        "Rejected Implementation Shapes",
+        "Do not add `MarkdownLoader`, `MarkdownSidebar`, `MarkdownPreviewPanel`, `MarkdownPaneLayout`, `MarkdownModeDefault`",
+        "if mode == \"markdown\"",
+        "if package == \"@clay/markdown\"",
+        "The one-line loader must be a generic `loadPackage(specifier)`",
+        "Do not keep the inline package manifest object (`const markdownPackage = { ... }`)",
+        "fixture-only `publishTree(...)` call",
+        "Do not publish a default fixed or transient Markdown panel on load",
+        "No Markdown-specific Rust editor/parser/render/shell branch is introduced by any task below",
+        "no Markdown-specific Rust parser, editor, or shell branch",
+    ] {
+        assert!(
+            plan.contains(required),
+            "replanned Plan 023 must reject Markdown-specific Rust UI branches and fixture-only UI assumptions: {required}"
+        );
+    }
+}
+
+#[test]
+fn replan_023_references_generic_clay_ui_primitives() {
+    let plan = replan_023_plan();
+
+    // Every task must reference generic clay:ui, shell, configuration, and
+    // package-loading primitives promoted in Phases 18.1-18.4 instead of
+    // Markdown-specific UI assumptions.
+    for required in [
+        "`PanelContribution`",
+        "`ComponentContribution`",
+        "`TransientOverlayContribution`",
+        "`PackageThemeTokenDeclaration`",
+        "`PackageInputContribution`",
+        "`PackageUiStateScope`",
+        "`PackageLayoutOverride`",
+        "`PackageOwnedConfiguration`",
+        "`WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`",
+        "`PaneSlotLayout`",
+        "mandatory `main` slot",
+        "`setPackageOption`",
+        "`serverSetLayoutOverride`",
+        "`serverRegisterPanelContribution`",
+        "`MajorModeActivation`",
+        "`DocumentClassification`",
+        "`CommandDeclaration`",
+        "`serverRegisterParseHandler`",
+        "`serverPublishDecorations`",
+        "`defaultVisibility: \"hidden\"`",
+        "targeting a Clay slot such as `right`",
+        "consumes the generic shell/package UI primitives promoted in",
+    ] {
+        assert!(
+            plan.contains(required),
+            "replanned Plan 023 must reference generic clay:ui / shell / configuration primitives: {required}"
+        );
+    }
+}
+
+#[test]
+fn replan_023_preserves_one_line_load_and_ctrl_o_separation() {
+    let plan = replan_023_plan();
+
+    // The replanned plan must preserve the one-line package loading target and
+    // the explicit bindKey("Ctrl+O", ...) separation from package loading.
+    for required in [
+        "`loadPackage(\"@clay/markdown\")`",
+        "import { loadPackage } from \"clay:packages\";",
+        "await loadPackage(\"@clay/markdown\")",
+        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" })",
+        "Keep `bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" })` as the user-configured Windows file-open binding, separate from package loading",
+        "separation is preserved",
+        "package-owned fallback",
+        "Phase 18.5 Replan",
+        "plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md",
+    ] {
+        assert!(
+            plan.contains(required),
+            "replanned Plan 023 must preserve the one-line loadPackage target and the explicit Ctrl+O bindKey separation: {required}"
+        );
+    }
+}
+
 #[test]
 fn shell_layout_strategy_doc_linked_from_docs_indexes() {
     let docs_index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");

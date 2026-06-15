@@ -300,7 +300,19 @@ bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 
 Phase 18.4 verifies that the generic one-line loader is not implemented yet: `runtime/js/packages.ts` and the embedded `clay:packages` facade export validation helpers but not `loadPackage`, and there is no public registry entry for `clay.packages.loadPackage`. The generic loader/API gap is a Clay package-service bridge that can resolve an installed package specifier, enable the package, execute/import its declared `loadEntry`, and record activation from `init.js` without granting package-manager, filesystem, network, shell, AI, WASM, raw-op, native-widget, or client-JS authority.
 
+Phase 18.5 (`plans/028` Task 4) investigated that bridge and deferred it with a decision-log-backed rationale: the controlled server-side runtime is deny-by-default (`src/server/js_runtime.rs::ClayModuleLoader`) and confines loadable modules to the configuration root (`src/server/configuration.rs::canonical_local_file`), so a working `loadPackage("@clay/*")` requires a security-critical module-loader extension plus a `PackageService` resolve/enable/execute path and a new op. That authority expansion warrants its own focused phase; see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`. The documented temporary fallback for first-party packages is the package-owned default entry that imports the Clay facades directly. For Markdown that entry is `markdownLoadMode()` (in `packages/markdown/dist/load.js`, re-exported from `./dist/index.js`), which consumes only implemented generic primitives and contains no copied manifest:
+
 If a package cannot yet support one-line loading because Clay lacks a generic primitive, document the longer setup as a temporary limitation rather than the preferred path.
+
+**Implemented/package-owned temporary fallback** (Phase 18.5, until the generic `loadPackage` resolver ships):
+
+```js
+import { markdownLoadMode } from "@clay/markdown";
+
+await markdownLoadMode();
+```
+
+This fallback imports the Clay facades internally and reuses the package's own default setup; it does not paste a manifest into `init.js`. It becomes end-to-end callable once the constrained first-party module-loader bridge lands; until then, deterministic smoke/configuration fixtures continue to validate the package through `serverLoadPackage(packageJson)` plus the same package-owned helpers.
 
 ## Package Code Shape
 

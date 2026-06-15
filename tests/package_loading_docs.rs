@@ -121,6 +121,85 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
 }
 
 #[test]
+fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback() {
+    // Phase 18.5 (plans/028 Task 4) defers the generic loadPackage("@clay/*")
+    // resolver with a decision-log-backed rationale and ships a clean
+    // package-owned fallback entry. This test pins both halves so the gap
+    // cannot drift back to fixture-only copied manifests.
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let markdown_docs = read("packages/markdown/docs/index.md");
+    let decision_log = read(
+        "decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md",
+    );
+    let load_entry = read("packages/markdown/dist/load.js");
+    let package_index = read("packages/markdown/dist/index.js");
+
+    // The deferral is decision-log-backed.
+    for source in [&package_loading, &wiki, &package_guide, &markdown_docs] {
+        assert!(
+            source.contains("2026-06-15-1015-defer-generic-loadpackage-first-party-resolver"),
+            "docs must reference the loadPackage deferral decision log"
+        );
+    }
+    for phrase in [
+        "Defer the generic",
+        "loadPackage(\"@clay/*\")",
+        "ClayModuleLoader",
+        "canonical_local_file",
+        "security-critical",
+        "markdownLoadMode",
+        "Alternatives Considered",
+        "explicitly_approved_by_user",
+    ] {
+        assert!(
+            decision_log.contains(phrase),
+            "loadPackage deferral decision log must record `{phrase}`"
+        );
+    }
+
+    // The package-owned fallback entry exists, imports Clay facades directly,
+    // and reuses loadMarkdownPackage without an inline manifest.
+    assert!(
+        load_entry.contains("export async function markdownLoadMode(options = {})"),
+        "package load entry must export markdownLoadMode"
+    );
+    for facade in [
+        "import { serverRegisterCommand } from \"clay:commands\"",
+        "import { serverActivateMajorMode, serverRegisterModePattern } from \"clay:modes\"",
+        "import { serverLoadPackage } from \"clay:packages\"",
+        "import { serverRegisterParseHandler } from \"clay:parse\"",
+    ] {
+        assert!(
+            load_entry.contains(facade),
+            "package load entry must import Clay facade directly: {facade}"
+        );
+    }
+    assert!(
+        load_entry.contains("return loadMarkdownPackage(clay, options);")
+            && !load_entry.contains("const markdownPackage = {"),
+        "markdownLoadMode must reuse loadMarkdownPackage and must not declare an inline manifest"
+    );
+    assert!(
+        package_index.contains("export { loadMarkdownPackage, markdownLoadMode } from \"./load.js\""),
+        "package root index must re-export markdownLoadMode so the @clay/markdown fallback import resolves"
+    );
+
+    // The documented fallback is concise and uses implemented generic primitives.
+    for source in [&package_guide, &markdown_docs] {
+        assert!(
+            source.contains("import { markdownLoadMode } from \"@clay/markdown\""),
+            "docs must show the concise package-owned fallback import"
+        );
+        assert!(
+            source.contains("await markdownLoadMode();"),
+            "docs must show the concise package-owned fallback call"
+        );
+    }
+}
+
+#[test]
 fn package_customization_uses_documented_configuration_apis() {
     let package_guide = read("docs/reference/packages/creating-packages.md");
     let package_loading = read("docs/reference/primitives/package-loading.md");

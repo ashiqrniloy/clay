@@ -10,7 +10,7 @@
 - Supported extensions: `.md`, `.markdown`, `.mdown`
 - Supported MIME type: `text/markdown`
 - Runtime entry: `./dist/index.js`
-- Load entry: `./dist/load.js`
+- Load entry: `./dist/load.js` (exports `loadMarkdownPackage(clay, options)` for facade-driven callers and `markdownLoadMode(options)` as the package-owned one-line default entry; re-exported from `./dist/index.js`)
 - Parser/decorator adapter: `./dist/parser.js`
 - SDUI preview/status adapter: `./dist/sdui.js`
 - Documentation entry: `./docs/index.md`
@@ -42,6 +42,20 @@ The package manifest declares inert contribution metadata for:
 - A package-owned parser adapter that converts markdown-it token streams and package-owned source/line indexes into viewport-bounded Clay decoration spans for ATX headings, strong/emphasis, inline code, fenced code blocks, and list markers.
 
 Package installation remains separate from execution. Clay validates this metadata during package operations, configuration load, document open/reload, explicit mode activation, or explicit viewport/policy changes; typing, paint, scroll, layout, and text-event handlers do not load the package, run package-manager work, or compute large-file policy. SDUI status messages are fixed/sanitized package strings and never include document text or absolute paths. Configuration cannot install, enable, disable, or grant new permissions to this package; those authorities remain outside `init.js` package options.
+
+## Default Load Path
+
+The preferred end-user default remains the one-line target `loadPackage("@clay/markdown")`. Phase 18.5 verified that generic one-line loader is not implemented yet: making it work requires a security-critical module-loader bridge that lets the controlled runtime import a resolver-validated first-party `loadEntry` from outside the configuration root, plus a `PackageService` resolve/enable/execute path. That authority expansion was deferred to a dedicated phase with a decision-log-backed rationale; see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`.
+
+The package ships the fallback entry shape the future resolver will invoke. `markdownLoadMode()` (in `./dist/load.js`, re-exported from `./dist/index.js`) imports the `clay:packages`, `clay:modes`, `clay:commands`, and `clay:parse` facades directly, reuses the existing `loadMarkdownPackage` logic, declares no inline manifest, and consumes only implemented generic primitives. The documented temporary end-user fallback is therefore:
+
+```js
+import { markdownLoadMode } from "@clay/markdown";
+
+await markdownLoadMode();
+```
+
+It becomes end-to-end callable once the constrained first-party module-loader bridge lands. Until then, deterministic smoke/configuration fixtures continue to validate the package through `serverLoadPackage(packageJson)` plus the same package-owned helpers, and the explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` separation is preserved.
 
 ## Smoke Fixture
 

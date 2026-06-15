@@ -657,6 +657,43 @@ Expected outcome:
 - The Markdown end-user loading/UI cleanup plan is current with Clay's implemented shell/package UI architecture.
 - Markdown can proceed as a normal package/mode consumer of Clay primitives rather than a special architectural bootstrap.
 
+## Phase 18.6: Generic Package Loader and First-Party Module Bridge
+
+Ship the constrained generic `loadPackage("@clay/*")` resolver, first-party module-loader extension, and PackageService resolve/enable/execute path that Phase 18.5 Task 4 deferred (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`).
+
+Entry gate:
+
+- Do not start until Phase 18.5 is complete and the Phase 18.5 primitive review, decision-log-backed deferral, and package-owned fallback entry (`markdownLoadMode`) are in place.
+- This phase is the authority-expansion gate: the module-loader bridge and specifier resolver must ship as one coherent, security-reviewed unit with its own decision log, not as incremental patches to later Markdown or hot-reload phases.
+
+Focus areas:
+
+- Implement a constrained first-party `@clay/*` specifier resolver op (`op_clay_packages_load_package_by_specifier` or equivalent) that resolves an installed package specifier to its `package.json`, validates it through the existing `PackageService` validation path, and returns the declared `loadEntry` path plus a typed manifest summary. The resolver is deny-by-default for arbitrary external specifiers, package-manager execution, registry fetching, and arbitrary specifier expansion.
+- Extend `ClayModuleLoader` (`src/server/js_runtime.rs`) to allow loading resolver-validated first-party package `loadEntry` modules from outside the configuration root. The extension must gate loading on: (a) the specifier resolved through the constrained `@clay/*` resolver, (b) the `loadEntry` path validated and returned by `PackageService`, and (c) no direct filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-enable/disable authority granted through the load path. The extension must not relax the existing deny-by-default module boundary for non-package imports.
+- Wire `PackageService` (`src/packages/service.rs`) into the JS runtime so the resolver can resolve, validate, enable, and return the declared `loadEntry` for a first-party `@clay/*` package without granting general filesystem or registry authority.
+- Add the `clay:packages.loadPackage` facade export to `runtime/js/packages.ts` and the embedded `CLAY_FACADE_PACKAGES` constant in `src/server/js_runtime.rs` so that `import { loadPackage } from "clay:packages"; await loadPackage("@clay/markdown");` resolves end-to-end from `~/.config/clay/init.js`.
+- Validate the security boundary: the module-loader extension must not open arbitrary module loading, must not grant package-enable/disable authority to user configuration, must not expand filesystem/network/shell authority, must not allow non-`@clay/*` specifiers, must not allow external registry fetching, and must not allow package-manager execution. Add deterministic security boundary tests that enforce deny-by-default for arbitrary specifiers, arbitrary external imports, and authority expansion through the load path.
+- Update `tests/package_loading_docs.rs` to transition the `!one_line_loader_is_implemented` assertion to verify that `loadPackage` is now a working `clay:packages` export with specifier resolution, and add tests for `op_clay_packages_load_package_by_specifier` deny-by-default behavior for arbitrary specifiers, `PackageService` validation-on-resolve, and end-to-end `loadPackage("@clay/markdown")` activation from a configuration module.
+- Transition the package-owned `markdownLoadMode()` fallback entry (`packages/markdown/dist/load.js`) to be the shape that `loadPackage("@clay/markdown")` invokes internally, or confirm that the existing `markdownLoadMode` shape is compatible with the resolver's `loadEntry` execution. The fallback entry becomes the canonical default load path; `markdownLoadMode()` can remain as a convenience alias.
+- Add Clay JS API documentation, `docs/reference/primitives/package-loading.md` updates, `docs/reference/packages/creating-packages.md` updates, generated registry entries, `docs/index.md` links, and code wiki updates for the new `loadPackage` facade, the specifier resolver, the module-loader extension, and the security boundary.
+- Update `plans/023-Phase20-Markdown-Mode-End-User-Loading-and-UI-Cleanup.md` so that every task, acceptance criterion, API example, and code example assumes `loadPackage("@clay/markdown")` works end-to-end from the start. The package-owned `markdownLoadMode()` fallback and the fixture-style `serverLoadPackage(packageJson)` setup become fallback/test-only paths rather than the primary end-user loading approach. Replace any remaining references to the deferred-gap status with the now-implemented generic resolver.
+- Create a decision log recording the authority expansion (first-party module loading outside the configuration root) with explicit approval, the deny-by-default boundary, the constrained `@clay/*` allowlist, the upgrade path for future non-`@clay/*` packages, and the security review.
+
+Expected outcome:
+
+- `import { loadPackage } from "clay:packages"; await loadPackage("@clay/markdown");` works end-to-end from `~/.config/clay/init.js` as a one-line default with no inline manifest, no manual facade plumbing, and no copied fixture code.
+- The controlled server-side runtime can load resolver-validated first-party package `loadEntry` modules from outside the configuration root, but the module boundary remains deny-by-default for arbitrary specifiers, external packages, and authority-expanding imports.
+- `PackageService` resolves, validates, enables, and returns package `loadEntry` paths for `@clay/*` packages, and the JS runtime executes the declared `loadEntry` under Clay's authority without granting general filesystem, registry, or package-manager access.
+- The `!one_line_loader_is_implemented` test transitions to assert that `loadPackage` is a working `clay:packages` export.
+- Plan 023 is updated to assume the generic loader from the start; the deferral decision log and fallback documentation are superseded by the implemented resolver.
+- No new filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, package-enable/disable, or package-manager execution authority is granted beyond the constrained first-party load path.
+
+Carried-forward items:
+
+- Non-`@clay/*` package specifier resolution (third-party package registries, `npm install` integration, external package stores) remains out of scope until Phase 23 ecosystem hardening provides trust, integrity, and compatibility guarantees.
+- Hot reload of already-loaded packages (`loadPackage` called more than once for the same specifier, or runtime reload after configuration change) is deferred to Phase 19 hot-reload semantics.
+- Persistent shared package enable/disable state across processes is deferred to Phase 17 completion or Phase 23 ecosystem hardening.
+
 ## Phase 19: Hot Reload and Behavior Update Semantics
 
 Make runtime package and mode behavior changes safe and non-janky after the first package/mode path exists.
