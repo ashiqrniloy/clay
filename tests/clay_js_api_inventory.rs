@@ -1999,6 +1999,222 @@ fn phase9_file_workspace_apis_are_documented_indexed_and_security_scoped() {
 }
 
 #[test]
+fn phase18_4_configuration_audit_closes_unchecked_task() {
+    // Closes the gap from plans/027 Phase 18.4 "Create or verify Clay configuration APIs".
+    // All Phase 18.4 configuration/override surfaces have docs, index links,
+    // inventory entries, custom_properties, security notes, and runtime-backed status.
+    let entries = inventory_entries();
+    let registry_links = docs_index_registry_links();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing Phase 18.4 configuration API inventory entry {id}"))
+    };
+
+    // The four Phase 18.4 configuration/override surfaces
+    for (id, doc_path) in [
+        (
+            "clay.configuration.setPackageOption",
+            "docs/reference/clay-js-api/configuration/set-package-option.md",
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "docs/reference/clay-js-api/ui/server-set-layout-override.md",
+        ),
+        (
+            "clay.ui.serverRegisterUiStateScope",
+            "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
+        ),
+        (
+            "clay.ui.serverRegisterInputContribution",
+            "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
+        ),
+    ] {
+        let entry = entry_by_id(id);
+        // Status and visibility
+        assert_eq!(
+            entry.get("status"),
+            "runtime-backed",
+            "{id} must be runtime-backed"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "true",
+            "{id} must be registry public"
+        );
+        // Per-API docs exist
+        let full_doc_path = root.join(doc_path);
+        assert!(
+            full_doc_path.exists(),
+            "{id} per-API doc must exist at {doc_path}"
+        );
+        // docs/index.md link
+        assert!(
+            registry_links.contains(doc_path),
+            "{id} must be linked from docs/index.md registry section"
+        );
+        // custom_properties exist and are non-empty
+        let custom_props = inventory_custom_property_names(entry.get("custom_properties"));
+        assert!(!custom_props.is_empty(), "{id} must have custom_properties");
+        // Security notes deny prohibited authorities
+        for denied in [
+            "filesystem",
+            "network",
+            "shell",
+            "extension loading",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+            "direct Masonry widgets",
+        ] {
+            assert!(
+                entry.get("security_notes").contains(denied),
+                "{id} security_notes must deny {denied}"
+            );
+        }
+        // Facade export is wired
+        assert!(
+            facade_exports_function(entry.get("facade_path"), entry.get("js_export")),
+            "{id} facade must export the function"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_configuration_audit_rejects_hidden_keys() {
+    // Verifies no undocumented configuration keys were introduced.
+    // Phase 18.4 docs explicitly reject hidden JSON/TOML/ad hoc layout, style,
+    // input, theme, and package option keys.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let configuration_wiki =
+        fs::read_to_string(root.join("docs/wiki/modules/configuration-runtime.md"))
+            .expect("read configuration runtime wiki");
+
+    // The configuration.md and wiki must contain rejection language
+    for rejection_phrase in [
+        "hidden JSON/TOML/ad hoc",
+        "documented Clay JS APIs",
+        "raw CSS",
+        "client-side JavaScript",
+        "package enable/disable",
+    ] {
+        assert!(
+            configuration_doc.contains(rejection_phrase),
+            "configuration.md must reject hidden/ad hoc keys: {rejection_phrase}"
+        );
+        assert!(
+            configuration_wiki.contains(rejection_phrase),
+            "configuration-runtime.md must reject hidden/ad hoc keys: {rejection_phrase}"
+        );
+    }
+
+    // The per-API docs for setPackageOption and serverSetLayoutOverride must
+    // explicitly reject hidden keys
+    let set_option_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/configuration/set-package-option.md"),
+    )
+    .expect("read set-package-option.md");
+    let layout_override_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/ui/server-set-layout-override.md"),
+    )
+    .expect("read server-set-layout-override.md");
+
+    for rejection_phrase in ["hidden", "raw ops", "client-side JavaScript"] {
+        assert!(
+            set_option_doc.contains(rejection_phrase),
+            "set-package-option.md must reject {rejection_phrase}"
+        );
+        assert!(
+            layout_override_doc.contains(rejection_phrase),
+            "server-set-layout-override.md must reject {rejection_phrase}"
+        );
+    }
+
+    // Named hidden keys that must be identified as rejected in configuration.md
+    for hidden_key in [
+        "preview.position",
+        "layout.preview.defaultSlot",
+        "preview.defaultVisibility",
+        "layout.preview.defaultVisibility",
+    ] {
+        assert!(
+            configuration_doc.contains(hidden_key),
+            "configuration.md must identify hidden key `{hidden_key}` as rejected or planned-only"
+        );
+    }
+}
+
+#[test]
+fn phase18_4_configuration_audit_records_deferrals() {
+    // Verifies intentionally deferred surfaces have explicit rationale in docs.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let entries = inventory_entries();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing inventory entry {id}"))
+    };
+
+    // Deferred surfaces: setModePreference, setDecorationTheme, setParsePolicy
+    // must remain planned in the inventory
+    for deferred_id in [
+        "clay.configuration.setModePreference",
+        "clay.configuration.setDecorationTheme",
+        "clay.configuration.setParsePolicy",
+    ] {
+        let entry = entry_by_id(deferred_id);
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "{deferred_id} must remain planned (not runtime-backed)"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "{deferred_id} must not be registry public"
+        );
+    }
+
+    // Deferred shell/layout mutation APIs remain planned
+    for deferred_id in [
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+    ] {
+        let entry = entry_by_id(deferred_id);
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "{deferred_id} must remain planned"
+        );
+    }
+
+    // configuration.md must explicitly document what remains deferred
+    for deferred_mention in [
+        "setModePreference",
+        "setDecorationTheme",
+        "setParsePolicy",
+        "durable state-value mutation",
+        "pane selector",
+        "package enable/disable",
+    ] {
+        assert!(
+            configuration_doc.contains(deferred_mention),
+            "configuration.md must document deferred surface: {deferred_mention}"
+        );
+    }
+}
+
+#[test]
 fn permission_bearing_configuration_requires_validation_notes() {
     for entry in public_inventory_entries()
         .into_iter()
@@ -2029,6 +2245,318 @@ fn permission_bearing_configuration_requires_validation_notes() {
             contains_permission_validation_note(&combined_validation_notes),
             "{id} {} lists permissions but is missing server-side validation notes",
             entry.get("documentation_path")
+        );
+    }
+}
+
+#[test]
+fn phase18_5_clay_js_api_inventory_status_matches_runtime() {
+    // Phase 18.5 Task 7: verifies that implemented Phase 18.5-relevant APIs
+    // have runtime metadata and deferred APIs remain planned in the inventory.
+    let entries = inventory_entries();
+    let registry_links = docs_index_registry_links();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    // Implemented runtime-backed APIs that Phase 18.5 relies on must have
+    // status = "runtime-backed" (or "runtime-backed-command"), registry_public = true,
+    // per-API docs, facade exports, and generated registry/index links.
+    let implemented_ids = [
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.ui.serverRegisterComponentContribution",
+        "clay.ui.serverRegisterTransientOverlayContribution",
+        "clay.ui.serverRegisterInputContribution",
+        "clay.ui.serverRegisterUiStateScope",
+        "clay.ui.serverRegisterThemeToken",
+        "clay.ui.serverSetLayoutOverride",
+        "clay.configuration.setPackageOption",
+        "clay.documents.clientOpenFileDialog",
+    ];
+
+    for id in implemented_ids {
+        let entry = entries
+            .iter()
+            .find(|e| e.get("id") == id)
+            .unwrap_or_else(|| panic!("missing inventory entry for {id}"));
+        let status = entry.get("status");
+        assert!(
+            status == "runtime-backed" || status == "runtime-backed-command",
+            "{id} must be runtime-backed, got {status}"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "true",
+            "{id} must be registry public"
+        );
+        let doc_path = entry.get("documentation_path");
+        assert!(!doc_path.is_empty(), "{id} must have a documentation_path");
+        let full_path = root.join(doc_path);
+        assert!(
+            full_path.exists(),
+            "{id} per-API doc must exist at {doc_path}"
+        );
+        assert!(
+            registry_links.contains(doc_path),
+            "{id} must be linked from docs/index.md registry section"
+        );
+        // Facade must export the function
+        assert!(
+            facade_exports_function(entry.get("facade_path"), entry.get("js_export")),
+            "{id} facade must export the function"
+        );
+    }
+
+    // Deferred APIs from Phase 18.5 must remain planned
+    let deferred_ids = [
+        "clay.packages.loadPackage",
+        "clay.ui.serverRegisterWorkingAreaLayout",
+        "clay.ui.serverRegisterPaneSplitTree",
+        "clay.ui.serverSetPaneSlotLayout",
+        "clay.configuration.setModePreference",
+        "clay.configuration.setDecorationTheme",
+        "clay.configuration.setParsePolicy",
+    ];
+    for id in deferred_ids {
+        let entry = entries
+            .iter()
+            .find(|e| e.get("id") == id)
+            .unwrap_or_else(|| panic!("missing inventory entry for deferred {id}"));
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "deferred {id} must be planned, got {}",
+            entry.get("status")
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "deferred {id} must not be registry public"
+        );
+    }
+
+    // The loadPackage gap must reference the decision log
+    let entry = entries
+        .iter()
+        .find(|e| e.get("id") == "clay.packages.loadPackage")
+        .expect("clay.packages.loadPackage must exist in inventory");
+    assert!(
+        entry
+            .get("security_notes")
+            .contains("decision-logs/2026-06-15"),
+        "clay.packages.loadPackage security_notes must reference the deferral decision log"
+    );
+    assert!(
+        !entry.get("custom_properties").is_empty(),
+        "clay.packages.loadPackage must list custom_properties even as a planned entry"
+    );
+}
+
+#[test]
+fn generated_registry_contains_phase18_5_public_apis() {
+    // Phase 18.5 Task 7: verifies that the generated Clay JS API registry
+    // contains entries for all Phase 18.5-relevant public APIs with docs, index
+    // links, user-facing names, and custom properties.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let registry_path = root.join("docs/generated/clay-js-api-registry.json");
+    let registry_text = fs::read_to_string(&registry_path).expect("read generated registry");
+    let registry: serde_json::Value =
+        serde_json::from_str(&registry_text).expect("parse generated registry");
+    let entries = registry["entries"]
+        .as_array()
+        .expect("registry entries array");
+
+    let registry_by_id: BTreeMap<String, &serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            let id = e["id"].as_str().expect("entry id");
+            (id.to_string(), e)
+        })
+        .collect();
+
+    // Every Phase 18.5-relevant implemented public API must be in the registry
+    let public_api_ids = [
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.ui.serverRegisterComponentContribution",
+        "clay.ui.serverRegisterTransientOverlayContribution",
+        "clay.ui.serverRegisterInputContribution",
+        "clay.ui.serverRegisterUiStateScope",
+        "clay.ui.serverRegisterThemeToken",
+        "clay.ui.serverSetLayoutOverride",
+        "clay.configuration.setPackageOption",
+        "clay.documents.clientOpenFileDialog",
+    ];
+    for id in &public_api_ids {
+        let entry = registry_by_id
+            .get(*id)
+            .unwrap_or_else(|| panic!("generated registry missing {id}"));
+        // Must have user_facing_name
+        assert!(
+            entry
+                .get("user_facing_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .len()
+                > 0,
+            "{id} must have a user_facing_name"
+        );
+        // Must have custom_properties (even if empty list for clientOpenFileDialog)
+        assert!(
+            entry.get("custom_properties").is_some(),
+            "{id} must have custom_properties"
+        );
+        // Must have a non-empty documentation_path
+        let doc_path = entry
+            .get("documentation_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(!doc_path.is_empty(), "{id} must have documentation_path");
+        let full_doc = root.join(doc_path);
+        assert!(
+            full_doc.exists(),
+            "{id} per-API doc must exist at {doc_path}"
+        );
+    }
+
+    // Verify Markdown package exports are documented in packages/markdown/docs/index.md
+    let markdown_docs = root.join("packages/markdown/docs/index.md");
+    assert!(
+        markdown_docs.exists(),
+        "packages/markdown/docs/index.md must exist"
+    );
+    let markdown_text = fs::read_to_string(&markdown_docs).expect("read markdown package docs");
+    // Package-owned load-path exports documented in package docs.
+    // markdownPackageManifest is an internal helper, not a documented end-user surface.
+    for export_name in ["markdownLoadMode", "loadMarkdownPackage"] {
+        assert!(
+            markdown_text.contains(export_name),
+            "packages/markdown/docs/index.md must document {export_name}"
+        );
+    }
+}
+
+#[test]
+fn phase18_5_public_rust_surfaces_have_clay_js_mapping_or_internal_visibility() {
+    // Phase 18.5 Task 7: verifies that no new public Rust server-side function
+    // bypasses Clay JS API mapping. Phase 18.5-relevant server modules must
+    // either have pub(crate) visibility for internal functions or have a Clay JS
+    // API inventory entry mapping the public surface.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory_text =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+            .expect("read api inventory");
+
+    // Phase 18.5-relevant server source files that handle package UI contributions,
+    // layout overrides, configuration, and package loading.
+    let server_sources = [
+        "src/server/ui.rs",
+        "src/server/ops/ui.rs",
+        "src/server/ops/configuration.rs",
+        "src/server/ops/packages.rs",
+        "src/packages/record.rs",
+    ];
+
+    // src/packages/service.rs has known pub functions (PackageService::new,
+    // install, install_from_value, enable, disable, remove, list, inspect,
+    // enabled_records) that are internal server infrastructure, not Clay JS APIs.
+    // They are behind server-side ops and validated through Clay JS facades.
+    // They share the crate with main but are not user-facing APIs; the test
+    // verifies that no new pub fn in these Phase 18.5-relevant files bypasses
+    // the Clay JS API boundary.
+    let service_source =
+        fs::read_to_string(root.join("src/packages/service.rs")).expect("read packages/service.rs");
+    let service_known_pub_fns = [
+        "new",
+        "install",
+        "install_from_value",
+        "enable",
+        "disable",
+        "remove",
+        "list",
+        "inspect",
+        "enabled_records",
+    ];
+    for known_fn in &service_known_pub_fns {
+        assert!(
+            service_source.contains(&format!("pub fn {known_fn}"))
+                || service_source.contains(&format!("pub async fn {known_fn}")),
+            "PackageService::{known_fn} must remain a known internal server function"
+        );
+    }
+    // PackageService pub fns are internal server infrastructure behind Clay JS ops;
+    // they must not be user-facing Clay JS APIs.
+    assert!(
+        !inventory_text.contains("PackageService::install"),
+        "PackageService::install must not be a Clay JS API; package installation is a separate authority boundary"
+    );
+    assert!(
+        !inventory_text.contains("PackageService::enable"),
+        "PackageService::enable must not be a Clay JS API; package enable/disable is package-service authority"
+    );
+
+    for source_path in &server_sources {
+        let full_path = root.join(source_path);
+        let source =
+            fs::read_to_string(&full_path).unwrap_or_else(|_| panic!("read {source_path}"));
+        // Verify there are no leaked `pub fn` or `pub async fn` that would
+        // create public server-side surfaces without a Clay JS API entry.
+        // `pub(crate) fn` is acceptable.
+        for line in source.lines() {
+            let trimmed = line.trim();
+            // Skip comment lines
+            if trimmed.starts_with("//") || trimmed.starts_with("/*") {
+                continue;
+            }
+            // Detect pub fn / pub async fn that is NOT pub(crate)
+            if (trimmed.starts_with("pub fn ") || trimmed.starts_with("pub async fn "))
+                && !trimmed.starts_with("pub(crate)")
+            {
+                // Extract function name
+                let fn_decl = if trimmed.starts_with("pub async fn ") {
+                    &trimmed["pub async fn ".len()..]
+                } else {
+                    &trimmed["pub fn ".len()..]
+                };
+                let fn_name = fn_decl.split('(').next().unwrap_or("").trim();
+                // Check if this function is mapped in the Clay JS API inventory
+                // (as backing_rust, current_rust_owner, or deno_op_path)
+                let mapped = inventory_text.contains(fn_name);
+                assert!(
+                    mapped,
+                    "{} has pub fn {} without Clay JS API inventory mapping; make it pub(crate) or add a Clay JS API entry",
+                    source_path, fn_name
+                );
+            }
+        }
+    }
+
+    // Verify that the package-service public surface (PackageService) is internal
+    // or mapped, and that server ops for Phase 18.5 APIs are mapped.
+    let service_source =
+        fs::read_to_string(root.join("src/packages/service.rs")).expect("read packages/service.rs");
+    // PackageService is pub but package-installation/enable is not a Clay JS API
+    // surface; it is internal server infrastructure behind serverLoadPackage ops.
+    assert!(
+        service_source.contains("pub struct PackageService"),
+        "PackageService must exist in packages/service.rs"
+    );
+
+    // The op files must not have public fn declarations that bypass the facade.
+    // Ops are registered through deno_core macro invocations, not pub fn.
+    for ops_path in &[
+        "src/server/ops/ui.rs",
+        "src/server/ops/configuration.rs",
+        "src/server/ops/packages.rs",
+    ] {
+        let ops_source =
+            fs::read_to_string(root.join(ops_path)).unwrap_or_else(|_| panic!("read {ops_path}"));
+        // Ops use #[deno_core::op2] or similar macros; they must not have pub fn.
+        let has_pub_fn = ops_source.lines().any(|line| {
+            let trimmed = line.trim();
+            (trimmed.starts_with("pub fn ") || trimmed.starts_with("pub async fn "))
+                && !trimmed.starts_with("pub(crate)")
+        });
+        assert!(
+            !has_pub_fn,
+            "{ops_path} must not have pub fn; ops are registered through deno_core macros"
         );
     }
 }

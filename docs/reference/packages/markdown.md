@@ -27,6 +27,18 @@ The package owns fixed large-file defaults verified by the Phase 18.5 configurat
 
 The package-owned `./dist/sdui.js` adapter builds an inert preview/status panel with mode, parse, decoration, highlighting-policy, and preview labels plus a `markdown.togglePreview` button. Runtime SDUI validation requires package commands to be registered before a package-owned SDUI tree can target them, so disabling or invalidating the package falls back to plain text without stale Markdown command/keybinding authority. Status text uses fixed/sanitized package messages (`full`, `windowed`, `degraded`, `plain-text-fallback`) and does not include document text or absolute paths.
 
+## UI/Layout Behavior
+
+Phase 18.5 establishes the Markdown package UI/layout authoring contract:
+
+- **No default fixed panel on load.** The package does not publish a default side panel, preview panel, or status panel when loaded. The editor occupies `PaneSlotLayout.main` by default.
+- **Optional preview as `PanelContribution`.** The package may register an optional preview panel through `serverRegisterPanelContribution` targeting the `right` slot with `defaultVisibility: "hidden"`. The panel appears only when the user enables it through `setPackageOption`, `serverSetLayoutOverride`, or the `markdown.togglePreview` command.
+- **Theme tokens for preview styling.** Panel styles use `PackageThemeTokenDeclaration` with same-type core fallbacks (e.g., `markdown.preview.background` → `surface.panel`). Raw CSS, raw colors, and renderer callbacks are prohibited.
+- **User customization through Clay JS APIs.** Preview visibility, slot, split ratio, and theme token mapping are controlled through `setPackageOption` and `serverSetLayoutOverride`, not through hidden JSON/TOML/ad hoc keys.
+- **Generic primitive consumption.** The package consumes only generic shell/layout/UI/configuration primitives from Phases 18.1–18.4. No Markdown-specific Rust editor/parser/render/shell branch is required or added.
+
+Current smoke fixtures at `tests/fixtures/configuration/markdown-mode/` may still publish the SDUI preview/status panel through the `clay:sdui` bridge for validation. That SDUI bridge is a Clay-owned internal compatibility path, not the user-facing panel authoring convention. The long-term path uses `PanelContribution` with `defaultVisibility: "hidden"`.
+
 ## Smoke Fixture
 
 Use `cargo run -- smoke-gui --config-fixture markdown-mode` for a deterministic GUI smoke path. The fixture lives at `tests/fixtures/configuration/markdown-mode/`, opens `workspace/sample.md` when a workspace root is provided by tests, activates Markdown mode, registers parse/decorations, publishes representative decorations, and shows the Markdown preview/status SDUI panel.

@@ -1,6 +1,8 @@
 # Phase 20 Markdown Mode End-User Loading and UI Cleanup
 
 > **Phase 18.5 Replan (2026-06-15):** This plan was rewritten by `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md` so that every task consumes the generic shell/package UI primitives promoted in Phases 18.1–18.4 (`WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, `PackageOwnedConfiguration`) instead of driving Markdown UI from fixture-only behavior. The mapping of every Markdown need to an existing generic primitive is recorded in `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`. The one-line loading target (`loadPackage("@clay/markdown")`) and the explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` binding remains separate from package loading (the one-line load and Ctrl+O separation is preserved). No Markdown-specific Rust editor/parser/render/shell branch is introduced by any task below.
+>
+> **Phase 18.6 dependency (2026-06-15):** Task 3 (one-line package loader) requires the Phase 18.6 `loadPackage("@clay/*")` resolver. The generic `loadPackage` was deferred from Phase 18.5 with a decision-log-backed rationale (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`). Until Phase 18.6 ships, the package-owned fallback (`import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();`) is the documented temporary end-user loading path. Task 3 should be revisited once Phase 18.6 is complete. Task 4 (remove default side panel) was deferred from Phase 18.5 because the Markdown package load path already does not publish a default side panel; the panel only exists in test fixtures and the `connection.rs` selected-file-open evaluation. This task now owns the full `clay:ui` `PanelContribution` conversion, fixture simplification, and `connection.rs` cleanup.
 
 ## Objectives
 - Make the first-party Markdown mode usable through an end-user configuration surface that consumes generic shell/package primitives, instead of a smoke-fixture-only script that inlines a package manifest object and manually calls per-facade registration helpers.
@@ -150,9 +152,9 @@
 
 - [ ] Remove the default Markdown side panel and make the optional preview a `PanelContribution`
   - Acceptance Criteria:
-    - Functional: Loading Markdown mode by default does not publish a `PanelContribution` (or any `publishTree(...)` side panel). The optional Markdown preview/status panel is implemented as a package `PanelContribution` via `clay:ui` targeting a slot such as `right`, with `kind: "fixed"` and `defaultVisibility: "hidden"`, invoked only by an optional `registerMarkdownPreview()` helper or an explicit `setPackageOption` / `serverSetLayoutOverride`. The main editor remains in the mandatory `main` slot of `PaneSlotLayout`.
+    - Functional: Loading Markdown mode by default does not publish a `PanelContribution` (or any `publishTree(...)` side panel). The optional Markdown preview/status panel is implemented as a package `PanelContribution` via `clay:ui` targeting a slot such as `right`, with `kind: "fixed"` and `defaultVisibility: "hidden"`, invoked only by an optional `registerMarkdownPreview()` helper or an explicit `setPackageOption` / `serverSetLayoutOverride`. The main editor remains in the mandatory `main` slot of `PaneSlotLayout`. The `connection.rs` selected-file-open evaluation (`evaluate_markdown_open` / `markdown_open_init_source`) does not publish a default preview/status side panel; it publishes behavior/decorations only.
     - Performance: Removing the default panel avoids unnecessary SDUI snapshot work during ordinary Markdown loading and selected-file activation. The optional panel, if enabled, uses bounded inert `clay:ui` declarations and does not run package JavaScript in paint/layout.
-    - Code Quality: Package code uses generic `clay:ui` APIs and `PaneSlotLayout` concepts rather than hard-coded `SIDEBAR_WIDTH` or root-level `EditorWidget` assumptions. Tests that previously depended on default panel labels are rewritten to assert mode/decor/behavior state or moved to optional-panel tests.
+    - Code Quality: Package code uses generic `clay:ui` APIs and `PaneSlotLayout` concepts rather than hard-coded `SIDEBAR_WIDTH` or root-level `EditorWidget` assumptions. Test fixtures (`tests/fixtures/configuration/markdown-mode/init.js` and `tests/fixtures/configuration/windows-markdown-open/init.js`) are simplified to use the default load path without `publishTree(...)` panel publication. Tests that previously depended on default panel labels are rewritten to assert mode/decor/behavior state or moved to optional-panel tests.
     - Security: The package `PanelContribution` is validated by the server-side `PackageUiRegistry` for prefix, slot, action targets, permissions, and payload budgets before client publication.
   - Approach:
     - Documentation Reviewed:
@@ -160,21 +162,23 @@
       - `runtime/js/ui.ts`: `serverRegisterPanelContribution` and `ComponentContribution` APIs.
       - `docs/reference/primitives/shell-layout-strategy.md`: Fixed/transient panel rules and slot behavior.
       - `docs/reference/packages/creating-packages.md`: Package author anti-patterns and `clay:ui` examples.
-      - `tests/fixtures/configuration/markdown-mode/init.js` and `tests/fixtures/configuration/windows-markdown-open/init.js`: Current fixture-published panels.
-      - `packages/markdown/dist/sdui.js` and `packages/markdown/dist/load.js`: Package-owned SDUI and load behavior.
-      - `src/server/connection.rs::markdown_open_init_source`: Selected-file activation currently publishes Markdown preview/status SDUI.
+      - `tests/fixtures/configuration/markdown-mode/init.js` and `tests/fixtures/configuration/windows-markdown-open/init.js`: Current fixture-published panels that must be simplified.
+      - `packages/markdown/dist/sdui.js` and `packages/markdown/dist/load.js`: Package-owned SDUI and load behavior — `loadMarkdownPackage` / `markdownLoadMode` already do not publish a default side panel.
+      - `src/server/connection.rs::markdown_open_init_source` and `evaluate_markdown_open`: Selected-file activation currently publishes Markdown preview/status SDUI including a side panel; this must be converted to behavior/decorations only unless an explicit option enables it.
+      - `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`: Deferred task 5 rationale.
     - Options Considered:
       - Delete all Markdown SDUI/panel code: rejected because the optional preview capability is still useful for future customization.
       - Keep the panel code but make it an optional `PanelContribution` registered through `clay:ui` with `defaultVisibility: "hidden"`: selected.
       - Hide the panel client-side only: rejected because the server should not publish irrelevant default UI state in the first place.
+      - Move panel logic into a separate Markdown sub-package: rejected because it adds unnecessary complexity for a single optional feature.
     - Chosen Approach:
-      - Update the Markdown package load path so it does not call `publishTree(...)` or register a default panel. Add an optional `registerMarkdownPreview()` helper that uses `serverRegisterPanelContribution` targeting the `right` slot with `defaultVisibility: "hidden"`. Update fixtures to use the default load path without panel publication.
+      - Update the Markdown package so it does not call `publishTree(...)` or register a default panel. Add an optional `registerMarkdownPreview()` helper that uses `serverRegisterPanelContribution` targeting the `right` slot with `defaultVisibility: "hidden"`. Simplify test fixtures to use the default load path without panel publication. Convert the `connection.rs` selected-file-open path to publish behavior/decorations only (no default side panel SDUI tree) unless an explicit option enables the preview.
     - API Notes and Examples:
       ```ts
       // Inside package load entry (not user config)
       import { serverRegisterPanelContribution } from "clay:ui";
 
-      // Optional preview panel, not published by default.
+      // Optional preview panel, not published by default
       export function registerMarkdownPreview() {
         serverRegisterPanelContribution(manifest, {
           id: "markdown.preview",
@@ -190,18 +194,20 @@
       - `packages/markdown/dist/load.js`: Remove default panel publication; add optional preview helper if not already present.
       - `packages/markdown/dist/index.js`: Export the default load entry and optional helpers.
       - `packages/markdown/dist/sdui.js`: Narrow or document as optional only.
-      - `tests/fixtures/configuration/markdown-mode/init.js`: Simplify to default load path.
-      - `tests/fixtures/configuration/windows-markdown-open/init.js`: Simplify to default load path + `bindKey`.
-      - `src/server/connection.rs`: Stop publishing Markdown preview/status SDUI during selected-file open unless an explicit option exists.
+      - `tests/fixtures/configuration/markdown-mode/init.js`: Simplify to default load path without `publishTree(...)` panel publication.
+      - `tests/fixtures/configuration/windows-markdown-open/init.js`: Simplify to default load path + `bindKey` without `publishTree(...)` panel publication.
+      - `src/server/connection.rs`: Stop publishing Markdown preview/status SDUI side panel during selected-file open (`evaluate_markdown_open` / `markdown_open_init_source`) unless an explicit option enables it. Publish behavior manifests and decorations only by default.
       - `tests/markdown_mode.rs`, `tests/manual_smoke_docs.rs`: Update assertions away from default panel labels.
     - References:
       - `docs/wiki/modules/server-driven-ui.md`
       - `docs/wiki/modules/slot-aware-package-ui.md`
       - `docs/wiki/modules/first-party-markdown-package.md`
+      - `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md` (deferred task 5 rationale)
   - Test Cases to Write:
-    - Runtime smoke fixture test: Markdown fixture loads mode/decorations without publishing a left-side Markdown preview/status `PanelContribution`.
-    - Runtime selected-file test: opening a Markdown file publishes behavior/decorations for the selected document without publishing the panel by default.
-    - Static guard: fixture sources do not contain `Windows Markdown Open Dialog Smoke`, `Markdown Preview`, or default `publishTree(...)` panel code.
+    - `markdown_default_load_does_not_publish_side_panel`: Verifies fixture and package load paths produce no default panel.
+    - `markdown_optional_preview_is_valid_panel_contribution`: Verifies the optional preview helper, if called, produces a valid `clay:ui` `PanelContribution` with provenance.
+    - `selected_markdown_file_opens_without_default_panel`: Verifies selected-file activation (`connection.rs`) does not publish the side panel SDUI by default.
+    - `markdown_fixture_simplification_no_publishTree`: Verifies the simplified fixtures do not contain `publishTree(...)` panel code.
 
 - [ ] Keep the Windows open-file binding explicit and verify selected-file Markdown activation uses generic mode activation
   - Acceptance Criteria:

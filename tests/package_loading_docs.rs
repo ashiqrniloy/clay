@@ -79,12 +79,21 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
         );
     }
 
+    // Phase 18.5 added the planned inventory entry clay.packages.loadPackage to track
+    // the preferred target. The generic loader remains unimplemented; a planned entry
+    // with registry_public = false does not mean the loader ships. When loadPackage
+    // ships, its status will become runtime-backed and registry_public will become true.
     let one_line_loader_is_implemented = facade.contains("export function loadPackage(")
-        || embedded_facade.contains("export function loadPackage(")
-        || inventory.contains("clay.packages.loadPackage");
+        || embedded_facade.contains("export function loadPackage(");
     assert!(
         !one_line_loader_is_implemented,
-        "Phase 18.4 verified the generic one-line package loader remains unimplemented; update this test when loadPackage ships"
+        "The generic one-line package loader remains unimplemented; update this test when loadPackage ships as a runtime-backed facade export"
+    );
+
+    // The planned inventory entry must exist to track the gap.
+    assert!(
+        inventory.contains("clay.packages.loadPackage"),
+        "clay.packages.loadPackage must have a planned inventory entry tracking the preferred one-line target"
     );
 
     for source in [&package_guide, &package_loading, &wiki] {
@@ -130,9 +139,8 @@ fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback()
     let wiki = read("docs/wiki/modules/package-loading.md");
     let package_guide = read("docs/reference/packages/creating-packages.md");
     let markdown_docs = read("packages/markdown/docs/index.md");
-    let decision_log = read(
-        "decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md",
-    );
+    let decision_log =
+        read("decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md");
     let load_entry = read("packages/markdown/dist/load.js");
     let package_index = read("packages/markdown/dist/index.js");
 
@@ -182,7 +190,8 @@ fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback()
         "markdownLoadMode must reuse loadMarkdownPackage and must not declare an inline manifest"
     );
     assert!(
-        package_index.contains("export { loadMarkdownPackage, markdownLoadMode } from \"./load.js\""),
+        package_index
+            .contains("export { loadMarkdownPackage, markdownLoadMode } from \"./load.js\""),
         "package root index must re-export markdownLoadMode so the @clay/markdown fallback import resolves"
     );
 

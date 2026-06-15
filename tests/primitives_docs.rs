@@ -1888,6 +1888,10 @@ fn creating_packages_docs_mark_examples_by_status() {
         "**Implemented/runtime-backed component style example**",
         "**Planned/target default user setup**",
         "fixtures are validation tools, not the long-term user setup or shell/layout authoring convention",
+        "**Implemented/package-owned temporary fallback** (Phase 18.5, until `loadPackage` resolver ships)",
+        "**Implemented/runtime-backed Phase 18.5 no-default-panel example**",
+        "markdownLoadMode",
+        "Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption",
     ] {
         assert!(
             guide.contains(required),
@@ -1910,6 +1914,9 @@ fn creating_packages_docs_reject_package_ui_antipatterns() {
         "Provide CSS, HTML, script, draw callbacks, or native handles",
         "filesystem/network/shell/AI/WASM work without an approved permissioned API",
         "Add Markdown-specific Rust UI/layout branches for package behavior",
+        "Publish a default fixed panel from the package load path",
+        "Use the SDUI `publishTree` left-slot bridge as a user-facing panel authoring pattern",
+        "Hard-code a side panel position or width",
         "planned working-area/split-tree/slot-layout/state/override `clay:ui` snippets or planned configuration helpers as callable runtime code",
         "Treat `serverLoadPackage` as ordinary end-user package installation, enablement, or execution authority",
         "raw CSS, raw style strings, raw ops, native widget handles, Masonry widget constructors, client-side JavaScript, and native renderer callbacks",
@@ -2262,7 +2269,7 @@ fn phase18_4_package_guide_documents_input_action_state_and_configuration_apis()
         "fallback",
         "package-configuration",
         "diagnostics",
-        "Migration note for Phase 18.5 Markdown replanning",
+        "Phase 18.5 Markdown replanning",
         "loadPackage(\"@clay/markdown\")",
     ] {
         assert!(
@@ -2507,6 +2514,40 @@ fn phase18_2_shell_runtime_docs_mark_implemented_and_planned_surfaces() {
         assert!(
             backlog.contains(required),
             "primitive backlog must record Phase 18.2 implementation/planned status: {required}"
+        );
+    }
+}
+
+#[test]
+fn creating_packages_docs_cover_phase18_5_shell_layout_examples() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption",
+        "No default fixed panel",
+        "defaultVisibility: \"hidden\"",
+        "PaneSlotLayout.main",
+        "Optional preview as a `PanelContribution`",
+        "Theme token usage for panel styling",
+        "`setPackageOption` and `serverSetLayoutOverride` for customization",
+        "Package-owned fallback entry while `loadPackage` is deferred",
+        "Implemented/runtime-backed Phase 18.5 no-default-panel example",
+        "markdown.preview",
+        "slot: \"right\"",
+        "kind: \"fixed\"",
+        "defaultVisibility: \"hidden\"",
+        "markdown.togglePreview",
+        "editor occupies `PaneSlotLayout.main`",
+        "does not publish a default fixed panel on load",
+        "`PanelContribution` targeting the `right` slot",
+        "user can enable preview through `setPackageOption` or `serverSetLayoutOverride`",
+        "preview panel styling uses `PackageThemeTokenDeclaration`",
+        "consumes only generic shell/layout/UI/configuration primitives",
+        "no Markdown-specific Rust branches",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must cover Phase 18.5 shell/layout authoring contract: {required}"
         );
     }
 }

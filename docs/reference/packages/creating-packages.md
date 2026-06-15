@@ -126,7 +126,7 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.2 | Document implemented internal shell root, `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` runtime behavior while keeping public `clay:ui` package APIs marked planned/unavailable. |
 | Phase 18.3 | Document runtime-backed public APIs for slot-aware `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration` registration, examples, diagnostics, package metadata, package permissions, and generated registry/API coverage. |
 | Phase 18.4 | Document implemented `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, and package option customization APIs; verify the one-line `loadPackage("@clay/markdown")` default loader remains a planned generic package-service gap rather than a shipped end-user API. |
-| Phase 18.5 | Update first-party Markdown package docs to consume the generic shell/layout APIs and remove fixture-only UI guidance from user-facing defaults. |
+| Phase 18.5 | Document the Phase 18.5 authoring contract: no default fixed panel unless explicitly registered, optional preview as `PanelContribution` with `defaultVisibility: "hidden"`, main editor placement via `PaneSlotLayout.main`, theme token usage, and `setPackageOption`/`serverSetLayoutOverride` customization. Update Markdown package docs to consume generic shell/layout primitives and remove fixture-only UI guidance from user-facing defaults. |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.4 `serverRegisterInputContribution`, `serverRegisterUiStateScope`, `serverSetLayoutOverride`, and `setPackageOption` examples are also runtime-backed public APIs. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and the future `loadPackage("@clay/markdown")` one-line loader remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
@@ -859,6 +859,104 @@ Decoration span example:
 
 Packages should translate parser-specific output into generic Clay decoration spans. Rust should not branch on Markdown-specific token names.
 
+## Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption
+
+Phase 18.5 replanned Markdown end-user loading around the generic shell/package primitives promoted in Phases 18.1–18.4. The key authoring contract changes are:
+
+1. **No default fixed panel.** Packages do not publish a default fixed panel on load. A package that offers a preview, status, or auxiliary panel registers it as a `PanelContribution` with `defaultVisibility: "hidden"`. The panel appears only when the user explicitly enables it through `setPackageOption`, `serverSetLayoutOverride`, or a package command.
+
+2. **Main editor placement via `PaneSlotLayout.main`.** The editor always occupies the mandatory `main` slot. Packages do not need to request or register this; Clay places the active editor in `main` by default. Package-owned panels target optional fixed slots (`left`, `right`, `top`, `bottom`).
+
+3. **Optional preview as a `PanelContribution`.** A package preview panel is a `PanelContribution` targeting a Clay slot (e.g., `right`) with `defaultVisibility: "hidden"`. The package registers the contribution at load time; the shell validates it, composes it into `PaneSlotLayout`, and keeps it hidden until a user or package action changes visibility.
+
+4. **Theme token usage for panel styling.** Preview and panel styles use `PackageThemeTokenDeclaration` with same-type core fallbacks (e.g., `markdown.preview.background` → `surface.panel`). Raw CSS, raw colors, and renderer callbacks remain prohibited.
+
+5. **`setPackageOption` and `serverSetLayoutOverride` for customization.** User configuration changes preview visibility, slot, split ratio, or theme token mapping through documented Clay JS APIs, not through hidden JSON/TOML/ad hoc keys.
+
+6. **Package-owned fallback entry while `loadPackage` is deferred.** The generic `loadPackage("@clay/markdown")` one-line resolver is deferred (see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`). The package-owned `markdownLoadMode()` entry consumes implemented generic primitives internally and is the documented temporary fallback.
+
+**Implemented/runtime-backed Phase 18.5 no-default-panel example** (Markdown as a consumer of generic primitives):
+
+```ts
+import { serverRegisterPanelContribution } from "clay:ui";
+import { serverRegisterThemeToken } from "clay:ui";
+import { setPackageOption } from "clay:configuration";
+import { serverRegisterCommand } from "clay:commands";
+
+// Register the toggle command first (actions target registered commands).
+serverRegisterCommand({
+  id: "markdown.togglePreview",
+  label: "Toggle Markdown Preview",
+  routing: "ServerFirst",
+});
+
+// Declare theme tokens for preview panel styling.
+serverRegisterThemeToken(manifest, {
+  token: "markdown.preview.background",
+  type: "color-role",
+  fallback: "surface.panel",
+  description: "Markdown preview panel background",
+});
+
+// Register the optional preview panel. Hidden by default.
+// The editor is always in PaneSlotLayout.main; this panel targets the right slot.
+serverRegisterPanelContribution(manifest, {
+  id: "markdown.preview",
+  slot: "right",
+  kind: "fixed",
+  defaultVisibility: "hidden",
+  actionTargets: ["markdown.togglePreview"],
+  component: {
+    kind: "panel",
+    id: "markdown.preview.root",
+    title: "Preview",
+    style: { background: "markdown.preview.background", padding: "spacing.panel" },
+    children: [
+      { kind: "label", id: "markdown.preview.empty", text: "Preview unavailable" },
+    ],
+  },
+});
+```
+
+**User enables preview from `init.js`** (implemented/runtime-backed configuration APIs):
+
+```js
+import { markdownLoadMode } from "@clay/markdown";
+import { setPackageOption } from "clay:configuration";
+import { serverSetLayoutOverride } from "clay:ui";
+import { bindKey } from "clay:keybindings";
+
+await markdownLoadMode();
+
+// Optional: show the preview panel by default
+setPackageOption({
+  packagePrefix: "markdown",
+  option: "layout.defaultVisibility",
+  value: "visible",
+  source: "init-js",
+});
+
+// Optional: move the preview to the left slot
+serverSetLayoutOverride({
+  targetId: "markdown.preview",
+  property: "slot",
+  value: "left",
+  source: "user-config",
+});
+
+// Separate explicit Ctrl+O binding for file open
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+```
+
+Performance rule remains: package UI/layout declaration, validation, panel registration, theme token declaration, and configuration evaluation are startup/load/configuration-time work. No package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+
+Anti-patterns for Phase 18.5:
+- Do not publish a default fixed panel from the package load path; optional panels start hidden.
+- Do not hard-code a side panel position or width; let the shell compose `PaneSlotLayout` from the declared `slot` and user overrides.
+- Do not use the SDUI `publishTree` left-slot bridge as a user-facing panel authoring pattern; it is a Clay-owned internal compatibility bridge.
+- Do not add Markdown-specific Rust shell/layout/input/state/config branches.
+- Do not present `serverLoadPackage(packageJson)` as the ordinary end-user load path.
+
 ## Phase 18.4 authoring contract summary
 
 Package authors should treat input, actions, state, and configuration as one validated contract:
@@ -870,7 +968,7 @@ Package authors should treat input, actions, state, and configuration as one val
 - Declare `package-configuration` when package defaults or options change behavior, and keep package-owned IDs package-prefixed.
 - Expect diagnostics to preserve package name, version, `apiPrefix`, primitive category, contribution ID, target, payload estimate, failed precedence rule, and failed validation rule.
 - Keep validation/publication/configuration work at startup, package load, configuration reload, explicit command handling, or explicit UI update time. No package JavaScript, package parsing, configuration evaluation, raw IPC wait, full-document serialization, or package-authored native widget mutation may run in Masonry paint/layout/pointer/scroll/key/text-event hot paths.
-- Migration note for Phase 18.5 Markdown replanning: first-party Markdown preview/status/input/state/configuration should consume these generic APIs and the future one-line `loadPackage("@clay/markdown")` loader when it ships; it should not add Markdown-specific Rust shell/input/state/config branches or fixture-only user setup.
+- Phase 18.5 Markdown replanning: first-party Markdown preview/status/input/state/configuration consumes these generic APIs. The package-owned `markdownLoadMode()` fallback entry consumes `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, and `serverRegisterParseHandler` internally; the optional preview is a `PanelContribution` with `defaultVisibility: "hidden"` targeting the `right` slot; user customization uses `setPackageOption` and `serverSetLayoutOverride`; no default fixed panel is published on load. See the Phase 18.5 authoring contract section above.
 
 Deferred surfaces remain explicit: durable state-value mutation, persisted workspace/document/user-config storage, pane selector syntax, multi-panel ordering, overlay z-order, cross-window layout behavior, direct working-area/split/pane-slot mutation, and package enable/disable from configuration are planned/deferred until separate documented APIs ship.
 
@@ -952,6 +1050,9 @@ Do not:
 - Provide CSS, HTML, script, draw callbacks, or native handles.
 - Do filesystem/network/shell/AI/WASM work without an approved permissioned API.
 - Add Markdown-specific Rust UI/layout branches for package behavior.
+- Publish a default fixed panel from the package load path; optional panels should start with `defaultVisibility: "hidden"`.
+- Use the SDUI `publishTree` left-slot bridge as a user-facing panel authoring pattern; it is a Clay-owned internal compatibility bridge.
+- Hard-code a side panel position or width; let the shell compose `PaneSlotLayout` from the declared `slot` and user overrides.
 - Treat smoke fixtures as user-facing setup instructions.
 - Treat planned working-area/split-tree/slot-layout/state/override `clay:ui` snippets or planned configuration helpers as callable runtime code before public API docs, docs-index links, generated registry entries, and backing ops ship. In current Phase 18.4 wording, this means planned working-area/split-tree/direct pane-slot/state-value mutation snippets, package enable/disable helpers, or any undocumented configuration helper.
 - Treat `serverLoadPackage` as ordinary end-user package installation, enablement, or execution authority.
@@ -968,16 +1069,29 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Target Markdown package behavior:
+**Implemented/package-owned temporary fallback** (Phase 18.5, until `loadPackage` resolver ships):
+
+```js
+import { markdownLoadMode } from "@clay/markdown";
+import { bindKey } from "clay:keybindings";
+
+await markdownLoadMode();
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+```
+
+Target Markdown package behavior (Phase 18.5 authoring contract):
 
 - registers `markdown` major mode
 - matches `.md`, `.markdown`, `.mdown`, and `text/markdown`
 - registers Markdown parser/decorator handler
 - publishes syntax decorations with style tokens
 - registers package commands such as `markdown.togglePreview`
-- defaults to editor-only `main` layout
-- offers preview/status as optional shell-aware panel contributions later
-- does not publish a smoke/status side panel by default
+- defaults to editor-only `main` layout; the editor occupies `PaneSlotLayout.main`
+- does not publish a default fixed panel on load
+- offers preview/status as an optional `PanelContribution` targeting the `right` slot with `defaultVisibility: "hidden"`
+- user can enable preview through `setPackageOption` or `serverSetLayoutOverride`
+- preview panel styling uses `PackageThemeTokenDeclaration` with same-type core fallbacks
+- consumes only generic shell/layout/UI/configuration primitives; no Markdown-specific Rust branches
 
 Current Markdown smoke/configuration fixtures may still validate package metadata, parse/decorations, and inert SDUI preview/status publication. Those fixtures are validation tools, not the long-term user setup or shell/layout authoring convention.
 
