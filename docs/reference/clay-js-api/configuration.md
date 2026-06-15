@@ -98,6 +98,38 @@ Dialog behavior in this phase uses fixed defaults, not hidden `init.js` keys: Wi
 
 Configuration remains server startup/load-time work. Pressing the configured key uses client-local manifest routing and then an explicit native UI command; ordinary keypress, paint, scroll, layout, text-event, edit acknowledgement, and Markdown decoration rendering paths do not execute configuration JavaScript. This configuration route does not grant arbitrary filesystem authority, package installation or enable/disable authority, shell, network, AI, WASM, raw Deno ops, workspace expansion, or client-side JavaScript authority.
 
+## Phase 18.5 Markdown end-user loading configuration audit
+
+Phase 18.5 task 8 (plan `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`) closes the configuration audit for Markdown end-user loading. Every behavior-changing Markdown configuration surface from the replan is either a fully documented runtime-backed Clay JS API or an explicitly planned/unavailable API. No undocumented configuration keys are introduced.
+
+Markdown need → Clay JS API mapping:
+
+| Markdown need | Clay JS API | Status | Custom properties |
+|---|---|---|---|
+| Markdown package options (`layout.defaultVisibility`, `layout.defaultSlot`, `layout.splitRatio`, `input.default`, `action.default`, `themeTokenRemap`, `fallback`) | [`clay.configuration.setPackageOption`](configuration/set-package-option.md) | runtime-backed | `packagePrefix`, `option`, `value`, `source` |
+| Markdown layout overrides (`slot`, `visibility`, `splitRatio`, `themeToken`, `inputDefault`, `actionDefault`, `fallback`) for targets such as `markdown.preview` | [`clay.ui.serverSetLayoutOverride`](ui/server-set-layout-override.md) | runtime-backed | `targetId`, `property`, `value`, `source` |
+| Markdown theme-token declarations (`markdown.preview.background`, `markdown.preview.padding`, `markdown.heading.1`, ...) | [`clay.ui.serverRegisterThemeToken`](ui/server-register-theme-token.md) | runtime-backed | `token`, `type`, `fallback`, `description`, `source` |
+| Markdown panel visibility defaults (e.g., `markdown.preview` with `defaultVisibility: "hidden"`) | [`clay.ui.serverRegisterPanelContribution`](ui/server-register-panel-contribution.md) | runtime-backed | `id`, `slot`, `kind`, `defaultVisibility`, `component`, `actionTargets` |
+| Markdown input routing defaults | [`clay.ui.serverRegisterInputContribution`](ui/server-register-input-contribution.md) | runtime-backed | `id`, `scope`, `componentId`, `pointer.*`, `focus.*`, `actionTargets` |
+| Markdown UI state scopes | [`clay.ui.serverRegisterUiStateScope`](ui/server-register-ui-state-scope.md) | runtime-backed | `id`, `scope`, `owner`, `lifetime`, `persistence`, `valueSchema.kind` |
+| Markdown file-dialog key binding | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | runtime-backed | `key`, `commandId`, `scope` |
+| Markdown mode activation preference | `clay.configuration.setModePreference` | planned (unavailable) | n/a |
+| Markdown decoration theme preference | `clay.configuration.setDecorationTheme` | planned (unavailable) | n/a |
+| Markdown parse policy (timeout, windows, memory budget) | `clay.configuration.setParsePolicy` | planned (unavailable); parse-handler policy fields are validated through [`clay.parse.serverRegisterParseHandler`](parse/server-register-parse-handler.md) | n/a |
+| One-line package loading | `clay.packages.loadPackage` | planned (unavailable); see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`; package-owned `markdownLoadMode()` is the documented fallback | n/a |
+
+Markdown-specific hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through one of the documented APIs above with the package-owned prefix and a supported option/property name:
+
+- `preview.position`, `preview.defaultVisibility`, `preview.slot`
+- `layout.preview.defaultSlot`, `layout.preview.defaultVisibility`, `layout.preview.splitRatio`
+- `theme.markdown.heading.1`, `theme.markdown.preview.background`, raw token override keys
+- `markdown.sidebar.width`, ad hoc sidebar/layout/style keys
+- Unregistered action keys, ad hoc input routing keys, ad hoc state-blob keys
+
+The default Markdown load path (through the package-owned `markdownLoadMode()` fallback until the generic `clay.packages.loadPackage` resolver ships) does not publish a default side panel: the optional Markdown preview is a package `PanelContribution` with `defaultVisibility: "hidden"` targeting the `right` slot, shown only through `setPackageOption` or `serverSetLayoutOverride`. Markdown package options such as `markdown.layout.defaultVisibility` and `markdown.layout.defaultSlot` go through `clay.configuration.setPackageOption`; Markdown layout overrides such as `markdown.preview` `visibility`/`themeToken` go through `clay.ui.serverSetLayoutOverride`; Markdown theme tokens go through `clay.ui.serverRegisterThemeToken`. None of these APIs grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw Deno ops / raw ops, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, or client-side JavaScript authority.
+
+Configuration evaluation for Markdown end-user loading remains startup, package-load, configuration-change, or explicit setting-change work only. Markdown keypress, paint, scroll, layout, text-event, edit acknowledgement, parse-result publication, and decoration rendering paths do not execute configuration JavaScript, recompute package options from user code, or mutate native layout from package code.
+
 ## Example Configuration
 
 ```js

@@ -2560,3 +2560,333 @@ fn phase18_5_public_rust_surfaces_have_clay_js_mapping_or_internal_visibility() 
         );
     }
 }
+
+#[test]
+fn phase18_5_configuration_surfaces_are_documented_or_planned() {
+    // Phase 18.5 task 8: closes the Markdown end-user loading configuration audit.
+    // Every behavior-changing Markdown configuration surface is either a runtime-backed
+    // Clay JS API (with docs/index/registry/custom_properties/security notes) or an
+    // explicitly planned/unavailable inventory entry. No undocumented keys are introduced.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let registry_links = docs_index_registry_links();
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing inventory entry {id}"))
+    };
+
+    // Implemented runtime-backed Markdown-relevant configuration surfaces.
+    // Each must be runtime-backed, registry-public, have per-API docs linked
+    // from docs/index.md, have non-empty custom_properties, deny prohibited
+    // authorities, and export the function through its facade.
+    let implemented_markdown_surfaces = [
+        (
+            "clay.configuration.setPackageOption",
+            "docs/reference/clay-js-api/configuration/set-package-option.md",
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "docs/reference/clay-js-api/ui/server-set-layout-override.md",
+        ),
+        (
+            "clay.ui.serverRegisterThemeToken",
+            "docs/reference/clay-js-api/ui/server-register-theme-token.md",
+        ),
+        (
+            "clay.ui.serverRegisterPanelContribution",
+            "docs/reference/clay-js-api/ui/server-register-panel-contribution.md",
+        ),
+        (
+            "clay.ui.serverRegisterInputContribution",
+            "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
+        ),
+        (
+            "clay.ui.serverRegisterUiStateScope",
+            "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
+        ),
+    ];
+
+    for (id, doc_path) in implemented_markdown_surfaces {
+        let entry = entry_by_id(id);
+        let status = entry.get("status");
+        assert!(
+            status == "runtime-backed" || status == "runtime-backed-command",
+            "Markdown-relevant surface {id} must be runtime-backed, got {status}"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "true",
+            "Markdown-relevant surface {id} must be registry public"
+        );
+        let full_doc = root.join(doc_path);
+        assert!(
+            full_doc.exists(),
+            "Markdown-relevant surface {id} per-API doc must exist at {doc_path}"
+        );
+        assert!(
+            registry_links.contains(doc_path),
+            "Markdown-relevant surface {id} must be linked from docs/index.md registry section"
+        );
+        let custom_props = inventory_custom_property_names(entry.get("custom_properties"));
+        assert!(
+            !custom_props.is_empty(),
+            "Markdown-relevant surface {id} must list non-empty custom_properties"
+        );
+        for denied in [
+            "filesystem",
+            "network",
+            "shell",
+            "extension loading",
+            "WASM",
+            "client-side JavaScript",
+            "raw Deno ops",
+        ] {
+            assert!(
+                entry.get("security_notes").contains(denied),
+                "Markdown-relevant surface {id} security_notes must deny {denied}"
+            );
+        }
+        assert!(
+            facade_exports_function(entry.get("facade_path"), entry.get("js_export")),
+            "Markdown-relevant surface {id} facade must export the function"
+        );
+    }
+
+    // Planned/unavailable Markdown-relevant configuration surfaces must remain planned.
+    for planned_id in [
+        "clay.configuration.setModePreference",
+        "clay.configuration.setDecorationTheme",
+        "clay.configuration.setParsePolicy",
+        "clay.packages.loadPackage",
+    ] {
+        let entry = entry_by_id(planned_id);
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "Markdown-relevant deferred surface {planned_id} must remain planned"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "Markdown-relevant deferred surface {planned_id} must not be registry public"
+        );
+    }
+
+    // configuration.md must document the Phase 18.5 audit table mapping Markdown
+    // needs to generic Clay JS APIs.
+    for phrase in [
+        "Phase 18.5 Markdown end-user loading configuration audit",
+        "Markdown need",
+        "defaultVisibility: \"hidden\"",
+        "clay.configuration.setPackageOption",
+        "clay.ui.serverSetLayoutOverride",
+        "clay.ui.serverRegisterThemeToken",
+        "clay.ui.serverRegisterPanelContribution",
+        "clay.configuration.setModePreference",
+        "clay.configuration.setDecorationTheme",
+        "clay.configuration.setParsePolicy",
+        "clay.packages.loadPackage",
+    ] {
+        assert!(
+            configuration_doc.contains(phrase),
+            "configuration.md Phase 18.5 audit must reference {phrase}"
+        );
+    }
+}
+
+#[test]
+fn phase18_5_configuration_apis_have_custom_properties() {
+    // Phase 18.5 task 8: behavior-changing Markdown-relevant configuration APIs
+    // have typed custom_properties with type/default/allowed-value metadata in
+    // their per-API docs and the generated registry.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let entry_by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing inventory entry {id}"))
+    };
+
+    // For each Markdown-relevant runtime-backed API, verify the per-API doc has
+    // YAML frontmatter custom_properties with name+type+default for each entry.
+    for (id, doc_path, required_props) in [
+        (
+            "clay.configuration.setPackageOption",
+            "docs/reference/clay-js-api/configuration/set-package-option.md",
+            vec!["packagePrefix", "option", "value", "source"],
+        ),
+        (
+            "clay.ui.serverSetLayoutOverride",
+            "docs/reference/clay-js-api/ui/server-set-layout-override.md",
+            vec!["targetId", "property", "value", "source"],
+        ),
+        (
+            "clay.ui.serverRegisterThemeToken",
+            "docs/reference/clay-js-api/ui/server-register-theme-token.md",
+            vec!["token", "type", "fallback", "description", "source"],
+        ),
+        (
+            "clay.ui.serverRegisterPanelContribution",
+            "docs/reference/clay-js-api/ui/server-register-panel-contribution.md",
+            vec!["id", "slot", "kind", "defaultVisibility", "component"],
+        ),
+    ] {
+        let entry = entry_by_id(id);
+        let inventory_props = inventory_custom_property_names(entry.get("custom_properties"));
+        for prop in &required_props {
+            assert!(
+                inventory_props.iter().any(|name| name == prop),
+                "inventory for {id} must list custom_property {prop}"
+            );
+        }
+        let doc_text = fs::read_to_string(root.join(doc_path))
+            .unwrap_or_else(|err| panic!("read {doc_path}: {err}"));
+        // Parse the YAML frontmatter custom_properties block as lines so the
+        // test works for both LF and CRLF line endings.
+        let doc_lines: Vec<&str> = doc_text.lines().collect();
+        for prop in &required_props {
+            let header = format!("  - name: {prop}");
+            let start = doc_lines
+                .iter()
+                .position(|line| line.trim_end() == header)
+                .unwrap_or_else(|| {
+                    panic!("{id} per-API doc {doc_path} must declare frontmatter custom_property entry for {prop}")
+                });
+            // Take lines until the next `  - name:` (next property), a blank line,
+            // or the frontmatter close `---`.
+            let mut block: Vec<&str> = Vec::new();
+            for line in doc_lines.iter().skip(start + 1) {
+                let trimmed = line.trim_end();
+                if trimmed.starts_with("  - name:")
+                    || trimmed == "---"
+                    || trimmed.is_empty()
+                    || (!trimmed.starts_with(' ') && !trimmed.is_empty())
+                {
+                    break;
+                }
+                block.push(line);
+            }
+            let block_text = block.join("\n");
+            assert!(
+                block_text.contains("type:"),
+                "{id} custom_property {prop} must declare a type"
+            );
+            assert!(
+                block_text.contains("default:"),
+                "{id} custom_property {prop} must declare a default"
+            );
+        }
+    }
+
+    // serverRegisterPanelContribution must declare defaultVisibility allowed
+    // values (visible|hidden|collapsed) so the Markdown preview can be hidden
+    // by default through this documented typed field, not a hidden key.
+    let panel_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/ui/server-register-panel-contribution.md"),
+    )
+    .expect("read panel contribution doc");
+    assert!(
+        panel_doc.contains("`visible`, `hidden`, or `collapsed`"),
+        "serverRegisterPanelContribution must document defaultVisibility allowed values"
+    );
+}
+
+#[test]
+fn phase18_5_docs_reject_hidden_markdown_config_keys() {
+    // Phase 18.5 task 8: hidden/ad hoc Markdown configuration keys remain
+    // rejected by policy and are explicitly identified in configuration docs.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let configuration_wiki =
+        fs::read_to_string(root.join("docs/wiki/modules/configuration-runtime.md"))
+            .expect("read configuration runtime wiki");
+
+    // Markdown-specific hidden keys that must be identified as rejected or
+    // planned-only in the Phase 18.5 audit and the configuration wiki.
+    let markdown_hidden_keys = [
+        "preview.position",
+        "preview.defaultVisibility",
+        "layout.preview.defaultSlot",
+        "layout.preview.defaultVisibility",
+        "theme.markdown.heading.1",
+        "theme.markdown.preview.background",
+        "markdown.sidebar.width",
+    ];
+
+    for hidden_key in markdown_hidden_keys {
+        assert!(
+            configuration_doc.contains(hidden_key),
+            "configuration.md must identify Markdown hidden key `{hidden_key}` as rejected or planned-only"
+        );
+    }
+
+    // A representative subset must also appear in the configuration runtime wiki
+    // so internal-vs-public boundary docs stay aligned.
+    for wiki_hidden_key in [
+        "preview.position",
+        "layout.preview.defaultSlot",
+        "theme.markdown.heading.1",
+        "theme.markdown.preview.background",
+        "markdown.sidebar.width",
+    ] {
+        assert!(
+            configuration_wiki.contains(wiki_hidden_key),
+            "configuration-runtime.md must identify Markdown hidden key `{wiki_hidden_key}` as rejected"
+        );
+    }
+
+    // The per-API docs for setPackageOption and serverSetLayoutOverride must
+    // explicitly reject hidden keys (covered for general hidden-key rejection
+    // in Phase 18.4; this Phase 18.5 test confirms Markdown-relevant coverage).
+    let set_option_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/configuration/set-package-option.md"),
+    )
+    .expect("read set-package-option.md");
+    let layout_override_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/ui/server-set-layout-override.md"),
+    )
+    .expect("read server-set-layout-override.md");
+    for phrase in ["hidden", "raw ops", "client-side JavaScript"] {
+        assert!(
+            set_option_doc.contains(phrase),
+            "set-package-option.md must reject {phrase}"
+        );
+        assert!(
+            layout_override_doc.contains(phrase),
+            "server-set-layout-override.md must reject {phrase}"
+        );
+    }
+
+    // The setPackageOption doc must reject hidden option keys specifically.
+    assert!(
+        set_option_doc.contains("hidden option keys"),
+        "set-package-option.md must reject hidden option keys"
+    );
+
+    // The serverSetLayoutOverride doc must reject hidden layout keys specifically.
+    assert!(
+        layout_override_doc.contains("hidden layout"),
+        "server-set-layout-override.md must reject hidden layout keys"
+    );
+
+    // The Phase 18.5 audit section must reject Markdown-specific hidden/ad hoc keys.
+    for phrase in [
+        "Markdown-specific hidden/ad hoc configuration keys",
+        "rejected by policy",
+        "package-owned prefix",
+    ] {
+        assert!(
+            configuration_doc.contains(phrase),
+            "configuration.md Phase 18.5 audit must state {phrase}"
+        );
+    }
+}

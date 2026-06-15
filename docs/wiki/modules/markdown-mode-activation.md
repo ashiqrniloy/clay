@@ -121,6 +121,7 @@ mode-specific knowledge.
 - **No Markdown-named fields on `EditorBehaviorRules`.** The old `markdown_transforms: Option<MarkdownTransformRules>` field has been removed.
 - **JS package owns all Markdown-specific data.** Marker strings, pair delimiters, command IDs, key bindings, parser adapter path, large-file thresholds, fallback mode names, and markdown-it SDUI parse status are declared in `dist/index.js`, `dist/load.js`, `dist/parser.js`, and `dist/sdui.js`.
 - **Editor ops are JSON-in, generic-types-out.** `parse_editor_rules`, `parse_enter_rule`, `parse_pair_rule` handle JSON → `EnterRule`/`PairRule` with no mode awareness.
+- **Phase 18.5 package-owned one-line fallback loader.** `markdownLoadMode()` in `packages/markdown/dist/load.js` (re-exported from `./dist/index.js`) imports the `clay:packages`, `clay:modes`, `clay:commands`, and `clay:parse` facades directly and reuses `loadMarkdownPackage`. It is the documented temporary end-user fallback `import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();` while the generic `loadPackage("@clay/markdown")` specifier resolver is deferred (see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`). Mode activation, command registration, and parse-handler registration inside that fallback all go through the same generic ops above — no mode-specific Rust branch is added by the fallback entry.
 
 ## Security
 

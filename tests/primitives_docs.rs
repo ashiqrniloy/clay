@@ -3500,3 +3500,89 @@ fn primitive_public_api_stubs_exist_with_required_phase16_metadata() {
         );
     }
 }
+
+#[test]
+fn phase18_5_markdown_wiki_documents_default_load_and_no_default_panel() {
+    // Phase 18.5 (plans/028 Task 11) updates the Markdown implementation wiki
+    // so the default load path, the deferred loadPackage gap, the
+    // no-default-panel/optional-preview contract, and generic primitive
+    // consumption cannot be orphaned from the code wiki.
+    let markdown_package = fs::read_to_string(repository_path(
+        "docs/wiki/modules/first-party-markdown-package.md",
+    ))
+    .expect("read first-party-markdown-package wiki");
+    let markdown_activation = fs::read_to_string(repository_path(
+        "docs/wiki/modules/markdown-mode-activation.md",
+    ))
+    .expect("read markdown-mode-activation wiki");
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+
+    // The Markdown package wiki documents the package-owned one-line fallback
+    // and the deferred generic loadPackage gap with its decision log.
+    for required in [
+        "markdownLoadMode",
+        "import { markdownLoadMode } from \"@clay/markdown\"",
+        "await markdownLoadMode();",
+        "loadPackage(\"@clay/markdown\")",
+        "decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md",
+        "ClayModuleLoader",
+        "canonical_local_file",
+        "security-critical module-loader bridge",
+    ] {
+        assert!(
+            markdown_package.contains(required),
+            "first-party-markdown-package wiki must document Phase 18.5 load path: {required}"
+        );
+    }
+
+    // The Markdown package wiki documents the no-default-panel / optional
+    // preview contract and generic primitive consumption.
+    for required in [
+        "PanelContribution",
+        "defaultVisibility: \"hidden\"",
+        "right",
+        "main",
+        "PaneSlotLayout",
+        "setPackageOption",
+        "serverSetLayoutOverride",
+        "no default side panel",
+        "no Markdown-specific Rust editor/parser/render/shell branch",
+    ] {
+        assert!(
+            markdown_package.contains(required),
+            "first-party-markdown-package wiki must document Phase 18.5 no-default-panel contract and generic primitive consumption: {required}"
+        );
+    }
+
+    // The Markdown package wiki links the Phase 18.5 primitive review.
+    assert!(
+        markdown_package.contains("phase18.5-markdown-replan-primitive-review.md"),
+        "first-party-markdown-package wiki must link the Phase 18.5 primitive review"
+    );
+
+    // The mode-activation wiki records the shared package-owned fallback
+    // loader entry and the deferral decision log.
+    for required in [
+        "markdownLoadMode()",
+        "import { markdownLoadMode } from \"@clay/markdown\"",
+        "loadPackage(\"@clay/markdown\")",
+        "decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md",
+    ] {
+        assert!(
+            markdown_activation.contains(required),
+            "markdown-mode-activation wiki must reference the shared fallback loader and deferral: {required}"
+        );
+    }
+
+    // The master index links both updated pages and mentions the Phase 18.5
+    // fallback / no-default-panel contract in the package page description.
+    assert!(
+        index.contains("modules/first-party-markdown-package.md")
+            && index.contains("modules/markdown-mode-activation.md"),
+        "wiki index must link both Markdown implementation pages"
+    );
+    assert!(
+        index.contains("markdownLoadMode") && index.contains("no-default-panel"),
+        "wiki index description for the Markdown package page must mention the Phase 18.5 fallback and no-default-panel contract"
+    );
+}
