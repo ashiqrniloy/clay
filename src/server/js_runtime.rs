@@ -2203,7 +2203,9 @@ mod tests {
     #[tokio::test]
     async fn markdown_large_file_status_reports_windowed_highlighting() {
         let root = config_fixture("markdown-large-file-windowed-status");
-        for file_name in ["index.js", "sdui.js"] {
+        // index.js re-exports from ./load.js (markdownLoadMode fallback entry),
+        // so the whole dist module graph must be copied for sdui.js to load.
+        for file_name in ["index.js", "sdui.js", "load.js"] {
             fs::write(
                 root.join(file_name),
                 fs::read_to_string(format!("packages/markdown/dist/{file_name}"))
@@ -2287,7 +2289,7 @@ mod tests {
     #[tokio::test]
     async fn markdown_degraded_status_contains_no_document_text_or_paths() {
         let root = config_fixture("markdown-degraded-status-sanitized");
-        for file_name in ["index.js", "sdui.js"] {
+        for file_name in ["index.js", "sdui.js", "load.js"] {
             fs::write(
                 root.join(file_name),
                 fs::read_to_string(format!("packages/markdown/dist/{file_name}"))
