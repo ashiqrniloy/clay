@@ -3,6 +3,8 @@
 > **Phase 18.5 Replan (2026-06-15):** This plan was rewritten by `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md` so that every task consumes the generic shell/package UI primitives promoted in Phases 18.1–18.4 (`WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, `PackageOwnedConfiguration`) instead of driving Markdown UI from fixture-only behavior. The mapping of every Markdown need to an existing generic primitive is recorded in `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`. The one-line loading target (`loadPackage("@clay/markdown")`) and the explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` binding remains separate from package loading (the one-line load and Ctrl+O separation is preserved). No Markdown-specific Rust editor/parser/render/shell branch is introduced by any task below.
 >
 > **Phase 18.6 dependency (2026-06-15):** Task 3 (one-line package loader) requires the Phase 18.6 `loadPackage("@clay/*")` resolver. The generic `loadPackage` was deferred from Phase 18.5 with a decision-log-backed rationale (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`). Until Phase 18.6 ships, the package-owned fallback (`import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();`) is the documented temporary end-user loading path. Task 3 should be revisited once Phase 18.6 is complete. Task 4 (remove default side panel) was deferred from Phase 18.5 because the Markdown package load path already does not publish a default side panel; the panel only exists in test fixtures and the `connection.rs` selected-file-open evaluation. This task now owns the full `clay:ui` `PanelContribution` conversion, fixture simplification, and `connection.rs` cleanup.
+>
+> **Phase 18.5 completion status (2026-06-15):** `plans/028` is complete except for task 10 (manual GUI smoke, a recurring non-interactive-session handoff) and the struck-through task 5 (folded into this plan's task 4). Tasks 1-9 and 11 (config audits, Clay JS API verification, package guide, code wiki) are done. The Phase 18.4 configuration API audit gap (`setPackageOption`, `serverSetLayoutOverride`) is closed. The generic `loadPackage` resolver still has **no dedicated Phase 18.6 plan**; until one ships, this plan's task 3 stays blocked on the `markdownLoadMode()` fallback. The unaddressed Compromises/Further Actions carried forward from `plans/024`-`028` (manual GUI smoke matrix, multi-pane/component population, pre-existing dead-code warnings, deferred durable persistence/pane-selector surfaces) are folded into the Compromises Made and Further Actions sections below.
 
 ## Objectives
 - Make the first-party Markdown mode usable through an end-user configuration surface that consumes generic shell/package primitives, instead of a smoke-fixture-only script that inlines a package manifest object and manually calls per-facade registration helpers.
@@ -392,6 +394,7 @@
       - Use focused tests during implementation plus final broad checks and manual Windows smoke: selected.
     - Chosen Approach:
       - Add focused regression tests per task, run targeted Cargo tests during execution (using `CARGO_TARGET_DIR=target/pi-verify` to avoid Windows target-directory locks), then perform final `cargo fmt --check`, relevant integration tests, and manual Windows `cargo run` validation.
+      - Fold in the manual GUI smoke matrix deferred from `plans/025`/`026`/`028` task 10: in addition to the Markdown end-user `cargo run` path, run the `cargo run -- smoke-gui` fixture variants (`markdown-mode`, `windows-markdown-open`, and the runtime-SDUI fixture) in an interactive desktop session and record operator observations for fixed panels, transient overlays, Markdown/package status, and Windows file-open behavior. These were never observed in non-interactive agent sessions and remain a developer handoff.
     - API Notes and Examples:
       ```text
       cargo fmt --check
@@ -405,6 +408,14 @@
       ```powershell
       cargo run
       # Click editor, press Ctrl+O, select a UTF-8 .md file, verify editor-only Markdown behavior/decorations in the main slot.
+      ```
+      ```text
+      # Deferred manual GUI smoke matrix (plans/025, 026, 028 task 10) — run in an interactive desktop session:
+      cargo run -- smoke-gui
+      cargo run -- smoke-gui --config-fixture runtime-sdui
+      cargo run -- smoke-gui --config-fixture markdown-mode
+      cargo run -- smoke-gui --config-fixture windows-markdown-open   # Windows 11
+      # Record: fixed-panel rendering, transient overlays, Markdown/package status, Ctrl+O file-open, editor-only main-slot behavior.
       ```
     - Files to Create/Edit:
       - `tests/markdown_mode.rs`: Simplified loader/no-panel/package-boundary tests.
@@ -423,6 +434,7 @@
     - `selected_markdown_file_uses_shared_default_loader_without_side_panel`
     - `arbitrary_external_package_imports_remain_denied`
     - Manual Windows 11: `cargo run`, configured real `~/.config/clay/init.js`, `Ctrl+O`, select Markdown file, verify editor-only view, decorations, responsive editing, and no save expectation.
+    - Manual GUI smoke matrix (deferred from `plans/025`/`026`/`028` task 10): run the `smoke-gui` fixture variants in an interactive desktop session and record operator observations for fixed panels, transient overlays, Markdown/package status, and Windows file-open behavior.
 
 - [ ] Update or verify the code wiki after implementation
   - Acceptance Criteria:
@@ -464,10 +476,18 @@
 
 ## Compromises Made
 - This plan was rewritten by Phase 18.5 (`plans/028`) to consume generic shell/package UI primitives. The original fixture-centric task language (inline `markdownPackage` manifest object, manual per-facade registration imports, `publishTree(...)` side panel, hard-coded `SIDEBAR_WIDTH`, root-level `EditorWidget` ownership) is replaced by generic `clay:ui` contribution and `PaneSlotLayout` language. See the Phase 18.5 header note at the top.
-- The one-line `loadPackage("@clay/markdown")` target is preserved as the preferred end-user convention. If a safe generic resolver cannot be implemented within the phase, a documented package-owned fallback that consumes generic primitives internally is acceptable and must be recorded in a decision log.
+- The one-line `loadPackage("@clay/markdown")` target is preserved as the preferred end-user convention. A safe generic resolver could not be implemented within Phase 18.5, so the gap was deferred with a decision-log-backed rationale (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`) and the package-owned `markdownLoadMode()` fallback (which consumes generic primitives internally) was shipped. This plan's task 3 stays blocked on a future Phase 18.6 resolver; until then the fallback is the documented temporary end-user path.
+- **Manual GUI smoke was never run in non-interactive agent sessions** (carried forward from `plans/025`, `026`, and `plans/028` task 10). Structural/editor/SDUI/config tests, manual smoke documentation guards, and the exact `smoke-gui` handoff commands cover the automated portion, but a developer with an interactive desktop session must still run the Markdown end-user `cargo run` path and the `smoke-gui` fixture matrix recorded in task 9.
+- **Multi-pane editor/component population and inter-pane action/focus routing remain deferred** shell work (carried forward from `plans/025` medium-priority and `plans/026` deferred items). This plan's optional Markdown preview renders as an implemented fixed `PanelContribution` in the `right` slot (native fixed-panel/overlay composition is wired in Phase 18.3), so it does not require the deferred multi-editor-pane semantics. If a future task needs a second live editor pane or inter-pane focus/action routing, it depends on that deferred shell work and is out of scope here.
+- **Pre-existing dead-code warnings remain** for internal SDUI/package UI observability and runtime helpers (e.g. `SduiObservableListItem`, `SduiAccessibleNode`, `PackageUiRuntimeUpdate`, unused fixed-slot/input-route constants, and `src/server/ui.rs` `fixed_slot_id`) — carried forward from `plans/025`, `026`, and `028`. They are pre-existing, internal, and not Markdown-specific; this plan must not introduce new warnings but does not undertake the cleanup.
+- **Durable state-value persistence, pane selectors, multi-panel ordering, overlay z-order, cross-window layout, and package enable/disable authority remain planned/deferred** (carried forward from `plans/027` and tracked by the `phase18_4_docs_mark_deferred_persistence_pane_selector_and_package_enable_surfaces` guard). Markdown preview visibility enabled through `setPackageOption` / `serverSetLayoutOverride` "persists" across restarts only via `~/.config/clay/init.js` re-execution, not a dedicated persistence layer; that is sufficient for this plan's optional-preview contract.
+- The no-hot-path-package-JS rule is preserved: all Markdown loading, contribution validation, configuration, and selected-file activation are startup/load/configuration/open-time work only.
 
 ## Further Actions
-- Close the `loadPackage` generic resolver gap (or document the fallback) as part of Phase 18.5 task 4.
-- Remove default `PanelContribution` publication from the Markdown package and fixtures as part of Phase 18.5 task 5.
-- Close the Phase 18.4 configuration API audit gap as part of Phase 18.5 task 6.
-- Update the package authoring guide and wiki after implementation verification passes.
+- **High priority — create the Phase 18.6 plan and implement the generic `loadPackage("@clay/*")` resolver** to close the one-line loader gap. No Phase 18.6 plan exists yet. The resolver must extend the deny-by-default `ClayModuleLoader` to load resolver-validated first-party `loadEntry` modules from outside the config root, add a `PackageService` resolve/enable/execute path and a new op, and ship with full docs/index/generated-registry/api-inventory/tests/Rust-visibility coverage and its own decision log. Once it ships, this plan's task 3 switches from the `markdownLoadMode()` fallback to `loadPackage("@clay/markdown")`. Decision source: `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`.
+- **Execute this plan's task 4** (remove default `PanelContribution` publication, convert `connection.rs` selected-file-open SDUI to behavior/decorations only, simplify fixtures) — this is the active handoff from `plans/028` deferred task 5 and is unblocked now that the Phase 18.5 primitive inventory and package guide are complete.
+- **Medium priority — run the manual GUI smoke matrix** deferred from `plans/025`/`026`/`028` task 10 in an interactive desktop session: the Markdown end-user `cargo run` path plus the `smoke-gui` fixture variants (`runtime-sdui`, `markdown-mode`, `windows-markdown-open`), recording operator observations for fixed panels, transient overlays, Markdown/package status, and Windows file-open behavior. Recorded as a test case in task 9.
+- **Medium priority — continue reducing or explicitly annotating** the pre-existing dead-code warnings for SDUI/package UI observability and runtime helpers (carried from `plans/025`/`026`/`028`) once their GUI/runtime call sites are fully wired. Out of scope for this plan but must not regress.
+- **Low priority — multi-pane editor/component population and inter-pane action/focus routing** (carried from `plans/025`/`026`) when public pane/component semantics land. Only relevant if Markdown ever needs a second live editor pane; the optional inert preview panel does not require it.
+- **Keep rerunning the Phase 18.1 architecture-gate verification suite** (`cargo fmt --check`, `primitives_docs`, `clay_js_api_inventory`, `clay_js_doc_registry`, `rust_visibility_api_mapping`) whenever shell/layout docs, inventory, package-guide sections, or wiki references change — carried forward from `plans/024`.
+- **Fill `plans/027`'s empty Compromises Made / Further Actions sections** — they still read "To be filled" despite all 12 tasks being complete. The deferred surfaces (durable persistence, pane selectors, multi-panel ordering, overlay z-order, cross-window layout, package enable/disable) are tracked by documentation guards but not yet summarized in that plan's closing sections. Doc-debt cleanup, not a code gap.

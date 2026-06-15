@@ -28,3 +28,32 @@ export function serverValidatePackagePermissions(permissions: unknown): unknown 
 export function serverLoadPackage(packageJson: unknown): unknown {
   return parse(requireOps().op_clay_packages_load_package(JSON.stringify(packageJson ?? null)));
 }
+
+/** Load and activate a first-party `@clay/*` package by specifier.
+ *
+ * This is the one-line default end-user package loader (e.g.
+ * `await loadPackage("@clay/markdown")` from `~/.config/clay/init.js`). It
+ * resolves + validates + enables the package through the authoritative
+ * PackageService path, then imports the package's declared `loadEntry` so the
+ * package registers its modes, commands, parse handlers, and decorations under
+ * Clay's authority. Only first-party `@clay/*` specifiers are accepted; all
+ * other authority (filesystem/network/shell/package-manager/enable-disable) is
+ * denied by the op and the module loader. */
+export async function loadPackage(specifier: string): Promise<unknown> {
+  if (typeof specifier !== "string") {
+    throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
+  }
+  const result = parse<{ loadEntrySpecifier: string }>(
+    requireOps().op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })),
+  );
+  // Import the validated on-disk loadEntry, then invoke its default export so
+  // the package activates (registers modes/commands/parse handlers) under Clay's
+  // authority. The loadEntry contract is: a module whose default export is the
+  // activation function. Curated `clay:` facade imports inside the loadEntry are
+  // always allowed by the module loader; no new authority is granted here.
+  const loadEntry = await import(result.loadEntrySpecifier);
+  if (typeof loadEntry.default === "function") {
+    await loadEntry.default();
+  }
+  return result;
+}

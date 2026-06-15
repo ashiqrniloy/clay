@@ -12,6 +12,7 @@ mod sdui;
 mod ui;
 mod workspace;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use deno_core::{OpState, extension, op2};
@@ -47,8 +48,8 @@ use self::{
         op_clay_modes_register_pattern,
     },
     packages::{
-        op_clay_packages_load_package, op_clay_packages_validate_manifest,
-        op_clay_packages_validate_permissions,
+        op_clay_packages_load_package, op_clay_packages_load_package_by_specifier,
+        op_clay_packages_validate_manifest, op_clay_packages_validate_permissions,
     },
     parse::op_clay_parse_register_parse_handler,
     planned::op_clay_runtime_unavailable,
@@ -62,8 +63,9 @@ use self::{
     workspace::op_clay_workspace_list_roots,
 };
 
+pub(crate) use self::packages::FirstPartyLoadEntryAllowlist;
+
 /// Server-owned state shared with explicit Clay JavaScript ops.
-#[derive(Debug)]
 pub(crate) struct ClayOpState {
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
@@ -76,6 +78,19 @@ pub(crate) struct ClayOpState {
     ui: Mutex<crate::server::ui::PackageUiRegistry>,
     workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
     runtime_document_id: crate::protocol::DocumentId,
+    // ponytail: PackageService reuse for the first-party resolver op. The store
+    // root and FakeBackend are never used by the resolver (it reads first-party
+    // packages from CARGO_MANIFEST_DIR/packages); only the validate/enable path
+    // (assemble_package_record + check_enabled_packages) is exercised. Upgrade
+    // path: a real on-disk registry/installer when non-`@clay/*` packages land.
+    first_party_packages: Mutex<crate::packages::service::PackageService>,
+    load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
+}
+
+impl std::fmt::Debug for ClayOpState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClayOpState").finish_non_exhaustive()
+    }
 }
 
 impl Default for ClayOpState {
@@ -109,6 +124,11 @@ impl ClayOpState {
             ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
             workspace,
             runtime_document_id,
+            first_party_packages: Mutex::new(crate::packages::service::PackageService::new(
+                PathBuf::new(),
+                Box::new(crate::packages::manager::FakeBackend::new()),
+            )),
+            load_entry_allowlist: Arc::new(FirstPartyLoadEntryAllowlist::default()),
         }
     }
 
@@ -120,6 +140,18 @@ impl ClayOpState {
 
     pub(super) fn runtime_document_id(&self) -> crate::protocol::DocumentId {
         self.runtime_document_id
+    }
+
+    /// Handle to the shared `PackageService` used by the first-party resolver
+    /// op for validation/enable/conflict checks.
+    pub(super) fn first_party_packages(&self) -> &Mutex<crate::packages::service::PackageService> {
+        &self.first_party_packages
+    }
+
+    /// Handle to the validated first-party `loadEntry` allowlist shared with
+    /// `ClayModuleLoader`.
+    pub(crate) fn load_entry_allowlist(&self) -> Arc<FirstPartyLoadEntryAllowlist> {
+        Arc::clone(&self.load_entry_allowlist)
     }
 
     pub(crate) fn records(&self) -> Vec<String> {
@@ -499,6 +531,7 @@ extension!(
         op_clay_packages_validate_manifest,
         op_clay_packages_validate_permissions,
         op_clay_packages_load_package,
+        op_clay_packages_load_package_by_specifier,
         op_clay_modes_register_pattern,
         op_clay_modes_classify_document,
         op_clay_modes_activate_major_mode,

@@ -177,3 +177,9 @@ export async function markdownLoadMode(options = {}) {
   };
   return loadMarkdownPackage(clay, options);
 }
+
+// Default activation entry. `loadPackage("@clay/markdown")` imports this module
+// (the declared `clay.loadEntry`) and invokes this default export so the
+// package's mode/commands/parse handler register under Clay's authority without
+// any per-primitive plumbing in user config.
+export default markdownLoadMode;

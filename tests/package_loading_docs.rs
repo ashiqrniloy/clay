@@ -80,53 +80,61 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
     }
 
     // Phase 18.5 added the planned inventory entry clay.packages.loadPackage to track
-    // the preferred target. The generic loader remains unimplemented; a planned entry
-    // with registry_public = false does not mean the loader ships. When loadPackage
-    // ships, its status will become runtime-backed and registry_public will become true.
+    // the preferred target. Phase 18.6 task 5 ships the loader as a runtime-backed
+    // facade export. While the loader is unimplemented the test pins the doc gap;
+    // once it ships the gap-phrase assertions are skipped (task 8 updates the docs
+    // to describe the implemented loader, then replaces this branch).
     let one_line_loader_is_implemented = facade.contains("export function loadPackage(")
-        || embedded_facade.contains("export function loadPackage(");
+        || facade.contains("export async function loadPackage(")
+        || embedded_facade.contains("export function loadPackage(")
+        || embedded_facade.contains("export async function loadPackage(");
     assert!(
-        !one_line_loader_is_implemented,
-        "The generic one-line package loader remains unimplemented; update this test when loadPackage ships as a runtime-backed facade export"
+        one_line_loader_is_implemented,
+        "The generic one-line package loader must ship as a runtime-backed facade export (`export ... function loadPackage`)"
     );
 
-    // The planned inventory entry must exist to track the gap.
+    // The planned inventory entry must exist to track the loader.
     assert!(
         inventory.contains("clay.packages.loadPackage"),
         "clay.packages.loadPackage must have a planned inventory entry tracking the preferred one-line target"
     );
 
-    for source in [&package_guide, &package_loading, &wiki] {
-        for phrase in [
-            "generic one-line loader is not implemented yet",
-            "generic loader/API gap",
-            "resolve an installed package specifier",
-            "enable the package",
-            "loadEntry",
-            "temporary validation/loading gap",
-        ] {
-            assert!(
-                source.contains(phrase),
-                "docs/wiki must identify current one-line loader gap phrase `{phrase}`"
-            );
+    // Gap-phrase assertions describe the pre-Phase-18.6 doc state; they are only
+    // meaningful while the loader is unimplemented. Task 8 replaces this branch
+    // with implemented-loader documentation coverage.
+    if !one_line_loader_is_implemented {
+        for source in [&package_guide, &package_loading, &wiki] {
+            for phrase in [
+                "generic one-line loader is not implemented yet",
+                "generic loader/API gap",
+                "resolve an installed package specifier",
+                "enable the package",
+                "loadEntry",
+                "temporary validation/loading gap",
+            ] {
+                assert!(
+                    source.contains(phrase),
+                    "docs/wiki must identify current one-line loader gap phrase `{phrase}`"
+                );
+            }
         }
-    }
 
-    assert!(
-        package_loading.contains("serverLoadPackage(packageJson)")
-            && package_loading.contains("rather than end-user package installation"),
-        "package loading reference must document serverLoadPackage as a validation helper/gap, not the default loader"
-    );
-    assert!(
-        package_guide.contains("Do not present `serverLoadPackage` as ordinary end-user setup"),
-        "package guide must keep the fixture-only serverLoadPackage fallback clear"
-    );
-    assert!(
-        wiki.contains("not the end-user one-line package loader")
-            && wiki.contains("fixture scripts")
-            && wiki.contains("explicitly temporary"),
-        "package loading wiki must document the default-loader gap"
-    );
+        assert!(
+            package_loading.contains("serverLoadPackage(packageJson)")
+                && package_loading.contains("rather than end-user package installation"),
+            "package loading reference must document serverLoadPackage as a validation helper/gap, not the default loader"
+        );
+        assert!(
+            package_guide.contains("Do not present `serverLoadPackage` as ordinary end-user setup"),
+            "package guide must keep the fixture-only serverLoadPackage fallback clear"
+        );
+        assert!(
+            wiki.contains("not the end-user one-line package loader")
+                && wiki.contains("fixture scripts")
+                && wiki.contains("explicitly temporary"),
+            "package loading wiki must document the default-loader gap"
+        );
+    }
 }
 
 #[test]

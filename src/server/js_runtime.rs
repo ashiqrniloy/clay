@@ -22,7 +22,7 @@ use crate::protocol::RuntimeDiagnostic;
 
 use super::{
     configuration::{ConfigurationError, ConfigurationRuntime},
-    ops::{ClayOpState, init_runtime_extension},
+    ops::{ClayOpState, FirstPartyLoadEntryAllowlist, init_runtime_extension},
     workspace::WorkspaceState,
 };
 
@@ -178,6 +178,17 @@ export function serverValidatePackagePermissions(permissions) {
 }
 export function serverLoadPackage(packageJson) {
   return parse(ops.op_clay_packages_load_package(JSON.stringify(packageJson ?? null)));
+}
+export async function loadPackage(specifier) {
+  if (typeof specifier !== "string") {
+    throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
+  }
+  const result = parse(ops.op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })));
+  const loadEntry = await import(result.loadEntrySpecifier);
+  if (typeof loadEntry.default === "function") {
+    await loadEntry.default();
+  }
+  return result;
 }
 "#;
 
@@ -533,6 +544,7 @@ fn evaluate_module_on_runtime(
             loaded_configuration.main_specifier.clone(),
             loaded_configuration.main_source.clone(),
             loaded_configuration.configuration.clone(),
+            op_state.load_entry_allowlist(),
         ))),
         extensions: vec![init_runtime_extension()],
         ..Default::default()
@@ -593,6 +605,12 @@ struct ClayModuleLoader {
     main_specifier: ModuleSpecifier,
     main_source: Option<String>,
     configuration: Option<Arc<ConfigurationRuntime>>,
+    // ponytail: shared validated first-party loadEntry gate. Populated by
+    // `op_clay_packages_load_package_by_specifier`, checked in resolve/load.
+    // The loader branches that consume it are added in Phase 18.6 task 4;
+    // until then it is threaded but unused, so the deny-by-default boundary
+    // is unchanged. Ceiling: one entry per loaded first-party package.
+    first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
 }
 
 impl ClayModuleLoader {
@@ -600,11 +618,13 @@ impl ClayModuleLoader {
         main_specifier: ModuleSpecifier,
         main_source: Option<String>,
         configuration: Option<Arc<ConfigurationRuntime>>,
+        first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
     ) -> Self {
         Self {
             main_specifier,
             main_source,
             configuration,
+            first_party_load_entry_allowlist,
         }
     }
 
@@ -632,6 +652,40 @@ impl ModuleLoader for ClayModuleLoader {
         if specifier == "markdown-it" {
             return ModuleSpecifier::parse(MARKDOWN_IT_MODULE_SPECIFIER)
                 .map_err(|error| Self::denied(&error.to_string()).into());
+        }
+        // First-party validated `loadEntry`: opaque `clay://packages/...`
+        // specifiers recorded by `op_clay_packages_load_package_by_specifier`.
+        // This branch sits BEFORE the config-root branch because
+        // `reject_non_local_specifier` would otherwise deny `clay://` URLs; the
+        // shared allowlist is the single gate, so only a specifier the resolver
+        // op validated and recorded ever resolves here. Every other
+        // `clay://packages/...` URL falls through to config-root confinement
+        // (which rejects non-local specifiers) and the deny fallback.
+        // ponytail: authority ceiling is first-party `@clay/*` loadEntry only.
+        // Upgrade path: non-`@clay/*` registry packages are deferred to Phase 23
+        // ecosystem hardening and would widen the resolver, not this branch.
+        if self
+            .first_party_load_entry_allowlist
+            .absolute_path(specifier)
+            .is_some()
+        {
+            return ModuleSpecifier::parse(specifier)
+                .map_err(|error| Self::denied(&error.to_string()).into());
+        }
+        // Transitive relative imports from a validated package loadEntry are
+        // confined to the validated package root by the allowlist and recorded
+        // on first resolution. This lets a loadEntry import its own sibling
+        // modules (e.g. `./index.js`) without weakening the config-root
+        // boundary for any non-package specifier. ponytail: ceiling is the
+        // validated package root; `resolve_relative` denies anything escaping it.
+        if specifier.starts_with("./") || specifier.starts_with("../") {
+            if let Some(new_specifier) = self
+                .first_party_load_entry_allowlist
+                .resolve_relative(referrer, specifier)
+            {
+                return ModuleSpecifier::parse(&new_specifier)
+                    .map_err(|error| Self::denied(&error.to_string()).into());
+            }
         }
         if let Some(configuration) = &self.configuration {
             return configuration
@@ -678,7 +732,32 @@ impl ModuleLoader for ClayModuleLoader {
                 )
             }));
         }
-
+        // First-party validated `loadEntry`: read the on-disk source the
+        // resolver op recorded for this exact opaque specifier. Single gate,
+        // same allowlist as `resolve`; no path outside the validated loadEntry
+        // is ever read.
+        if let Some(absolute_path) = self
+            .first_party_load_entry_allowlist
+            .absolute_path(module_specifier.as_str())
+        {
+            return ModuleLoadResponse::Sync(
+                std::fs::read_to_string(&absolute_path)
+                    .map_err(|error| {
+                        Self::denied(&format!(
+                            "first-party loadEntry {module_specifier} could not be loaded ({error})"
+                        ))
+                        .into()
+                    })
+                    .map(|source| {
+                        ModuleSource::new(
+                            ModuleType::JavaScript,
+                            ModuleSourceCode::String(source.into()),
+                            module_specifier,
+                            None,
+                        )
+                    }),
+            );
+        }
         if let Some(configuration) = &self.configuration {
             return ModuleLoadResponse::Sync(
                 configuration
@@ -729,8 +808,16 @@ mod tests {
 
     use tokio::sync::Mutex;
 
-    use super::{ClayJsRuntimeService, ClayRuntimeError};
+    use deno_core::{
+        ModuleLoadOptions, ModuleLoadResponse, ModuleLoader, ModuleSpecifier, ModuleType,
+        RequestedModuleType, ResolutionKind,
+    };
+
+    use super::{
+        ClayJsRuntimeService, ClayModuleLoader, ClayRuntimeError, FirstPartyLoadEntryAllowlist,
+    };
     use crate::protocol::DiagnosticSeverity;
+    use crate::server::configuration::ConfigurationRuntime;
     use crate::server::workspace::WorkspaceState;
 
     fn config_fixture(name: &str) -> PathBuf {
@@ -2565,5 +2652,326 @@ mod tests {
 
         assert_eq!(diagnostic.code, "clay.runtime.invalid_record");
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+    }
+
+    /// Helper: call the raw resolver op from a controlled module. The public
+    /// `loadPackage` facade is wired in Phase 18.6 task 5; these op-level
+    /// tests exercise the resolver directly so the security boundary is
+    /// covered before the facade lands.
+    async fn resolve_by_specifier(specifier: &str) -> Result<String, String> {
+        let source = format!(
+            r#"
+            const result = Deno.core.ops.op_clay_packages_load_package_by_specifier(
+              JSON.stringify({{ specifier: {specifier:?} }})
+            );
+            globalThis.__clay_result = result;
+            "#
+        );
+        match ClayJsRuntimeService::default()
+            .evaluate_controlled_module(source)
+            .await
+        {
+            Ok(_) => Ok("ok".to_string()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn op_clay_packages_load_package_by_specifier_rejects_non_first_party_specifier() {
+        // Non-`@clay/*` specifiers are denied before the package service is
+        // touched. Third-party registry specs, bare names, and `npm:` specs.
+        for denied in [
+            "lodash",
+            "npm:foo",
+            "markdown",
+            "react",
+            "@types/node",
+            "@clay/",
+            "@clay/../escape",
+            "@clay/foo/bar",
+        ] {
+            let err = resolve_by_specifier(denied).await.unwrap_err();
+            assert!(
+                err.contains("clay.packages.invalid_specifier"),
+                "specifier `{denied}` must be denied with invalid_specifier, got: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn op_clay_packages_load_package_by_specifier_rejects_unknown_package() {
+        // `@clay/*` shape but no installed package on disk.
+        let err = resolve_by_specifier("@clay/does-not-exist")
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("clay.packages.not_installed"),
+            "unknown first-party package must be not_installed, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn op_clay_packages_load_package_by_specifier_resolves_and_enables_first_party_markdown()
+    {
+        // The real shipped `@clay/markdown` package validates/enables through
+        // PackageService and returns an opaque loadEntrySpecifier. The module
+        // import itself is task 4/5; here we prove resolve + enable works and
+        // the opaque specifier is recorded in the allowlist via the returned
+        // summary shape.
+        let source = r#"
+            const raw = Deno.core.ops.op_clay_packages_load_package_by_specifier(
+              JSON.stringify({ specifier: "@clay/markdown" })
+            );
+            const summary = JSON.parse(raw);
+            globalThis.__clay_summary = summary;
+        "#;
+        let evaluation = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(source)
+            .await
+            .expect("@clay/markdown must resolve and enable");
+
+        // The op returns the typed summary as a JSON string; we cannot read
+        // `globalThis` after the runtime tears down, so we assert the op ran
+        // without error and that subsequent resolver calls for the same
+        // package succeed (idempotent enable via AlreadyEnabled fallback).
+        assert!(evaluation.behavior_manifest.is_none());
+        let second = resolve_by_specifier("@clay/markdown").await;
+        assert!(
+            second.is_ok(),
+            "resolving an already-enabled package must be idempotent, got: {second:?}"
+        );
+    }
+
+    /// Build an isolated `ClayModuleLoader` with a manually-populated allowlist
+    /// (no resolver op, no real runtime) so the resolve/load gate is tested in
+    /// isolation. `configuration` mirrors the runtime's config-root branch.
+    fn loader_with_allowlist(
+        entries: &[(&str, PathBuf, PathBuf)],
+        configuration: Option<Arc<ConfigurationRuntime>>,
+    ) -> ClayModuleLoader {
+        let allowlist = Arc::new(FirstPartyLoadEntryAllowlist::default());
+        for (specifier, path, package_root) in entries {
+            allowlist.record(specifier, path.clone(), package_root.clone());
+        }
+        let main_specifier = ModuleSpecifier::parse("clay://runtime/main.js").unwrap();
+        ClayModuleLoader::new(main_specifier, None, configuration, allowlist)
+    }
+
+    fn default_load_options() -> ModuleLoadOptions {
+        ModuleLoadOptions {
+            is_dynamic_import: false,
+            is_synchronous: false,
+            requested_module_type: RequestedModuleType::None,
+        }
+    }
+
+    #[test]
+    fn clay_module_loader_loads_allowlisted_first_party_load_entry() {
+        // A real on-disk loadEntry OUTSIDE any config root, recorded in the
+        // allowlist (what the resolver op does), must resolve and load.
+        let outside_root = config_fixture("loader-loadentry");
+        let loadentry_path = outside_root.join("load.js");
+        fs::write(&loadentry_path, "export const clayLoadedEntry = true;\n").unwrap();
+
+        let opaque = "clay://packages/@clay/example/dist/load.js";
+        let loader = loader_with_allowlist(&[(opaque, loadentry_path, outside_root)], None);
+
+        let resolved = loader
+            .resolve(opaque, "clay://runtime/main.js", ResolutionKind::Import)
+            .expect("allowlisted loadEntry must resolve");
+        assert_eq!(resolved.as_str(), opaque);
+
+        let source = match loader.load(&resolved, None, default_load_options()) {
+            ModuleLoadResponse::Sync(Ok(source)) => source,
+            ModuleLoadResponse::Sync(Err(error)) => panic!("load failed: {error:?}"),
+            _ => panic!("expected sync response, got async"),
+        };
+        assert_eq!(source.module_type, ModuleType::JavaScript);
+        assert!(
+            std::str::from_utf8(source.code.as_bytes())
+                .unwrap()
+                .contains("clayLoadedEntry"),
+            "load must return the recorded on-disk loadEntry source"
+        );
+    }
+
+    #[test]
+    fn clay_module_loader_denies_unallowlisted_first_party_url() {
+        // Empty allowlist: every `clay://packages/...` URL is denied exactly
+        // like any other untrusted specifier, even loadEntry-shaped ones.
+        let loader = loader_with_allowlist(&[], None);
+        for url in [
+            "clay://packages/@clay/markdown/dist/load.js",
+            "clay://packages/@clay/evil/x.js",
+            "clay://packages/anything",
+        ] {
+            let error = loader
+                .resolve(url, "clay://runtime/main.js", ResolutionKind::Import)
+                .expect_err("unallowlisted package URL must be denied");
+            assert!(
+                error.to_string().contains("clay.runtime.invalid_import"),
+                "unallowlisted `{url}` must be denied, got: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn clay_module_loader_preserves_config_root_confinement_for_non_package_imports() {
+        // A real config root exercises the configuration branch. The allowlist
+        // addition must NOT relax config-root confinement: escaping imports are
+        // still rejected, while an allowlisted first-party loadEntry still loads.
+        let parent = config_fixture("loader-configroot-parent");
+        let root = parent.join("config");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("init.js"), "export const ready = true;\n").unwrap();
+        // `escape.js` lives in the parent (a real file OUTSIDE config root) so
+        // `canonicalize` succeeds and the `starts_with(config_root)` check is
+        // the thing that rejects it.
+        fs::write(parent.join("escape.js"), "export const escape = true;\n").unwrap();
+        let configuration = Arc::new(ConfigurationRuntime::from_config_root(&root).unwrap());
+
+        // Allowlisted loadEntry lives OUTSIDE the config root but still loads.
+        let outside = config_fixture("loader-configroot-loadentry");
+        let loadentry_path = outside.join("load.js");
+        fs::write(&loadentry_path, "export const ok = true;\n").unwrap();
+        let opaque = "clay://packages/@clay/example/dist/load.js";
+        let loader = loader_with_allowlist(
+            &[(opaque, loadentry_path, outside.clone())],
+            Some(configuration),
+        );
+
+        let resolved = loader
+            .resolve(opaque, "clay:configuration", ResolutionKind::Import)
+            .expect("allowlisted loadEntry loads even with a config root present");
+
+        // Escaping relative imports (not validated loadEntries) stay confined.
+        let escape_err = loader
+            .resolve("../escape.js", "clay:configuration", ResolutionKind::Import)
+            .expect_err("escaping import must be denied by config-root confinement");
+        assert!(
+            escape_err.to_string().contains("configuration directory"),
+            "config-root confinement must reject escaping imports, got: {escape_err:?}"
+        );
+
+        // And the allowlisted entry still returns its on-disk source alongside.
+        let source = match loader.load(&resolved, None, default_load_options()) {
+            ModuleLoadResponse::Sync(Ok(source)) => source,
+            ModuleLoadResponse::Sync(Err(error)) => panic!("load failed: {error:?}"),
+            _ => panic!("expected sync response, got async"),
+        };
+        assert!(
+            std::str::from_utf8(source.code.as_bytes())
+                .unwrap()
+                .contains("ok = true"),
+            "allowlisted loadEntry must load alongside config-root confinement"
+        );
+    }
+
+    #[test]
+    fn clay_module_loader_denies_arbitrary_file_url_or_https_specifier() {
+        // `file://`, `https://`, `http://`, bare, and scheme-bearing specifiers
+        // that are not curated facades or allowlisted loadEntries stay denied.
+        let loader = loader_with_allowlist(&[], None);
+        for specifier in [
+            "file:///etc/passwd",
+            "https://example.com/evil.js",
+            "http://example.com/x.js",
+            "react",
+            "node:fs",
+            "npm:lodash",
+        ] {
+            let error = loader
+                .resolve(specifier, "clay://runtime/main.js", ResolutionKind::Import)
+                .expect_err("non-allowlisted specifier must be denied");
+            assert!(
+                error.to_string().contains("clay.runtime.invalid_import"),
+                "specifier `{specifier}` must be denied, got: {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn load_package_resolves_and_activates_first_party_markdown_end_to_end() {
+        // The one-line default end-user path: a configuration module that does
+        // `await loadPackage("@clay/markdown")` activates the package — the
+        // loadEntry imports curated clay:* facades and registers its mode,
+        // commands, and parse handler under Clay's authority.
+        let root = config_fixture("loadpackage-e2e");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            const summary = await loadPackage("@clay/markdown");
+            Deno.core.ops.op_clay_runtime_record(
+              `loaded:${summary.name}:modes:${summary.modes.join(",")}`
+            );
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("loadPackage('@clay/markdown') must succeed end-to-end");
+
+        // The resolver summary reaches the caller.
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|record| record == "loaded:@clay/markdown:modes:markdown"),
+            "loadPackage must return the typed summary with name + modes, got {:?}",
+            result.op_records
+        );
+        // The loadEntry's default activation registered a parse handler.
+        assert!(
+            !result.parse_handlers.is_empty(),
+            "loadPackage must activate the markdown parse handler, got none"
+        );
+        // Modes/commands/keymaps surfaced through the behavior manifest.
+        assert!(
+            result.behavior_manifest.is_some(),
+            "loadPackage must register mode/commands/keymaps into the behavior manifest"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_package_rejects_non_string_specifier() {
+        // The facade validates the specifier type before touching the op,
+        // mirroring bindKey/serverLoadPackage validation.
+        for invalid in ["loadPackage(123)", "loadPackage()", "loadPackage(null)"] {
+            let root = config_fixture("loadpackage-invalid");
+            fs::write(
+                root.join("init.js"),
+                format!(
+                    r#"
+                    import {{ loadPackage }} from "clay:packages";
+                    try {{
+                      await {invalid};
+                      Deno.core.ops.op_clay_runtime_record("no-throw");
+                    }} catch (error) {{
+                      Deno.core.ops.op_clay_runtime_record(String(error));
+                    }}
+                    "#
+                ),
+            )
+            .unwrap();
+            let result = ClayJsRuntimeService::default()
+                .load_configuration_from_root(root)
+                .await
+                .expect("the invalid-specifier facade call must not crash the runtime");
+            assert!(
+                result
+                    .op_records
+                    .iter()
+                    .any(|record| record.contains("clay.packages.invalid_specifier")),
+                "`{invalid}` must throw clay.packages.invalid_specifier, got {:?}",
+                result.op_records
+            );
+            assert!(
+                !result.op_records.iter().any(|record| record == "no-throw"),
+                "`{invalid}` must throw, not return normally"
+            );
+        }
     }
 }
