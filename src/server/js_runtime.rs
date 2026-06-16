@@ -2890,6 +2890,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn clay_module_loader_denies_load_entry_imports_outside_package_root() {
+        // Phase 18.6 task 7 security boundary: a validated first-party loadEntry
+        // may import its own sibling modules (e.g. `./index.js`) — those are
+        // confined to the validated package root by `resolve_relative`. But an
+        // import that ESCAPES the package root (e.g. `../escape.js` landing
+        // outside it) must be denied so a package cannot read arbitrary files
+        // outside its validated root. This is the transitive-load confinement
+        // gate added in task 5.
+        let outside = config_fixture("pkg-escape-root");
+        let package_root = outside.join("pkg");
+        let dist = package_root.join("dist");
+        fs::create_dir_all(&dist).unwrap();
+        let load_entry = dist.join("load.js");
+        fs::write(&load_entry, "// loadEntry").unwrap();
+        // A legitimate sibling inside the package root.
+        let sibling = dist.join("index.js");
+        fs::write(&sibling, "// sibling").unwrap();
+        // An escape file OUTSIDE the package root (in the fixture parent).
+        let escape = outside.join("escape.js");
+        fs::write(&escape, "// secret").unwrap();
+
+        let opaque = "clay://packages/@clay/example/dist/load.js";
+        let allowlist = Arc::new(FirstPartyLoadEntryAllowlist::default());
+        allowlist.record(
+            opaque,
+            load_entry.canonicalize().unwrap(),
+            package_root.canonicalize().unwrap(),
+        );
+
+        // Legitimate sibling import inside the package root resolves.
+        let ok = allowlist.resolve_relative(opaque, "./index.js");
+        assert!(
+            ok.is_some(),
+            "a sibling import inside the validated package root must resolve"
+        );
+        // An import that escapes the package root is denied (returns None).
+        assert_eq!(
+            allowlist.resolve_relative(opaque, "../escape.js"),
+            None,
+            "an import escaping the validated package root must be denied"
+        );
+        // A deep escape attempt is also denied.
+        assert_eq!(
+            allowlist.resolve_relative(opaque, "../../escape.js"),
+            None,
+            "a deep-escape import must be denied"
+        );
+        // A relative import from an unknown referrer (not in the allowlist) is
+        // denied — the confinement gate only fires for validated package modules.
+        assert_eq!(
+            allowlist.resolve_relative("clay://packages/@clay/unknown/dist/x.js", "./y.js"),
+            None,
+            "a relative import from a non-validated referrer must be denied"
+        );
+    }
+
     #[tokio::test]
     async fn load_package_resolves_and_activates_first_party_markdown_end_to_end() {
         // The one-line default end-user path: a configuration module that does
@@ -2973,5 +3030,153 @@ mod tests {
                 "`{invalid}` must throw, not return normally"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn load_package_markdown_default_activates_full_mode_from_init_js() {
+        // Phase 18.6 task 6: the one-line default end-user path activates the
+        // FULL markdown setup (parse handler + commands + mode) from a genuinely
+        // minimal init.js — no inline manifest, no per-primitive registration,
+        // no manual clay facade plumbing in user config.
+        let root = config_fixture("loadpackage-default");
+        let init_js = r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/markdown");
+            "#;
+        fs::write(root.join("init.js"), init_js).unwrap();
+
+        // The user config carries no manifest object and no per-primitive
+        // registration calls — loadPackage does all of it.
+        for forbidden in [
+            "contributions",
+            "modePattern",
+            "serverRegisterCommand",
+            "serverRegisterParseHandler",
+            "serverActivateMajorMode",
+            "markdownPackageManifest",
+        ] {
+            assert!(
+                !init_js.contains(forbidden),
+                "default init.js must not carry `{forbidden}` — loadPackage owns activation"
+            );
+        }
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("loadPackage('@clay/markdown') default must succeed");
+
+        // The markdown parse handler registered (mode_id `markdown`).
+        assert!(
+            result
+                .parse_handlers
+                .iter()
+                .any(|handler| handler.mode_id == "markdown"),
+            "default load must register the markdown parse handler, got {:?}",
+            result.parse_handlers
+        );
+        // The markdown commands surfaced into the behavior manifest.
+        let manifest = result
+            .behavior_manifest
+            .as_ref()
+            .expect("default load must activate the major mode into the behavior manifest");
+        assert!(
+            manifest
+                .commands
+                .iter()
+                .any(|command| command.command_id == "markdown.togglePreview"),
+            "default load must register the markdown.togglePreview command, got {:?}",
+            manifest
+                .commands
+                .iter()
+                .map(|c| &c.command_id)
+                .collect::<Vec<_>>()
+        );
+        // The markdown keymap surfaced into the behavior manifest (distinct from
+        // any Ctrl+O file-open binding, which loadPackage must NOT install).
+        assert!(
+            manifest
+                .keymaps
+                .iter()
+                .any(|rule| rule.command_id == "markdown.togglePreview"),
+            "default load must register the markdown togglePreview keymap, got {:?}",
+            manifest
+                .keymaps
+                .iter()
+                .map(|k| &k.command_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn default_loading_preserves_explicit_ctrl_o_separation() {
+        // Phase 18.6 task 6: loadPackage must NOT install the Ctrl+O file-open
+        // binding. That binding stays a separate explicit bindKey call so the
+        // package never owns a global file-open key. This test verifies both
+        // halves: loadPackage alone installs no clientOpenFileDialog keymap, and
+        // adding the documented separate bindKey call does install it.
+        let root = config_fixture("loadpackage-no-ctrlo");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/markdown");
+            "#,
+        )
+        .unwrap();
+        let without_binding = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("loadPackage-only config must load");
+        let manifest = without_binding
+            .behavior_manifest
+            .as_ref()
+            .expect("loadPackage must still produce a behavior manifest");
+        assert!(
+            !manifest
+                .keymaps
+                .iter()
+                .any(|rule| rule.command_id == "clay.documents.clientOpenFileDialog"),
+            "loadPackage must NOT install the Ctrl+O file-open keymap; it stays a separate bindKey call, got {:?}",
+            manifest
+                .keymaps
+                .iter()
+                .map(|k| &k.command_id)
+                .collect::<Vec<_>>()
+        );
+
+        // The documented default adds the Ctrl+O binding as a separate explicit
+        // bindKey call after loadPackage, and it lands in the manifest.
+        let root = config_fixture("loadpackage-with-ctrlo");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            import { bindKey } from "clay:keybindings";
+            await loadPackage("@clay/markdown");
+            bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+            "#,
+        )
+        .unwrap();
+        let with_binding = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("loadPackage + bindKey config must load");
+        let manifest = with_binding
+            .behavior_manifest
+            .as_ref()
+            .expect("config with bindKey must produce a behavior manifest");
+        assert!(
+            manifest
+                .keymaps
+                .iter()
+                .any(|rule| rule.command_id == "clay.documents.clientOpenFileDialog"),
+            "the separate bindKey call must install the Ctrl+O file-open keymap, got {:?}",
+            manifest
+                .keymaps
+                .iter()
+                .map(|k| &k.command_id)
+                .collect::<Vec<_>>()
+        );
     }
 }

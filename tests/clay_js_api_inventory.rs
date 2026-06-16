@@ -2307,7 +2307,6 @@ fn phase18_5_clay_js_api_inventory_status_matches_runtime() {
 
     // Deferred APIs from Phase 18.5 must remain planned
     let deferred_ids = [
-        "clay.packages.loadPackage",
         "clay.ui.serverRegisterWorkingAreaLayout",
         "clay.ui.serverRegisterPaneSplitTree",
         "clay.ui.serverSetPaneSlotLayout",
@@ -2332,22 +2331,6 @@ fn phase18_5_clay_js_api_inventory_status_matches_runtime() {
             "deferred {id} must not be registry public"
         );
     }
-
-    // The loadPackage gap must reference the decision log
-    let entry = entries
-        .iter()
-        .find(|e| e.get("id") == "clay.packages.loadPackage")
-        .expect("clay.packages.loadPackage must exist in inventory");
-    assert!(
-        entry
-            .get("security_notes")
-            .contains("decision-logs/2026-06-15"),
-        "clay.packages.loadPackage security_notes must reference the deferral decision log"
-    );
-    assert!(
-        !entry.get("custom_properties").is_empty(),
-        "clay.packages.loadPackage must list custom_properties even as a planned entry"
-    );
 }
 
 #[test]
@@ -2663,7 +2646,6 @@ fn phase18_5_configuration_surfaces_are_documented_or_planned() {
         "clay.configuration.setModePreference",
         "clay.configuration.setDecorationTheme",
         "clay.configuration.setParsePolicy",
-        "clay.packages.loadPackage",
     ] {
         let entry = entry_by_id(planned_id);
         assert_eq!(

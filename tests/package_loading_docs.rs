@@ -99,40 +99,80 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
         "clay.packages.loadPackage must have a planned inventory entry tracking the preferred one-line target"
     );
 
-    // Gap-phrase assertions describe the pre-Phase-18.6 doc state; they are only
-    // meaningful while the loader is unimplemented. Task 8 replaces this branch
-    // with implemented-loader documentation coverage.
-    if !one_line_loader_is_implemented {
-        for source in [&package_guide, &package_loading, &wiki] {
+    // The loader is implemented (Phase 18.6). The docs must describe the
+    // implemented resolver, the deny-by-default boundary, and the carried-
+    // forward deferrals (non-@clay/*, hot reload, persistent enable state).
+    // The old gap phrases are no longer present.
+    if one_line_loader_is_implemented {
+        // Authoritative reference docs must describe the resolver mechanics.
+        for source in [&package_guide, &package_loading] {
             for phrase in [
-                "generic one-line loader is not implemented yet",
-                "generic loader/API gap",
-                "resolve an installed package specifier",
-                "enable the package",
+                "Phase 18.6 shipped",
+                "deny-by-default",
+                "FirstPartyLoadEntryAllowlist",
+                "PackageService",
                 "loadEntry",
-                "temporary validation/loading gap",
+                "runtime-backed",
             ] {
                 assert!(
                     source.contains(phrase),
-                    "docs/wiki must identify current one-line loader gap phrase `{phrase}`"
+                    "package docs must describe the implemented resolver with phrase `{phrase}`"
                 );
             }
         }
+        // The implementation wiki summarizes the resolver at a higher level.
+        assert!(
+            wiki.contains("Phase 18.6 implemented")
+                && wiki.contains("loadPackage")
+                && wiki.contains("deny-by-default"),
+            "package loading wiki must summarize the Phase 18.6 implementation"
+        );
 
+        for source in [&package_guide, &package_loading, &wiki] {
+            // Old gap phrases must be gone or replaced.
+            assert!(
+                !source.contains("generic one-line loader is not implemented yet"),
+                "docs must not claim the loader is unimplemented after Phase 18.6"
+            );
+            assert!(
+                !source.contains("generic loader/API gap"),
+                "docs must not describe the resolver as a gap after Phase 18.6"
+            );
+            assert!(
+                !source.contains("temporary validation/loading gap"),
+                "docs must not describe the resolver as a temporary gap after Phase 18.6"
+            );
+        }
+
+        // The inventory entry must be promoted to runtime-backed.
         assert!(
-            package_loading.contains("serverLoadPackage(packageJson)")
-                && package_loading.contains("rather than end-user package installation"),
-            "package loading reference must document serverLoadPackage as a validation helper/gap, not the default loader"
+            inventory.contains("status = \"runtime-backed\"")
+                && inventory.contains("registry_public = true")
+                && inventory.contains("op_clay_packages_load_package_by_specifier"),
+            "clay.packages.loadPackage inventory entry must be promoted to runtime-backed with concrete paths"
+        );
+
+        // The resolver op must be documented as the concrete implementation.
+        assert!(
+            package_loading.contains("op_clay_packages_load_package_by_specifier")
+                && package_loading.contains("src/server/ops/packages.rs"),
+            "package loading reference must document the concrete resolver op"
         );
         assert!(
-            package_guide.contains("Do not present `serverLoadPackage` as ordinary end-user setup"),
-            "package guide must keep the fixture-only serverLoadPackage fallback clear"
+            package_loading.contains("constrained first-party")
+                && (package_loading.contains("Non-`@clay/*`")
+                    || package_loading.contains("non-`@clay/*`")
+                    || package_loading.contains("non-@clay/*"))
+                && (package_loading.contains("Hot-reload")
+                    || package_loading.contains("hot reload"))
+                && (package_loading.contains("Persistent shared enable state")
+                    || package_loading.contains("persistent shared enable state")),
+            "package loading reference must document the carried-forward deferrals"
         );
         assert!(
-            wiki.contains("not the end-user one-line package loader")
-                && wiki.contains("fixture scripts")
-                && wiki.contains("explicitly temporary"),
-            "package loading wiki must document the default-loader gap"
+            package_loading.contains("serverLoadPackage")
+                && package_loading.contains("remains a lower-level validation helper"),
+            "package loading reference must reframe serverLoadPackage as a helper, not a gap"
         );
     }
 }
@@ -360,4 +400,126 @@ fn phase18_parse_decoration_apis_are_documented_without_raw_op_exposure() {
             );
         }
     }
+}
+
+#[test]
+fn package_loading_docs_describe_implemented_resolver_and_carried_forward_deferrals() {
+    // Phase 18.6 task 8: after the docs transition, the authoritative docs must
+    // describe the implemented resolver (not a gap) and the carried-forward
+    // deferrals (non-@clay/*, hot reload, persistent enable state).
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+
+    for source in [&package_loading, &package_guide, &wiki] {
+        assert!(
+            source.contains("Phase 18.6 shipped") || source.contains("Phase 18.6 implemented"),
+            "docs must describe the Phase 18.6 implementation"
+        );
+        assert!(
+            source.contains("deny-by-default"),
+            "docs must document the deny-by-default boundary"
+        );
+        assert!(
+            source.contains("loadPackage"),
+            "docs must mention the loadPackage facade"
+        );
+    }
+    // Carried-forward deferrals are explicitly stated as future work, not
+    // current gaps.
+    let has_non_clay_deferral = package_loading.contains("Non-`@clay/*`")
+        || package_loading.contains("non-`@clay/*`")
+        || package_loading.contains("non-@clay/*");
+    assert!(
+        has_non_clay_deferral
+            && (package_loading.contains("Hot-reload") || package_loading.contains("hot reload"))
+            && (package_loading.contains("Persistent shared enable state")
+                || package_loading.contains("persistent shared enable state")),
+        "package loading reference must document the carried-forward deferrals"
+    );
+    // Old gap language must not appear.
+    assert!(
+        !package_loading.contains("generic one-line loader is not implemented yet"),
+        "package loading reference must not claim the loader is unimplemented"
+    );
+    assert!(
+        !package_loading.contains("generic loader/API gap"),
+        "package loading reference must not describe the resolver as a gap"
+    );
+    assert!(
+        !package_loading.contains("temporary validation/loading gap"),
+        "package loading reference must not describe the resolver as a temporary gap"
+    );
+}
+
+#[test]
+fn clay_packages_load_package_registry_entry_is_runtime_backed() {
+    // Phase 18.6 task 8: the inventory entry must be promoted from planned to
+    // runtime-backed with concrete paths and registry_public = true.
+    let inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+    let entry = inventory
+        .split("[[api]]")
+        .find(|block| block.contains("id = \"clay.packages.loadPackage\""))
+        .expect("clay.packages.loadPackage inventory entry must exist");
+
+    assert!(
+        entry.contains("status = \"runtime-backed\""),
+        "loadPackage inventory entry must be runtime-backed, got:\n{entry}"
+    );
+    assert!(
+        entry.contains("registry_public = true"),
+        "loadPackage inventory entry must be registry_public, got:\n{entry}"
+    );
+    // Concrete paths replace the old "planned:" placeholders.
+    assert!(
+        entry.contains("facade_path = \"runtime/js/packages.ts::loadPackage\""),
+        "loadPackage inventory entry must have a concrete facade path"
+    );
+    assert!(
+        entry.contains("src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier"),
+        "loadPackage inventory entry must have a concrete deno_op_path"
+    );
+    assert!(
+        entry.contains("src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier"),
+        "loadPackage inventory entry must have a concrete backing_rust path"
+    );
+    assert!(
+        entry.contains("src/server/js_runtime.rs::ClayModuleLoader"),
+        "loadPackage inventory entry must reference the module-loader gate"
+    );
+    assert!(
+        entry.contains("docs/reference/clay-js-api/packages/load-package.md"),
+        "loadPackage inventory entry must point to the dedicated Markdown doc"
+    );
+}
+
+#[test]
+fn load_package_introduces_no_hidden_configuration_key() {
+    // configuration verification: loadPackage is an explicit action, not a config key.
+    let facade = read("runtime/js/packages.ts");
+    let resolver_op = read("src/server/ops/packages.rs");
+
+    // The loadPackage facade takes only a specifier; no config/options/setting key.
+    assert!(
+        facade.contains("specifier: string"),
+        "loadPackage facade must accept only specifier, not config/options/setting"
+    );
+    assert!(
+        !facade.contains("defaultPackages"),
+        "loadPackage facade must not introduce a defaultPackages config key"
+    );
+
+    // The resolver op takes only specifier JSON; no config/preferences/settings key.
+    assert!(
+        !resolver_op.contains("defaultPackages"),
+        "resolver op must not introduce a defaultPackages config key"
+    );
+
+    // Package customization uses documented APIs, not loadPackage config keys.
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    assert!(
+        package_loading.contains("setPackageOption")
+            || package_loading.contains("clay.configuration.setPackageOption"),
+        "package-loading.md must reference setPackageOption for customization"
+    );
 }

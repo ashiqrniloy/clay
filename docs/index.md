@@ -62,6 +62,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverClassifyDocument](reference/clay-js-api/modes/server-classify-document.md) — `clay.modes.serverClassifyDocument`
 - [serverRegisterModePattern](reference/clay-js-api/modes/server-register-mode-pattern.md) — `clay.modes.serverRegisterModePattern`
 - [serverLoadPackage](reference/clay-js-api/packages/server-load-package.md) — `clay.packages.serverLoadPackage`
+- [loadPackage](reference/clay-js-api/packages/load-package.md) — `clay.packages.loadPackage`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `clay.parse.serverRegisterParseHandler`
 - [serverValidatePackageManifest](reference/clay-js-api/packages/server-validate-package-manifest.md) — `clay.packages.serverValidatePackageManifest`
 - [serverValidatePackagePermissions](reference/clay-js-api/packages/server-validate-package-permissions.md) — `clay.packages.serverValidatePackagePermissions`

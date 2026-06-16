@@ -1,0 +1,125 @@
+---
+id: clay.packages.loadPackage
+kind: clay-js-api
+js_module: "clay:packages"
+js_export: loadPackage
+js_facade: runtime/js/packages.ts::loadPackage
+backing_rust: src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load
+deno_op: op_clay_packages_load_package_by_specifier
+deno_op_path: src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier
+name: loadPackage
+user_facing_name: Load Package by Specifier
+summary: Resolve and activate a first-party @clay/* package from a single specifier string.
+owner: server
+phase: Phase 18.6
+visibility: public
+permissions: []
+key_bindings: []
+custom_properties:
+  - name: specifier
+    type: string
+    default: required
+    description: First-party package specifier, e.g. "@clay/markdown".
+security: Constrained first-party load authority only. Deny-by-default for non-@clay/* specifiers, unallowlisted clay://packages/... URLs, and any external import. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or package enable/disable authority. The loadEntry default export is executed server-side only; no package JavaScript runs in the client.
+agent_guidance: Use as the one-line default for loading first-party packages from ~/.config/clay/init.js. Do not pass arbitrary specifiers or enable/disable flags. For non-@clay/* packages, the resolution path is deferred to a future ecosystem hardening phase.
+lookup_tags: [packages, js-api, load, first-party, init]
+app_visible: true
+help_visible: true
+stability: runtime-backed
+async: true
+---
+
+# loadPackage
+
+## Summary
+
+Resolve and activate a first-party `@clay/*` package from a single specifier string.
+
+## Description
+
+`loadPackage("@clay/markdown")` is the one-line end-user default for loading a Clay first-party package from `~/.config/clay/init.js`. It resolves the specifier to the on-disk first-party package, validates the package metadata through Clay-owned `PackageService` validators, enables the package (recording its contributions in a validated, conflict-checked set), and imports and executes the package's declared `loadEntry` so that its mode, commands, parse handler, and keymaps are registered under Clay's authority. No inline manifest object, no per-primitive registration, and no manual `clay` facade plumbing are required in user configuration.
+
+The resolver is deny-by-default for all specifiers. Only first-party `@clay/*` specifiers that pass validation and match an installed package directory are accepted. The resolved `loadEntry` is confined to the validated package root for its own imports; it cannot load modules outside its root or escape the config root for any non-package specifier.
+
+## When to use
+
+Use this API as the default way to load a first-party package from `~/.config/clay/init.js`. It is the preferred path over `serverLoadPackage(packageJson)` (which is a lower-level validation helper for fixtures) and over `markdownLoadMode()` (which remains a documented convenience alias for per-load options).
+
+Do not use this API for non-`@clay/*` packages, arbitrary file paths, or URL-based imports. Non-`@clay/*` resolution is deferred to a future ecosystem hardening phase.
+
+## JavaScript usage
+
+```ts
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/markdown");
+```
+
+## Example
+
+```ts
+// ~/.config/clay/init.js
+import { loadPackage } from "clay:packages";
+import { bindKey } from "clay:keybindings";
+
+await loadPackage("@clay/markdown");
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+```
+
+## Options
+
+- `specifier` (string, required): A first-party package specifier, e.g. `"@clay/markdown"`. The resolver accepts only `@clay/*` names; any other shape is rejected with `clay.packages.invalid_specifier`.
+
+## Key bindings
+
+No default key binding is assigned. Users may bind a key to `clay.packages.loadPackage` in `~/.config/clay/init.js` if they need a reload command, but reloading is not a default hot key.
+
+## Custom properties
+
+No behavior-changing custom properties. The `specifier` is the only user input; the rest of the activation (mode, commands, parse handler, keymaps) is package-owned and validated by the server.
+
+## Return and async behavior
+
+Returns a promise that resolves to the resolver's typed summary (`name`, `version`, `apiPrefix`, `loadEntrySpecifier`, `modes`, `permissions`, and contribution counts). The loadEntry default export is invoked before the promise resolves, so the package's mode, commands, and parse handler are registered by the time the caller receives the result.
+
+## Errors
+
+- `clay.packages.invalid_specifier`: The specifier is not a non-empty string, or it does not match the first-party `@clay/*` pattern, or it contains path-traversal characters (`/`, `\`, `..`).
+- `clay.packages.not_installed`: The specifier matches the `@clay/*` pattern but the package directory is not found on disk.
+- `clay.packages.load_failed`: The package metadata is invalid (missing required fields, reserved IDs, undeclared permissions, or malformed contributions).
+- `clay.packages.conflict`: The package would conflict with an already-enabled package (duplicate prefix, mode, command, or keymap). The conflicting package is not enabled; the already-enabled set is unchanged.
+
+## Permissions and security
+
+This API grants **constrained first-party load authority only**. It does not grant:
+- Filesystem or network access.
+- Shell or process execution.
+- AI model mutation or inference.
+- WASM execution or native extension loading.
+- Raw Deno ops or native widget handles.
+- Client-side JavaScript execution.
+- Package enable/disable mutation authority for user configuration.
+- Package-manager install/remove/list authority.
+- Arbitrary module loading from outside the config root or the validated package root.
+
+The resolver reuses the Clay-owned `PackageService::enable` validation path: `assemble_package_record` for metadata validation and `check_enabled_packages` for deterministic conflict detection before any contribution is activated. The module loader (`ClayModuleLoader`) is deny-by-default for all specifiers and only accepts a validated `loadEntry` that was explicitly recorded by the resolver in a shared allowlist. The `loadEntry` is confined to the validated package root for its own imports; escaping imports are rejected.
+
+## Agent guidance
+
+Use this API as the one-line default when a user or script needs to load a first-party Clay package. Prefer it over `serverLoadPackage` (a lower-level validation helper) and over package-owned convenience aliases like `markdownLoadMode()`. Do not construct or pass inline manifest objects. Do not use this API for arbitrary package specifiers or non-`@clay/*` packages; those resolution paths are deferred to a future ecosystem hardening phase.
+
+## Backing implementation
+
+- JS facade: `runtime/js/packages.ts::loadPackage` (mirrored in the embedded `CLAY_FACADE_PACKAGES` constant in `src/server/js_runtime.rs`)
+- Deno op: `src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`
+- Rust validation: `src/packages/service.rs::PackageService::enable` (calls `assemble_package_record` + `check_enabled_packages`)
+- Module loader gate: `src/server/js_runtime.rs::ClayModuleLoader` (first-party allowlist branch via `FirstPartyLoadEntryAllowlist`)
+
+## Lookup metadata
+
+- Stable ID: `clay.packages.loadPackage`
+- User-facing name: Load Package by Specifier
+- Kind: `clay-js-api`
+- Default key bindings: none
+- Custom properties: none (only the required `specifier`)
+- Tags: `packages`, `js-api`, `load`, `first-party`, `init`

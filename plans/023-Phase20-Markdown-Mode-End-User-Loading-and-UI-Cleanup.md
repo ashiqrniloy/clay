@@ -2,14 +2,14 @@
 
 > **Phase 18.5 Replan (2026-06-15):** This plan was rewritten by `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md` so that every task consumes the generic shell/package UI primitives promoted in Phases 18.1–18.4 (`WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, `PackageOwnedConfiguration`) instead of driving Markdown UI from fixture-only behavior. The mapping of every Markdown need to an existing generic primitive is recorded in `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`. The one-line loading target (`loadPackage("@clay/markdown")`) and the explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` binding remains separate from package loading (the one-line load and Ctrl+O separation is preserved). No Markdown-specific Rust editor/parser/render/shell branch is introduced by any task below.
 >
-> **Phase 18.6 dependency (2026-06-15):** Task 3 (one-line package loader) requires the Phase 18.6 `loadPackage("@clay/*")` resolver. The generic `loadPackage` was deferred from Phase 18.5 with a decision-log-backed rationale (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`). Until Phase 18.6 ships, the package-owned fallback (`import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();`) is the documented temporary end-user loading path. Task 3 should be revisited once Phase 18.6 is complete. Task 4 (remove default side panel) was deferred from Phase 18.5 because the Markdown package load path already does not publish a default side panel; the panel only exists in test fixtures and the `connection.rs` selected-file-open evaluation. This task now owns the full `clay:ui` `PanelContribution` conversion, fixture simplification, and `connection.rs` cleanup.
+> **Phase 18.6 loader update (2026-06-16):** `plans/029-Phase18.6-Generic-Package-Loader-and-First-Party-Module-Bridge.md` implemented the constrained first-party `loadPackage("@clay/*")` resolver and promoted `clay.packages.loadPackage` to a runtime-backed Clay JS API. This plan now assumes `loadPackage("@clay/markdown")` works end-to-end from the start. The package-owned `markdownLoadMode()` entry remains a fallback/test-only alias for package-owned options, not the primary user setup. The deferral rationale remains recorded in `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`; Plan 029's decision-log task records the finalized authority expansion. Task 4 (remove default side panel) was deferred from Phase 18.5 because the Markdown package load path already does not publish a default side panel; the panel only exists in test fixtures and the `connection.rs` selected-file-open evaluation. This task now owns the full `clay:ui` `PanelContribution` conversion, fixture simplification, and `connection.rs` cleanup.
 >
-> **Phase 18.5 completion status (2026-06-15):** `plans/028` is complete except for task 10 (manual GUI smoke, a recurring non-interactive-session handoff) and the struck-through task 5 (folded into this plan's task 4). Tasks 1-9 and 11 (config audits, Clay JS API verification, package guide, code wiki) are done. The Phase 18.4 configuration API audit gap (`setPackageOption`, `serverSetLayoutOverride`) is closed. The generic `loadPackage` resolver still has **no dedicated Phase 18.6 plan**; until one ships, this plan's task 3 stays blocked on the `markdownLoadMode()` fallback. The unaddressed Compromises/Further Actions carried forward from `plans/024`-`028` (manual GUI smoke matrix, multi-pane/component population, pre-existing dead-code warnings, deferred durable persistence/pane-selector surfaces) are folded into the Compromises Made and Further Actions sections below.
+> **Phase 18.5 completion status (2026-06-15):** `plans/028` is complete except for task 10 (manual GUI smoke, a recurring non-interactive-session handoff) and the struck-through task 5 (folded into this plan's task 4). Tasks 1-9 and 11 (config audits, Clay JS API verification, package guide, code wiki) are done. The Phase 18.4 configuration API audit gap (`setPackageOption`, `serverSetLayoutOverride`) is closed. The Phase 18.6 resolver is now tracked by `plans/029`; this plan's task 3 is no longer blocked and starts from the runtime-backed `loadPackage("@clay/markdown")` path. The unaddressed Compromises/Further Actions carried forward from `plans/024`-`028` (manual GUI smoke matrix, multi-pane/component population, pre-existing dead-code warnings, deferred durable persistence/pane-selector surfaces) are folded into the Compromises Made and Further Actions sections below.
 
 ## Objectives
 - Make the first-party Markdown mode usable through an end-user configuration surface that consumes generic shell/package primitives, instead of a smoke-fixture-only script that inlines a package manifest object and manually calls per-facade registration helpers.
 - Publish **no** default Markdown side panel on load. The Markdown editor occupies the mandatory `main` slot of `PaneSlotLayout`; an optional Markdown preview/status panel is a package `PanelContribution` (via `clay:ui`) targeting a Clay slot such as `right`, with `defaultVisibility: "hidden"`, and is shown only when a user/package option explicitly enables it through `setPackageOption` or `serverSetLayoutOverride`.
-- Reduce Markdown setup in `~/.config/clay/init.js` to a one-line default load path through a generic `loadPackage("@clay/markdown")` specifier resolver (or a documented package-owned fallback that consumes generic primitives internally), while preserving a package-owned customization path for later options.
+- Reduce Markdown setup in `~/.config/clay/init.js` to the runtime-backed one-line default load path through `loadPackage("@clay/markdown")`, while preserving `markdownLoadMode()` as a package-owned fallback/test-only alias for later options.
 - Keep `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` as the user-configured Windows file-open binding, separate from package loading. Selected-file open activation reuses generic `MajorModeActivation` + `DocumentClassification`, not a Markdown-specific Rust branch.
 - Preserve Clay's primitive-first package architecture: Rust exposes only generic package-loading and shell/package-UI primitives; Markdown-specific registration, parser, decoration, behavior-manifest, and panel data remain in `@clay/markdown`.
 
@@ -30,14 +30,14 @@
 
 - [ ] Confirm the end-user Markdown UX contract and remove fixture behavior from the product baseline
   - Acceptance Criteria:
-    - Functional: The plan starts from a written baseline distinguishing smoke-only behavior from the desired end-user behavior: one-line Markdown loading through a generic `loadPackage("@clay/markdown")` resolver (or documented package-owned fallback), explicit `Ctrl+O` binding, no default `PanelContribution`, main editor placement through the `PaneSlotLayout` `main` slot, and edit-only selected-file open until selected-file save is implemented later.
+    - Functional: The plan starts from a written baseline distinguishing smoke-only behavior from the desired end-user behavior: one-line Markdown loading through the runtime-backed generic `loadPackage("@clay/markdown")` resolver, explicit `Ctrl+O` binding, no default `PanelContribution`, main editor placement through the `PaneSlotLayout` `main` slot, and edit-only selected-file open until selected-file save is implemented later.
     - Performance: The baseline states that Markdown loading, contribution descriptor validation, and selected-file activation run at configuration/open time, while ordinary typing, paint, scroll, layout, and text-event handling stay local/non-blocking and read only installed inert shell/contribution state.
     - Code Quality: The baseline identifies duplicated fixture code (inline `markdownPackage` manifest object, manual `serverLoadPackage`/`serverRegisterModePattern`/`serverActivateMajorMode`/`serverRegisterCommand`/`serverRegisterParseHandler`/`publishTree` calls) and ad hoc user-config responsibilities that must move behind a generic `loadPackage` resolver and package-owned contribution helpers.
     - Security: The baseline records that simplifying `init.js` must not broaden package, filesystem, workspace, shell, network, AI, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript authority.
   - Approach:
     - Documentation Reviewed:
-      - `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`: Phase 18.5 replan scope and entry-gate gaps.
-      - `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`: Markdown-to-generic-primitive mapping and the `loadPackage` gap.
+      - `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`: Phase 18.5 replan scope and entry-gate history.
+      - `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`: Markdown-to-generic-primitive mapping and the former `loadPackage` gap closed by Plan 029.
       - `plans/020-Phase18-Markdown-Mode-Package-Proof-of-Concept.md`, `plans/021-Phase18.5-Large-File-Markdown-Performance-and-Memory.md`, `plans/022-Phase19-Windows-Markdown-File-Open-Dialog-Smoke.md`: Prior Markdown POC, large-file, and Windows open-dialog context.
       - `docs/reference/primitives/shell-layout-strategy.md` and `docs/reference/primitives/package-loading.md`: Canonical shell/layout and package-loading contracts.
       - `.agents/skills/project-patterns/references/planning-checklist.md`, `configuration-system.md`, `authority-boundaries.md`, `package-ui-layout.md`.
@@ -71,21 +71,21 @@
 
 - [ ] Confirm the generic primitive inventory and Markdown-to-generic mapping before package work
   - Acceptance Criteria:
-    - Functional: Existing generic primitives are confirmed before implementation: `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, `PackageOwnedConfiguration`, `serverLoadPackage`, `MajorModeActivation`, `DocumentClassification`, `CommandDeclaration`, behavior manifests, command registry, parse coordinator, decoration transport, configuration runtime, and selected-file open activation. Every Markdown need maps to one of these; the only generic gap is the one-line `loadPackage("@clay/markdown")` specifier resolver.
+    - Functional: Existing generic primitives are confirmed before implementation: `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageThemeTokenDeclaration`, `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, `PackageOwnedConfiguration`, `loadPackage`, `serverLoadPackage`, `MajorModeActivation`, `DocumentClassification`, `CommandDeclaration`, behavior manifests, command registry, parse coordinator, decoration transport, configuration runtime, and selected-file open activation. Every Markdown need maps to one of these; no Markdown-specific Rust primitive is needed.
     - Performance: The review classifies work as configuration/load time, package validation time, explicit command/UI update time, background parse/decor time, behavior-manifest update time, or editor hot-path work, and preserves the no-hot-path-package-JS rule.
-    - Code Quality: Any new Rust work is generic (a `loadPackage` specifier resolver or package-service bridge). No Markdown-specific Rust editor/parser/render/shell branch is planned.
+    - Code Quality: Any new Rust work remains generic and builds on the implemented `loadPackage` specifier resolver/package-service bridge. No Markdown-specific Rust editor/parser/render/shell branch is planned.
     - Security: The review documents allowed imports, package provenance, permission validation, deny-by-default specifier resolution, and why simplified user config does not grant extra authority.
   - Approach:
     - Documentation Reviewed:
-      - `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`: The Phase 18.5 primitive review that already inventories primitives (`serverPublishDecorations` and decoration transport included), maps Markdown needs, and identifies the `loadPackage` gap.
+      - `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`: The Phase 18.5 primitive review that already inventories primitives (`serverPublishDecorations` and decoration transport included), maps Markdown needs, and identified the `loadPackage` gap before Plan 029 closed it.
       - `docs/reference/primitives/index.md`, `registry.md`, `backlog.md`, `shell-layout-strategy.md`, `package-security.md`, `package-loading.md`.
       - `.agents/skills/project-patterns/references/mode-primitive-first.md`, `package-distribution.md`, `package-ui-layout.md`, `behavior-manifests.md`.
     - Options Considered:
       - Re-derive a new Phase 20 primitive review: rejected because the Phase 18.5 review already covers the Markdown-to-generic mapping.
       - Add a `clay:markdown` Rust facade that performs all Markdown setup: rejected unless it is a thin generic module alias, because package logic should remain in the package.
-      - Consume the existing Phase 18.5 primitive review as the authoritative mapping and implement only the generic `loadPackage` gap: selected.
+      - Consume the existing Phase 18.5 primitive review as the authoritative mapping and start from the implemented generic `loadPackage` path: selected.
     - Chosen Approach:
-      - Treat `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md` as the authoritative primitive inventory and Markdown-to-generic mapping for this plan. Add deterministic coverage so the mapping cannot drift.
+      - Treat `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md` as the authoritative primitive inventory and Markdown-to-generic mapping for this plan. Update deterministic coverage so the former `loadPackage` gap is recorded as closed by Plan 029 and cannot drift back into Markdown-specific Rust.
     - API Notes and Examples:
       ```text
       init.js -> loadPackage("@clay/markdown") -> PackageService validation ->
@@ -94,7 +94,7 @@
       ```
     - Files to Create/Edit:
       - `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`: Already authoritative; keep current as implementation proceeds.
-      - `tests/primitives_docs.rs`: Keep deterministic coverage for the review, the Markdown-to-generic mapping, and the `loadPackage` gap.
+      - `tests/primitives_docs.rs`: Keep deterministic coverage for the review, the Markdown-to-generic mapping, and the implemented `loadPackage` path.
     - References:
       - `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`
       - `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`
@@ -102,42 +102,42 @@
   - Test Cases to Write:
     - `phase18_5_markdown_replan_primitive_review_records_existing_inventory`: Review lists current generic primitives.
     - `phase18_5_markdown_replan_primitive_review_maps_markdown_to_generic_primitives`: Review maps Markdown needs to generic primitives, not Markdown-specific Rust branches.
-    - `phase18_5_markdown_replan_primitive_review_identifies_load_package_gap`: Review identifies `loadPackage` as the only generic gap and rejects a Markdown-specific loader.
+    - `phase20_markdown_plan_assumes_generic_load_package_is_available`: Review records that Plan 029 closed the `loadPackage` gap and rejects any Markdown-specific loader.
 
-- [ ] Add a generic one-line package loader reachable from user configuration
+- [ ] Verify the generic one-line package loader is the Markdown default from user configuration
   - Acceptance Criteria:
-    - Functional: User config can load default Markdown mode through a generic `loadPackage("@clay/markdown")` specifier resolver that resolves the installed package, reads its declared `loadEntry`, validates it through the existing `PackageService` path, and executes the package-owned load entry. If a safe generic resolver cannot be implemented in this phase, the gap is documented in a decision log and a package-owned fallback (`import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();`) consumes generic primitives (`serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`) internally. Either way, the end-user `init.js` is concise.
+    - Functional: User config loads default Markdown mode through the runtime-backed generic `loadPackage("@clay/markdown")` specifier resolver that resolves the first-party package, reads its declared `loadEntry`, validates it through the existing package-service path, and executes the package-owned load entry. The package-owned `markdownLoadMode()` export remains available for tests/per-load package-owned options, but the end-user `init.js` starts from `loadPackage("@clay/markdown")`.
     - Performance: Default loading runs at configuration/document-open time only; it does not run package JavaScript from keypress, paint, layout, scroll, or text-event handlers.
-    - Code Quality: The resolver is generic (a `loadPackage(specifier)` for any first-party `@clay/*` package), deny-by-default for arbitrary external specifiers, package-manager execution, registry fetching, and arbitrary specifier expansion. The Markdown package only publishes a `loadEntry`; no `MarkdownLoader` or `if package == "@clay/markdown"` Rust branch exists. Public package exports use the registered `markdown` prefix.
+    - Code Quality: The resolver stays generic (a `loadPackage(specifier)` for first-party `@clay/*` packages), deny-by-default for arbitrary external specifiers, package-manager execution, registry fetching, and arbitrary specifier expansion. The Markdown package only publishes a `loadEntry`; no `MarkdownLoader` or `if package == "@clay/markdown"` Rust branch exists. Public package exports use the registered `markdown` prefix.
     - Security: The loader uses documented Clay facades and existing server-side validators; it does not expose raw Deno ops or grant filesystem, network, shell, AI, WASM, client-side JavaScript, package enable/disable, or workspace expansion authority.
   - Approach:
     - Documentation Reviewed:
       - `packages/markdown/dist/load.js` and `packages/markdown/dist/index.js`: Existing package-owned manifest/rules/commands/policy helpers and `loadMarkdownPackage(clay, options)` entry.
       - `tests/fixtures/configuration/markdown-mode/init.js` and `tests/fixtures/configuration/windows-markdown-open/init.js`: Current duplicated fixture setup to collapse.
-      - `runtime/js/packages.ts`, `src/server/ops/packages.rs`, `src/packages/service.rs`: Current `serverLoadPackage(packageJson)` surface to extend with a specifier resolver.
+      - `runtime/js/packages.ts`, `src/server/ops/packages.rs`, `src/server/js_runtime.rs`: Implemented Plan 029 `loadPackage` facade, resolver op, and first-party module-loader allowlist.
       - `docs/reference/packages/markdown.md` and `docs/reference/primitives/package-loading.md`: Public package contract and loading primitive contract.
       - `.agents/skills/project-patterns/references/clay-js-api-naming.md`, `package-distribution.md`, `configuration-system.md`.
     - Options Considered:
-      - `loadPackage("@clay/markdown")`: preferred end-user convention; package loading is explicit in `init.js` and defaults remain concise.
-      - Constrained first-party `@clay/*` resolver only, deny-by-default for external packages: selected scope for a safe implementation.
-      - `import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();`: package-owned fallback, selected only if the generic resolver cannot be implemented safely in this phase.
-      - `import "@clay/markdown/auto";`: possible last-resort fallback, used only if neither generic nor explicit package-owned forms can be implemented cleanly.
+      - `loadPackage("@clay/markdown")`: selected end-user convention; package loading is explicit in `init.js` and defaults remain concise.
+      - Constrained first-party `@clay/*` resolver only, deny-by-default for external packages: selected and implemented in Plan 029.
+      - `import { markdownLoadMode } from "@clay/markdown"; await markdownLoadMode();`: retained package-owned alias for tests/per-load options, not the primary setup.
+      - `import "@clay/markdown/auto";`: rejected; it hides behavior-changing package activation behind import side effects.
     - Chosen Approach:
-      - Implement a constrained first-party `loadPackage("@clay/*")` resolver that reuses `PackageService` validation and executes the declared `loadEntry`. If authority, validation, or scope constraints prevent a safe implementation, document the gap in a decision log and ship the package-owned fallback that consumes generic primitives internally.
+      - Verify and consume the Plan 029 constrained first-party `loadPackage("@clay/*")` resolver that reuses the package-service validation path and executes the declared `loadEntry`. Keep `markdownLoadMode()` as a package-owned alias for targeted tests/options only.
     - API Notes and Examples:
       ```js
       // Preferred one-line default.
       import { loadPackage } from "clay:packages";
       await loadPackage("@clay/markdown");
 
-      // Package-owned fallback if the generic resolver is deferred.
+      // Package-owned alias for tests/per-load options, not primary setup.
       import { markdownLoadMode } from "@clay/markdown";
       await markdownLoadMode({});
       ```
     - Files to Create/Edit:
-      - `runtime/js/packages.ts`: Add or promote the `loadPackage` facade if implemented.
-      - `src/server/ops/packages.rs`: Add `op_clay_packages_load_package_by_specifier` or equivalent if implemented.
-      - `src/packages/service.rs`: Add specifier resolution and load-entry execution if implemented.
+      - `runtime/js/packages.ts`: Verify the implemented `loadPackage` facade remains the public setup API.
+      - `src/server/ops/packages.rs`: Verify `op_clay_packages_load_package_by_specifier` remains constrained to first-party `@clay/*` specifiers.
+      - `src/server/js_runtime.rs`: Verify the first-party `loadEntry` allowlist gate remains deny-by-default.
       - `packages/markdown/dist/load.js` and `packages/markdown/dist/index.js`: Ensure the package-owned default load entry is correct and imports Clay facades internally.
       - `packages/markdown/package.json`: Ensure exports and Clay metadata (declared `loadEntry`) support the chosen load path.
       - `tests/markdown_mode.rs`, `tests/package_loading.rs`, `src/server/js_runtime.rs` tests: Add load-path coverage.
@@ -147,8 +147,8 @@
       - `docs/wiki/modules/first-party-markdown-package.md`
       - `docs/wiki/modules/phase18.5-markdown-replan-primitive-review.md`
   - Test Cases to Write:
-    - Runtime config test: `loadPackage("@clay/markdown")` (or documented fallback) loads the package, registers Markdown mode, commands, parse handler, and behavior manifest for document `1` without user-supplied facade plumbing.
-    - Runtime config test: package-owned fallback, if used, produces the same default package/mode/parse registration when called with no options.
+    - Runtime config test: `loadPackage("@clay/markdown")` loads the package, registers Markdown mode, commands, parse handler, and behavior manifest for document `1` without user-supplied facade plumbing.
+    - Runtime config test: package-owned `markdownLoadMode()` alias still produces the same default package/mode/parse registration when called with no options.
     - Static guard: Markdown default loader source imports documented `clay:*` facades, not raw `Deno.core.ops`.
     - Static guard: package/module resolver allows only the intended first-party `@clay/*` package specifiers and continues rejecting arbitrary external imports.
 
@@ -343,7 +343,7 @@
 
 - [ ] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
-    - Functional: Any public programmatic surface introduced or changed by this plan (e.g., `loadPackage` or its fallback, Markdown package public exports, updated `clay:ui` usage patterns such as `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterThemeToken`) is documented through the Clay/package JS API contract, and all changed server-side Rust public functions are either private/`pub(crate)` or mapped to documented facades.
+    - Functional: Any public programmatic surface introduced or changed by this plan (e.g., `loadPackage`, the retained `markdownLoadMode()` alias, Markdown package public exports, updated `clay:ui` usage patterns such as `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterThemeToken`) is documented through the Clay/package JS API contract, and all changed server-side Rust public functions are either private/`pub(crate)` or mapped to documented facades.
     - Performance: API docs and metadata preserve no-hot-path-JS and bounded payload expectations for Markdown mode loading, parse, decorations, contribution publication, and selected-file activation.
     - Code Quality: Public callable names distinguish module specifiers, callable exports, stable IDs, and user-facing names; package-owned exports use the `markdown` prefix.
     - Security: API docs include authority notes, permissions, failure modes, and explicit non-authorities.
@@ -476,7 +476,7 @@
 
 ## Compromises Made
 - This plan was rewritten by Phase 18.5 (`plans/028`) to consume generic shell/package UI primitives. The original fixture-centric task language (inline `markdownPackage` manifest object, manual per-facade registration imports, `publishTree(...)` side panel, hard-coded `SIDEBAR_WIDTH`, root-level `EditorWidget` ownership) is replaced by generic `clay:ui` contribution and `PaneSlotLayout` language. See the Phase 18.5 header note at the top.
-- The one-line `loadPackage("@clay/markdown")` target is preserved as the preferred end-user convention. A safe generic resolver could not be implemented within Phase 18.5, so the gap was deferred with a decision-log-backed rationale (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`) and the package-owned `markdownLoadMode()` fallback (which consumes generic primitives internally) was shipped. This plan's task 3 stays blocked on a future Phase 18.6 resolver; until then the fallback is the documented temporary end-user path.
+- The one-line `loadPackage("@clay/markdown")` path is now the primary end-user convention. Phase 18.5 deferred the generic resolver with a decision-log-backed rationale (`decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`); Plan 029 implements the constrained first-party resolver, so task 3 starts from the runtime-backed loader. The package-owned `markdownLoadMode()` export remains available as a fallback/test-only alias that consumes generic primitives internally.
 - **Manual GUI smoke was never run in non-interactive agent sessions** (carried forward from `plans/025`, `026`, and `plans/028` task 10). Structural/editor/SDUI/config tests, manual smoke documentation guards, and the exact `smoke-gui` handoff commands cover the automated portion, but a developer with an interactive desktop session must still run the Markdown end-user `cargo run` path and the `smoke-gui` fixture matrix recorded in task 9.
 - **Multi-pane editor/component population and inter-pane action/focus routing remain deferred** shell work (carried forward from `plans/025` medium-priority and `plans/026` deferred items). This plan's optional Markdown preview renders as an implemented fixed `PanelContribution` in the `right` slot (native fixed-panel/overlay composition is wired in Phase 18.3), so it does not require the deferred multi-editor-pane semantics. If a future task needs a second live editor pane or inter-pane focus/action routing, it depends on that deferred shell work and is out of scope here.
 - **Pre-existing dead-code warnings remain** for internal SDUI/package UI observability and runtime helpers (e.g. `SduiObservableListItem`, `SduiAccessibleNode`, `PackageUiRuntimeUpdate`, unused fixed-slot/input-route constants, and `src/server/ui.rs` `fixed_slot_id`) — carried forward from `plans/025`, `026`, and `028`. They are pre-existing, internal, and not Markdown-specific; this plan must not introduce new warnings but does not undertake the cleanup.
@@ -484,7 +484,7 @@
 - The no-hot-path-package-JS rule is preserved: all Markdown loading, contribution validation, configuration, and selected-file activation are startup/load/configuration/open-time work only.
 
 ## Further Actions
-- **High priority — create the Phase 18.6 plan and implement the generic `loadPackage("@clay/*")` resolver** to close the one-line loader gap. No Phase 18.6 plan exists yet. The resolver must extend the deny-by-default `ClayModuleLoader` to load resolver-validated first-party `loadEntry` modules from outside the config root, add a `PackageService` resolve/enable/execute path and a new op, and ship with full docs/index/generated-registry/api-inventory/tests/Rust-visibility coverage and its own decision log. Once it ships, this plan's task 3 switches from the `markdownLoadMode()` fallback to `loadPackage("@clay/markdown")`. Decision source: `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`.
+- **Plan 029 loader handoff is complete for this plan:** the generic `loadPackage("@clay/*")` resolver exists and this plan now assumes `loadPackage("@clay/markdown")` from the start. Continue the remaining Plan 029 follow-up tasks (Plan 029 update/decision log/wiki/API verification) separately; do not reintroduce `markdownLoadMode()` as the primary setup. Decision source: `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`.
 - **Execute this plan's task 4** (remove default `PanelContribution` publication, convert `connection.rs` selected-file-open SDUI to behavior/decorations only, simplify fixtures) — this is the active handoff from `plans/028` deferred task 5 and is unblocked now that the Phase 18.5 primitive inventory and package guide are complete.
 - **Medium priority — run the manual GUI smoke matrix** deferred from `plans/025`/`026`/`028` task 10 in an interactive desktop session: the Markdown end-user `cargo run` path plus the `smoke-gui` fixture variants (`runtime-sdui`, `markdown-mode`, `windows-markdown-open`), recording operator observations for fixed panels, transient overlays, Markdown/package status, and Windows file-open behavior. Recorded as a test case in task 9.
 - **Medium priority — continue reducing or explicitly annotating** the pre-existing dead-code warnings for SDUI/package UI observability and runtime helpers (carried from `plans/025`/`026`/`028`) once their GUI/runtime call sites are fully wired. Out of scope for this plan but must not regress.

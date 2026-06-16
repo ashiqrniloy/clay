@@ -8,7 +8,7 @@ Clay package APIs are evolving. This document intentionally distinguishes **curr
 
 A Clay package should be easy for users to load and safe for Clay to run:
 
-**Planned/target default user load** (not a callable Phase 18.2 runtime API until a later package-loading phase documents it):
+**Implemented end-user default** (runtime-backed since Phase 18.6):
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -18,7 +18,7 @@ await loadPackage("@clay/markdown");
 
 The one-line load path is the preferred default when Clay has the necessary generic primitives. Packages may expose optional customization APIs, but ordinary users should not have to copy package manifests, manually register every primitive, or paste smoke-fixture scripts into `~/.config/clay/init.js`.
 
-Current implemented package API status: `clay.packages.serverLoadPackage` / `serverLoadPackage(packageJson)` validates a package record and returns inert metadata. It is not an end-user install, enable/disable, package-manager, or package-code execution wrapper.
+Current implemented package API status: `clay.packages.loadPackage` / `loadPackage("@clay/markdown")` is the one-line end-user default. It resolves the specifier, validates the package metadata, enables the package, and imports and executes its `loadEntry`. `clay.packages.serverLoadPackage` / `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and internal use; it is not an end-user install, enable/disable, package-manager, or package-code execution wrapper.
 
 Clay packages can contribute editor modes, commands, behavior manifests, parsers, decorations, UI, layout, actions, configuration, theme tokens, and documentation. They do so through Clay JS APIs and inert validated declarations, not through direct native widget access.
 
@@ -266,8 +266,8 @@ A permission declaration does not grant broad authority. Packages still cannot a
 
 Package loading status:
 
-- **Planned/target end-user default:** users explicitly load packages from `~/.config/clay/init.js` with a one-line helper once package spec resolution, package-service install/enable/load-entry authority, and activation state recording are implemented and documented.
-- **Implemented/runtime-backed today:** `serverLoadPackage(packageJson)` validates Clay package metadata and returns inert summary metadata. It does not install a package, enable/disable a package, run package-manager work, execute a package `loadEntry`, or execute package JavaScript.
+- **Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js` with `await loadPackage("@clay/markdown")`. The resolver validates the specifier, runs the package metadata through `PackageService`, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the deny-by-default boundary and the carried-forward deferrals (non-`@clay/*` registry, hot reload, persistent enable state).
+- **Implemented/runtime-backed today:** `loadPackage("@clay/*")` is the one-line end-user default. `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and controlled configuration tests.
 - **Phase 18.4 customization status:** optional customization after the future one-line load uses documented `setPackageOption` and `serverSetLayoutOverride` APIs. These are startup/configuration-change/package-load/update-time validators, not hidden JSON/TOML/ad hoc keys and not package enable/disable authority.
 
 Planned preferred default form:
@@ -286,7 +286,7 @@ import { serverLoadPackage } from "clay:packages";
 const loaded = serverLoadPackage(packageJson);
 ```
 
-Do not present `serverLoadPackage` as ordinary end-user setup. It is useful for controlled package/configuration fixtures and load-contract validation, not for package installation or enablement; any `serverLoadPackage(packageJson)` plus package-owned helper flow is a temporary validation/loading gap, not the preferred convention.
+Do not present `serverLoadPackage` as ordinary end-user setup. It is useful for controlled package/configuration fixtures and load-contract validation, not for package installation or enablement; the end-user default is the runtime-backed `loadPackage("@clay/*")` facade.
 
 Optional user configuration should be separate and explicit after the one-line package load helper exists:
 
@@ -298,21 +298,9 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Phase 18.4 verifies that the generic one-line loader is not implemented yet: `runtime/js/packages.ts` and the embedded `clay:packages` facade export validation helpers but not `loadPackage`, and there is no public registry entry for `clay.packages.loadPackage`. The generic loader/API gap is a Clay package-service bridge that can resolve an installed package specifier, enable the package, execute/import its declared `loadEntry`, and record activation from `init.js` without granting package-manager, filesystem, network, shell, AI, WASM, raw-op, native-widget, or client-JS authority.
+Phase 18.6 shipped the generic one-line loader. The current deny-by-default runtime (`src/server/js_runtime.rs::ClayModuleLoader`) now accepts resolver-validated first-party `@clay/*` `loadEntry` modules through a shared `FirstPartyLoadEntryAllowlist` gate. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a constrained first-party allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the original deferral rationale and the carried-forward deferrals (non-`@clay/*` registry resolution, hot reload, persistent shared enable state). The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
 
-Phase 18.5 (`plans/028` Task 4) investigated that bridge and deferred it with a decision-log-backed rationale: the controlled server-side runtime is deny-by-default (`src/server/js_runtime.rs::ClayModuleLoader`) and confines loadable modules to the configuration root (`src/server/configuration.rs::canonical_local_file`), so a working `loadPackage("@clay/*")` requires a security-critical module-loader extension plus a `PackageService` resolve/enable/execute path and a new op. That authority expansion warrants its own focused phase; see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`. The documented temporary fallback for first-party packages is the package-owned default entry that imports the Clay facades directly. For Markdown that entry is `markdownLoadMode()` (in `packages/markdown/dist/load.js`, re-exported from `./dist/index.js`), which consumes only implemented generic primitives and contains no copied manifest:
-
-If a package cannot yet support one-line loading because Clay lacks a generic primitive, document the longer setup as a temporary limitation rather than the preferred path.
-
-**Implemented/package-owned temporary fallback** (Phase 18.5, until the generic `loadPackage` resolver ships):
-
-```js
-import { markdownLoadMode } from "@clay/markdown";
-
-await markdownLoadMode();
-```
-
-This fallback imports the Clay facades internally and reuses the package's own default setup; it does not paste a manifest into `init.js`. It becomes end-to-end callable once the constrained first-party module-loader bridge lands; until then, deterministic smoke/configuration fixtures continue to validate the package through `serverLoadPackage(packageJson)` plus the same package-owned helpers.
+If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
 
 ## Package Code Shape
 
@@ -329,7 +317,7 @@ src/theme.js       optional theme token declarations
 
 Compiled packages may publish `dist/` equivalents.
 
-**Planned/target default loader shape** for a package load entry after the one-line load contract is implemented:
+**Implemented default loader shape** for a package load entry (the loadEntry contract is now implemented since Phase 18.6):
 
 ```js
 import { serverRegisterCommand } from "clay:commands";
@@ -873,7 +861,7 @@ Phase 18.5 replanned Markdown end-user loading around the generic shell/package 
 
 5. **`setPackageOption` and `serverSetLayoutOverride` for customization.** User configuration changes preview visibility, slot, split ratio, or theme token mapping through documented Clay JS APIs, not through hidden JSON/TOML/ad hoc keys.
 
-6. **Package-owned fallback entry while `loadPackage` is deferred.** The generic `loadPackage("@clay/markdown")` one-line resolver is deferred (see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`). The package-owned `markdownLoadMode()` entry consumes implemented generic primitives internally and is the documented temporary fallback.
+6. **Package-owned fallback alias retained after `loadPackage` shipped.** The generic `loadPackage("@clay/markdown")` one-line resolver is implemented in Phase 18.6 (see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the authority rationale). The package-owned `markdownLoadMode()` entry consumes implemented generic primitives internally and remains a documented convenience alias for per-load options.
 
 **Implemented/runtime-backed Phase 18.5 no-default-panel example** (Markdown as a consumer of generic primitives):
 
@@ -1009,7 +997,7 @@ Recommended test categories:
 
 1. **Manifest validation** — required fields, prefix, permissions, docs, performance metadata.
 2. **Conflict tests** — duplicate modes, commands, keybindings, slots, config keys, theme tokens.
-3. **Runtime loader tests** — implemented validation helpers (`serverLoadPackage`) stay separate from planned one-line end-user load helpers (`loadPackage`), docs identify the current generic loader/API gap, customization uses `setPackageOption` / `serverSetLayoutOverride`, and the one-line load path registers defaults once it exists.
+3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage("@clay/*")` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the deny-by-default module loader only accepts resolver-validated first-party load entries.
 4. **Mode tests** — classification, activation, behavior manifest composition.
 5. **Input tests** — key routing, command routing, mouse/component actions.
 6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy.
@@ -1059,7 +1047,7 @@ Do not:
 
 ## Example: Markdown as a Package
 
-**Planned/target default user setup** after the one-line package load helper exists:
+**Implemented/runtime-backed default user setup**:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -1069,7 +1057,7 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-**Implemented/package-owned temporary fallback** (Phase 18.5, until `loadPackage` resolver ships):
+**Implemented/package-owned fallback alias** (Phase 18.5, retained after `loadPackage` shipped):
 
 ```js
 import { markdownLoadMode } from "@clay/markdown";

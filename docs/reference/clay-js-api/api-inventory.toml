@@ -1475,28 +1475,25 @@ security_notes = "Bindable client UI command ID only; native dialog execution re
 current_rust_owner = "src/client/file_dialog.rs; src/main.rs::handle_client_ui_command; src/client/behavior.rs::ClientBehaviorState::route_key; src/server/workspace.rs::WorkspaceState::open_selected_file"
 registry_public = true
 
-# Phase 18.5 planned gap: the generic one-line end-user package loader.
-# Decision log: decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md
-# This entry tracks the preferred target so inventory/registry tests can verify the gap explicitly.
 [[api]]
 id = "clay.packages.loadPackage"
 category = "package-loading"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:packages"
 js_export = "loadPackage"
 user_facing_name = "Load Package by Specifier"
-authority = "server-first-package-enable-and-load-runtime"
-runtime_path = "server-first-package-enable-load-runtime-planned"
+authority = "constrained-first-party-load-runtime"
+runtime_path = "server-side-package-validation-and-load-entry-execution"
 hot_path_policy = "Package loading, enabling, and load-entry execution are startup/load/configuration-time work only; no package JavaScript runs in keypress, paint, layout, IPC, or text-event handlers."
-facade_path = "planned: runtime/js/packages.ts::loadPackage"
-backing_rust = "planned: src/packages/service.rs::PackageService; planned: src/server/js_runtime.rs::ClayModuleLoader first-party extension"
+facade_path = "runtime/js/packages.ts::loadPackage"
+backing_rust = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load"
 deno_op = "op_clay_packages_load_package_by_specifier"
-deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier"
-documentation_path = "docs/reference/primitives/package-loading.md"
+deno_op_path = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier"
+documentation_path = "docs/reference/clay-js-api/packages/load-package.md"
 key_bindings = []
-custom_properties = ["specifier:string=required", "options:LoadPackageOptions=optional"]
+custom_properties = ["specifier:string=required"]
 permissions = []
-security_notes = "Planned unavailable Clay JS API only; a working one-line loader requires a security-critical module-loader extension (loading validated first-party loadEntry modules from outside the config root) plus a PackageService resolve/enable/execute path. That authority expansion is deferred with a decision-log-backed rationale; see decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md. The current deny-by-default ClayModuleLoader confines loadable modules to the configuration root. This planned API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package enable/disable, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, or arbitrary package execution authority."
-current_rust_owner = "planned: src/packages/service.rs::PackageService; planned: src/server/js_runtime.rs::ClayModuleLoader first-party extension"
-registry_public = false
+security_notes = "Constrained first-party load authority only. Deny-by-default for non-@clay/* specifiers, unallowlisted clay://packages/... URLs, and any external import. The resolver reuses the package-service enable path (assemble_package_record + check_enabled_packages) so invalid metadata and conflicting packages are rejected before activation. The module loader is deny-by-default and only accepts a validated loadEntry recorded by the resolver in a shared allowlist. The loadEntry is confined to the validated package root for its own imports. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or package enable/disable authority. Non-@clay/* registry resolution and package-manager authority are deferred to Phase 23 ecosystem hardening."
+current_rust_owner = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load"
+registry_public = true

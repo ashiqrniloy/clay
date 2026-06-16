@@ -33,12 +33,14 @@ Package validation, package loading, mode activation, per-document manifest sele
 
 `serverLoadPackage` is runtime-backed for package record validation. It now validates Phase 18.4 slot-aware UI, input, UI state-scope, layout-override, package-option, API dependency, and theme-token metadata. The summary includes `input`, `uiStateScopes`, `layoutOverrides`, and `packageOptions` contribution counts so fixture tests can verify the same load-time contract as enable/reload. It remains a validation helper rather than end-user package installation, enablement, default `loadEntry` execution, or package-manager authority. The preferred end-user setup remains an explicit one-line `loadPackage("@clay/markdown")` target from `~/.config/clay/init.js`.
 
-Phase 18.4 verified that the generic one-line loader is not implemented yet: there is no public `loadPackage` export in `runtime/js/packages.ts`, no server runtime op that resolves a package specifier, enables the installed package, imports its `loadEntry`, and records package activation from `init.js`, and no `clay.packages.loadPackage` registry entry. The generic loader/API gap is a Clay package-service bridge that can resolve an installed package specifier, enable the package, import its `loadEntry`, and record activation under Clay's package-service authority. Phase 18.5 (`plans/028` Task 4) investigated this bridge and deferred it with a decision-log-backed rationale: the controlled server-side runtime is deny-by-default (`src/server/js_runtime.rs::ClayModuleLoader`) and confines loadable modules to the configuration root (`src/server/configuration.rs::canonical_local_file`), so a working `loadPackage("@clay/*")` requires a security-critical module-loader extension that lets the runtime import a resolver-validated first-party `loadEntry` from outside the config root, plus a `PackageService` resolve/enable/execute path and a new op. That authority expansion warrants its own focused phase rather than being folded into the Markdown replan; see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`. Until that authority exists, fixtures may call `serverLoadPackage(packageJson)` plus package-owned load helpers as a temporary validation/loading gap, not as the documented default.
+Phase 18.6 shipped the generic one-line loader: `loadPackage` is a runtime-backed `clay:packages` facade export backed by a constrained first-party resolver that accepts `@clay/*` specifiers, validates package metadata through `PackageService`, enables the package, and imports and executes its declared `loadEntry` so that the package's mode, commands, parse handler, and keymaps are registered under Clay's authority. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The resolver op is `op_clay_packages_load_package_by_specifier` (`src/server/ops/packages.rs`). The module-loader extension (`src/server/js_runtime.rs::ClayModuleLoader`) is deny-by-default for all specifiers and only accepts a resolver-validated first-party `loadEntry` recorded in a shared `FirstPartyLoadEntryAllowlist`. The `loadEntry` is confined to the validated package root for its own imports; escaping imports are rejected. The resolver reuses the Clay-owned `PackageService::enable` validation path (`assemble_package_record` + `check_enabled_packages`) so invalid metadata and conflicting packages are rejected before activation.
 
-Phase 18.4 also verifies the supported customization path that should follow the future one-line load. Optional package customization is expressed through documented Clay JS APIs, specifically documented runtime-backed Clay JS APIs such as `clay.configuration.setPackageOption` and `clay.ui.serverSetLayoutOverride`; hidden JSON/TOML/ad hoc layout, input, style, or theme keys remain rejected, and these APIs do not provide package enable/disable authority. These APIs evaluate at startup, package-load, configuration-change, or explicit setting-change time and install inert validated state for Masonry hot paths to read later.
+The resolver is constrained to first-party `@clay/*` packages only. Non-`@clay/*` registry resolution (e.g. npm, custom registries, third-party packages) remains deferred to a future ecosystem hardening phase (Phase 23). Hot-reload and persistent shared enable state across runtime restarts are also deferred (Phase 19). See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the full authority boundary, rationale, and security review. `serverLoadPackage` remains a lower-level validation helper used by fixtures and internally by `loadPackage`; it is not the documented end-user default.
+
+The supported customization path after the one-line load is unchanged. Optional package customization is expressed through documented Clay JS APIs such as `clay.configuration.setPackageOption` and `clay.ui.serverSetLayoutOverride`; hidden JSON/TOML/ad hoc layout, input, style, or theme keys remain rejected, and these APIs do not provide package enable/disable authority. These APIs evaluate at startup, package-load, configuration-change, or explicit setting-change time and install inert validated state for Masonry hot paths to read later.
 
 ```javascript
-// Preferred target once the generic loader ships:
+// Implemented end-user default from ~/.config/clay/init.js:
 import { loadPackage } from "clay:packages";
 import { setPackageOption } from "clay:configuration";
 import { serverSetLayoutOverride } from "clay:ui";
@@ -58,7 +60,7 @@ serverSetLayoutOverride({
 });
 ```
 
-Current fixture-only validation still uses the lower-level helper and explicit package-owned setup while the loader gap remains:
+The lower-level `serverLoadPackage` validation helper remains available for fixture tests and controlled configuration scenarios:
 
 ```javascript
 import { serverLoadPackage } from "clay:packages";
@@ -67,6 +69,13 @@ import { serverRegisterCommand } from "clay:commands";
 import { serverPublishDecorations } from "clay:decorations";
 import { serverRegisterParseHandler } from "clay:parse";
 ```
+
+## Carried-forward deferrals
+
+- **Non-`@clay/*` registry resolution:** Third-party, npm, and custom registry packages are not resolved by the current first-party resolver. The authority boundary is limited to the shipped `@clay/*` packages under `CARGO_MANIFEST_DIR/packages`. Future ecosystem hardening (Phase 23) will widen the resolver to support registry packages, third-party verification, and package-manager integration.
+- **Hot-reload:** The shared `FirstPartyLoadEntryAllowlist` is an in-memory map that grows with loaded packages. Eviction and hot-reload are deferred to Phase 19 when packages may be unloaded or reloaded dynamically.
+- **Persistent shared enable state:** `PackageService` is instantiated per runtime with an empty `FakeBackend` and a `Mutex`. Persistent enable state across server restarts is not implemented; packages are re-installed and re-enabled at each configuration load.
+- **Security review:** The deny-by-default boundary, the constrained `@clay/*` allowlist, and the validation reuse are covered by an executable test suite (see `tests/package_loading_docs.rs` and `src/server/js_runtime.rs`). The decision log records the explicit authority expansion and the authorities NOT granted.
 
 ## References
 

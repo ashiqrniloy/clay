@@ -1176,6 +1176,40 @@
       "async": false
     },
     {
+      "id": "clay.packages.loadPackage",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/packages/load-package.md",
+      "js_module": "clay:packages",
+      "js_export": "loadPackage",
+      "js_facade": "runtime/js/packages.ts::loadPackage",
+      "backing_rust": "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load",
+      "deno_op": "op_clay_packages_load_package_by_specifier",
+      "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier",
+      "name": "loadPackage",
+      "user_facing_name": "Load Package by Specifier",
+      "summary": "Resolve and activate a first-party @clay/* package from a single specifier string.",
+      "owner": "server",
+      "phase": "Phase 18.6",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "First-party package specifier, e.g. \"@clay/markdown\"."
+        }
+      ],
+      "security": "Constrained first-party load authority only. Deny-by-default for non-@clay/* specifiers, unallowlisted clay://packages/... URLs, and any external import. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or package enable/disable authority. The loadEntry default export is executed server-side only; no package JavaScript runs in the client.",
+      "agent_guidance": "Use as the one-line default for loading first-party packages from ~/.config/clay/init.js. Do not pass arbitrary specifiers or enable/disable flags. For non-@clay/* packages, the resolution path is deferred to a future ecosystem hardening phase.",
+      "lookup_tags": ["packages", "js-api", "load", "first-party", "init"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
       "id": "clay.packages.serverLoadPackage",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/packages/server-load-package.md",
