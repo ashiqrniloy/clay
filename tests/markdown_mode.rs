@@ -564,6 +564,104 @@ fn markdown_fixture_activates_with_markdown_it_adapter() {
 }
 
 #[test]
+fn markdown_default_load_entry_imports_documented_clay_facades_only() {
+    // Static guard: the default end-user loader source (the package-owned
+    // loadEntry that `loadPackage("@clay/markdown")` imports and invokes) must
+    // consume documented `clay:*` facades and must never reach for raw
+    // `Deno.core.ops`. This keeps package activation under Clay's validated
+    // server-side boundary.
+    let load = std::fs::read_to_string("packages/markdown/dist/load.js")
+        .expect("Markdown default load entry must exist");
+    let index = std::fs::read_to_string("packages/markdown/dist/index.js")
+        .expect("Markdown package index must exist");
+
+    for documented_facade in [
+        "import { serverRegisterCommand } from \"clay:commands\";",
+        "import { serverActivateMajorMode, serverRegisterModePattern } from \"clay:modes\";",
+        "import { serverLoadPackage } from \"clay:packages\";",
+        "import { serverRegisterParseHandler } from \"clay:parse\";",
+    ] {
+        assert!(
+            load.contains(documented_facade),
+            "default load entry must import documented facade `{documented_facade}`"
+        );
+    }
+    // The default export is the no-options activation entry that loadPackage
+    // invokes; markdownLoadMode is the same function re-exported as a named
+    // fallback/test-only alias.
+    assert!(
+        load.contains("export default markdownLoadMode;")
+            && load.contains("export async function markdownLoadMode(options = {})"),
+        "default load entry must export markdownLoadMode as both default and named alias"
+    );
+    for source in [load.as_str(), index.as_str()] {
+        assert!(
+            !source.contains("Deno.core.ops"),
+            "Markdown default loader source must use Clay facades, not raw Deno ops"
+        );
+    }
+}
+
+#[test]
+fn markdown_default_load_does_not_publish_side_panel() {
+    // Phase 20 task 4: the default load path (`loadMarkdownPackage` /
+    // `markdownLoadMode`, which `loadPackage("@clay/markdown")` invokes) must
+    // publish NO default side panel. The optional preview is a separate
+    // `registerMarkdownPreview()` helper the host opts into.
+    let load = std::fs::read_to_string("packages/markdown/dist/load.js")
+        .expect("Markdown load entry must exist");
+
+    // The optional helper exists and declares a hidden right-slot panel.
+    assert!(
+        load.contains("export function registerMarkdownPreview")
+            && load.contains("slot: \"right\"")
+            && load.contains("defaultVisibility: \"hidden\"")
+            && load.contains("actionTargets: [\"markdown.togglePreview\"]"),
+        "load entry must declare the optional hidden right-slot preview helper"
+    );
+
+    // The shared activation body (`loadMarkdownPackage`, which both
+    // `markdownLoadMode` and `loadPackage("@clay/markdown")` invoke) does not
+    // reference the optional helper or any publishTree call — the panel is
+    // opt-in only. (The full default path is proven panel-free at runtime by
+    // `load_package_markdown_default_activates_full_mode_from_init_js`.)
+    let load_markdown_package = load
+        .split("export async function loadMarkdownPackage")
+        .nth(1)
+        .and_then(|rest| rest.split("export async function markdownLoadMode").next())
+        .unwrap_or("");
+    assert!(
+        !load_markdown_package.contains("registerMarkdownPreview")
+            && !load_markdown_package.contains("publishTree")
+            && !load_markdown_package.contains("serverRegisterPanelContribution"),
+        "default activation must not publish a panel or call the optional preview helper"
+    );
+    assert!(
+        !load.contains("publishTree"),
+        "load entry must not call publishTree at all"
+    );
+}
+
+#[test]
+fn markdown_fixture_simplification_no_publish_tree() {
+    // Phase 20 task 4: smoke fixtures use the default load path and publish NO
+    // default side panel — no `publishTree(...)` and no `clay:sdui` builder
+    // imports. The optional preview is a package PanelContribution, not fixture
+    // SDUI output.
+    for fixture_path in [
+        "tests/fixtures/configuration/markdown-mode/init.js",
+        "tests/fixtures/configuration/windows-markdown-open/init.js",
+    ] {
+        let fixture =
+            std::fs::read_to_string(fixture_path).expect("Markdown smoke fixture must exist");
+        assert!(
+            !fixture.contains("publishTree") && !fixture.contains("from \"clay:sdui\""),
+            "fixture `{fixture_path}` must not publish a default side panel (no publishTree / clay:sdui)"
+        );
+    }
+}
+
+#[test]
 fn windows_markdown_open_fixture_binds_ctrl_o_without_hardcoding() {
     let fixture =
         std::fs::read_to_string("tests/fixtures/configuration/windows-markdown-open/init.js")
@@ -593,6 +691,9 @@ fn windows_markdown_open_fixture_loads_markdown_package() {
     .expect("Windows Markdown open workspace sample must exist");
 
     assert!(sample.contains("# Clay Markdown Fixture"));
+    // Phase 20 task 4: the fixture uses the default load path (load + mode +
+    // parse + decorations) and publishes NO default side panel — the optional
+    // preview is a package PanelContribution, not fixture publishTree output.
     for expected in [
         "@clay/markdown",
         "serverLoadPackage(markdownPackage)",
@@ -600,12 +701,20 @@ fn windows_markdown_open_fixture_loads_markdown_package() {
         "serverRegisterParseHandler({",
         "serverPublishDecorations({",
         "extensions: [\"md\", \"markdown\", \"mdown\"]",
-        "Windows Markdown Open Dialog Smoke",
-        "Open: Ctrl+O native Markdown dialog",
     ] {
         assert!(
             fixture.contains(expected),
             "Windows Markdown open fixture must include `{expected}`"
+        );
+    }
+    for forbidden in [
+        "publishTree",
+        "Windows Markdown Open Dialog Smoke",
+        "Open: Ctrl+O native Markdown dialog",
+    ] {
+        assert!(
+            !fixture.contains(forbidden),
+            "Windows Markdown open fixture must no longer publish a default side panel (`{forbidden}`)"
         );
     }
 }

@@ -1345,6 +1345,8 @@ fn phase18_5_markdown_replan_primitive_review_records_existing_inventory() {
         "`serverRegisterParseHandler` and parse coordinator",
         "`serverPublishDecorations` and decoration transport",
         "`serverLoadPackage(packageJson)`",
+        "`loadPackage(\"@clay/*\")` (`clay.packages.loadPackage`)",
+        "Implemented by Plan 029",
         "Selected-file open activation (`clientOpenFileDialog` binding, `open_selected_file`, `selected_file_open_followup_messages`)",
         "`~/.config/clay/init.js` configuration runtime",
         "Package manifest, permissions, conflict, provenance validation",
@@ -1382,7 +1384,8 @@ fn phase18_5_markdown_replan_primitive_review_maps_markdown_to_generic_primitive
         "User configuration override            -> setPackageOption / serverSetLayoutOverride (implemented)",
         "Theme tokens for preview styling       -> PackageThemeTokenDeclaration + ThemeTokenResolver (implemented)",
         "Selected-file open activation          -> bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\") + open_selected_file (implemented)",
-        "Every Markdown need except one-line end-user package loading maps onto an implemented generic primitive",
+        "One-line end-user package loading      -> loadPackage(\"@clay/markdown\") (implemented by Plan 029)",
+        "Every Markdown need now maps onto an implemented generic primitive, including one-line end-user package loading, which Plan 029 closed",
         "No Markdown-specific Rust editor/parser/render/shell branch is required",
         "Hot-Path Classification",
         "Configuration/load time",
@@ -1401,18 +1404,20 @@ fn phase18_5_markdown_replan_primitive_review_maps_markdown_to_generic_primitive
 }
 
 #[test]
-fn phase18_5_markdown_replan_primitive_review_identifies_load_package_gap() {
+fn phase20_markdown_plan_assumes_generic_load_package_is_available() {
     let review = phase18_5_markdown_replan_primitive_review();
 
+    // Plan 029 closed the former `loadPackage` gap. The review must record the
+    // gap as closed, reject any Markdown-specific loader, and preserve the
+    // deny-by-default security rationale for the resolver.
     for required in [
-        "Generic Phase 18.5 Primitive Gaps",
-        "### `loadPackage(\"@clay/markdown\")` — generic one-line package specifier resolver",
-        "The only generic gap blocking the Markdown replan is the absence of a generic end-user package loader",
-        "Today only `serverLoadPackage(packageJson)` exists.",
+        "Generic Phase 18.5 Primitive Gaps — `loadPackage` (closed by Plan 029)",
+        "Status (2026-06-16): CLOSED.",
+        "Plan 029 closed this gap.",
+        "the constrained first-party `loadPackage(\"@clay/*\")` resolver is implemented",
         "Candidate public API target: `clay.packages.loadPackage` / `loadPackage(\"@clay/markdown\")`",
         "`runtime/js/packages.ts`",
         "`op_clay_packages_load_package_by_specifier` in `src/server/ops/packages.rs`",
-        "specifier resolver in `src/packages/service.rs`",
         "The resolver must remain deny-by-default for arbitrary external specifiers",
         "Acceptable scope for a safe Phase 18.5 implementation is a constrained first-party resolver for `@clay/*` specifiers",
         "External package resolution, package-manager execution, registry fetching, and arbitrary specifier expansion remain prohibited",
@@ -1426,7 +1431,7 @@ fn phase18_5_markdown_replan_primitive_review_identifies_load_package_gap() {
     ] {
         assert!(
             review.contains(required),
-            "Phase 18.5 Markdown replan primitive review must identify the generic loadPackage gap and reject Markdown-specific loaders: {required}"
+            "Phase 18.5 Markdown replan primitive review must record that Plan 029 closed the loadPackage gap and reject Markdown-specific loaders: {required}"
         );
     }
 }

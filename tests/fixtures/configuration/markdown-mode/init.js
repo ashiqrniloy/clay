@@ -4,16 +4,6 @@ import { serverOpenDocument } from "clay:documents";
 import { serverActivateMajorMode, serverRegisterModePattern } from "clay:modes";
 import { serverLoadPackage } from "clay:packages";
 import { serverRegisterParseHandler } from "clay:parse";
-import {
-  defineButton,
-  defineEditorView,
-  defineFlex,
-  defineLabel,
-  defineList,
-  definePanel,
-  defineStack,
-  publishTree,
-} from "clay:sdui";
 import { serverListWorkspaceRoots } from "clay:workspace";
 
 const markdownPackage = {
@@ -128,7 +118,6 @@ const activationInput = {
   ],
 };
 serverActivateMajorMode(markdownPackage, activationInput);
-const activation = serverActivateMajorMode(markdownPackage, activationInput);
 
 for (const command of markdownPackage.clay.contributions.commands) {
   serverRegisterCommand(markdownPackage, {
@@ -157,44 +146,3 @@ serverPublishDecorations({
     { byteStart: 2, byteEnd: 23, kind: "syntax", styleToken: "markup.heading.1", priority: 9 },
   ],
 });
-
-const root = defineFlex({
-  id: "markdown-root",
-  direction: "row",
-  children: [
-    definePanel({
-      id: "markdown-panel",
-      title: "Markdown Preview",
-      children: [
-        defineStack({
-          id: "markdown-stack",
-          children: [
-            defineLabel({ id: "markdown-document", text: `Document: ${documentPath}` }),
-            defineLabel({ id: "markdown-mode", text: `Mode: ${activation.modeId}` }),
-            defineLabel({ id: "markdown-parse", text: "Parse: markdown-it registered" }),
-            defineLabel({ id: "markdown-decorations", text: "Decorations: published" }),
-            defineLabel({ id: "markdown-preview", text: "Preview: decorated editor" }),
-            defineButton({
-              id: "markdown-toggle-preview",
-              label: "Toggle Preview",
-              action: { commandId: "markdown.togglePreview" },
-            }),
-            defineList({
-              id: "markdown-preview-list",
-              items: [
-                {
-                  id: "markdown-preview-mode",
-                  label: "Decorated editor preview",
-                  detail: "Inert package SDUI, server-routed command only",
-                },
-              ],
-            }),
-          ],
-        }),
-      ],
-    }),
-    defineEditorView({ id: "markdown-editor", documentId, expectedVersion: documentVersion }),
-  ],
-});
-
-await publishTree(root);

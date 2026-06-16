@@ -33,6 +33,34 @@ cargo run -- client
 cargo run -- client
 ```
 
+## Default End-User Configuration
+
+The commands above launch the app or run dev-only smoke fixtures. The actual end-user product setup is a small `~/.config/clay/init.js` that loads Markdown defaults through the runtime-backed generic package loader and binds the Windows open-file command:
+
+```js
+import { bindKey } from "clay:keybindings";
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/markdown");
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+```
+
+This is the Markdown product baseline. It is deliberately distinct from the smoke fixtures under `tests/fixtures/configuration/`:
+
+- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, `serverPublishDecorations`, and `publishTree`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported and is not the documented setup.
+- **End-user (product baseline):** the one-line `loadPackage("@clay/markdown")` plus the explicit `Ctrl+O` `bindKey`. No inline manifest object, no per-facade registration imports, no `publishTree` panel publication.
+
+Markdown end-user baseline invariants:
+
+- **Editor-only main slot.** The Markdown editor occupies the mandatory `main` slot of `PaneSlotLayout`. No default `PanelContribution` (side panel, preview panel, or status panel) is published on load.
+- **Optional preview only on demand.** An optional Markdown preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`; it appears only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
+- **Selected-file open is edit-only.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Saving a file picked through the dialog is out of scope until a later phase; close or discard the smoke document after editing.
+
+Timing and authority boundaries for the baseline:
+
+- **Configuration/open time only.** Markdown loading, contribution-descriptor validation, and selected-file activation run at configuration load or document-open time. Ordinary typing, paint, scroll, layout, and text-event handling stay client-local/non-blocking and read only already-installed inert shell/contribution state; they never run package JavaScript, parser work, IPC, file IO, or full-document serialization.
+- **No authority broadened.** Simplifying `init.js` to the one-line loader plus `bindKey` does not grant package installation, filesystem access beyond the selected file and the config root, workspace expansion, shell, network, AI mutation, WASM, raw Deno op, native-widget handle, raw CSS, renderer-callback, or client-side JavaScript authority. Package loading remains constrained to first-party `@clay/*` specifiers and deny-by-default for arbitrary external imports.
+
 ## Expected GUI Status
 
 The GUI status line and accessibility label should make the connection state visible without reading stderr:

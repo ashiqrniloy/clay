@@ -2,6 +2,28 @@
 
 `@clay/markdown` is the first-party Markdown mode POC package. Its source scaffold lives under `packages/markdown/`.
 
+## End-User UX Baseline
+
+The intended default end-user setup for Markdown mode is a small `~/.config/clay/init.js`:
+
+```js
+import { bindKey } from "clay:keybindings";
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/markdown");
+bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+```
+
+This is the Markdown product baseline. It is distinct from the dev-only smoke fixtures (see [Smoke Fixture](#smoke-fixture)), which inline the package manifest object and call each Clay facade manually only to validate them deterministically. The fixture manifest block and manual `serverLoadPackage` / `serverRegisterModePattern` / `serverActivateMajorMode` / `serverRegisterCommand` / `serverRegisterParseHandler` / `serverPublishDecorations` / `publishTree` plumbing are dev validation, never the documented end-user path.
+
+Baseline invariants for the end-user Markdown UX:
+
+- **Editor-only main slot.** The editor occupies the mandatory `main` slot of `PaneSlotLayout`. No default `PanelContribution` (side/preview/status panel) is published on load.
+- **Optional preview on demand.** An optional preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`, shown only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
+- **Selected-file open is edit-only.** Opening a file through `Ctrl+O` activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Saving a file picked through the dialog is out of scope until a later phase.
+
+Loading, contribution validation, and selected-file activation run at configuration/document-open time only; typing, paint, scroll, layout, and text-event paths stay client-local/non-blocking and read only installed inert shell/contribution state. The one-line loader does not broaden package installation, filesystem (beyond the selected file and config root), workspace expansion, shell, network, AI mutation, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript authority beyond what the constrained first-party `@clay/*` resolver already grants.
+
 ## Contract
 
 - `package.json` name: `@clay/markdown`

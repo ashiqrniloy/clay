@@ -188,4 +188,4 @@ export function markdownPackageManifest() {
 // circular index <-> load re-export stays TDZ-safe (load.js only references
 // these bindings inside functions it does not call at module-eval time).
 // See decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md.
-export { loadMarkdownPackage, markdownLoadMode } from "./load.js";
+export { loadMarkdownPackage, markdownLoadMode, registerMarkdownPreview } from "./load.js";

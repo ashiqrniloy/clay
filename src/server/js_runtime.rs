@@ -1127,7 +1127,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn markdown_config_fixture_opens_workspace_and_publishes_status_sdui() {
+    async fn markdown_config_fixture_opens_workspace_without_default_panel() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
             .join("fixtures")
@@ -1144,42 +1144,14 @@ mod tests {
             .await
             .unwrap();
 
-        let tree = result.published_sdui_tree.expect("published SDUI tree");
-        assert!(tree.nodes.iter().any(|node| matches!(
-            &node.kind,
-            crate::protocol::SduiNodeKind::Panel { title, .. } if title == "Markdown Preview"
-        )));
-        assert!(tree.nodes.iter().any(|node| matches!(
-            &node.kind,
-            crate::protocol::SduiNodeKind::Label { text } if text == "Mode: markdown"
-        )));
-        assert!(tree.nodes.iter().any(|node| matches!(
-            &node.kind,
-            crate::protocol::SduiNodeKind::Label { text } if text == "Parse: markdown-it registered"
-        )));
-        assert!(tree.nodes.iter().any(|node| matches!(
-            &node.kind,
-            crate::protocol::SduiNodeKind::Label { text } if text == "Decorations: published"
-        )));
-        let toggle_intent = tree
-            .nodes
-            .iter()
-            .find_map(|node| match &node.kind {
-                crate::protocol::SduiNodeKind::Button { action, .. }
-                    if action.command_id == "markdown.togglePreview" =>
-                {
-                    Some(action.clone())
-                }
-                _ => None,
-            })
-            .expect("markdown toggle action must be present");
-        let mut sdui_state = crate::server::sdui::StaticSduiState::for_document(1, 1);
-        sdui_state
-            .replace_with_runtime_tree(tree)
-            .expect("runtime Markdown SDUI tree must validate");
-        sdui_state
-            .validate_action(&toggle_intent)
-            .expect("registered package command action must validate");
+        // Phase 20 task 4: the fixture uses the default load path and publishes
+        // NO default side panel — only behavior/decorations state. The optional
+        // preview is a package PanelContribution, validated separately by
+        // `markdown_optional_preview_is_valid_panel_contribution`.
+        assert!(
+            result.published_sdui_tree.is_none(),
+            "markdown-mode fixture must not publish a default side panel SDUI tree"
+        );
         assert_eq!(result.parse_handlers.len(), 1);
         assert_eq!(result.parse_handlers[0].package_prefix, "markdown");
         assert!(result.published_decoration_set.is_some());
@@ -1195,7 +1167,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn windows_markdown_open_config_fixture_loads_markdown_and_binds_ctrl_o() {
+    async fn windows_markdown_open_config_fixture_loads_without_default_panel() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
             .join("fixtures")
@@ -1212,17 +1184,12 @@ mod tests {
             .await
             .unwrap();
 
-        let tree = result.published_sdui_tree.expect("published SDUI tree");
-        assert!(tree.nodes.iter().any(|node| matches!(
-            &node.kind,
-            crate::protocol::SduiNodeKind::Panel { title, .. }
-                if title == "Windows Markdown Open Dialog Smoke"
-        )));
-        assert!(tree.nodes.iter().any(|node| matches!(
-            &node.kind,
-            crate::protocol::SduiNodeKind::Label { text }
-                if text == "Open: Ctrl+O native Markdown dialog"
-        )));
+        // Phase 20 task 4: the fixture uses the default load path and publishes
+        // NO default side panel — only behavior/decorations state.
+        assert!(
+            result.published_sdui_tree.is_none(),
+            "windows-markdown-open fixture must not publish a default side panel SDUI tree"
+        );
         assert_eq!(result.parse_handlers.len(), 1);
         assert_eq!(result.parse_handlers[0].package_prefix, "markdown");
         assert!(result.published_decoration_set.is_some());
@@ -3030,6 +2997,80 @@ mod tests {
                 "`{invalid}` must throw, not return normally"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn markdown_optional_preview_is_valid_panel_contribution() {
+        // Phase 20 task 4: the optional Markdown preview helper registers a
+        // valid clay:ui PanelContribution (hidden right slot, toggle action
+        // target, package provenance) — but ONLY when called explicitly. The
+        // default load path never invokes it (guarded separately by the
+        // `load_package_markdown_default_activates_full_mode_from_init_js`
+        // test, which asserts no panel contribution is published by default).
+        let root = config_fixture("markdown-optional-preview-panel");
+        // load.js imports the `clay:ui` facade and `markdownPackageManifest`
+        // from index.js, so the dist module graph must be copied.
+        for file_name in ["index.js", "load.js"] {
+            fs::write(
+                root.join(file_name),
+                fs::read_to_string(format!("packages/markdown/dist/{file_name}"))
+                    .expect("first-party Markdown runtime module must exist"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import * as commands from "clay:commands";
+            import * as decorations from "clay:decorations";
+            import * as modes from "clay:modes";
+            import * as packages from "clay:packages";
+            import * as parse from "clay:parse";
+            import { loadMarkdownPackage, registerMarkdownPreview } from "./load.js";
+
+            // Realistic opt-in order: load the package first (registers the
+            // markdown.togglePreview command), THEN publish the optional panel.
+            const clay = { commands, decorations, modes, packages, parse };
+            await loadMarkdownPackage(clay, { documentId: 1, path: "sample.md" });
+            const panel = registerMarkdownPreview();
+            Deno.core.ops.op_clay_runtime_record(`${panel.id}:${panel.slot}:${panel.defaultVisibility}`);
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("registerMarkdownPreview must succeed");
+
+        // The returned declaration reached the caller with the contract shape.
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|record| record == "markdown.preview:right:hidden"),
+            "registerMarkdownPreview must return the hidden right-slot panel, got {:?}",
+            result.op_records
+        );
+        // The server-side PackageUiRegistry validated and recorded it with
+        // package provenance.
+        let panel = result
+            .ui_contributions
+            .panels
+            .iter()
+            .find(|panel| panel.id == "markdown.preview")
+            .expect("the optional preview must register as a validated PanelContribution");
+        assert_eq!(panel.slot, "right");
+        assert_eq!(panel.default_visibility, "hidden");
+        assert_eq!(panel.provenance.api_prefix, "markdown");
+        assert!(
+            panel
+                .action_targets
+                .iter()
+                .any(|target| target == "markdown.togglePreview"),
+            "preview panel must target the toggle command, got {:?}",
+            panel.action_targets
+        );
     }
 
     #[tokio::test]

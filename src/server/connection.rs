@@ -598,7 +598,7 @@ fn create_markdown_open_runtime_root(
         .join("packages")
         .join("markdown")
         .join("dist");
-    for file_name in ["index.js", "load.js", "parser.js", "sdui.js"] {
+    for file_name in ["index.js", "load.js", "parser.js"] {
         std::fs::copy(dist_root.join(file_name), config_root.join(file_name))
             .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
     }
@@ -650,13 +650,11 @@ import * as decorations from "clay:decorations";
 import * as modes from "clay:modes";
 import * as packages from "clay:packages";
 import * as parse from "clay:parse";
-import * as sdui from "clay:sdui";
 import {{ getActiveBehaviorManifest }} from "clay:behavior";
 import {{ loadMarkdownPackage }} from "./load.js";
 import {{ publishMarkdownDecorations }} from "./parser.js";
-import {{ publishMarkdownPreviewStatus }} from "./sdui.js";
 
-const clay = {{ commands, decorations, modes, packages, parse, sdui }};
+const clay = {{ commands, decorations, modes, packages, parse }};
 const documentId = {document_id};
 const documentVersion = {document_version};
 const documentPath = {document_path};
@@ -685,13 +683,6 @@ await publishMarkdownDecorations(clay, {{
     baseLine: 0,
     text: windowText
   }}]
-}});
-await publishMarkdownPreviewStatus(clay, {{
-  documentId,
-  documentVersion,
-  documentPath,
-  documentByteLength,
-  fileSizeBytes: documentByteLength
 }});
 "#
     )
@@ -1397,7 +1388,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selected_markdown_file_publishes_manifest_decorations_and_status() {
+    async fn selected_markdown_file_publishes_manifest_and_decorations() {
         let root = temp_workspace("selected-markdown-runtime");
         let selected = root.join("note.md");
         fs::write(
@@ -1503,24 +1494,54 @@ mod tests {
             }
             message => panic!("expected Markdown DecorationSet, got {message:?}"),
         }
-        match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::SduiSnapshot { tree, .. } => {
-                assert!(tree.nodes.iter().any(|node| matches!(
-                    &node.kind,
-                    SduiNodeKind::Panel { title, .. } if title == "Markdown Preview"
-                )));
-                assert!(tree.nodes.iter().any(|node| matches!(
-                    &node.kind,
-                    SduiNodeKind::Label { text } if text == "Mode: markdown"
-                )));
-            }
-            message => panic!("expected Markdown SDUI snapshot, got {message:?}"),
-        }
+
+        // Phase 20 task 4: selected-file Markdown activation publishes behavior
+        // and decorations ONLY — no default preview/status side panel. The
+        // runtime evaluation produces no SDUI tree, so no SduiSnapshot follows.
+        // (The dedicated `selected_markdown_file_opens_without_default_panel`
+        // test below asserts `evaluate_markdown_open` yields no SDUI tree.)
 
         drop(client);
         server_task.await.unwrap().unwrap();
         let _ = fs::remove_file(selected);
         let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn selected_markdown_file_opens_without_default_panel() {
+        // Phase 20 task 4: `evaluate_markdown_open` (the connection selected-file
+        // open evaluation) must publish a behavior manifest and decorations but
+        // NO default preview/status SDUI side panel. The optional preview is a
+        // package PanelContribution published only by an explicit opt-in, never
+        // by the selected-file-open path.
+        let metadata = DocumentMetadata {
+            document_id: 1,
+            version: 1,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: 1,
+            path: "note.md".to_string(),
+        };
+        let text = "# Opened note\n\n- item\n";
+
+        let evaluation = super::evaluate_markdown_open(&metadata, text)
+            .await
+            .expect("Markdown open runtime should evaluate");
+
+        assert!(
+            evaluation.published_sdui_tree.is_none(),
+            "selected-file Markdown open must not publish a default side panel SDUI tree, got {:?}",
+            evaluation.published_sdui_tree
+        );
+        assert!(
+            evaluation.behavior_manifest.is_some(),
+            "selected-file Markdown open must still publish a behavior manifest"
+        );
+        assert!(
+            evaluation.published_decoration_set.is_some(),
+            "selected-file Markdown open must still publish decorations"
+        );
     }
 
     #[tokio::test]

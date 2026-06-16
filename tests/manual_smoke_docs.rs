@@ -14,6 +14,14 @@ fn windows_doc() -> String {
     .expect("read docs/development/windows.md")
 }
 
+fn markdown_package_reference() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/reference/packages/markdown.md"
+    ))
+    .expect("read docs/reference/packages/markdown.md")
+}
+
 fn wiki_doc(path: &str) -> String {
     std::fs::read_to_string(format!("{}/{}", env!("CARGO_MANIFEST_DIR"), path))
         .unwrap_or_else(|error| panic!("read {path}: {error}"))
@@ -134,6 +142,86 @@ fn phase19_manual_smoke_docs_reject_file_association_requirement() {
         assert!(
             !launch_doc.contains(forbidden),
             "Phase 19 docs must not require file association behavior via `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn phase20_end_user_markdown_setup_is_one_line_load_plus_bind_key() {
+    // Guard: the actual-app Markdown instructions show a minimal package load
+    // plus an explicit bindKey, not the smoke fixture manifest block. The
+    // end-user product baseline must be documented and clearly separated from
+    // the dev-only fixtures.
+    let launch_doc = launch_smoke_doc();
+    let markdown_ref = markdown_package_reference();
+
+    for required in [
+        "Default End-User Configuration",
+        "import { loadPackage } from \"clay:packages\";",
+        "await loadPackage(\"@clay/markdown\");",
+        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });",
+        "Smoke-only (dev validation, never the product path)",
+        "End-user (product baseline)",
+        "inline a full `markdownPackage` manifest object",
+        "Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported",
+    ] {
+        assert!(
+            launch_doc.contains(required),
+            "launch smoke docs must document the Phase 20 end-user Markdown baseline marker `{required}`"
+        );
+    }
+
+    // The reference doc must carry the same baseline contract.
+    for required in [
+        "End-User UX Baseline",
+        "import { loadPackage } from \"clay:packages\";",
+        "await loadPackage(\"@clay/markdown\");",
+        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });",
+        "product baseline",
+        "are dev validation, never the documented end-user path",
+    ] {
+        assert!(
+            markdown_ref.contains(required),
+            "docs/reference/packages/markdown.md must document the Phase 20 end-user Markdown baseline marker `{required}`"
+        );
+    }
+}
+
+#[test]
+fn phase20_markdown_baseline_no_default_panel_and_edit_only_selected_file() {
+    // Guard: default Markdown mode does not require a PanelContribution, and
+    // selected-file save remains out of scope. These baseline invariants must
+    // be recorded in the product docs.
+    let launch_doc = launch_smoke_doc();
+    let markdown_ref = markdown_package_reference();
+
+    for required in [
+        "Editor-only main slot",
+        "mandatory `main` slot of `PaneSlotLayout`",
+        "No default `PanelContribution`",
+        "defaultVisibility: \"hidden\"",
+        "Selected-file open is edit-only",
+        "Saving a file picked through the dialog is out of scope until a later phase",
+        "Configuration/open time only",
+        "No authority broadened",
+    ] {
+        assert!(
+            launch_doc.contains(required),
+            "launch smoke docs must record the Phase 20 Markdown baseline invariant `{required}`"
+        );
+    }
+
+    for required in [
+        "Editor-only main slot",
+        "mandatory `main` slot of `PaneSlotLayout`",
+        "No default `PanelContribution`",
+        "defaultVisibility: \"hidden\"",
+        "Selected-file open is edit-only",
+        "Saving a file picked through the dialog is out of scope until a later phase",
+    ] {
+        assert!(
+            markdown_ref.contains(required),
+            "docs/reference/packages/markdown.md must record the Phase 20 Markdown baseline invariant `{required}`"
         );
     }
 }

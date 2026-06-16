@@ -2,6 +2,7 @@ import { serverRegisterCommand } from "clay:commands";
 import { serverActivateMajorMode, serverRegisterModePattern } from "clay:modes";
 import { serverLoadPackage } from "clay:packages";
 import { serverRegisterParseHandler } from "clay:parse";
+import { serverRegisterPanelContribution } from "clay:ui";
 
 import {
   apiPrefix,
@@ -176,6 +177,29 @@ export async function markdownLoadMode(options = {}) {
     parse: { serverRegisterParseHandler }
   };
   return loadMarkdownPackage(clay, options);
+}
+
+// Optional Markdown preview panel. NOT called by the default load entry above
+// — `loadPackage("@clay/markdown")` and `markdownLoadMode()` publish NO
+// PanelContribution by default, so the right slot stays empty unless the host
+// opts in. Call this helper explicitly AFTER the package is loaded (so its
+// `markdown.togglePreview` command is registered), or drive it through Clay's
+// package-option / layout-override configuration. The PackageUiRegistry
+// validates the action target, slot, and payload before publication.
+export function registerMarkdownPreview(manifest = markdownPackageManifest()) {
+  return serverRegisterPanelContribution(manifest, {
+    id: "markdown.preview",
+    slot: "right",
+    kind: "fixed",
+    defaultVisibility: "hidden",
+    actionTargets: ["markdown.togglePreview"],
+    component: {
+      kind: "panel",
+      id: "markdown.preview.root",
+      title: "Markdown Preview",
+      children: []
+    }
+  });
 }
 
 // Default activation entry. `loadPackage("@clay/markdown")` imports this module
