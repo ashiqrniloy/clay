@@ -312,7 +312,9 @@ where
         .await?;
 
     let sdui_snapshot = sdui.lock().await.snapshot_message(client_id);
-    codec.write_server_message(stream, &sdui_snapshot).await?;
+    if let Some(sdui_snapshot) = sdui_snapshot {
+        codec.write_server_message(stream, &sdui_snapshot).await?;
+    }
 
     let diagnostics = runtime_diagnostics.lock().await.clone();
     for diagnostic in diagnostics {
@@ -692,7 +694,11 @@ await publishMarkdownDecorations(clay, {{
 mod tests {
     use std::{fs, path::PathBuf, sync::Arc, time::SystemTime};
 
-    use tokio::{io::duplex, sync::Mutex};
+    use tokio::{
+        io::duplex,
+        sync::Mutex,
+        time::{Duration, timeout},
+    };
 
     use super::handle_connection;
 
@@ -702,6 +708,10 @@ mod tests {
 
     fn sdui_state() -> Arc<Mutex<StaticSduiState>> {
         Arc::new(Mutex::new(StaticSduiState::for_document(1, 1)))
+    }
+
+    fn empty_sdui_state() -> Arc<Mutex<StaticSduiState>> {
+        Arc::new(Mutex::new(StaticSduiState::empty_for_document(1)))
     }
 
     fn runtime_diagnostics() -> Arc<Mutex<Vec<RuntimeDiagnostic>>> {
@@ -828,7 +838,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_sends_initial_sdui_snapshot_after_bootstrap() {
+    async fn server_does_not_send_default_workspace_sdui_snapshot_after_bootstrap() {
         let (client, server) = duplex(4096);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
@@ -843,7 +853,7 @@ mod tests {
             document,
             behavior,
             workspace_state(),
-            sdui_state(),
+            empty_sdui_state(),
             runtime_diagnostics(),
             codec,
         ));
@@ -863,18 +873,12 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
-        match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::SduiSnapshot { client_id, tree } => {
-                assert_eq!(client_id, 99);
-                assert_eq!(tree.ui_version, 1);
-                assert!(
-                    tree.nodes
-                        .iter()
-                        .any(|node| matches!(node.kind, SduiNodeKind::EditorView { .. }))
-                );
-            }
-            message => panic!("expected SduiSnapshot, got {message:?}"),
-        }
+        let next = timeout(
+            Duration::from_millis(25),
+            codec.read_server_message(&mut client),
+        )
+        .await;
+        assert!(next.is_err(), "unexpected default SDUI message: {next:?}");
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -1541,6 +1545,58 @@ mod tests {
         assert!(
             evaluation.published_decoration_set.is_some(),
             "selected-file Markdown open must still publish decorations"
+        );
+    }
+
+    #[test]
+    fn selected_markdown_open_uses_generic_mode_activation() {
+        // Phase 20 task 5: the selected-file Markdown open path must reuse the
+        // package-owned loader (`loadMarkdownPackage`) and generic mode
+        // activation primitives (`clay:modes`, `clay:parse`, `clay:decorations`,
+        // `clay:behavior`) rather than generating a divergent init script or
+        // hardcoding Rust-side Markdown branches. The init script is a generic
+        // facade-driven activation path.
+        let metadata = DocumentMetadata {
+            document_id: 1,
+            version: 1,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: 1,
+            path: "note.md".to_string(),
+        };
+        let init_source = super::markdown_open_init_source(&metadata, 16, "# Opened note\n", 16);
+
+        // Generic facade imports — the init script uses Clay's generic primitives.
+        for import_line in [
+            "import * as commands from \"clay:commands\"",
+            "import * as decorations from \"clay:decorations\"",
+            "import * as modes from \"clay:modes\"",
+            "import * as packages from \"clay:packages\"",
+            "import * as parse from \"clay:parse\"",
+            "from \"clay:behavior\"",
+        ] {
+            assert!(
+                init_source.contains(import_line),
+                "selected-file Markdown init must use generic facade import `{import_line}`, got:\n{init_source}"
+            );
+        }
+
+        // Reuses the package-owned loader — not a divergent Rust-side activation.
+        assert!(
+            init_source.contains("loadMarkdownPackage"),
+            "selected-file Markdown init must reuse the package-owned loader `loadMarkdownPackage`"
+        );
+
+        // No hardcoded Rust-side Markdown branches — the init script does not
+        // bypass the clay facades with raw ops.
+        assert!(
+            !init_source.contains("op_clay_modes_server_register_mode_pattern"),
+            "selected-file Markdown init must not bypass the clay:modes facade with raw ops"
+        );
+        assert!(
+            !init_source.contains("op_clay_parse_server_register_parse_handler"),
+            "selected-file Markdown init must not bypass the clay:parse facade with raw ops"
         );
     }
 

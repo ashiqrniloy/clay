@@ -2872,3 +2872,174 @@ fn phase18_5_docs_reject_hidden_markdown_config_keys() {
         );
     }
 }
+
+#[test]
+fn phase20_markdown_configuration_audit_documents_end_user_contract() {
+    // Phase 20 task 7: Verify that the Phase 18.5 Markdown end-user loading
+    // configuration audit section accurately documents the Phase 20 contract:
+    // one-line loadPackage, explicit bindKey, and setPackageOption/serverSetLayoutOverride
+    // for the optional preview. Also verify no hardcoded Markdown config keys exist
+    // in Rust code outside of test code that validates rejection.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+
+    // Verify the Phase 18.5 audit section documents loadPackage as implemented by Plan 029
+    assert!(
+        configuration_doc.contains("One-line package loading")
+            && configuration_doc.contains("clay.packages.loadPackage")
+            && configuration_doc.contains("implemented (Plan 029, Phase 18.6)"),
+        "Phase 18.5 audit must document loadPackage as implemented by Plan 029"
+    );
+
+    // Verify the Phase 18.5 audit section documents bindKey for the file-dialog key binding
+    assert!(
+        configuration_doc.contains("Markdown file-dialog key binding")
+            && configuration_doc.contains("clay.keybindings.bindKey"),
+        "Phase 18.5 audit must document bindKey for the file-dialog key binding"
+    );
+
+    // Verify the Phase 18.5 audit section documents setPackageOption for Markdown package options
+    assert!(
+        configuration_doc.contains("Markdown package options")
+            && configuration_doc.contains("clay.configuration.setPackageOption")
+            && configuration_doc.contains("runtime-backed"),
+        "Phase 18.5 audit must document setPackageOption for Markdown package options"
+    );
+
+    // Verify the Phase 18.5 audit section documents serverSetLayoutOverride for Markdown layout overrides
+    assert!(
+        configuration_doc.contains("Markdown layout overrides")
+            && configuration_doc.contains("clay.ui.serverSetLayoutOverride"),
+        "Phase 18.5 audit must document serverSetLayoutOverride for Markdown layout overrides"
+    );
+
+    // Verify no hardcoded Markdown-specific hidden config keys exist in the
+    // non-test Rust sources. Only configuration.rs test code (which validates
+    // rejection) should reference hidden key names.
+    let configuration_rs = fs::read_to_string(root.join("src/server/configuration.rs"))
+        .expect("read configuration.rs");
+    // The non-test portion of configuration.rs must not declare or accept
+    // hidden Markdown config keys. Test code that validates rejection is
+    // guarded by #[cfg(test)] and is excluded from this check.
+    let non_test_section = configuration_rs
+        .find("#[cfg(test)]")
+        .map(|idx| &configuration_rs[..idx])
+        .unwrap_or(&configuration_rs);
+    for pattern in [
+        "\"markdown.preview.position\"",
+        "\"markdown.preview.defaultVisibility\"",
+        "\"markdown.layout.preview.defaultSlot\"",
+        "\"markdown.sidebar.width\"",
+    ] {
+        assert!(
+            !non_test_section.contains(pattern),
+            "configuration.rs non-test code must not contain hardcoded Markdown hidden key {pattern}"
+        );
+    }
+}
+
+#[test]
+fn phase20_loadpackage_api_documentation_is_complete() {
+    // Phase 20 task 8: Verify that the loadPackage API has complete documentation
+    // with all required sections: examples, errors, permissions, security notes, etc.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    // Verify loadPackage docs exist and have required sections
+    let load_package_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/packages/load-package.md"))
+            .expect("read load-package.md");
+
+    // Check for required documentation sections
+    let required_sections = [
+        "## Example",
+        "## Errors",
+        "## Permissions and security",
+        "## Agent guidance",
+        "## Return and async behavior",
+        "## When to use",
+    ];
+
+    for section in required_sections {
+        assert!(
+            load_package_doc.contains(section),
+            "loadPackage docs must include {section} section"
+        );
+    }
+
+    // Verify security notes are present
+    assert!(
+        load_package_doc.contains("does not grant") && load_package_doc.contains("deny-by-default"),
+        "loadPackage docs must include security constraints"
+    );
+
+    // Verify package docs reference the API correctly
+    let package_doc = fs::read_to_string(root.join("packages/markdown/docs/index.md"))
+        .expect("read packages/markdown/docs/index.md");
+
+    assert!(
+        package_doc.contains("loadPackage") && package_doc.contains("@clay/markdown"),
+        "Package docs must reference loadPackage API"
+    );
+
+    // Verify the reference docs have the end-user baseline
+    let ref_doc = fs::read_to_string(root.join("docs/reference/packages/markdown.md"))
+        .expect("read docs/reference/packages/markdown.md");
+
+    assert!(
+        ref_doc.contains("End-User UX Baseline") || ref_doc.contains("loadPackage"),
+        "Reference docs must document end-user setup"
+    );
+}
+
+#[test]
+fn phase20_rust_public_functions_have_api_mappings_or_internal_visibility() {
+    // Phase 20 task 8: Verify that no public Rust function in the package loading
+    // path lacks a Clay JS API mapping or explicit internal visibility.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+        .expect("read api-inventory.toml");
+
+    // Check key files in the package loading path
+    let files_to_check = [
+        "src/server/ops/packages.rs",
+        "src/server/js_runtime.rs",
+        "src/server/ops/ui.rs",
+        "src/server/ops/configuration.rs",
+    ];
+
+    for file_path in files_to_check {
+        let full_path = root.join(file_path);
+        if !full_path.exists() {
+            continue;
+        }
+
+        let content = fs::read_to_string(&full_path).expect(&format!("read {}", file_path));
+
+        // Find all pub fn declarations (excluding pub(crate))
+        let lines: Vec<&str> = content.lines().collect();
+        for (line_num, line) in lines.iter().enumerate() {
+            if line.contains("pub fn") && !line.contains("pub(crate)") {
+                // Extract function name
+                if let Some(fn_name) = line.split("fn ").nth(1).and_then(|s| s.split('(').next()) {
+                    let fn_name = fn_name.trim();
+
+                    // Check if this function has a corresponding entry in the API inventory
+                    // We look for the function name in backing_rust or deno_op_path fields
+                    let has_api_mapping = inventory.contains(fn_name);
+
+                    // If no mapping found, this is a violation
+                    assert!(
+                        has_api_mapping,
+                        "Public function `{}` in {} at line {} lacks a Clay JS API mapping in api-inventory.toml. \
+                         Either add a mapping or change visibility to pub(crate) if it's internal.",
+                        fn_name,
+                        file_path,
+                        line_num + 1
+                    );
+                }
+            }
+        }
+    }
+}

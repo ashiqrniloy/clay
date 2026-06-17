@@ -7,7 +7,7 @@ use masonry::core::{
     LayoutCtx, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut,
     PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, render_text,
 };
-use masonry::kurbo::{Affine, Size};
+use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
 use masonry::peniko::{Color, Fill};
 use masonry::vello::Scene;
@@ -426,9 +426,15 @@ impl EditorWidget {
         }
     }
 
-    fn editor_region_contains(&self, size: Size, point: masonry::kurbo::Point) -> bool {
+    fn editor_main_rect(&self, size: Size) -> Rect {
         let document_id = self.editor.document_state().document_id;
-        editor_region_for_document(size, &self.sdui, document_id).contains(point)
+        editor_region_for_document(size, &self.sdui, document_id)
+    }
+
+    fn editor_local_point(&self, size: Size, point: Point) -> Option<Point> {
+        let rect = self.editor_main_rect(size);
+        rect.contains(point)
+            .then(|| Point::new(point.x - rect.x0, point.y - rect.y0))
     }
 
     fn paint_status_line(&self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
@@ -502,17 +508,17 @@ impl Widget for EditorWidget {
                         let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
                     }
                     (false, true)
-                } else if self.editor_region_contains(ctx.size(), point) {
+                } else if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
                     ctx.capture_pointer();
-                    (self.editor.place_caret_at_point(point), true)
+                    (self.editor.place_caret_at_point(local_point), true)
                 } else {
                     (false, true)
                 }
             }
             PointerEvent::Move(pointer_update) if ctx.is_active() => {
                 let point = ctx.local_position(pointer_update.current.position);
-                if self.editor_region_contains(ctx.size(), point) {
-                    (self.editor.extend_selection_to_point(point), true)
+                if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
+                    (self.editor.extend_selection_to_point(local_point), true)
                 } else {
                     (false, true)
                 }
@@ -659,7 +665,8 @@ impl Widget for EditorWidget {
             None,
             &rect,
         );
-        self.editor.paint(ctx, scene);
+        self.editor
+            .paint_in_rect(ctx, scene, self.editor_main_rect(ctx.size()));
         self.sdui.paint(ctx, scene);
         self.paint_status_line(ctx, scene);
     }
@@ -702,7 +709,10 @@ mod tests {
         KeyModifiers, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode,
         SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
-    use crate::shell::{FixedSlotId, FixedSlotState, PaneSlotLayout};
+    use crate::shell::{
+        FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
+        PackageUiComponentTree, PackageUiRuntimeUpdate, PaneSlotLayout,
+    };
     use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Modifiers};
 
     fn sdui_tree(label_text: &str) -> SduiTree {
@@ -1154,6 +1164,52 @@ mod tests {
             widget
                 .sdui_visible_texts()
                 .contains(&"Side panel updated".to_string())
+        );
+    }
+
+    #[test]
+    fn fixed_package_panel_shrinks_editor_hit_region() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget
+            .sdui
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Left,
+                    PackagePanelVisibility::Visible,
+                    PackageUiComponentTree {
+                        id: "markdown.preview.root".to_string(),
+                        kind: "panel".to_string(),
+                        title: Some("Preview".to_string()),
+                        text: None,
+                        label: None,
+                        action_command_id: None,
+                        items: Vec::new(),
+                        children: Vec::new(),
+                    },
+                    Vec::new(),
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let size = masonry::kurbo::Size::new(900.0, 600.0);
+        let main = widget.editor_main_rect(size);
+
+        assert_eq!(main.x0, 240.0);
+        assert!(
+            widget
+                .editor_local_point(size, masonry::kurbo::Point::new(100.0, 80.0))
+                .is_none()
+        );
+        assert_eq!(
+            widget.editor_local_point(size, masonry::kurbo::Point::new(300.0, 80.0)),
+            Some(masonry::kurbo::Point::new(60.0, 80.0))
         );
     }
 

@@ -45,9 +45,17 @@ Package installation remains separate from execution. Clay validates this metada
 
 ## Default Load Path
 
-The preferred end-user default remains the one-line target `loadPackage("@clay/markdown")`. Phase 18.5 verified that generic one-line loader is not implemented yet: making it work requires a security-critical module-loader bridge that lets the controlled runtime import a resolver-validated first-party `loadEntry` from outside the configuration root, plus a `PackageService` resolve/enable/execute path. That authority expansion was deferred to a dedicated phase with a decision-log-backed rationale; see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`.
+The documented end-user default is one line from `~/.config/clay/init.js`:
 
-The package ships the fallback entry shape the future resolver will invoke. `markdownLoadMode()` (in `./dist/load.js`, re-exported from `./dist/index.js`) imports the `clay:packages`, `clay:modes`, `clay:commands`, and `clay:parse` facades directly, reuses the existing `loadMarkdownPackage` logic, declares no inline manifest, and consumes only implemented generic primitives. The documented temporary end-user fallback is therefore:
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/markdown");
+```
+
+Plan 029 (Phase 18.6) implemented the generic `loadPackage("@clay/*")` resolver with the `op_clay_packages_load_package_by_specifier` gate and the `FirstPartyLoadEntryAllowlist` module-loader bridge. The resolver is constrained to first-party `@clay/*` packages only; non-`@clay/*` registry resolution (third-party, npm, custom registries) is deferred to Phase 23 ecosystem hardening. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the authority rationale and security review.
+
+The Markdown package's `loadEntry` (`markdownLoadMode` in `packages/markdown/dist/load.js`) is the default activation export that `loadPackage` invokes. The package-owned `markdownLoadMode()` entry remains available as a convenience alias for per-load options:
 
 ```js
 import { markdownLoadMode } from "@clay/markdown";
@@ -55,8 +63,8 @@ import { markdownLoadMode } from "@clay/markdown";
 await markdownLoadMode();
 ```
 
-It becomes end-to-end callable once the constrained first-party module-loader bridge lands. Until then, deterministic smoke/configuration fixtures continue to validate the package through `serverLoadPackage(packageJson)` plus the same package-owned helpers, and the explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` separation is preserved.
+The explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` separation is preserved — file-open is app/editor configuration, not Markdown mode behavior.
 
 ## Smoke Fixture
 
-The deterministic smoke fixture at `tests/fixtures/configuration/markdown-mode/` registers the package metadata, opens `workspace/sample.md` when a workspace root is available, activates Markdown mode, registers parse/decorations, publishes representative decorations, and publishes the inert Markdown preview/status SDUI panel. If no workspace root is available, the fixture falls back to document `1` so `cargo run -- smoke-gui --config-fixture markdown-mode` still validates the package SDUI workflow without expanding filesystem authority.
+The deterministic smoke fixture at `tests/fixtures/configuration/markdown-mode/` registers the package metadata, opens `workspace/sample.md` when a workspace root is available, activates Markdown mode, registers parse/decorations, and publishes representative decorations. If no workspace root is available, the fixture falls back to document `1` so `cargo run -- smoke-gui --config-fixture markdown-mode` still validates the package workflow without expanding filesystem authority. The fixture does not publish a default side panel; the optional preview is a `PanelContribution` the host opts into.

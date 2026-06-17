@@ -57,7 +57,7 @@ The model is deliberately not a direct Masonry, CSS, HTML, or client-side JavaSc
 5. Accepted records are stored as `RegisteredPanelContribution`, `RegisteredComponentContribution`, `RegisteredTransientOverlayContribution`, `RegisteredPackageInputContribution`, `RegisteredPackageUiStateScope`, and `RegisteredPackageThemeTokenDeclaration` values with `UiContributionProvenance`.
 6. `PackageUiRegistrySnapshot::runtime_update` maps registered panels, overlays, and input contributions into `PackageUiRuntimeUpdate`. `src/shell/package_ui.rs` applies that update only when the base version matches, enforces `MAX_FIXED_PANELS`, `MAX_TRANSIENT_OVERLAYS`, `MAX_INPUT_ROUTES`, duplicate contribution-ID rejection, and duplicate exclusive fixed-slot rejection, then increments the local runtime version.
 7. `PackageUiRuntimeState::slot_layout` folds visible fixed panels into `PaneSlotLayout`. Side panels use bounded side sizes, top/bottom panels use bounded vertical sizes, and transient overlays are kept separate so they do not consume fixed slot geometry.
-8. `src/masonry_sdui.rs` reads the installed inert package UI state during layout/paint. It paints fixed panels, compatibility SDUI content, transient overlays, and the status bar while keeping `EditorSurface` responsible for text, caret, selection, viewport, edit queueing, and ordinary input.
+8. `src/masonry_sdui.rs` reads the installed inert package UI state during layout/paint. It paints fixed panels and transient overlays from validated state, while `src/masonry_editor.rs` uses the same slot-computed `main` rect to clip/offset `EditorSurface` painting and translate pointer hit-testing before caret/selection updates. `EditorSurface` remains responsible for text, caret, selection, viewport, edit queueing, and ordinary input.
 9. Package UI action regions emit bounded `ClientMessage::SduiAction` command intents for registered command IDs. The pointer handler does not execute package JavaScript and does not wait synchronously for IPC acknowledgement. Phase 18.4 input routes are installed as inert `PackageInputRouting` values so native input code can read focus/action policy without package validation, configuration evaluation, or package JavaScript in pointer/key/text hot paths.
 
 ## Code Examples
@@ -99,7 +99,7 @@ serverRegisterPanelContribution(manifest, {
   - Owner/source: `runtime/js/ui.ts`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-panel-contribution.md`.
   - Validation: package-prefixed ID, `kind = fixed`, slot in `left`/`right`/`top`/`bottom`, allowed default visibility, bounded component tree, registered action targets, duplicate ID/slot rejection, prohibited authority rejection.
-  - Runtime: fixed panels compose into `PaneSlotLayout`; the editor remains in `main`.
+  - Runtime: fixed panels compose into `PaneSlotLayout`; the editor remains clipped/offset in `main` for paint and pointer hit-testing.
 
 - `ComponentContribution`
   - Owner/source: `runtime/js/ui.ts`, `src/server/ui.rs`, `src/shell/components.rs`, `src/shell/package_ui.rs`.
@@ -152,6 +152,7 @@ serverRegisterPanelContribution(manifest, {
 - `src/shell/theme.rs` unit tests: validate core token resolution, package-token fallback resolution, and type mismatch rejection.
 - `src/shell/package_ui.rs` unit tests: validate fixed panel slot composition, duplicate exclusive slot rejection, and transient overlay geometry.
 - `src/masonry_sdui.rs` unit tests: validate package fixed-panel geometry, transient overlay geometry, action routing, observation privacy, and resolved theme-token rendering.
+- `src/masonry_editor.rs::fixed_package_panel_shrinks_editor_hit_region`: validates editor hit-testing uses the fixed-panel-reduced `main` rect.
 - `tests/package_loading.rs`: validates package manifest UI/input/state/layout/configuration metadata, contribution counts, deterministic conflicts, prefix/provenance rules, and invalid contribution rejection.
 - `tests/package_primitive_gate.rs`: keeps package permission/prohibited-authority gates aligned with UI contribution rules.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`, and `tests/rust_visibility_api_mapping.rs`: verify public `clay:ui` docs, generated registry entries, facade exports, op mappings, and Rust visibility boundaries.

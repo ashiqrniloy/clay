@@ -59,8 +59,6 @@ Phase 18.5 establishes the Markdown package UI/layout authoring contract:
 - **User customization through Clay JS APIs.** Preview visibility, slot, split ratio, and theme token mapping are controlled through `setPackageOption` and `serverSetLayoutOverride`, not through hidden JSON/TOML/ad hoc keys.
 - **Generic primitive consumption.** The package consumes only generic shell/layout/UI/configuration primitives from Phases 18.1–18.4. No Markdown-specific Rust editor/parser/render/shell branch is required or added.
 
-Current smoke fixtures at `tests/fixtures/configuration/markdown-mode/` may still publish the SDUI preview/status panel through the `clay:sdui` bridge for validation. That SDUI bridge is a Clay-owned internal compatibility path, not the user-facing panel authoring convention. The long-term path uses `PanelContribution` with `defaultVisibility: "hidden"`.
-
 ## Smoke Fixture
 
-Use `cargo run -- smoke-gui --config-fixture markdown-mode` for a deterministic GUI smoke path. The fixture lives at `tests/fixtures/configuration/markdown-mode/`, opens `workspace/sample.md` when a workspace root is provided by tests, activates Markdown mode, registers parse/decorations, publishes representative decorations, and shows the Markdown preview/status SDUI panel.
+Use `cargo run -- smoke-gui --config-fixture markdown-mode` for a deterministic GUI smoke path. The fixture lives at `tests/fixtures/configuration/markdown-mode/`, opens `workspace/sample.md` when a workspace root is provided by tests, activates Markdown mode, registers parse/decorations, and publishes representative decorations. The fixture does not publish a default side panel; the optional preview is a `PanelContribution` the host opts into.

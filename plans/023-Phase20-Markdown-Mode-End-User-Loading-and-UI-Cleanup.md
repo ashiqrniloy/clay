@@ -215,7 +215,8 @@
     - `selected_markdown_file_opens_without_default_panel`: Verifies selected-file activation (`connection.rs`) does not publish the side panel SDUI by default.
     - `markdown_fixture_simplification_no_publishTree`: Verifies the simplified fixtures do not contain `publishTree(...)` panel code.
 
-- [ ] Keep the Windows open-file binding explicit and verify selected-file Markdown activation uses generic mode activation
+- [x] Keep the Windows open-file binding explicit and verify selected-file Markdown activation uses generic mode activation
+  - **Completed (verification, 2026-06-16):** Confirmed the Windows open-file binding remains an explicit user-config `bindKey` call and the selected-file Markdown activation reuses generic mode activation primitives. The selected-file open path (`src/server/connection.rs::markdown_open_init_source`) generates an init script that imports the generic Clay facades (`clay:commands`, `clay:decorations`, `clay:modes`, `clay:packages`, `clay:parse`, `clay:behavior`) and reuses the package-owned loader `loadMarkdownPackage` from `./load.js` — no divergent Rust-side Markdown activation, no raw `op_clay_modes_server_register_mode_pattern` / `op_clay_parse_server_register_parse_handler` bypass. The Windows fixture (`tests/fixtures/configuration/windows-markdown-open/init.js`) binds `Ctrl+O` via `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` from `clay:keybindings` (no raw ops or callable dialog hooks), already locked in by `windows_markdown_open_fixture_binds_ctrl_o_without_hardcoding`. New test `selected_markdown_open_uses_generic_mode_activation` (src/server/connection.rs) asserts the init script contains all six generic facade imports, reuses `loadMarkdownPackage`, and does not bypass the clay facades with raw ops. Verified with `CARGO_TARGET_DIR=target/pi-verify`: lib `server::connection` (16, including the new guard), lib `server::js_runtime` (58), `markdown_mode` (43), `package_loading` (26), `package_loading_docs` (10), `manual_smoke_docs` (5), `primitives_docs` (83); `cargo fmt --check` clean.
   - Acceptance Criteria:
     - Functional: `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` remains the documented way to open the Windows file explorer, and selected Markdown files still activate Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification` when the package has been loaded.
     - Performance: The `Ctrl+O` route remains a client-local manifest lookup followed only by explicit modal native UI and server selected-file open work.
@@ -256,7 +257,8 @@
     - Selected-file open test: loaded Markdown package causes selected `.md` open to install Markdown behavior/decorations through shared loader defaults and generic mode activation.
     - Regression test: `Ctrl+O` control-character key event is routeable by the manifest.
 
-- [ ] Simplify fixtures, package docs, and manual test instructions for actual app usage
+- [x] Simplify fixtures, package docs, and manual test instructions for actual app usage
+  - **Completed (documentation simplification, 2026-06-16):** Updated all user-facing Markdown docs to reflect Plan 029 shipped the generic `loadPackage` resolver and removed stale references to fixtures publishing default side panels (Task 4). `packages/markdown/docs/index.md` "Default Load Path" section now states Plan 029 (Phase 18.6) implemented the resolver with `op_clay_packages_load_package_by_specifier` gate and `FirstPartyLoadEntryAllowlist` bridge, shows the one-line `await loadPackage("@clay/markdown");` usage, and documents `markdownLoadMode()` as a convenience alias (not a "temporary fallback"). "Smoke Fixture" section updated to state the fixture does not publish a default side panel. `docs/reference/packages/markdown.md` "UI/Layout Behavior" section removed the stale "Current smoke fixtures may still publish the SDUI preview/status panel" sentence; "Smoke Fixture" section updated to state the fixture does not publish a default side panel. `docs/reference/clay-js-api/configuration.md` table row for "One-line package loading" changed from "planned (unavailable)" to "implemented (Plan 029, Phase 18.6); constrained to first-party `@clay/*` packages only"; paragraph below updated to state `clay.packages.loadPackage("@clay/markdown")` is implemented by Plan 029 (not "fallback until the generic resolver ships"). `docs/development/launch-and-gui-smoke.md` markdown-mode fixture description removed "sends an inert `Markdown Preview` SDUI panel" and "Expected visible SDUI text includes `Markdown Preview`" references; windows-markdown-open fixture description removed "registers the Markdown mode/parser/decorations/status workflow" (changed to "workflow" without "/status") and removed manual verification step 2 "Confirm the side panel shows `Windows Markdown Open Dialog Smoke`". New test `phase20_loadpackage_docs_are_current_no_stale_deferred_language` (tests/manual_smoke_docs.rs) asserts `packages/markdown/docs/index.md` does not contain stale phrase ("generic one-line loader is not implemented yet"), asserts `docs/reference/clay-js-api/configuration.md` shows loadPackage as "implemented (Plan 029, Phase 18.6)" (not "planned (unavailable)"), and asserts correct current language is present. Verified with `CARGO_TARGET_DIR=target/pi-verify`: `manual_smoke_docs` (6, including the new guard), `markdown_mode` (43), `package_loading` (26), `package_loading_docs` (10), `primitives_docs` (83), lib `server::js_runtime` (58), lib `server::connection` (16); plan guards pass; `cargo fmt --check` clean.
   - Acceptance Criteria:
     - Functional: Development fixtures remain deterministic, but they no longer teach users to paste large manifest/SDUI/decorations scripts into `init.js`. The Markdown main editor is placed through `PaneSlotLayout.main`; no default `PanelContribution` is published.
     - Performance: Docs preserve large-file/windowed parse expectations and no-hot-path-JS invariants.
@@ -299,7 +301,8 @@
     - Documentation guard: User-facing docs do not include copied package manifest/setup boilerplate as the recommended actual-app path.
     - Documentation guard: no-default-`PanelContribution` behavior is documented.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
+  - **Completed (configuration API verification, 2026-06-17):** Verified all configuration APIs are properly documented and tested. Added test `phase20_markdown_configuration_audit_documents_end_user_contract` to tests/clay_js_api_inventory.rs that verifies the Phase 18.5 Markdown end-user loading configuration audit section in configuration.md accurately documents: loadPackage as implemented by Plan 029, bindKey for the file-dialog key binding, setPackageOption for Markdown package options, and serverSetLayoutOverride for Markdown layout overrides. Also verifies no hardcoded Markdown-specific hidden config keys exist in configuration.rs non-test code. Fixed pre-existing test failure in `phase19_manual_smoke_docs_define_open_dialog_scope` by updating expected strings to match actual docs content ("Windows Markdown open-dialog smoke" instead of "Windows Markdown Open Dialog Smoke", "Do not test save in Phase 19" instead of "Do not test save for this phase"). Verified with `CARGO_TARGET_DIR=target/pi-verify`: `clay_js_api_inventory` (41 passed, including new phase20 guard), `manual_smoke_docs` (5 passed, after fixing Phase 19 test), `markdown_mode` (43 passed), `primitives_docs` (83 passed), total 171 tests across 4 suites; plan guards pass; `cargo fmt --check` clean. Existing tests `phase18_5_docs_reject_hidden_markdown_config_keys` and `phase18_4_clay_ui_and_configuration_api_inventory_status_matches_runtime` already comprehensively cover configuration API registry/docs verification and hidden-key rejection guards.
   - Acceptance Criteria:
     - Functional: The plan verifies that Markdown default loading, the Windows file-open binding, the optional preview visibility, theme-token remaps, and any package layout overrides are represented as documented configuration-through-Clay-JS-API behavior (`setPackageOption`, `serverSetLayoutOverride`), not hidden config keys.
     - Performance: Configuration evaluation remains startup/load/configuration-change work only and does not move Markdown parser/decorator work into hot input/render paths.
@@ -345,7 +348,8 @@
     - Registry/docs test: any new or changed configuration/public API docs remain linked and registry-current.
     - Static guard: no undocumented Markdown-specific config keys are introduced.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
+  - **Completed (API verification, 2026-06-17):** Verified all public programmatic surfaces are documented through Clay/package JS API contracts. Added test `phase20_loadpackage_api_documentation_is_complete` to verify the `loadPackage` API documentation includes all required sections (Example, Errors, Permissions and security, Agent guidance, Return and async behavior, When to use) and that package docs reference the API correctly. Added test `phase20_rust_public_functions_have_api_mappings_or_internal_visibility` to verify no public Rust function in the package loading path lacks a Clay JS API mapping or explicit internal visibility (all functions in `src/server/ops/packages.rs`, `src/server/js_runtime.rs`, `src/server/ops/ui.rs`, `src/server/ops/configuration.rs` are either `pub(crate)` or have API inventory mappings). Verified `loadPackage` is documented in `docs/reference/clay-js-api/packages/load-package.md` with comprehensive frontmatter and content including examples, errors, permissions, security notes, and agent guidance. Verified `markdownLoadMode()` alias is documented in `packages/markdown/docs/index.md`. Verified all `clay:ui` usage patterns (`serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterThemeToken`) are documented in `docs/reference/clay-js-api/ui/*.md`. All tests pass: `clay_js_api_inventory` (42 passed including new phase20 guards).
   - Acceptance Criteria:
     - Functional: Any public programmatic surface introduced or changed by this plan (e.g., `loadPackage`, the retained `markdownLoadMode()` alias, Markdown package public exports, updated `clay:ui` usage patterns such as `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterThemeToken`) is documented through the Clay/package JS API contract, and all changed server-side Rust public functions are either private/`pub(crate)` or mapped to documented facades.
     - Performance: API docs and metadata preserve no-hot-path-JS and bounded payload expectations for Markdown mode loading, parse, decorations, contribution publication, and selected-file activation.
@@ -380,7 +384,100 @@
     - Package docs test/static guard: public package loader docs include examples, defaults, errors, permissions, and security notes.
     - Rust visibility test: no new server-side Rust public function lacks an intended Clay JS API mapping or explicit internal visibility.
 
+- [x] Remove the legacy default Workspace SDUI panel from the end-user startup baseline
+  - **Completed (legacy Workspace SDUI removal, 2026-06-17):** Removed the legacy default `Workspace` SDUI side panel from the ordinary end-user startup path while preserving explicit/runtime SDUI publication. `StaticSduiState` now supports an empty state (`empty_for_document`) where `snapshot_message` returns `None`; `IpcServer::try_new` and test server construction initialize this empty state for bare startup; `send_welcome_snapshot_and_manifest` now sends an `SduiSnapshot` only when a tree exists. Explicit runtime/fixture publication remains intact through `replace_with_runtime_tree`, validated by `client_receives_js_generated_sdui_snapshot`. Added `empty_sdui_state_publishes_no_snapshot` and rewrote the connection bootstrap guard as `server_does_not_send_default_workspace_sdui_snapshot_after_bootstrap`; existing client bootstrap coverage confirms clients connect with only `Welcome` + `InitialDocument` + `BehaviorManifest`. Updated `docs/development/launch-and-gui-smoke.md` to state that bare `cargo run` is editor-only and must not show the legacy `Workspace` panel, while `runtime-sdui` remains the explicit fixture for SDUI panels. Updated `docs/wiki/modules/server-driven-ui.md` to document the empty default state and explicit publication boundary. Verified with `CARGO_TARGET_DIR=target/pi-verify`: lib `server::sdui` (6), lib `server::connection` (16), client bootstrap `end_to_end_client_receives_initial_snapshot` (1), explicit SDUI `client_receives_sdui_snapshot_event` (1), `manual_smoke_docs` (5), `markdown_mode` (43), `performance_budgets` (16), `primitives_docs` (83), and replan_023 plan guards (3); `cargo fmt --check` clean.
+  - Acceptance Criteria:
+    - Functional: Bare `cargo run` / default user configuration does not publish or render the legacy `Workspace` SDUI side panel; Markdown still loads through explicit `loadPackage("@clay/markdown")`; SDUI snapshots remain available only for explicit runtime/fixture publication paths such as `smoke-gui --config-fixture runtime-sdui`.
+    - Performance: Startup sends no unnecessary default SDUI tree or panel payload for the ordinary editor-only path; no new JavaScript, IPC, file IO, or layout work is added to typing/render hot paths.
+    - Code Quality: The server default state distinguishes "no SDUI tree" from an explicitly published SDUI tree without deleting the compatibility SDUI renderer/tests; startup connection code handles the absent tree directly instead of inventing placeholder panels.
+    - Security: Removing the default panel does not grant filesystem/workspace authority, command authority, package loading authority, native widget handles, raw ops, client-side JavaScript, or shell/network access.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-patterns/references/package-ui-layout.md`: Clay-owned shell slots; fixed panels are explicit contributions, not silent defaults.
+      - `.agents/skills/project-patterns/references/planning-checklist.md`: Authority, hot-path, and documentation-as-code checks.
+      - `docs/reference/primitives/shell-layout-strategy.md`: The editor-only `main` slot is mandatory; fixed panels consume slots only when accepted and visible.
+      - `docs/wiki/modules/slot-aware-package-ui.md` and `docs/wiki/modules/server-driven-ui.md`: SDUI is a compatibility/runtime publication path, not the default end-user shell.
+    - Options Considered:
+      - Keep the default `Workspace` tree and hide it in the client: rejected because the server would still publish a default side panel and tests could miss the product-baseline violation.
+      - Delete SDUI entirely: rejected because runtime-SDUI fixtures and compatibility tests still need the generic renderer.
+      - Make the default SDUI state empty/absent and publish snapshots only when a runtime/configuration path explicitly provides a tree: selected; smallest product-correct change.
+    - Chosen Approach:
+      - Change the default server SDUI state from `StaticSduiState::for_document(1, 1)` to an explicit empty/absent state, skip `SduiSnapshot` during initial connection when no tree exists, and preserve `replace_with_runtime_tree` / fixture publication for explicit SDUI paths.
+    - API Notes and Examples:
+      ```text
+      cargo run
+      # Expected: editor-only main slot, no left "Workspace" panel.
+
+      cargo run -- smoke-gui --config-fixture runtime-sdui
+      # Expected: explicit SDUI fixture may still publish its test panel.
+      ```
+    - Files to Create/Edit:
+      - `src/server/sdui.rs`: Add/verify an empty SDUI state representation and snapshot behavior.
+      - `src/server/mod.rs`: Initialize default server SDUI state as empty/absent.
+      - `src/server/connection.rs`: Send `SduiSnapshot` only when an explicit tree exists; keep selected-file Markdown no-panel behavior.
+      - `src/client/mod.rs` and `src/masonry_editor.rs`: Verify clients tolerate no initial SDUI snapshot.
+      - `tests/manual_smoke_docs.rs`, `src/server/connection.rs` tests, `src/server/sdui.rs` tests, and/or `tests/markdown_mode.rs`: Add deterministic guards for no default `Workspace` panel.
+      - `docs/development/launch-and-gui-smoke.md`: Update manual checks to call out the editor-only default and explicit SDUI fixture distinction.
+    - References:
+      - `.agents/skills/project-patterns/references/package-ui-layout.md`
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+      - `src/server/sdui.rs::default_document_tree`
+      - `src/server/mod.rs::IpcServer::try_new`
+      - `src/server/connection.rs::send_initial_state`
+  - Test Cases to Write:
+    - Server startup/default-state test: default `IpcServer` initial messages do not include an `SduiSnapshot` titled `Workspace`.
+    - Client/session test: connection without an initial SDUI snapshot still reaches Connected/Editable editor state.
+    - Fixture/runtime test: explicit runtime-SDUI publication still produces an SDUI snapshot.
+    - Manual Windows 11: `cargo run` opens editor-only with no left `Workspace` panel before and after `Ctrl+O` Markdown open.
+
+- [x] Make fixed panel slot geometry resize or clip the editor instead of overlaying content
+  - **Completed (fixed-panel editor geometry, 2026-06-17):** Routed editor paint and pointer hit-testing through the shared slot-computed editor `main` rect instead of the full `EditorWidget` bounds. `EditorWidget::editor_main_rect` now uses `editor_region_for_document`, paints `EditorSurface::paint_in_rect` clipped to that rect, and translates pointer coordinates into editor-local space before caret placement/selection extension. `editor_region_for_document` now shrinks for accepted visible package fixed panels even when no SDUI editor binding exists, while still preserving the existing document-bound SDUI compatibility behavior. `EditorSurface` and `LayoutState` gained the minimal origin-aware paint path so canvas, text, selection/decorations, and caret are clipped/offset together; transient overlays still paint through `SduiNativeState` after fixed panels and do not consume fixed slot geometry. Added `fixed_package_panel_shrinks_editor_hit_region` in `src/masonry_editor.rs`; updated `docs/development/launch-and-gui-smoke.md`, `docs/wiki/modules/masonry-shell.md`, `docs/wiki/modules/slot-aware-package-ui.md`, and the manual smoke doc guard. Verified with `CARGO_TARGET_DIR=target/pi-verify`: focused regression `fixed_package_panel_shrinks_editor_hit_region` (1), lib `masonry_editor` (21), lib `masonry_sdui` (28), lib `shell` (36), `performance_budgets` (16), `manual_smoke_docs` (5), and `primitives_docs` (83); `cargo fmt --check` clean. Manual Windows fixed-panel observation remains part of the following end-user verification task.
+  - Acceptance Criteria:
+    - Functional: Any accepted visible fixed panel (`left`, `right`, `top`, or `bottom`) participates in `PaneSlotLayout` geometry so the editor main region is reduced/clipped and text/caret/hit-testing remain fully visible; transient overlays still overlay without consuming fixed slot geometry.
+    - Performance: Geometry computation remains local and bounded in Masonry layout/paint; no package JavaScript, IPC, server round trip, full-document serialization, or file IO is introduced into paint/layout/input handlers.
+    - Code Quality: The client uses one main-region calculation for painting, hit-testing, caret placement, scrolling, accessibility bounds, and package fixed-panel rendering; no Markdown-specific or fixture-specific layout branch is added.
+    - Security: Packages still declare inert validated UI contributions only; they do not receive native Masonry widget handles, renderer callbacks, raw CSS, raw ops, client-side JavaScript, or authority to mutate the shell layout directly.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-patterns/references/package-ui-layout.md`: Fixed panels consume layout; transient overlays do not.
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`: No IPC/JS/file work in Masonry paint or input hot paths.
+      - `docs/reference/primitives/shell-layout-strategy.md`: `PaneSlotLayout` owns `main` plus fixed slots.
+      - `docs/wiki/modules/slot-aware-package-ui.md`: Client should render package fixed panels through Clay-owned slot geometry.
+    - Options Considered:
+      - Only remove the default `Workspace` panel: insufficient because optional/package fixed panels would still be able to cover editor text.
+      - Pad the editor manually by `SIDEBAR_WIDTH`: rejected as another legacy hard-coded left-panel workaround.
+      - Route editor painting/hit-testing/accessibility through the existing computed `main_rect` from `PaneSlotLayout`: selected; reuses the generic primitive already in place.
+    - Chosen Approach:
+      - Compute the visible editor `main_rect` from combined SDUI/package fixed-slot layout, paint the editor surface inside that rect (translate/clip or equivalent minimal native drawing boundary), route pointer hit-testing/caret mapping through the same rect, and keep package transient overlays painted after fixed panels without shrinking `main`.
+    - API Notes and Examples:
+      ```rust
+      let geometry = pane_slot_layout.compute_geometry(widget_size.to_rect());
+      let main_rect = geometry.main_rect;
+      // Paint/hit-test editor inside main_rect; paint fixed slots in geometry.fixed_slots.
+      ```
+    - Files to Create/Edit:
+      - `src/masonry_sdui.rs`: Expose/reuse one combined slot geometry/main-region helper for fixed panels and SDUI compatibility panels.
+      - `src/masonry_editor.rs`: Paint and hit-test the editor using the computed main region, then paint fixed panels/overlays/status in the correct order.
+      - `src/editor/surface.rs` and/or `src/editor/layout.rs`: Add the smallest rect-aware paint/hit-test adjustment if the surface currently assumes origin `(0, 0)`.
+      - `src/shell/package_ui.rs` and `src/shell/layout.rs`: Verify existing `PaneSlotLayout` geometry is reused rather than duplicated.
+      - `tests/markdown_mode.rs`, `src/masonry_sdui.rs` tests, `src/masonry_editor.rs` tests, and/or shell layout tests: Add deterministic geometry/overlap guards.
+      - `docs/development/launch-and-gui-smoke.md`: Add manual observation that fixed panels resize the main editor while overlays may cover content by design.
+    - References:
+      - `.agents/skills/project-patterns/references/package-ui-layout.md`
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+      - `src/masonry_sdui.rs::editor_region`
+      - `src/masonry_sdui.rs::sdui_slot_layout`
+      - `src/masonry_editor.rs::EditorWidget::paint`
+      - `src/editor/surface.rs::EditorSurface::paint`
+  - Test Cases to Write:
+    - Geometry unit test: left/right/top/bottom fixed slots shrink `main_rect` and keep it non-empty within minimum bounds.
+    - Native editor test: with a visible fixed left panel, editor paint/hit-test/caret coordinates are offset to the main region rather than covered by the panel.
+    - Package UI test: optional Markdown preview fixed panel uses the right slot and does not overlap editor text; transient overlays still overlay by design.
+    - Performance/static guard: no package JS/IPC/server/file APIs are called from Masonry paint/layout/input code paths.
+    - Manual Windows 11: load an explicit fixed panel fixture and verify the main editor resizes so all content remains visible.
+
 - [ ] Run automated and manual verification for the end-user Markdown path
+  - **Progress (automated verification, 2026-06-17):** Automated verification passed after formatting the Task 8 test additions with `cargo fmt`. Verified with `CARGO_TARGET_DIR=target/pi-verify`: `markdown_mode` (43 passed), `package_loading` (26), `package_loading_docs` (10), `primitives_docs` (83), `clay_js_api_inventory` (42), `clay_js_doc_registry` (26), `performance_budgets` (16), `manual_smoke_docs` (5), lib `js_runtime` filter (58), lib `connection` filter (17), and lib `ui` filter (78); `cargo fmt --check` clean. These cover the end-user `loadPackage("@clay/markdown")` path, no default panel publication, optional `PanelContribution` validation, selected-file generic activation/no-panel behavior, `Ctrl+O` manifest routing/docs, package resolver denial/security, docs/registry coverage, and performance/no-hot-path invariants. The required interactive Windows/manual GUI checks (`cargo run` plus `smoke-gui` fixture matrix) were **not run** in this non-interactive agent session, so this task remains unchecked until a developer records those operator observations.
   - Acceptance Criteria:
     - Functional: Automated tests cover simplified config loading, no default `PanelContribution`, selected-file Markdown activation through generic mode activation, `Ctrl+O` manifest routing, package UI contribution validation, and configuration docs/registry coverage; manual Windows 11 `cargo run` verifies actual app behavior.
     - Performance: Relevant tests preserve no-hot-path parser/JS/IPC invariants, bounded decoration/parse/contribution payload checks, no full-document IPC for ordinary edits, and no package JavaScript in Masonry paint/layout/input handlers.

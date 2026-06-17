@@ -99,7 +99,7 @@ impl IpcServer {
             document: Arc::new(Mutex::new(DocumentState::default())),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
             workspace: Arc::new(Mutex::new(workspace)),
-            sdui: Arc::new(Mutex::new(StaticSduiState::for_document(1, 1))),
+            sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
             js_runtime: ClayJsRuntimeService::default(),
@@ -400,7 +400,7 @@ mod tests {
                 workspace.reserve_document_ids_from(2);
                 Arc::new(Mutex::new(workspace))
             },
-            sdui: Arc::new(Mutex::new(StaticSduiState::for_document(1, 1))),
+            sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
             js_runtime: ClayJsRuntimeService::default(),
@@ -450,7 +450,6 @@ mod tests {
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
-        let _sdui = codec.read_server_message(&mut stream).await.unwrap();
 
         codec
             .write_client_message(
@@ -518,6 +517,16 @@ mod tests {
         let server = IpcServer::new(ServerConfig::new(&socket_path));
 
         assert_eq!(server.js_runtime.evaluation_count(), 0);
+
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn default_server_starts_without_workspace_sdui_snapshot() {
+        let socket_path = unique_socket_path("no-default-sdui");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+
+        assert!(server.sdui.lock().await.snapshot_message(1).is_none());
 
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }

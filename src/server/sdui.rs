@@ -61,23 +61,32 @@ impl SduiValidationError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StaticSduiState {
     document_id: DocumentId,
-    tree: SduiTree,
+    tree: Option<SduiTree>,
 }
 
 impl StaticSduiState {
+    pub(crate) fn empty_for_document(document_id: DocumentId) -> Self {
+        Self {
+            document_id,
+            tree: None,
+        }
+    }
+
     pub(crate) fn for_document(document_id: DocumentId, document_version: DocumentVersion) -> Self {
         let tree = default_document_tree(document_id, document_version);
         validate_static_tree(&tree).expect("static SDUI tree must be valid before publication");
         validate_editor_bindings(&tree, document_id)
             .expect("static SDUI editor views must bind to the open document");
-        Self { document_id, tree }
+        Self {
+            document_id,
+            tree: Some(tree),
+        }
     }
 
-    pub(crate) fn snapshot_message(&self, client_id: u64) -> ServerMessage {
-        ServerMessage::SduiSnapshot {
-            client_id,
-            tree: self.tree.clone(),
-        }
+    pub(crate) fn snapshot_message(&self, client_id: u64) -> Option<ServerMessage> {
+        self.tree
+            .clone()
+            .map(|tree| ServerMessage::SduiSnapshot { client_id, tree })
     }
 
     pub(crate) fn replace_with_runtime_tree(
@@ -94,7 +103,7 @@ impl StaticSduiState {
     ) -> Result<(), SduiValidationError> {
         validate_runtime_tree(&tree, document_id)?;
         self.document_id = document_id;
-        self.tree = tree;
+        self.tree = Some(tree);
         Ok(())
     }
 
@@ -110,7 +119,10 @@ impl StaticSduiState {
         update: SduiTreeUpdate,
     ) -> Result<ServerMessage, SduiValidationError> {
         self.validate_update(&update)?;
-        apply_update(&mut self.tree, &update);
+        let Some(tree) = &mut self.tree else {
+            return Err(SduiValidationError::EmptyTree);
+        };
+        apply_update(tree, &update);
         Ok(ServerMessage::SduiUpdate { update })
     }
 
@@ -118,7 +130,12 @@ impl StaticSduiState {
         &self,
         intent: &SduiActionIntent,
     ) -> Result<(), SduiValidationError> {
-        if !tree_declares_action_command(&self.tree, &intent.command_id) {
+        let Some(tree) = &self.tree else {
+            return Err(SduiValidationError::UnknownActionCommand(
+                intent.command_id.clone(),
+            ));
+        };
+        if !tree_declares_action_command(tree, &intent.command_id) {
             return Err(SduiValidationError::UnknownActionCommand(
                 intent.command_id.clone(),
             ));
@@ -157,10 +174,13 @@ impl StaticSduiState {
     }
 
     fn validate_update(&self, update: &SduiTreeUpdate) -> Result<(), SduiValidationError> {
-        if update.base_ui_version != self.tree.ui_version {
+        let Some(tree) = &self.tree else {
+            return Err(SduiValidationError::EmptyTree);
+        };
+        if update.base_ui_version != tree.ui_version {
             return Err(SduiValidationError::StaleUpdate {
                 base_ui_version: update.base_ui_version,
-                current_ui_version: self.tree.ui_version,
+                current_ui_version: tree.ui_version,
             });
         }
         if update.new_ui_version <= update.base_ui_version {
@@ -170,7 +190,7 @@ impl StaticSduiState {
             });
         }
 
-        let known_ids: BTreeSet<_> = self.tree.nodes.iter().map(|node| node.id).collect();
+        let known_ids: BTreeSet<_> = tree.nodes.iter().map(|node| node.id).collect();
         for operation in &update.operations {
             match operation {
                 SduiTreeOperation::ReplaceRoot { root_id } => {
@@ -197,7 +217,11 @@ impl StaticSduiState {
     }
 
     fn node(&self, node_id: SduiNodeId) -> Option<&SduiNode> {
-        self.tree.nodes.iter().find(|node| node.id == node_id)
+        self.tree
+            .as_ref()?
+            .nodes
+            .iter()
+            .find(|node| node.id == node_id)
     }
 }
 
@@ -409,6 +433,13 @@ pub(crate) fn sdui_action_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_sdui_state_publishes_no_snapshot() {
+        let state = StaticSduiState::empty_for_document(7);
+
+        assert_eq!(state.snapshot_message(1), None);
+    }
 
     #[test]
     fn default_sdui_tree_is_valid_and_static() {

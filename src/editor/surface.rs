@@ -692,27 +692,44 @@ impl EditorSurface {
     }
 
     pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut masonry::vello::Scene) {
-        let size = ctx.size();
-        let width = size.width;
-        let height = size.height;
+        self.paint_in_rect(ctx, scene, ctx.size().to_rect());
+    }
+
+    pub(crate) fn paint_in_rect(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        scene: &mut masonry::vello::Scene,
+        rect: Rect,
+    ) {
+        let width = rect.width();
+        let height = rect.height();
         self.update_visible_line_count_for_height(height);
 
+        scene.push_clip_layer(Affine::IDENTITY, &rect);
         let canvas = Rect::new(
-            24.0,
-            24.0,
-            (width - 24.0).max(24.0),
-            (height - 24.0).max(24.0),
+            rect.x0 + 24.0,
+            rect.y0 + 24.0,
+            (rect.x0 + width - 24.0).max(rect.x0 + 24.0),
+            (rect.y0 + height - 24.0).max(rect.y0 + 24.0),
         );
         scene.fill(Fill::NonZero, Affine::IDENTITY, PANEL_COLOR, None, &canvas);
 
         let radius = (width.min(height) * 0.12).clamp(32.0, 96.0);
-        let circle = Circle::new((width - 72.0, height - 72.0), radius);
+        let circle = Circle::new((rect.x0 + width - 72.0, rect.y0 + height - 72.0), radius);
         scene.fill(Fill::NonZero, Affine::IDENTITY, ACCENT_COLOR, None, &circle);
 
         let max_width = (width - (TEXT_INSET * 2.0)).max(1.0) as f32;
         let available_height = (height - (TEXT_INSET * 2.0)).max(0.0);
         let focused = ctx.is_focus_target();
-        self.paint_text(ctx, scene, max_width, available_height, focused);
+        self.paint_text(
+            ctx,
+            scene,
+            max_width,
+            available_height,
+            focused,
+            (rect.x0, rect.y0),
+        );
+        scene.pop_layer();
     }
 
     fn paint_text(
@@ -722,6 +739,7 @@ impl EditorSurface {
         max_width: f32,
         available_height: f64,
         focused: bool,
+        origin: (f64, f64),
     ) {
         let snapshot = self.visible_snapshot();
         let current_text = snapshot.text.as_str();
@@ -749,6 +767,7 @@ impl EditorSurface {
             selection_visible_range,
             SELECTION_COLOR,
             &decoration_visible_ranges,
+            origin,
         );
         if current_text.is_empty() {
             self.visual_scroll_y = 0.0;
@@ -763,6 +782,7 @@ impl EditorSurface {
                 max_width,
                 available_height,
                 caret_visible_offset,
+                origin,
             );
         }
         self.follow_visual_end = false;
@@ -775,14 +795,16 @@ impl EditorSurface {
         max_width: f32,
         available_height: f64,
         caret_visible_offset: Option<usize>,
+        origin: (f64, f64),
     ) {
         let caret = if text_is_empty {
             Rect::new(
-                TEXT_INSET,
-                TEXT_INSET,
-                TEXT_INSET + CARET_WIDTH,
-                (TEXT_INSET + TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER)
-                    .min(TEXT_INSET + available_height),
+                origin.0 + TEXT_INSET,
+                origin.1 + TEXT_INSET,
+                origin.0 + TEXT_INSET + CARET_WIDTH,
+                origin.1
+                    + (TEXT_INSET + TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER)
+                        .min(TEXT_INSET + available_height),
             )
         } else if let Some(visible_offset) = caret_visible_offset {
             let Some(geometry) = self
@@ -792,20 +814,20 @@ impl EditorSurface {
                 return;
             };
             Rect::new(
-                geometry.rect.x0 + TEXT_INSET,
-                geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
-                geometry.rect.x1 + TEXT_INSET,
-                geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
+                origin.0 + geometry.rect.x0 + TEXT_INSET,
+                origin.1 + geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
+                origin.0 + geometry.rect.x1 + TEXT_INSET,
+                origin.1 + geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
             )
         } else {
             return;
         };
 
         let clip = Rect::new(
-            TEXT_INSET,
-            TEXT_INSET,
-            TEXT_INSET + max_width as f64,
-            TEXT_INSET + available_height,
+            origin.0 + TEXT_INSET,
+            origin.1 + TEXT_INSET,
+            origin.0 + TEXT_INSET + max_width as f64,
+            origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
         scene.fill(Fill::NonZero, Affine::IDENTITY, CARET_COLOR, None, &caret);

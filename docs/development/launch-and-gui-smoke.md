@@ -47,12 +47,13 @@ bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 
 This is the Markdown product baseline. It is deliberately distinct from the smoke fixtures under `tests/fixtures/configuration/`:
 
-- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, `serverPublishDecorations`, and `publishTree`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported and is not the documented setup.
+- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, and `serverPublishDecorations`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported and is not the documented setup.
 - **End-user (product baseline):** the one-line `loadPackage("@clay/markdown")` plus the explicit `Ctrl+O` `bindKey`. No inline manifest object, no per-facade registration imports, no `publishTree` panel publication.
 
 Markdown end-user baseline invariants:
 
-- **Editor-only main slot.** The Markdown editor occupies the mandatory `main` slot of `PaneSlotLayout`. No default `PanelContribution` (side panel, preview panel, or status panel) is published on load.
+- **Editor-only main slot.** The Markdown editor occupies the mandatory `main` slot of `PaneSlotLayout`. No default `PanelContribution` (side panel, preview panel, or status panel) is published on load, and bare `cargo run` must not show the legacy `Workspace` SDUI side panel.
+- **Fixed panels resize the editor.** Any accepted visible fixed panel in `left`, `right`, `top`, or `bottom` consumes `PaneSlotLayout` geometry and reduces/clips the editor `main` rect; transient overlays may cover content by design and do not consume fixed slot geometry.
 - **Optional preview only on demand.** An optional Markdown preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`; it appears only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
 - **Selected-file open is edit-only.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Saving a file picked through the dialog is out of scope until a later phase; close or discard the smoke document after editing.
 
@@ -74,15 +75,15 @@ The GUI status line and accessibility label should make the connection state vis
 
 Typing remains local and optimistic. Editor input must not wait for IPC acknowledgements, server work, runtime diagnostics, or full-document synchronization; acknowledgements, resyncs, and runtime diagnostic status updates arrive asynchronously and update status when available.
 
-The server-driven UI smoke surface should show more than one native region when connected: a server-generated workspace/sidebar panel with status/list/button content plus the document-bound editor view. Updating or interacting with side-panel controls must not replace the editor text, caret, document version, editable/read-only status, or runtime diagnostic status text.
+Bare `cargo run` should show the editor-only default surface: no legacy `Workspace` SDUI sidebar is sent during bootstrap. Server-driven UI remains covered by the explicit `runtime-sdui` smoke fixture; that fixture should show more than one native region when connected: a server-generated workspace/sidebar panel with status/list/button content plus the document-bound editor view. Visible fixed panels should reduce the editor `main` rect instead of covering text/caret hit targets; transient overlays may cover content because they are overlay UI. Updating or interacting with side-panel controls must not replace the editor text, caret, document version, editable/read-only status, or runtime diagnostic status text.
 
-SDUI payload costs are validated by unit tests rather than GUI smoke output. The representative initial SDUI snapshot is expected to stay under 4 KiB, and a simple side-panel update is expected to stay under 1 KiB and below the equivalent snapshot size.
+SDUI payload costs are validated by unit tests rather than default GUI smoke output. The representative explicit SDUI snapshot is expected to stay under 4 KiB, and a simple side-panel update is expected to stay under 1 KiB and below the equivalent snapshot size.
 
 ## Smoke Modes
 
 ### Bare `cargo run`
 
-Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected.
+Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected. The expected default surface is editor-only: no left `Workspace` SDUI panel should appear.
 
 ### `cargo run -- smoke-gui`
 
@@ -94,21 +95,20 @@ The runtime-backed smoke path uses the same managed local IPC lifecycle, but pas
 
 ### `cargo run -- smoke-gui --config-fixture markdown-mode`
 
-The Markdown smoke path uses `tests/fixtures/configuration/markdown-mode/init.js`. The fixture validates and loads `@clay/markdown` metadata, activates the `markdown` mode for `sample.md`/document `1`, registers package commands and parse/decorations providers, publishes representative decorations, and sends an inert `Markdown Preview` SDUI panel with parse/decorations status and a `Toggle Preview` button targeting `markdown.togglePreview`. If no workspace root is configured, the fixture still uses document `1` so the GUI smoke remains deterministic and does not expand filesystem authority.
+The Markdown smoke path uses `tests/fixtures/configuration/markdown-mode/init.js`. The fixture validates and loads `@clay/markdown` metadata, activates the `markdown` mode for `sample.md`/document `1`, registers package commands and parse/decorations providers, and publishes representative decorations. If no workspace root is configured, the fixture still uses document `1` so the GUI smoke remains deterministic and does not expand filesystem authority.
 
-Expected visible SDUI text includes `Markdown Preview`, `Mode: markdown`, `Parse: markdown-it registered`, `Decorations: published`, and `Preview: decorated editor`. Ordinary typing remains local; preview/status publication is configuration/load-time work, not keypress, paint, or scroll work.
+The fixture does not publish a default side panel; the optional preview is a `PanelContribution` the host opts into. Ordinary typing remains local; parse/decoration publication is configuration/load-time work, not keypress, paint, or scroll work.
 
 ### `cargo run -- smoke-gui --config-fixture windows-markdown-open`
 
-The Windows Markdown open-dialog smoke path uses `tests/fixtures/configuration/windows-markdown-open/init.js`. The fixture loads `@clay/markdown`, registers the Markdown mode/parser/decorations/status workflow, and binds `Ctrl+O` to `clay.documents.clientOpenFileDialog` through the normal `bindKey` configuration API. It does not add a Rust shortcut, install packages, fetch network resources, execute shell commands, or broaden workspace authority.
+The Windows Markdown open-dialog smoke path uses `tests/fixtures/configuration/windows-markdown-open/init.js`. The fixture loads `@clay/markdown`, registers the Markdown mode/parser/decorations workflow, and binds `Ctrl+O` to `clay.documents.clientOpenFileDialog` through the normal `bindKey` configuration API. It does not add a Rust shortcut, install packages, fetch network resources, execute shell commands, or broaden workspace authority.
 
 Manual Windows 11 verification:
 
 1. Run `cargo run -- smoke-gui --config-fixture windows-markdown-open`.
-2. Confirm the side panel shows `Windows Markdown Open Dialog Smoke`, `Mode: markdown`, `Parse: markdown-it registered`, `Decorations: published`, and `Open: Ctrl+O native Markdown dialog`.
-3. Press `Ctrl+O`, select a regular UTF-8 `.md`, `.markdown`, or `.mdown` file in the native Windows file browser, and confirm the selected file replaces the editor buffer.
-4. Confirm Markdown decorations/status are visible for the opened file. Decoration refresh may arrive asynchronously; ordinary typing should remain responsive and local.
-5. Type a small edit in the opened document, then close/discard it. Do not test save in Phase 19.
+2. Press `Ctrl+O`, select a regular UTF-8 `.md`, `.markdown`, or `.mdown` file in the native Windows file browser, and confirm the selected file replaces the editor buffer.
+3. Confirm Markdown decorations are visible for the opened file. Decoration refresh may arrive asynchronously; ordinary typing should remain responsive and local.
+4. Type a small edit in the opened document, then close/discard it. Do not test save in Phase 19.
 
 ### Phase 19 Windows Markdown open-dialog smoke contract
 

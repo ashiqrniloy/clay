@@ -1079,9 +1079,16 @@ pub fn editor_region_for_document(
     sdui: &SduiNativeState,
     document_id: DocumentId,
 ) -> Rect {
+    let full_rect = size.to_rect();
+    let package_main_rect = sdui
+        .package_ui
+        .slot_layout()
+        .compute_geometry(full_rect)
+        .main_rect;
     match sdui.editor_binding() {
         Some(binding) if binding.document_id == document_id => editor_region(size, sdui),
-        _ => size.to_rect(),
+        _ if package_main_rect != full_rect => package_main_rect,
+        _ => full_rect,
     }
 }
 

@@ -84,6 +84,7 @@ impl LayoutState {
         selection_visible_byte_range: Option<Range<usize>>,
         selection_color: Color,
         decoration_visible_byte_ranges: &[(Range<usize>, Color)],
+        origin: (f64, f64),
     ) -> VisualLayoutMetrics {
         let recorder = global_recorder();
         let _scope = recorder.scope("editor.layout.paint_text");
@@ -114,10 +115,10 @@ impl LayoutState {
         }
 
         let clip = Rect::new(
-            TEXT_INSET,
-            TEXT_INSET,
-            TEXT_INSET + max_width as f64,
-            TEXT_INSET + available_height,
+            origin.0 + TEXT_INSET,
+            origin.1 + TEXT_INSET,
+            origin.0 + TEXT_INSET + max_width as f64,
+            origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
         for (range, decoration_color) in decoration_visible_byte_ranges {
@@ -125,10 +126,10 @@ impl LayoutState {
                 Self::selection_rects_in_layout(&cached.layout, cached.text_len, range.clone())
             {
                 let rect = Rect::new(
-                    rect.x0 + TEXT_INSET,
-                    rect.y0 + TEXT_INSET - *scroll_y,
-                    rect.x1 + TEXT_INSET,
-                    rect.y1 + TEXT_INSET - *scroll_y,
+                    origin.0 + rect.x0 + TEXT_INSET,
+                    origin.1 + rect.y0 + TEXT_INSET - *scroll_y,
+                    origin.0 + rect.x1 + TEXT_INSET,
+                    origin.1 + rect.y1 + TEXT_INSET - *scroll_y,
                 );
                 scene.fill(
                     Fill::NonZero,
@@ -142,10 +143,10 @@ impl LayoutState {
         if let Some(range) = selection_visible_byte_range {
             for rect in Self::selection_rects_in_layout(&cached.layout, cached.text_len, range) {
                 let rect = Rect::new(
-                    rect.x0 + TEXT_INSET,
-                    rect.y0 + TEXT_INSET - *scroll_y,
-                    rect.x1 + TEXT_INSET,
-                    rect.y1 + TEXT_INSET - *scroll_y,
+                    origin.0 + rect.x0 + TEXT_INSET,
+                    origin.1 + rect.y0 + TEXT_INSET - *scroll_y,
+                    origin.0 + rect.x1 + TEXT_INSET,
+                    origin.1 + rect.y1 + TEXT_INSET - *scroll_y,
                 );
                 scene.fill(
                     Fill::NonZero,
@@ -158,7 +159,7 @@ impl LayoutState {
         }
         render_text(
             scene,
-            Affine::translate((TEXT_INSET, TEXT_INSET - *scroll_y)),
+            Affine::translate((origin.0 + TEXT_INSET, origin.1 + TEXT_INSET - *scroll_y)),
             &cached.layout,
             &[color.into()],
             true,
