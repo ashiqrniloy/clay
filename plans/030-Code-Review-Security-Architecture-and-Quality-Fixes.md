@@ -1,0 +1,603 @@
+# Plan 030: Code Review Security, Architecture, and Quality Fixes
+
+**Plan date:** 2026-06-21  
+**Source review:** `code-reviews/2026-06-21-current-implementation-review.md`
+
+## Objectives
+
+- Close authority and supply-chain gaps identified in the 2026-06-21 review before any wider package or configuration distribution.
+- Harden the JavaScript runtime boundary with timeouts and resource limits.
+- Remove workspace-level serialization and full-document copies from the hot path.
+- Bring the repository to a clean clippy gate and reduce dead code.
+- Preserve and document public programmatic surfaces through Clay JS APIs, configuration APIs, package loading conventions, and the code wiki.
+
+## Expected Outcome
+
+- `cargo clippy --all-targets --all-features --locked -- -D warnings` passes.
+- `cargo test --locked --lib` and the primary integration suites run fast enough for a normal feedback loop.
+- Package `entry`/`loadEntry` paths cannot escape the package root.
+- Third-party package lifecycle scripts cannot execute during `clay package add`.
+- File-open IPC is no longer a raw path trust boundary.
+- JS runtime evaluation has a hard timeout and a runtime diagnostic on expiry.
+- Large file opens and saves are bounded or atomic.
+- Workspace mutex is not held across disk reads/writes.
+- Markdown open no longer bypasses the generic package/mode activation path.
+- All changed primitives and public surfaces are recorded in docs, Clay JS API docs, and the code wiki.
+
+---
+
+## Tasks
+
+- [ ] Review existing package/loader primitives and runtime evaluation contract before hardening work
+  - Acceptance Criteria:
+    - Functional: Inventory of existing package loading primitives (`FirstPartyLoadEntryAllowlist`, `ClayModuleLoader`, package manifest validation, `op_clay_packages_load_package_by_specifier`) and runtime evaluation outputs (`ClayRuntimeEvaluation`, parse handlers, decoration sets, UI contributions) is documented.
+    - Code Quality: Every proposed fix either uses an existing primitive or explicitly defines a minimal new generic primitive with tests/docs.
+    - Security: The review identifies where authority currently leaks and maps each leak to a primitive boundary.
+  - Approach:
+    - Documentation Reviewed:
+      - `docs/reference/primitives/index.md`
+      - `docs/reference/primitives/registry.md`
+      - `docs/wiki/modules/embedded-js-runtime.md`
+      - `docs/wiki/modules/server-file-workspace.md`
+      - `docs/wiki/modules/server-driven-ui.md`
+    - Options Considered:
+      - Add mode-specific fixes directly in `connection.rs`: quick but violates primitive-first policy.
+      - Refactor generic package loader/activation primitives and make Markdown use them: more work but reusable.
+    - Chosen Approach:
+      - Keep fixes generic. Confine loadEntry through the existing allowlist primitive; centralize runtime evaluation application; route Markdown open through the generic package/mode activation primitive when ready.
+    - Files to Create/Edit:
+      - `plans/030-Code-Review-Security-Architecture-and-Quality-Fixes.md`: update this task with the inventory after review.
+    - References:
+      - `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`
+      - `.agents/skills/project-patterns/references/mode-primitive-first.md`
+      - `code-reviews/2026-06-21-current-implementation-review.md` P0-1, P1-3, P2-2, P2-3
+  - Test Cases to Write:
+    - Inventory checklist test: confirm loadEntry confinement, runtime evaluation application, and mode activation are implemented through existing primitives or new generic ones.
+
+- [ ] Enforce package `entry`/`loadEntry` root confinement
+  - Acceptance Criteria:
+    - Functional: `validate_entry_path` rejects absolute paths, `..` traversal, paths not starting with `./`, and non-`.js` extensions.
+    - Functional: `op_clay_packages_load_package_by_specifier` verifies the canonicalized `loadEntry` path is inside the canonicalized package root before recording the allowlist entry.
+    - Functional: Canonicalization failure is an error, not silently ignored with `unwrap_or`.
+    - Security: A malformed package manifest cannot point `loadEntry` outside its package root.
+    - Code Quality: Clippy clean for changed code.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/packages/manifest.rs` validation rules
+      - `src/server/js_runtime.rs` `ClayModuleLoader` allowlist checks
+    - Options Considered:
+      - Validate only at load time: leaves manifest validation incomplete.
+      - Validate in manifest layer and double-check at load time: defense in depth.
+    - Chosen Approach:
+      - Defense in depth: tighten manifest validation, then add a root-starts-with check at the allowlist recording site.
+    - API Notes and Examples:
+      ```rust
+      // reject unless entry starts with "./" and ends with ".js" and contains no ".."
+      fn validate_entry_path(entry: &str) -> Result<(), PackageDiagnostic>;
+      // after canonicalization
+      if !canonical_load_entry.starts_with(&canonical_package_root) { return Err(...); }
+      ```
+    - Files to Create/Edit:
+      - `src/packages/manifest.rs`: tighten `validate_entry_path`.
+      - `src/server/ops/packages.rs`: add canonical root-starts-with check.
+      - `tests/package_loading.rs`: add traversal/outside-root test cases.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P0-1
+      - `.agents/skills/project-patterns/references/package-distribution.md`
+  - Test Cases to Write:
+    - `load_entry_outside_package_root_rejected`: manifest with `loadEntry: "../secret.js"` fails enable.
+    - `load_entry_absolute_path_rejected`: manifest with `loadEntry: "/etc/passwd"` fails enable.
+    - `load_entry_non_js_rejected`: manifest with `loadEntry: "./README.md"` fails enable.
+    - `load_entry_canonicalization_fails_rejected`: missing file returns an error, not silent fallback.
+
+- [ ] Disable third-party lifecycle scripts during package install
+  - Acceptance Criteria:
+    - Functional: `PnpmBackend::install` passes `--ignore-scripts` (or pnpm equivalent) by default.
+    - Functional: A CLI/env flag exists to opt into lifecycle scripts, documented as dangerous.
+    - Security: Remote package code cannot execute during `clay package add` before Clay metadata validation.
+    - Code Quality: Store directory is created and validated before invoking pnpm.
+  - Approach:
+    - Documentation Reviewed:
+      - pnpm CLI docs for `add --ignore-scripts`
+      - `src/packages/manager.rs` backend implementation
+    - Options Considered:
+      - Sandbox install in a separate process/container: ideal, heavy.
+      - Disable scripts by default with opt-in: minimal, effective.
+    - Chosen Approach:
+      - Disable scripts by default; add explicit opt-in flag if needed later.
+    - API Notes and Examples:
+      ```rust
+      let output = Command::new("pnpm")
+          .args(["add", package_spec, "--ignore-scripts", "--dir", store_root])
+          .env_clear() // or filtered env
+          .output()?;
+      ```
+    - Files to Create/Edit:
+      - `src/packages/manager.rs`: add `--ignore-scripts`, filter env, validate store root.
+      - `src/main.rs`: optionally expose `--allow-scripts` flag.
+      - `tests/package_loading.rs`: verify scripts are not executed.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P0-2
+      - `.agents/skills/project-patterns/references/package-distribution.md`
+  - Test Cases to Write:
+    - `install_does_not_run_postinstall`: package with a `postinstall` script does not execute it during `clay package add`.
+    - `store_directory_created_before_install`: missing store root is created and canonicalized.
+
+- [ ] Add capability-gated file open / restrict `OpenSelectedFile` authority
+  - Acceptance Criteria:
+    - Functional: `ClientMessage::OpenSelectedFile` is either removed or requires a server-issued capability/token.
+    - Functional: The server rejects raw selected paths from untrusted contexts with a typed `RuntimeDiagnostic`.
+    - Security: Arbitrary local processes cannot open any server-readable file by sending a path.
+    - Code Quality: Workspace-root file opening remains intact and tested.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/connection.rs` open dispatch
+      - `src/server/workspace.rs` open path validation
+      - `src/protocol/mod.rs` message variants
+    - Options Considered:
+      - Add token to every message: invasive.
+      - Convert `OpenSelectedFile` to capability-only flow or disable it on IPC: targeted.
+    - Chosen Approach:
+      - Short term: disable `OpenSelectedFile` over IPC and require workspace-root opens or a server-issued capability. Long term: implement a file-picker capability exchange.
+    - Files to Create/Edit:
+      - `src/protocol/mod.rs`: deprecate or restrict raw `OpenSelectedFile`.
+      - `src/server/connection.rs`: reject or capability-check `OpenSelectedFile`.
+      - `src/server/workspace.rs`: add explicit single-file grant helper.
+      - `tests/workspace.rs`: verify rejection of raw paths and success of workspace-root opens.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-1
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`
+  - Test Cases to Write:
+    - `raw_open_selected_file_rejected`: sending a path outside workspace roots fails.
+    - `workspace_root_open_succeeds`: opening a file under a configured root succeeds.
+
+- [ ] Harden IPC endpoint ownership and permissions
+  - Acceptance Criteria:
+    - Functional: Unix socket is created with owner-only permissions (`0o600`) and parent directory ownership is verified.
+    - Functional: Windows named pipe uses a security descriptor restricted to the current user.
+    - Security: Temp-directory fallback is avoided for sensitive IPC when a private runtime dir is available.
+    - Code Quality: Platform-specific code has clear `#[cfg]` boundaries and tests.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/ipc.rs` Unix socket creation
+      - `src/server/mod.rs` Windows named pipe creation
+      - Rust `std::os::unix::fs::PermissionsExt`, Windows `winapi`/`windows` crate security APIs
+    - Options Considered:
+      - Add application-level authentication: good defense but more complexity.
+      - Harden transport permissions first: minimal baseline.
+    - Chosen Approach:
+      - Harden transport permissions now; document application-level auth as a follow-up for networked or shared-machine scenarios.
+    - Files to Create/Edit:
+      - `src/ipc.rs`: set socket permissions, verify parent dir ownership.
+      - `src/server/mod.rs`: add Windows pipe security descriptor.
+      - `tests/server_ipc.rs`: verify permissions where testable.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-2
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`
+  - Test Cases to Write:
+    - `unix_socket_owner_only`: socket mode is `0o600`.
+    - `windows_pipe_current_user_only`: security descriptor excludes other users.
+
+- [ ] Add JS runtime evaluation timeout and resource guard
+  - Acceptance Criteria:
+    - Functional: `evaluate_module_on_runtime` terminates the isolate after a configurable timeout (default e.g. 5s).
+    - Functional: Timeout produces a typed `ClayRuntimeError`/`RuntimeDiagnostic`, not a hung thread.
+    - Performance: A `while(true) {}` config/loadEntry cannot block startup indefinitely.
+    - Security: `spawn_blocking` is still used but the underlying isolate is terminable.
+    - Code Quality: Timeout is tested without real long-running JS.
+  - Approach:
+    - Documentation Reviewed:
+      - `deno_core` runtime docs for `terminate_execution`, `v8::Isolate` heap limits
+      - `src/server/js_runtime.rs` evaluation flow
+    - Options Considered:
+      - Run JS in a separate process: best isolation, larger change.
+      - Add isolate terminate + heap limit in-process: adequate short-term fix.
+    - Chosen Approach:
+      - Add `terminate_execution` timeout now; document separate-process sandbox as a follow-up.
+    - API Notes and Examples:
+      ```rust
+      let handle = runtime.v8_isolate().thread_safe_handle();
+      let timeout = tokio::time::timeout(Duration::from_secs(5), event_loop);
+      if timeout.is_err() { handle.terminate_execution(); }
+      ```
+    - Files to Create/Edit:
+      - `src/server/js_runtime.rs`: add timeout and terminate handle.
+      - `src/server/mod.rs`: bubble timeout diagnostic.
+      - `tests/js_runtime.rs`: add timeout test with an infinite loop fixture.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-3
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`
+  - Test Cases to Write:
+    - `infinite_loop_config_times_out`: `init.js` with `while(true){}` is terminated and emits a diagnostic.
+    - `normal_config_loads_within_timeout`: valid config loads successfully.
+
+- [ ] Add runtime SDUI `publishTree` payload/node budgets
+  - Acceptance Criteria:
+    - Functional: `op_clay_sdui_publish_tree` rejects `tree_json` payloads exceeding a snapshot budget before parsing.
+    - Functional: Parsed tree has bounded node count, depth, and per-node text length.
+    - Performance: A malicious huge tree is rejected before allocating proportional memory.
+    - Security: Runtime tree validation matches the budget discipline already used for registered package UI contributions.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/ops/sdui.rs`
+      - `src/server/sdui.rs`
+      - `src/server/ui.rs` budget constants
+      - `src/perf/budgets.rs`
+    - Options Considered:
+      - Budget only total bytes: misses deeply nested structures.
+      - Budget bytes + nodes + depth + list lengths: robust.
+    - Chosen Approach:
+      - Mirror the package UI budget style: bytes, node count, depth, text length caps.
+    - Files to Create/Edit:
+      - `src/perf/budgets.rs`: add runtime SDUI budget constants.
+      - `src/server/ops/sdui.rs`: add pre-parse and post-build budget checks.
+      - `src/server/sdui.rs`: add depth/text helper validation if needed.
+      - `tests/sdui.rs`: add oversized/deep tree rejection tests.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-7
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+  - Test Cases to Write:
+    - `runtime_tree_too_large_rejected`: `tree_json.len()` over budget is rejected.
+    - `runtime_tree_too_deep_rejected`: nested depth over cap is rejected.
+    - `runtime_tree_too_many_nodes_rejected`: node count over cap is rejected.
+
+- [ ] Make `PackageService` CLI state persistent across invocations
+  - Acceptance Criteria:
+    - Functional: `clay package list` shows packages installed by a previous `clay package add` process.
+    - Functional: `clay package enable` works on previously installed packages without requiring re-install.
+    - Code Quality: Service constructor populates `installed` from `backend.list_installed()`.
+    - Security: Installed-package discovery does not execute package code.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/packages/service.rs`
+      - `src/packages/manager.rs` backend trait
+    - Options Considered:
+      - Persist a Clay-managed registry file: duplicates backend state.
+      - Refresh from backend store on startup: simpler, single source of truth.
+    - Chosen Approach:
+      - Refresh from backend store at service construction; keep enabled state in memory for now (or persist separately if needed).
+    - Files to Create/Edit:
+      - `src/packages/service.rs`: add `refresh_installed()` and call from constructor.
+      - `src/main.rs`: ensure fresh service still lists prior installs.
+      - `tests/package_cli.rs`: add multi-invocation list/enable test.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-1
+      - `.agents/skills/project-patterns/references/package-distribution.md`
+  - Test Cases to Write:
+    - `list_persists_across_processes`: install in one process, list in another.
+    - `enable_after_list`: enable succeeds after a fresh list has populated `installed`.
+
+- [ ] Centralize runtime evaluation output application
+  - Acceptance Criteria:
+    - Functional: `apply_runtime_evaluation` handles published decoration sets, parse handler registration, and UI contributions in addition to SDUI tree and behavior manifest.
+    - Functional: The hardcoded Markdown `selected_file_open_followup_messages` path uses the same application logic where possible.
+    - Code Quality: No duplicated output handling between server startup and Markdown open.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/mod.rs` `apply_runtime_evaluation`
+      - `src/server/connection.rs` selected-file follow-up
+      - `src/server/parse_coordinator.rs`
+      - `src/server/decorations.rs`
+      - `src/server/ui.rs`
+    - Options Considered:
+      - Leave outputs flow-specific: current state, hard to reason about.
+      - Centralize all outputs: consistent, easier to test.
+    - Chosen Approach:
+      - Centralize; remove or shrink Markdown-specific branch once generic path covers parse/decorations/UI.
+    - Files to Create/Edit:
+      - `src/server/mod.rs`: extend `apply_runtime_evaluation`.
+      - `src/server/connection.rs`: delegate to centralized application.
+      - `tests/js_runtime.rs`: verify all outputs are applied.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-2
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`
+  - Test Cases to Write:
+    - `runtime_evaluation_applies_all_outputs`: parse handler, decoration set, UI contributions, SDUI tree, and behavior manifest are all consumed.
+    - `markdown_open_uses_generic_application`: selected-file open no longer contains hand-rolled output dispatch.
+
+- [ ] Gate file sizes and move toward bounded document snapshots
+  - Acceptance Criteria:
+    - Functional: Workspace open/read rejects files above a configurable size limit with a typed error before allocating full text.
+    - Functional: Protocol messages carrying full text (`InitialDocument`, `ResyncSnapshot`, etc.) are bounded by the existing frame limit.
+    - Performance: Opening a 100 MiB file does not allocate multiple 100 MiB strings in memory.
+    - Security: Oversized files cannot be used as a memory-exhaustion vector.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/workspace.rs`
+      - `src/server/connection.rs`
+      - `src/protocol/codec.rs`
+      - `src/perf/budgets.rs`
+    - Options Considered:
+      - Chunk entire document protocol: ideal, larger change.
+      - Add explicit size gate now and chunk later: minimal safety first.
+    - Chosen Approach:
+      - Add size gate now; document chunked/viewport-first loading as a follow-up.
+    - Files to Create/Edit:
+      - `src/perf/budgets.rs`: add file-size budget constant.
+      - `src/server/workspace.rs`: check file size before read.
+      - `src/protocol/codec.rs`: ensure encode rejects oversized full-text messages.
+      - `tests/performance_protocol.rs`: add oversized file rejection test.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-4
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+  - Test Cases to Write:
+    - `open_oversized_file_rejected`: file above limit returns typed error.
+    - `initial_document_fits_frame`: small document snapshot round-trips.
+    - `oversized_snapshot_rejected`: snapshot exceeding frame limit is rejected at encode.
+
+- [ ] Release workspace mutex during disk I/O
+  - Acceptance Criteria:
+    - Functional: Open, save, and reload paths clone needed state/handles, release the workspace mutex, perform async disk I/O, then reacquire to commit.
+    - Performance: Concurrent operations on unrelated documents are no longer serialized by a slow disk call.
+    - Code Quality: Lock ordering is documented; no new deadlock paths introduced.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/connection.rs` handlers
+      - `src/server/workspace.rs` methods
+      - Tokio mutex patterns
+    - Options Considered:
+      - Keep global lock and add per-document locks: more granular but complex.
+      - Release lock for I/O only: smallest safe change.
+    - Chosen Approach:
+      - Release lock for I/O only; document the temporary state and version check on reacquire.
+    - Files to Create/Edit:
+      - `src/server/workspace.rs`: refactor open/save/reload into state + I/O + commit phases.
+      - `src/server/connection.rs`: adjust callers if needed.
+      - `tests/workspace.rs`: concurrent open/save on different documents.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-5
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+  - Test Cases to Write:
+    - `concurrent_save_different_documents`: saving two documents concurrently completes faster than sequential.
+    - `save_version_mismatch_after_io`: document changed during I/O is rejected on commit.
+
+- [ ] Make document saves atomic
+  - Acceptance Criteria:
+    - Functional: `save_document` writes to a temp file in the same directory, flushes, and renames over the target.
+    - Functional: Original file is preserved if the write/rename fails.
+    - Security: Crash/power loss during save leaves the original file intact.
+    - Code Quality: Permissions and ownership are preserved where feasible.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/workspace.rs` save path
+      - Tokio async file operations
+    - Options Considered:
+      - In-place write with fsync: still not atomic.
+      - Write-temp-and-rename: standard atomic save.
+    - Chosen Approach:
+      - Write-temp-and-rename; preserve original permissions.
+    - Files to Create/Edit:
+      - `src/server/workspace.rs`: implement atomic save.
+      - `tests/workspace.rs`: simulate failed save and verify original intact.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-6
+  - Test Cases to Write:
+    - `atomic_save_preserves_original_on_failure`: injected write failure leaves original file unchanged.
+    - `atomic_save_replaces_target`: successful save renames temp to target.
+
+- [ ] Remove hardcoded Markdown open path in favor of generic mode activation
+  - Acceptance Criteria:
+    - Functional: Markdown-specific temp-runtime creation and dist-file copying are removed from `connection.rs`.
+    - Functional: Markdown mode activation goes through the generic package/mode/parse coordinator path.
+    - Performance: File open does not spawn a fresh JS runtime or copy dist files for every Markdown file.
+    - Code Quality: No Markdown-specific branches in server connection handling.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/connection.rs` selected-file flow
+      - `src/server/parse_coordinator.rs`
+      - `src/server/ops/modes.rs`
+      - `packages/markdown/dist/load.js` and `parser.js`
+    - Options Considered:
+      - Keep special path until generic path is perfect: delays cleanup.
+      - Migrate now and fix gaps generically: aligns with primitives.
+    - Chosen Approach:
+      - Migrate Markdown open to generic package/mode activation; delete special path.
+    - Files to Create/Edit:
+      - `src/server/connection.rs`: remove `evaluate_markdown_open` and helpers.
+      - `src/server/js_runtime.rs` or `src/server/ops/modes.rs`: ensure generic activation can publish decorations/SDUI for a document.
+      - `tests/markdown_mode.rs`: update tests to use generic activation.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-3
+      - `.agents/skills/project-patterns/references/mode-primitive-first.md`
+  - Test Cases to Write:
+    - `markdown_open_uses_generic_mode_activation`: opening a `.md` file triggers the registered Markdown parse handler and behavior manifest.
+    - `no_temp_runtime_left_behind`: temp runtime directory is not created during file open.
+
+- [ ] Clean clippy and add lint gate
+  - Acceptance Criteria:
+    - Functional: `cargo clippy --all-targets --all-features --locked -- -D warnings` passes.
+    - Functional: CI or a documented local command enforces the same.
+    - Code Quality: Dead code is either removed or explicitly `#[expect]`ed with a reason.
+    - Code Quality: Large error diagnostic lints are resolved or tracked in a separate task.
+  - Approach:
+    - Documentation Reviewed:
+      - Clippy lint categories
+      - Existing `#[allow(dead_code)]` annotations
+    - Options Considered:
+      - Fix every lint immediately: large surface area.
+      - Fix simple lints, suppress staged primitives with reasons, tackle large diagnostics separately.
+    - Chosen Approach:
+      - Divide and conquer: this task covers dead code, collapsible if, redundant closures, casts; P2-5 covers large diagnostics.
+    - Files to Create/Edit:
+      - `src/masonry_sdui.rs`, `src/shell/package_ui.rs`, `src/server/sdui.rs`, `src/server/ui.rs`: remove or expect dead code.
+      - `src/editor/layout.rs`: fix unnecessary f64 casts.
+      - `src/server/ops/modes.rs`: fix redundant closure.
+      - `.github/workflows/*.yml` or equivalent: add clippy gate.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-4
+      - `.agents/skills/project-patterns/references/maintenance-validation.md`
+  - Test Cases to Write:
+    - `clippy_passes`: `cargo clippy --all-targets --all-features --locked -- -D warnings` exits 0.
+
+- [ ] Box large diagnostic error types
+  - Acceptance Criteria:
+    - Functional: Clippy `result_large_err` is resolved for `PackageServiceError`, `ModeDiagnostic`, `CommandDiagnostic`, `PackageConflictDiagnostic`, and `PackageRecordError`.
+    - Performance: `Result<T, E>` sizes are reduced on success paths.
+    - Code Quality: Error variants remain `Clone` where needed or use `Arc`/shared strings.
+  - Approach:
+    - Documentation Reviewed:
+      - Clippy `result_large_err` docs
+      - Error type definitions in `src/packages/`
+    - Options Considered:
+      - Box entire error enum: changes API.
+      - Box large variants or replace `String` fields with `Box<str>`/`Arc<str>`: smaller API churn.
+    - Chosen Approach:
+      - Box large variants and share detailed strings with `Arc<str>` where cloning is required.
+    - Files to Create/Edit:
+      - `src/packages/service.rs`: box `InvalidClayMetadata` and `ContributionConflict` variants.
+      - `src/packages/conflict.rs`: consider boxing or using `Arc<str>`.
+      - `src/packages/record.rs`: reduce `PackageRecordError` size.
+      - `src/server/ops/modes.rs`, `src/server/ops/mod.rs`, `src/server/behavior.rs`: box diagnostic variants.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-5
+  - Test Cases to Write:
+    - `error_size_within_limit`: compile-time assertion that `Result<(), DiagnosticError>` size is reasonable.
+
+- [ ] Trim public API surface and unused dependencies
+  - Acceptance Criteria:
+    - Functional: Internal implementation modules are `pub(crate)` unless intentionally public.
+    - Functional: Unused direct dependencies (`pollster`, `taffy`, `wgpu`) and over-broad Tokio features are removed or tightened.
+    - Build Performance: Compile graph shrinks measurably or is documented.
+    - Code Quality: `cargo check --locked` still passes.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/lib.rs`
+      - `Cargo.toml`
+      - `cargo tree` output
+    - Options Considered:
+      - Leave public surface wide: simpler now, harder later.
+      - Restrict public surface: aligns with semver and maintainability.
+    - Chosen Approach:
+      - Restrict public surface; remove unused direct deps; narrow Tokio features to actual usage.
+    - Files to Create/Edit:
+      - `src/lib.rs`: change module visibility.
+      - `Cargo.toml`: remove unused deps, narrow tokio features.
+      - `tests/rust_visibility_api_mapping.rs`: update if public API intentionally changes.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-7, P3-1
+  - Test Cases to Write:
+    - `unused_dependencies_removed`: `cargo machete` or manual check finds no unused direct deps.
+    - `public_api_intentional`: visibility mapping test reflects intended public surface.
+
+- [ ] Add SAFETY comments to unsafe COM code
+  - Acceptance Criteria:
+    - Functional: Every `unsafe` block in `src/client/file_dialog.rs` has a `// SAFETY:` comment.
+    - Code Quality: Comments state the invariant that makes the block safe.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/client/file_dialog.rs`
+      - `windows` crate COM examples
+    - Files to Create/Edit:
+      - `src/client/file_dialog.rs`: add safety comments.
+    - References:
+      - `code-reviews/2026-06-21-current-implementation-review.md` P3-2
+  - Test Cases to Write:
+    - Manual review: each unsafe block has a safety comment.
+
+- [ ] Define and verify the package default init.js loading experience
+  - Acceptance Criteria:
+    - Functional: Loading `@clay/markdown` from `~/.config/clay/init.js` is a one-line command.
+    - Functional: The hardened `loadEntry` and disabled lifecycle scripts do not break default loading.
+    - Functional: Default Markdown behavior works without copied manifests or manual primitive registration.
+    - Code Quality: Docs/tests cover both default loading and any supported customization.
+  - Approach:
+    - Documentation Reviewed:
+      - `docs/reference/packages/creating-packages.md`
+      - `packages/markdown/package.json`
+      - `runtime/js/packages.ts`
+    - Options Considered:
+      - Document a multi-step setup: violates one-line default convention.
+      - Keep one-line default and fix gaps: preferred.
+    - Chosen Approach:
+      - Preserve one-line default; add tests verifying it still works after security fixes.
+    - Files to Create/Edit:
+      - `docs/reference/packages/creating-packages.md`: verify examples.
+      - `tests/package_loading.rs` or `tests/markdown_mode.rs`: add default-load test.
+    - References:
+      - `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`
+      - `.agents/skills/project-patterns/references/package-distribution.md`
+  - Test Cases to Write:
+    - `markdown_one_line_default_load`: `init.js` containing `loadPackage("@clay/markdown")` enables Markdown mode.
+
+- [ ] Create or verify Clay configuration APIs
+  - Acceptance Criteria:
+    - Functional: Any user-visible behavior changed by this plan (package install scripts opt-in, file-size limits, JS timeout) is exposed as a documented Clay JS API.
+    - Functional: Configuration APIs do not implicitly grant filesystem/network/shell authority.
+    - Code Quality: All configuration options have Markdown docs with examples and security notes.
+  - Approach:
+    - Documentation Reviewed:
+      - `docs/reference/configuration/index.md`
+      - `runtime/js/configuration.ts`
+    - Files to Create/Edit:
+      - `docs/reference/configuration/index.md`: add options introduced by this plan.
+      - `runtime/js/configuration.ts`: expose options if not already present.
+      - `docs/index.md`: link new configuration docs.
+    - References:
+      - `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`
+      - `.agents/skills/project-patterns/references/configuration-system.md`
+  - Test Cases to Write:
+    - `configuration_api_docs_complete`: doc registry check or test fails if a new option is undocumented.
+
+- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+  - Acceptance Criteria:
+    - Functional: Every new or changed server-side Rust public function that is a programmatic capability has a `deno_core` op wrapper and a stable Clay JS/TS facade.
+    - Functional: Public Rust functions that should not be user-facing are `pub(crate)` or private.
+    - Code Quality: Clay JS API docs follow naming/registry conventions.
+  - Approach:
+    - Documentation Reviewed:
+      - `docs/reference/clay-js-api/*.md`
+      - `.agents/skills/project-patterns/references/clay-js-api-naming.md`
+      - `.agents/skills/project-patterns/references/clay-js-api-schema.md`
+      - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
+    - Files to Create/Edit:
+      - `src/lib.rs`: restrict visibility if needed.
+      - `runtime/js/*.ts`: add/update facades for changed surfaces.
+      - `docs/reference/clay-js-api/*.md`: add/update docs.
+      - `src/docs/registry.rs`: update generated registry.
+    - References:
+      - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
+      - `decision-logs/2026-05-08-1840-clay-js-api-discovery-keybindings-custom-properties.md`
+      - `.agents/skills/project-patterns/references/clay-js-api-naming.md`
+  - Test Cases to Write:
+    - `public_rust_functions_have_facades`: test mapping public functions to Clay JS APIs.
+    - `clay_js_api_docs_linked`: docs index links every new API doc.
+
+- [ ] Update or verify the code wiki after implementation
+  - Acceptance Criteria:
+    - Functional: Wiki pages for changed modules are updated or verified unchanged.
+    - Code Quality: Master wiki index links updated pages; updated pages explain what changed code does and how it works.
+    - Security: Security boundaries touched by this plan are documented.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-wiki/SKILL.md`
+      - `docs/wiki/index.md`
+      - `docs/wiki/modules/embedded-js-runtime.md`
+      - `docs/wiki/modules/server-file-workspace.md`
+      - `docs/wiki/modules/server-driven-ui.md`
+      - `docs/wiki/modules/package-loading.md` (create if missing)
+    - Files to Create/Edit:
+      - `docs/wiki/index.md`: add/update links.
+      - `docs/wiki/modules/embedded-js-runtime.md`: document timeout and resource guard.
+      - `docs/wiki/modules/server-file-workspace.md`: document atomic save and I/O lock release.
+      - `docs/wiki/modules/server-driven-ui.md`: document runtime SDUI budgets.
+      - `docs/wiki/modules/package-loading.md` (new): document loadEntry confinement and lifecycle-script policy.
+    - References:
+      - `.agents/skills/project-wiki/SKILL.md`
+      - `.agents/skills/project-patterns/references/maintenance-validation.md`
+  - Test Cases to Write:
+    - Manual wiki review: confirm updated pages explain changed behavior and link from the index.
+
+## Compromises Made
+
+- To be filled after task completion. Expected candidates:
+  - Whether Markdown open is migrated to generic activation in this phase or a fast follow-up.
+  - Whether application-level IPC authentication is implemented now or deferred after transport hardening.
+  - Whether separate-process JS sandboxing is deferred to a later phase.
+
+## Further Actions
+
+- To be filled after task completion. Likely follow-ups:
+  - Implement chunked document snapshots and viewport-first loading for files above the size gate.
+  - Add separate-process JS sandbox for package/config execution.
+  - Add package lock/integrity and automated `npm audit` for first-party JS packages.
+  - Introduce a capability-based file-picker protocol replacing raw `OpenSelectedFile`.
