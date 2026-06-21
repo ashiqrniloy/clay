@@ -298,14 +298,17 @@ fn validate_entry_path(
     field: &str,
     context: &DiagnosticContext,
 ) -> Result<(), PackageDiagnostic> {
-    if entry.trim().is_empty()
-        || entry.starts_with("http://")
-        || entry.starts_with("https://")
-        || entry.contains("Deno.core.ops")
-    {
+    let valid = entry.starts_with("./")
+        && entry.ends_with(".js")
+        && !entry.contains('\\')
+        && !entry.contains("Deno.core.ops")
+        && entry[2..]
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..");
+    if !valid {
         return Err(context.diagnostic(
             PackageValidationRule::InvalidEntry,
-            format!("{field} must be a non-empty local module path"),
+            format!("{field} must be a relative ./ module path ending in .js without traversal"),
         ));
     }
     Ok(())

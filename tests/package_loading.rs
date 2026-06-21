@@ -740,6 +740,34 @@ fn package_record_rejects_missing_required_contract_fields() {
     }
 }
 
+#[test]
+fn package_record_rejects_unsafe_entry_and_load_entry_paths() {
+    for (field, value) in [
+        ("entry", "dist/index.js"),
+        ("entry", "./dist/index.ts"),
+        ("entry", "../dist/index.js"),
+        ("entry", "./dist/../index.js"),
+        ("entry", "/tmp/index.js"),
+        ("entry", "C:\\tmp\\index.js"),
+        ("loadEntry", "dist/load.js"),
+        ("loadEntry", "./dist/load.ts"),
+        ("loadEntry", "./dist/../load.js"),
+        ("loadEntry", "https://example.invalid/load.js"),
+    ] {
+        let mut fixture = full_markdown_fixture();
+        fixture["clay"][field] = json!(value);
+
+        let err = assemble_package_record(&fixture).unwrap_err();
+
+        assert_eq!(err.rule, PackageRecordRule::ManifestValidationFailed);
+        assert!(
+            err.message.contains("without traversal"),
+            "got: {}",
+            err.message
+        );
+    }
+}
+
 /// Package-owned contribution IDs claiming the reserved `clay.*` namespace are
 /// rejected with a `ReservedClayIdInContribution` diagnostic.
 #[test]
@@ -1021,6 +1049,30 @@ fn package_service_disable_removes_active_contributions() {
         matches!(err, PackageServiceError::NotEnabled { .. }),
         "second disable must return NotEnabled, got {err:?}"
     );
+}
+
+/// The pnpm backend suppresses lifecycle scripts by default and only omits
+/// `--ignore-scripts` when explicitly opted in.
+#[test]
+fn pnpm_backend_install_args_suppress_lifecycle_scripts_by_default() {
+    use clay::packages::manager::{PackageInstallOptions, PnpmBackend};
+
+    let backend = PnpmBackend::new();
+
+    let default_args =
+        backend.install_command_args("@clay/markdown", PackageInstallOptions::default());
+    assert_eq!(
+        default_args,
+        vec!["add", "@clay/markdown", "--ignore-scripts"]
+    );
+
+    let allowed_args = backend.install_command_args(
+        "@clay/markdown",
+        PackageInstallOptions {
+            allow_lifecycle_scripts: true,
+        },
+    );
+    assert_eq!(allowed_args, vec!["add", "@clay/markdown"]);
 }
 
 /// The `clay package` CLI subcommands (add / enable / disable / list / inspect)

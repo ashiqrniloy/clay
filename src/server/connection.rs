@@ -1,6 +1,9 @@
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use tokio::{
@@ -36,7 +39,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let first_message = codec.read_client_message(&mut stream).await?;
-    match first_message {
+    let mut file_open_capabilities = match first_message {
         ClientMessage::Hello {
             protocol_version,
             client_name: _,
@@ -51,6 +54,21 @@ where
                 codec,
             )
             .await?;
+            // ponytail: per-connection capability token. Structural authority
+            // gate for single-file opens; not a hard boundary against a
+            // malicious same-user client that can also complete Hello. Full
+            // defense needs the long-term OS-verifiable picker exchange.
+            let mut file_open_capabilities = FileOpenCapabilityPool::new();
+            let initial_capability = file_open_capabilities.issue();
+            codec
+                .write_server_message(
+                    &mut stream,
+                    &ServerMessage::FileOpenCapabilityIssued {
+                        token: initial_capability,
+                    },
+                )
+                .await?;
+            file_open_capabilities
         }
         ClientMessage::Hello { .. } => {
             codec
@@ -76,7 +94,7 @@ where
                 .await?;
             return Ok(());
         }
-    }
+    };
 
     loop {
         let message = match codec.read_client_message(&mut stream).await {
@@ -203,8 +221,30 @@ where
             }
             ClientMessage::OpenSelectedFile {
                 client_id,
+                capability,
                 selected_path,
             } => {
+                let authorized = file_open_capabilities.consume(&capability);
+                // Replenish one pending token regardless of outcome so a
+                // legitimate client can retry or open another file.
+                let replenish = ServerMessage::FileOpenCapabilityIssued {
+                    token: file_open_capabilities.issue(),
+                };
+                if !authorized {
+                    codec.write_server_message(&mut stream, &replenish).await?;
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::RuntimeDiagnostic(
+                                RuntimeDiagnostic::error(
+                                    "clay.client.selected_file_open.unauthorized",
+                                    "OpenSelectedFile requires a valid server-issued file-open capability token.",
+                                ),
+                            ),
+                        )
+                        .await?;
+                    continue;
+                }
                 let response =
                     open_selected_file_response(&workspace, selected_path, client_id).await;
                 codec.write_server_message(&mut stream, &response).await?;
@@ -217,6 +257,7 @@ where
                         codec.write_server_message(&mut stream, &message).await?;
                     }
                 }
+                codec.write_server_message(&mut stream, &replenish).await?;
             }
             ClientMessage::SaveDocument {
                 client_id: _,
@@ -349,6 +390,49 @@ async fn release_client_access(
         .await
         .release_client_access(client_id)
         .await;
+}
+
+/// Per-connection pool of single-use file-open capability tokens.
+///
+/// Structural authority gate for `OpenSelectedFile`: the server mints tokens
+/// and only honors an open request carrying a valid, unconsumed token. Raw
+/// client-supplied paths without a token are rejected with a typed
+/// `RuntimeDiagnostic`. Tokens are per-connection and single-use; they are not
+/// cryptographically secret because the trust model is per-user IPC with a
+/// same-user server. Full defense against a malicious same-user client requires
+/// the long-term OS-verifiable picker exchange.
+#[derive(Debug, Default)]
+pub(crate) struct FileOpenCapabilityPool {
+    valid: HashSet<String>,
+}
+
+impl FileOpenCapabilityPool {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn issue(&mut self) -> String {
+        let token = next_capability_token();
+        self.valid.insert(token.clone());
+        token
+    }
+
+    pub(crate) fn consume(&mut self, token: &str) -> bool {
+        if token.is_empty() {
+            return false;
+        }
+        self.valid.remove(token)
+    }
+}
+
+fn next_capability_token() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nonce = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    format!("foc-{now:x}-{nonce:x}")
 }
 
 async fn open_document_response(
@@ -873,6 +957,11 @@ mod tests {
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        // Post-handshake file-open capability is always issued once.
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
         let next = timeout(
             Duration::from_millis(25),
             codec.read_server_message(&mut client),
@@ -1058,6 +1147,7 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -1127,6 +1217,7 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -1227,6 +1318,7 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -1299,6 +1391,7 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -1448,12 +1541,17 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::FileOpenCapabilityIssued { token } => token,
+            message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
+        };
 
         codec
             .write_client_message(
                 &mut client,
                 &ClientMessage::OpenSelectedFile {
                     client_id: 99,
+                    capability: capability_token,
                     selected_path: selected.to_string_lossy().into_owned(),
                 },
             )
@@ -1498,6 +1596,11 @@ mod tests {
             }
             message => panic!("expected Markdown DecorationSet, got {message:?}"),
         }
+        // Server re-issues one pending capability after the open attempt.
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
 
         // Phase 20 task 4: selected-file Markdown activation publishes behavior
         // and decorations ONLY — no default preview/status side panel. The
@@ -1677,12 +1780,17 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::FileOpenCapabilityIssued { token } => token,
+            message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
+        };
 
         codec
             .write_client_message(
                 &mut client,
                 &ClientMessage::OpenSelectedFile {
                     client_id: 99,
+                    capability: capability_token,
                     selected_path: selected.to_string_lossy().into_owned(),
                 },
             )
@@ -1704,6 +1812,11 @@ mod tests {
             codec.read_server_message(&mut client).await.unwrap(),
             ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))
         );
+        // Server re-issues one pending capability after the successful open.
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
 
         codec
             .write_client_message(
@@ -1770,6 +1883,7 @@ mod tests {
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
             .write_client_message(
@@ -1845,5 +1959,87 @@ mod tests {
 
         let result = server_task.await.unwrap();
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn open_selected_file_without_capability_is_rejected_with_diagnostic() {
+        let root = temp_workspace("selected-unauthorized");
+        let target = root.join("secret.md");
+        fs::write(&target, "# secret\n").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            Arc::clone(&workspace),
+            sdui_state(),
+            runtime_diagnostics(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..4 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+        // Consume the post-handshake capability so it is no longer pending.
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
+
+        // Raw path with no valid capability: server must reject and must NOT
+        // open or grant the file.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::OpenSelectedFile {
+                    client_id: 99,
+                    capability: String::new(),
+                    selected_path: target.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+        // Re-issued pending capability first, then the rejection diagnostic.
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::RuntimeDiagnostic(diagnostic) => {
+                assert_eq!(
+                    diagnostic.code,
+                    "clay.client.selected_file_open.unauthorized"
+                );
+            }
+            message => panic!("expected unauthorized RuntimeDiagnostic, got {message:?}"),
+        }
+        // No document was registered for the rejected path.
+        assert!(workspace.lock().await.document_handle(1).is_none());
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_dir(root);
     }
 }

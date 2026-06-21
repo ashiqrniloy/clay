@@ -180,7 +180,11 @@ enum ClayCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PackageCliSubcommand {
     /// Install a package by spec (delegates to the configured npm-compatible manager).
-    Add { package_spec: String },
+    Add {
+        package_spec: String,
+        /// Allow third-party lifecycle scripts to run during install.
+        allow_scripts: bool,
+    },
     /// Remove an installed package.
     Remove { package_name: String },
     /// List all installed packages and their enabled status.
@@ -215,7 +219,7 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec>\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
+const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchDiagnostic {
@@ -594,12 +598,27 @@ fn parse_package_subcommand(args: impl Iterator<Item = OsString>) -> Result<Clay
     };
     match op.to_string_lossy().as_ref() {
         "add" => {
-            let spec = args.next().ok_or_else(|| {
+            let mut spec = None;
+            let mut allow_scripts = false;
+            for arg in args {
+                let text = arg.to_string_lossy();
+                if text == "--allow-scripts" {
+                    allow_scripts = true;
+                } else if spec.is_none() {
+                    spec = Some(arg);
+                } else {
+                    return Err(CliError::new(
+                        "clay package add takes one package spec and optional --allow-scripts",
+                    ));
+                }
+            }
+            let spec = spec.ok_or_else(|| {
                 CliError::new("clay package add requires a package spec, e.g. @clay/markdown")
             })?;
             Ok(ClayCommand::Package {
                 subcommand: PackageCliSubcommand::Add {
                     package_spec: spec.to_string_lossy().into_owned(),
+                    allow_scripts,
                 },
             })
         }
@@ -661,9 +680,20 @@ fn run_package_subcommand(subcommand: PackageCliSubcommand) -> Result<(), Box<dy
     let mut service = PackageService::new(store_root, Box::new(PnpmBackend::new()));
 
     match subcommand {
-        PackageCliSubcommand::Add { package_spec } => {
+        PackageCliSubcommand::Add {
+            package_spec,
+            allow_scripts,
+        } => {
+            let allow_scripts = allow_scripts
+                || std::env::var_os("CLAY_ALLOW_LIFECYCLE_SCRIPTS")
+                    .is_some_and(|value| value == "1" || value == "true");
             println!("Installing {package_spec}…");
-            service.install(&package_spec)?;
+            service.install(
+                &package_spec,
+                clay::packages::manager::PackageInstallOptions {
+                    allow_lifecycle_scripts: allow_scripts,
+                },
+            )?;
             println!("Installed {package_spec}");
         }
         PackageCliSubcommand::Remove { package_name } => {

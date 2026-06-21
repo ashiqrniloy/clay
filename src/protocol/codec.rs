@@ -540,6 +540,7 @@ mod tests {
         };
         let selected = ClientMessage::OpenSelectedFile {
             client_id: 9,
+            capability: "foc-token".to_string(),
             selected_path: "C:/Users/test/Documents/note.md".to_string(),
         };
         let save = ClientMessage::SaveDocument {

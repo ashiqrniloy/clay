@@ -487,6 +487,9 @@ pub enum ClientMessage {
     },
     OpenSelectedFile {
         client_id: ClientId,
+        /// Server-issued single-use file-open capability token. Required so the
+        /// server authorizes single-file opens rather than honoring raw paths.
+        capability: String,
         selected_path: String,
     },
     SaveDocument {
@@ -555,6 +558,13 @@ pub enum ServerMessage {
     SduiSnapshot {
         client_id: ClientId,
         tree: SduiTree,
+    },
+    /// Server-issued single-use capability token authorizing one subsequent
+    /// `OpenSelectedFile` request. Issued once after the Hello handshake and
+    /// re-issued after every `OpenSelectedFile` attempt so the client always
+    /// has one pending token. Structural authority gate for single-file opens.
+    FileOpenCapabilityIssued {
+        token: String,
     },
     SduiUpdate {
         update: SduiTreeUpdate,

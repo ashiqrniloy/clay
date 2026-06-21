@@ -25,7 +25,9 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::packages::conflict::{PackageConflictDiagnostic, check_enabled_packages};
-use crate::packages::manager::{BackendError, PackageManagerBackend, PackageStore};
+use crate::packages::manager::{
+    BackendError, BackendErrorKind, PackageManagerBackend, PackageStore,
+};
 use crate::packages::record::{PackageRecord, PackageRecordError, assemble_package_record};
 
 // ── Installed package state ───────────────────────────────────────────────────
@@ -137,11 +139,27 @@ impl PackageService {
     /// Delegates the actual download/resolution/lockfile/integrity/caching to
     /// the backend.  Does not execute the package runtime or enable the
     /// package.  The installed `package.json` is cached for later `enable`.
-    pub fn install(&mut self, package_spec: &str) -> Result<(), PackageServiceError> {
+    pub fn install(
+        &mut self,
+        package_spec: &str,
+        options: crate::packages::manager::PackageInstallOptions,
+    ) -> Result<(), PackageServiceError> {
+        // Ensure the store directory exists before invoking the backend; pnpm
+        // needs a valid current working directory.
+        std::fs::create_dir_all(&self.store.root).map_err(|error| {
+            PackageServiceError::BackendError(BackendError {
+                kind: BackendErrorKind::IoError,
+                message: format!(
+                    "could not create package store {}: {error}",
+                    self.store.root.display()
+                ),
+            })
+        })?;
+
         // Delegate to the backend.
         let result = self
             .backend
-            .install(package_spec, &self.store)
+            .install(package_spec, &self.store, options)
             .map_err(PackageServiceError::BackendError)?;
 
         // Discover the installed package.json from the updated store.

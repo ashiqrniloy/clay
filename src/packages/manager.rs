@@ -85,6 +85,16 @@ impl BackendError {
     }
 }
 
+/// Options controlling package installation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PackageInstallOptions {
+    /// Allow the package manager to run third-party lifecycle scripts
+    /// (`postinstall`, `preinstall`, etc.). Defaults to `false`; enabling this
+    /// is dangerous because remote code can execute before Clay validates the
+    /// package metadata.
+    pub allow_lifecycle_scripts: bool,
+}
+
 /// Sealed boundary for npm-compatible package-manager backends.
 ///
 /// Implementors must:
@@ -100,6 +110,7 @@ pub trait PackageManagerBackend: Send + Sync {
         &self,
         package_spec: &str,
         store: &PackageStore,
+        options: PackageInstallOptions,
     ) -> Result<InstallResult, BackendError>;
 
     /// Remove a package from the Clay-managed package store.
@@ -146,6 +157,23 @@ impl PnpmBackend {
         }
     }
 
+    /// Build the `pnpm add` argument list for the given spec and options.
+    /// Exposed for tests so the command shape can be verified without
+    /// requiring pnpm to be installed.
+    pub fn install_command_args(
+        &self,
+        package_spec: &str,
+        options: PackageInstallOptions,
+    ) -> Vec<String> {
+        let mut args = vec!["add".to_string(), package_spec.to_string()];
+        if !options.allow_lifecycle_scripts {
+            // Suppress lifecycle scripts by default. Remote package code must
+            // not execute before Clay validates package metadata.
+            args.push("--ignore-scripts".to_string());
+        }
+        args
+    }
+
     fn run(&self, args: &[&str], cwd: &PathBuf) -> Result<Output, BackendError> {
         Command::new(&self.pnpm_bin)
             .args(args)
@@ -168,8 +196,11 @@ impl PackageManagerBackend for PnpmBackend {
         &self,
         package_spec: &str,
         store: &PackageStore,
+        options: PackageInstallOptions,
     ) -> Result<InstallResult, BackendError> {
-        let output = self.run(&["add", package_spec], &store.root)?;
+        let command_args = self.install_command_args(package_spec, options);
+        let args = command_args.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+        let output = self.run(&args, &store.root)?;
         let success = output.status.success();
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -301,7 +332,10 @@ impl PackageManagerBackend for FakeBackend {
         &self,
         package_spec: &str,
         _store: &PackageStore,
+        _options: PackageInstallOptions,
     ) -> Result<InstallResult, BackendError> {
+        // Fake backend never spawns a process, so lifecycle scripts are never
+        // executed regardless of options.
         self.install_results
             .get(package_spec)
             .cloned()

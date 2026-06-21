@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use deno_core::{OpState, op2};
@@ -347,14 +347,9 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
             .strip_prefix("./")
             .unwrap_or(load_entry)
             .replace('\\', "/");
-        let absolute_load_entry = package_root.join(&normalized_load_entry);
         let opaque_specifier = format!("clay://packages/{resolved_name}/{normalized_load_entry}");
-        // Canonicalize both paths so the loader's confinement `starts_with`
-        // check matches the canonicalized transitive-import paths (Windows
-        // prefixes canonical paths with `\\?\`).
-        let absolute_load_entry =
-            std::fs::canonicalize(&absolute_load_entry).unwrap_or(absolute_load_entry);
-        let canonical_package_root = std::fs::canonicalize(&package_root).unwrap_or(package_root);
+        let (absolute_load_entry, canonical_package_root) =
+            canonical_load_entry_paths(&package_root, &normalized_load_entry, specifier)?;
         clay_state.load_entry_allowlist().record(
             &opaque_specifier,
             absolute_load_entry,
@@ -389,4 +384,79 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
     };
 
     serde_json::to_string(&summary).map_err(serialize_error("clay.packages.load_failed"))
+}
+
+fn canonical_load_entry_paths(
+    package_root: &Path,
+    normalized_load_entry: &str,
+    specifier: &str,
+) -> Result<(PathBuf, PathBuf), JsErrorBox> {
+    let canonical_package_root = std::fs::canonicalize(package_root).map_err(|error| {
+        JsErrorBox::generic(format!(
+            "clay.packages.load_failed: package `{specifier}` root could not be canonicalized ({error})"
+        ))
+    })?;
+    let absolute_load_entry =
+        std::fs::canonicalize(package_root.join(normalized_load_entry)).map_err(|error| {
+            JsErrorBox::generic(format!(
+                "clay.packages.load_failed: package `{specifier}` loadEntry could not be canonicalized ({error})"
+            ))
+        })?;
+    if !absolute_load_entry.starts_with(&canonical_package_root) {
+        return Err(JsErrorBox::generic(format!(
+            "clay.packages.load_failed: package `{specifier}` loadEntry escapes its package root"
+        )));
+    }
+    Ok((absolute_load_entry, canonical_package_root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_load_entry_paths;
+    use std::{fs, path::PathBuf};
+
+    fn temp_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "clay-package-root-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        root
+    }
+
+    #[test]
+    fn canonical_load_entry_paths_accepts_file_inside_package_root() {
+        let root = temp_root("inside");
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::write(
+            root.join("dist/load.js"),
+            "export default function load() {}",
+        )
+        .unwrap();
+
+        let (load_entry, package_root) =
+            canonical_load_entry_paths(&root, "dist/load.js", "@clay/test").unwrap();
+
+        assert!(load_entry.starts_with(package_root));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn canonical_load_entry_paths_rejects_file_outside_package_root() {
+        let root = temp_root("outside");
+        fs::create_dir_all(&root).unwrap();
+        let outside = root.with_extension("js");
+        fs::write(&outside, "export default function load() {}").unwrap();
+        let relative_escape = format!("../{}", outside.file_name().unwrap().to_string_lossy());
+
+        let error = canonical_load_entry_paths(&root, &relative_escape, "@clay/test").unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("loadEntry escapes its package root")
+        );
+        let _ = fs::remove_file(outside);
+        let _ = fs::remove_dir_all(root);
+    }
 }

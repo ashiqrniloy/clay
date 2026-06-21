@@ -179,6 +179,7 @@ pub struct ClientEditQueue {
     client_id: ClientId,
     lease_id: Option<crate::protocol::LeaseId>,
     sync_state: Arc<Mutex<ClientSyncState>>,
+    file_open_capability: Arc<Mutex<Option<String>>>,
 }
 
 impl ClientEditQueue {
@@ -190,6 +191,7 @@ impl ClientEditQueue {
                 client_id: 0,
                 lease_id: None,
                 sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
+                file_open_capability: Arc::new(Mutex::new(None)),
             },
             receiver,
         )
@@ -201,6 +203,7 @@ impl ClientEditQueue {
             client_id: 0,
             lease_id: None,
             sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
+            file_open_capability: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -272,10 +275,29 @@ impl ClientEditQueue {
         &self,
         selected_path: PathBuf,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        // Take the pending server-issued capability token (single-use). If none
+        // is available yet, send an empty capability; the server rejects it
+        // with a typed diagnostic and re-issues a token for retry.
+        let capability = self
+            .file_open_capability
+            .lock()
+            .expect("client file-open capability state poisoned")
+            .take()
+            .unwrap_or_default();
         self.sender.try_send(ClientMessage::OpenSelectedFile {
             client_id: self.client_id,
+            capability,
             selected_path: selected_path.to_string_lossy().into_owned(),
         })
+    }
+
+    #[doc(hidden)]
+    pub fn with_file_open_capability(self, capability: impl Into<String>) -> Self {
+        *self
+            .file_open_capability
+            .lock()
+            .expect("client file-open capability state poisoned") = Some(capability.into());
+        self
     }
 
     pub fn sync_snapshot(&self) -> ClientSyncSnapshot {
@@ -507,6 +529,7 @@ where
         .with_authority(initial_state.client_id, &initial_state.access)
         .with_confirmed_version(initial_state.document_version);
     let sync_state = Arc::clone(&edit_queue.sync_state);
+    let file_open_capability = Arc::clone(&edit_queue.file_open_capability);
     let behavior_state = Arc::new(Mutex::new(
         behavior::ClientBehaviorState::new(initial_state.behavior_manifest.clone())
             .map_err(|_| ClientBootstrapError::UnexpectedMessage("invalid BehaviorManifest"))?,
@@ -519,6 +542,7 @@ where
         event_sender,
         sync_state,
         behavior_state,
+        file_open_capability,
         initial_state.client_id,
     ));
 
@@ -621,6 +645,7 @@ async fn run_connection<S>(
     events: mpsc::Sender<ClientConnectionEvent>,
     sync_state: Arc<Mutex<ClientSyncState>>,
     behavior_state: Arc<Mutex<behavior::ClientBehaviorState>>,
+    file_open_capability: Arc<Mutex<Option<String>>>,
     client_id: ClientId,
 ) where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -705,6 +730,14 @@ async fn run_connection<S>(
                     }
                     Ok(ServerMessage::SduiSnapshot { client_id, tree }) => {
                         let _ = events.send(ClientConnectionEvent::SduiSnapshot { client_id, tree }).await;
+                    }
+                    Ok(ServerMessage::FileOpenCapabilityIssued { token }) => {
+                        // Store the latest single-use token; replaces any unused
+                        // pending token so only the most recently issued one is
+                        // valid.
+                        *file_open_capability
+                            .lock()
+                            .expect("client file-open capability state poisoned") = Some(token);
                     }
                     Ok(ServerMessage::SduiUpdate { update }) => {
                         let _ = events.send(ClientConnectionEvent::SduiUpdate(update)).await;
@@ -996,6 +1029,28 @@ mod tests {
     #[tokio::test]
     async fn selected_file_open_request_emits_non_edit_message() {
         let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue
+            .with_authority(42, &DocumentAccess::ReadOnly)
+            .with_file_open_capability("foc-test-token");
+        let selected_path = PathBuf::from("C:/Users/test/Documents/note.md");
+
+        queue
+            .enqueue_open_selected_file(selected_path.clone())
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::OpenSelectedFile {
+                client_id: 42,
+                capability: "foc-test-token".to_string(),
+                selected_path: selected_path.to_string_lossy().into_owned(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn selected_file_open_without_capability_sends_empty_token() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
         let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
         let selected_path = PathBuf::from("C:/Users/test/Documents/note.md");
 
@@ -1007,6 +1062,7 @@ mod tests {
             receiver.recv().await.unwrap(),
             ClientMessage::OpenSelectedFile {
                 client_id: 42,
+                capability: String::new(),
                 selected_path: selected_path.to_string_lossy().into_owned(),
             }
         );

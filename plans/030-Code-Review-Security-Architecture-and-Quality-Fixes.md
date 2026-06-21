@@ -28,7 +28,7 @@
 
 ## Tasks
 
-- [ ] Review existing package/loader primitives and runtime evaluation contract before hardening work
+- [x] Review existing package/loader primitives and runtime evaluation contract before hardening work
   - Acceptance Criteria:
     - Functional: Inventory of existing package loading primitives (`FirstPartyLoadEntryAllowlist`, `ClayModuleLoader`, package manifest validation, `op_clay_packages_load_package_by_specifier`) and runtime evaluation outputs (`ClayRuntimeEvaluation`, parse handlers, decoration sets, UI contributions) is documented.
     - Code Quality: Every proposed fix either uses an existing primitive or explicitly defines a minimal new generic primitive with tests/docs.
@@ -37,24 +37,47 @@
     - Documentation Reviewed:
       - `docs/reference/primitives/index.md`
       - `docs/reference/primitives/registry.md`
+      - `docs/reference/primitives/package-loading.md`
       - `docs/wiki/modules/embedded-js-runtime.md`
       - `docs/wiki/modules/server-file-workspace.md`
       - `docs/wiki/modules/server-driven-ui.md`
+      - `docs/wiki/modules/package-loading.md`
+      - `docs/wiki/modules/parse-coordinator.md`
+      - `docs/wiki/modules/decoration-transport.md`
+      - `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`
     - Options Considered:
       - Add mode-specific fixes directly in `connection.rs`: quick but violates primitive-first policy.
       - Refactor generic package loader/activation primitives and make Markdown use them: more work but reusable.
     - Chosen Approach:
       - Keep fixes generic. Confine loadEntry through the existing allowlist primitive; centralize runtime evaluation application; route Markdown open through the generic package/mode activation primitive when ready.
+    - Inventory Completed:
+      - Package manifest validation: `validate_manifest_value` / `validate_entry_path` owns Clay metadata parsing (`apiPrefix`, permissions, modes, `entry`, `loadEntry`). Current gap: it rejects empty/HTTP/raw-op strings but does not yet enforce explicit relative `.js` paths or `..`/absolute-path denial. Next task should tighten this existing validator, not add a second manifest parser.
+      - Package record/service validation: `assemble_package_record`, `PackageService::enable`, and `check_enabled_packages` are the authoritative enable/load path for package metadata, permissions, inert contributions, and conflicts. Runtime package loading must continue to reuse this path.
+      - First-party resolver op: `op_clay_packages_load_package_by_specifier` is the implemented one-line `loadPackage("@clay/*")` resolver. It resolves only `CARGO_MANIFEST_DIR/packages/<name>`, seeds the first-party `PackageService`, enables the package, computes `loadEntry`, and records an opaque `clay://packages/...` specifier in the shared allowlist. Current gap: canonicalization uses `unwrap_or` fallback and records the initial `loadEntry` without verifying it starts with the canonical package root.
+      - Load-entry allowlist: `FirstPartyLoadEntryAllowlist` maps opaque specifiers to `{ absolute_path, package_root }`. Its `resolve_relative` already canonicalizes transitive `./` / `../` imports and rejects imports escaping the package root. Therefore root confinement should be fixed at the initial record boundary and preserved in this existing allowlist primitive.
+      - Module loader: `ClayModuleLoader` is deny-by-default. It permits Clay facade modules, the vendored `markdown-it` shim, validated config-root relative `.js` modules, and allowlist-recorded first-party package modules. It reads package module source only through the allowlist path.
+      - Runtime op state: `ClayOpState` collects runtime outputs: op records, `published_sdui_tree`, `published_decoration_set`, parse handler metadata, behavior manifest, UI contributions, workspace access, command/mode registries, and the shared load-entry allowlist.
+      - Runtime evaluation result: `evaluate_module_on_runtime` constructs `JsRuntime` with `ClayModuleLoader`, evaluates the main module, runs the event loop, and returns `ClayRuntimeEvaluation { op_records, published_sdui_tree, published_decoration_set, parse_handlers, behavior_manifest, ui_contributions }`. Current gap: no timeout/termination/resource budget at this generic runtime boundary.
+      - Runtime output application: `IpcServer::apply_runtime_evaluation` currently applies only SDUI tree and behavior manifest. `selected_file_open_followup_messages` has a Markdown-specific branch that separately handles behavior, decorations, and SDUI for selected Markdown opens. Current gap: parse handlers, UI contributions, and decoration publication are not applied through one generic server primitive.
+      - Parse/decorations primitives: `ParseCoordinator` and decoration validation already define generic, package-neutral boundaries for parse handlers, bounded parse windows, stale-result rejection, viewport-bounded `DecorationSet`s, and inert client rendering. Markdown should consume these primitives; Rust should not add Markdown-specific parser/style branches.
+      - Runtime SDUI primitive: `op_clay_sdui_publish_tree` and `StaticSduiState::replace_with_runtime_tree` validate inert tree shape and action targets. Current gap: runtime publication lacks the same payload/node/depth budget style used by package UI contribution validation.
+    - Authority Leak Map:
+      - Initial `loadEntry` escape risk -> fix in existing manifest validator plus resolver/allowlist record boundary.
+      - Transitive package import escape risk -> already covered by `FirstPartyLoadEntryAllowlist::resolve_relative`; keep and test it.
+      - Unbounded JS execution -> fix in generic `evaluate_module_on_runtime`, not package-specific code.
+      - Partial runtime-output application -> fix by extending one server-side evaluation-application primitive.
+      - Markdown selected-open special case -> migrate to generic mode/package activation and parse/decorations primitives; do not add more `is_markdown_path` branches.
+      - Oversized runtime SDUI publication -> fix at `clay:sdui` publish/validation boundary with generic budgets.
     - Files to Create/Edit:
-      - `plans/030-Code-Review-Security-Architecture-and-Quality-Fixes.md`: update this task with the inventory after review.
+      - `plans/030-Code-Review-Security-Architecture-and-Quality-Fixes.md`: updated this task with the completed inventory.
     - References:
       - `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`
       - `.agents/skills/project-patterns/references/mode-primitive-first.md`
       - `code-reviews/2026-06-21-current-implementation-review.md` P0-1, P1-3, P2-2, P2-3
   - Test Cases to Write:
-    - Inventory checklist test: confirm loadEntry confinement, runtime evaluation application, and mode activation are implemented through existing primitives or new generic ones.
+    - Manual inventory checklist completed with `rg` coverage for the relevant primitive symbols: `FirstPartyLoadEntryAllowlist`, `ClayModuleLoader`, `op_clay_packages_load_package_by_specifier`, `ClayRuntimeEvaluation`, `published_decoration_set`, `parse_handlers`, `ui_contributions`, `evaluate_module_on_runtime`, and `selected_file_open_followup_messages`.
 
-- [ ] Enforce package `entry`/`loadEntry` root confinement
+- [x] Enforce package `entry`/`loadEntry` root confinement
   - Acceptance Criteria:
     - Functional: `validate_entry_path` rejects absolute paths, `..` traversal, paths not starting with `./`, and non-`.js` extensions.
     - Functional: `op_clay_packages_load_package_by_specifier` verifies the canonicalized `loadEntry` path is inside the canonicalized package root before recording the allowlist entry.
@@ -65,32 +88,41 @@
     - Documentation Reviewed:
       - `src/packages/manifest.rs` validation rules
       - `src/server/js_runtime.rs` `ClayModuleLoader` allowlist checks
+      - `docs/wiki/modules/package-loading.md`
+      - `docs/reference/primitives/package-loading.md`
     - Options Considered:
       - Validate only at load time: leaves manifest validation incomplete.
       - Validate in manifest layer and double-check at load time: defense in depth.
     - Chosen Approach:
-      - Defense in depth: tighten manifest validation, then add a root-starts-with check at the allowlist recording site.
+      - Defense in depth: tightened manifest validation, then added a canonical root-starts-with check at the allowlist recording site.
     - API Notes and Examples:
       ```rust
-      // reject unless entry starts with "./" and ends with ".js" and contains no ".."
+      // reject unless entry starts with "./" and ends with ".js" and contains no traversal
       fn validate_entry_path(entry: &str) -> Result<(), PackageDiagnostic>;
       // after canonicalization
       if !canonical_load_entry.starts_with(&canonical_package_root) { return Err(...); }
       ```
-    - Files to Create/Edit:
-      - `src/packages/manifest.rs`: tighten `validate_entry_path`.
-      - `src/server/ops/packages.rs`: add canonical root-starts-with check.
-      - `tests/package_loading.rs`: add traversal/outside-root test cases.
+    - Completed Changes:
+      - `src/packages/manifest.rs`: `validate_entry_path` now accepts only explicit `./... .js` module paths and rejects `..`, empty segments, `.`, backslashes, non-JS extensions, absolute paths, URLs, and raw-op strings.
+      - `src/server/ops/packages.rs`: added `canonical_load_entry_paths`; package root and load entry canonicalization now fail closed, and the resolver records an allowlist entry only when the canonical load entry stays under the canonical package root.
+      - `tests/package_loading.rs`: added manifest coverage for unsafe `entry` and `loadEntry` values.
+      - `src/server/ops/packages.rs`: added focused helper tests for inside-root acceptance and outside-root rejection.
+      - `docs/wiki/modules/package-loading.md` and `docs/reference/primitives/package-loading.md`: documented the stricter path and canonicalization boundary.
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P0-1
       - `.agents/skills/project-patterns/references/package-distribution.md`
-  - Test Cases to Write:
-    - `load_entry_outside_package_root_rejected`: manifest with `loadEntry: "../secret.js"` fails enable.
-    - `load_entry_absolute_path_rejected`: manifest with `loadEntry: "/etc/passwd"` fails enable.
-    - `load_entry_non_js_rejected`: manifest with `loadEntry: "./README.md"` fails enable.
-    - `load_entry_canonicalization_fails_rejected`: missing file returns an error, not silent fallback.
+  - Test Cases Written / Verification:
+    - `package_record_rejects_unsafe_entry_and_load_entry_paths`: covers not starting with `./`, non-`.js`, traversal, absolute paths, Windows-style paths, and URL load entries.
+    - `canonical_load_entry_paths_accepts_file_inside_package_root`: canonical inside-root load entry is accepted.
+    - `canonical_load_entry_paths_rejects_file_outside_package_root`: canonical outside-root load entry is rejected before allowlist recording.
+    - `cargo fmt --check`: passed.
+    - `cargo test --locked --test package_loading package_record_rejects_unsafe_entry_and_load_entry_paths -- --nocapture`: passed.
+    - `cargo test --locked canonical_load_entry_paths -- --nocapture`: passed.
+    - `cargo check --locked`: passed with the pre-existing 32 dead-code warnings.
+    - `cargo clippy --locked --test package_loading -- -D warnings`: failed on the pre-existing clippy backlog (156 errors, same dead-code/result_large_err categories documented in the review), not on this task's new code.
+    - `cargo test --locked --test package_loading_docs -- --nocapture`: failed on pre-existing `package_default_load_gap_is_decision_log_backed_with_package_owned_fallback` assertion about `markdownLoadMode` root-index re-export; not caused by this task's touched files.
 
-- [ ] Disable third-party lifecycle scripts during package install
+- [x] Disable third-party lifecycle scripts during package install
   - Acceptance Criteria:
     - Functional: `PnpmBackend::install` passes `--ignore-scripts` (or pnpm equivalent) by default.
     - Functional: A CLI/env flag exists to opt into lifecycle scripts, documented as dangerous.
@@ -100,56 +132,108 @@
     - Documentation Reviewed:
       - pnpm CLI docs for `add --ignore-scripts`
       - `src/packages/manager.rs` backend implementation
+      - `src/packages/service.rs` install path
+      - `src/main.rs` package CLI parsing
     - Options Considered:
       - Sandbox install in a separate process/container: ideal, heavy.
       - Disable scripts by default with opt-in: minimal, effective.
     - Chosen Approach:
-      - Disable scripts by default; add explicit opt-in flag if needed later.
+      - Disable scripts by default; add explicit opt-in via `--allow-scripts` CLI flag and `CLAY_ALLOW_LIFECYCLE_SCRIPTS` env var.
     - API Notes and Examples:
       ```rust
-      let output = Command::new("pnpm")
-          .args(["add", package_spec, "--ignore-scripts", "--dir", store_root])
-          .env_clear() // or filtered env
-          .output()?;
+      // Default (safe)
+      PackageInstallOptions::default() // allow_lifecycle_scripts = false
+      // Opt-in (dangerous)
+      PackageInstallOptions { allow_lifecycle_scripts: true }
+      // CLI
+      clay package add <spec>
+      clay package add <spec> --allow-scripts
+      CLAY_ALLOW_LIFECYCLE_SCRIPTS=1 clay package add <spec>
       ```
-    - Files to Create/Edit:
-      - `src/packages/manager.rs`: add `--ignore-scripts`, filter env, validate store root.
-      - `src/main.rs`: optionally expose `--allow-scripts` flag.
-      - `tests/package_loading.rs`: verify scripts are not executed.
+    - Completed Changes:
+      - `src/packages/manager.rs`: added `PackageInstallOptions` with `allow_lifecycle_scripts`; `PackageManagerBackend::install` now takes options; `PnpmBackend::install` passes `--ignore-scripts` by default and exposes `install_command_args` for deterministic testing; `FakeBackend::install` ignores options and never runs scripts.
+      - `src/packages/service.rs`: `PackageService::install` now takes `PackageInstallOptions` and creates the store directory with `std::fs::create_dir_all` before invoking the backend, failing closed on I/O errors.
+      - `src/main.rs`: `PackageCliSubcommand::Add` carries `allow_scripts`; `parse_package_subcommand` accepts optional `--allow-scripts` after the spec; `run_package_subcommand` also honors `CLAY_ALLOW_LIFECYCLE_SCRIPTS=1`/`true`; CLI usage/help documents the flag and env var as dangerous.
+      - `tests/package_loading.rs`: added `pnpm_backend_install_args_suppress_lifecycle_scripts_by_default` verifying default args include `--ignore-scripts` and opt-in args omit it.
+      - `docs/reference/primitives/package-loading.md` and `docs/wiki/modules/package-loading.md`: documented the lifecycle-script default, opt-in flag/env var, and store-directory creation.
+    - Files Created/Edited:
+      - `src/packages/manager.rs`
+      - `src/packages/service.rs`
+      - `src/main.rs`
+      - `tests/package_loading.rs`
+      - `docs/reference/primitives/package-loading.md`
+      - `docs/wiki/modules/package-loading.md`
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P0-2
       - `.agents/skills/project-patterns/references/package-distribution.md`
-  - Test Cases to Write:
-    - `install_does_not_run_postinstall`: package with a `postinstall` script does not execute it during `clay package add`.
-    - `store_directory_created_before_install`: missing store root is created and canonicalized.
+  - Test Cases Written / Verification:
+    - `pnpm_backend_install_args_suppress_lifecycle_scripts_by_default`: default install command includes `--ignore-scripts`; opt-in command omits it.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked`: passed with the pre-existing 32 dead-code warnings.
+    - `cargo test --locked --test package_loading pnpm_backend_install_args -- --nocapture`: passed.
+    - `cargo test --locked --test package_loading package_service_install -- --nocapture`: passed.
+    - `cargo test --locked --test package_loading package_cli_subcommands -- --nocapture`: passed.
+    - `cargo run --locked -- --help`: shows `clay package add <spec> [--allow-scripts]`, the `--allow-scripts` option, and `CLAY_ALLOW_LIFECYCLE_SCRIPTS` env var.
+    - `cargo clippy --locked --test package_loading -- -D warnings`: failed on the pre-existing clippy backlog (156 errors), not on this task's new code.
 
-- [ ] Add capability-gated file open / restrict `OpenSelectedFile` authority
+- [x] Add capability-gated file open / restrict `OpenSelectedFile` authority
   - Acceptance Criteria:
     - Functional: `ClientMessage::OpenSelectedFile` is either removed or requires a server-issued capability/token.
     - Functional: The server rejects raw selected paths from untrusted contexts with a typed `RuntimeDiagnostic`.
-    - Security: Arbitrary local processes cannot open any server-readable file by sending a path.
+    - Security: Arbitrary local processes cannot open any server-readable file by sending a path. **Partially met** — see Limitation below.
     - Code Quality: Workspace-root file opening remains intact and tested.
+  - Limitation (honest assessment, Karpathy #1):
+    - The current per-user IPC endpoint (per-user named pipe / `XDG_RUNTIME_DIR` socket) plus a same-user background server means any same-user process can connect, complete Hello, receive a capability token, and open files it could already `cat` directly — no OS-level privilege escalation exists in this model.
+    - The capability gate is therefore a **structural authority boundary** (the server mints the grant; raw path injection without a token is rejected), not a hard cryptographic boundary against a malicious same-user client.
+    - Full satisfaction of "arbitrary local processes cannot open any server-readable file" requires the **long-term OS-verifiable picker exchange** (e.g., brokered file-handle capability from the native dialog), which remains a separate Further Action. This matches the plan's own short-term/long-term split.
   - Approach:
     - Documentation Reviewed:
-      - `src/server/connection.rs` open dispatch
-      - `src/server/workspace.rs` open path validation
-      - `src/protocol/mod.rs` message variants
+      - `src/server/connection.rs` open dispatch and `handle_connection` handshake
+      - `src/server/workspace.rs` `open_selected_file` / `add_single_file_grant` / `canonical_selected_file`
+      - `src/protocol/mod.rs` `ClientMessage` / `ServerMessage`
+      - `src/client/mod.rs` `ClientEditQueue`, `enqueue_open_selected_file`, `run_connection` select! loop, `connect_from_stream`
+      - `src/ipc.rs` per-user endpoint model
+      - `.agents/skills/project-patterns/references/authority-boundaries.md` (server owns file/workspace authority)
+      - `.agents/skills/karpathy-guidelines/SKILL.md`
     - Options Considered:
       - Add token to every message: invasive.
-      - Convert `OpenSelectedFile` to capability-only flow or disable it on IPC: targeted.
+      - Remove `OpenSelectedFile` entirely and require workspace-root opens only: breaks the native file-dialog UX (picker opens arbitrary files, not just workspace files).
+      - Disable `OpenSelectedFile` over IPC with no replacement: same UX break.
+      - Server-issued single-use capability token (chosen): preserves UX, establishes the authority boundary, gives the hook for the long-term OS-verifiable exchange.
+      - Session-scoped reusable token via a `Welcome` field: rejected — would add a field to ~20 `Welcome` construction sites and provides no more security than a token every connected client receives.
     - Chosen Approach:
-      - Short term: disable `OpenSelectedFile` over IPC and require workspace-root opens or a server-issued capability. Long term: implement a file-picker capability exchange.
-    - Files to Create/Edit:
-      - `src/protocol/mod.rs`: deprecate or restrict raw `OpenSelectedFile`.
-      - `src/server/connection.rs`: reject or capability-check `OpenSelectedFile`.
-      - `src/server/workspace.rs`: add explicit single-file grant helper.
-      - `tests/workspace.rs`: verify rejection of raw paths and success of workspace-root opens.
+      - Server-issued single-use capability token, delivered via a new `ServerMessage::FileOpenCapabilityIssued { token }` once after the Hello handshake and re-issued after every `OpenSelectedFile` attempt (success or failure) so the client always has one pending token. `OpenSelectedFile { client_id, capability, selected_path }` is validated against a per-connection `FileOpenCapabilityPool`; the token is consumed on use (single-use, non-replayable within the connection). Rejection emits `RuntimeDiagnostic` code `clay.client.selected_file_open.unauthorized` and creates no file grant or document. Workspace-root `OpenDocument` opens are unaffected.
+    - Completed Changes:
+      - `src/protocol/mod.rs`: added `capability: String` field to `ClientMessage::OpenSelectedFile`; added `ServerMessage::FileOpenCapabilityIssued { token }`.
+      - `src/server/connection.rs`: added `FileOpenCapabilityPool` (`HashSet`-backed, `issue`/`consume`, empty-token rejection) and `next_capability_token()` (process-wide monotonic counter + wall-clock nonce); `handle_connection` now binds the post-Hello match to a pool, issues one token after the welcome handshake, validates+consumes the capability in the `OpenSelectedFile` arm, sends a typed `RuntimeDiagnostic` on rejection, and replenishes one pending token after every attempt.
+      - `src/client/mod.rs`: added `file_open_capability: Arc<Mutex<Option<String>>>` to `ClientEditQueue`; `enqueue_open_selected_file` takes the pending token (or sends empty); `run_connection` accepts and updates the shared slot on `FileOpenCapabilityIssued`; added `with_file_open_capability` test helper; `connect_from_stream` shares the slot with the loop.
+      - `src/protocol/codec.rs`: updated round-trip test construction.
+      - `docs/wiki/modules/server-file-workspace.md`: documented the capability gate, rejection diagnostic, replenishment, single-use semantics, the structural-not-hard-boundary limitation, and the unaffected workspace-root open path.
+      - Updated existing connection/client handshake tests to read the post-handshake capability message and the post-open replenishment message; added a new `open_selected_file_without_capability_is_rejected_with_diagnostic` test.
+    - Files Created/Edited:
+      - `src/protocol/mod.rs`
+      - `src/server/connection.rs`
+      - `src/client/mod.rs`
+      - `src/protocol/codec.rs`
+      - `docs/wiki/modules/server-file-workspace.md`
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P1-1
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
-  - Test Cases to Write:
-    - `raw_open_selected_file_rejected`: sending a path outside workspace roots fails.
-    - `workspace_root_open_succeeds`: opening a file under a configured root succeeds.
+  - Test Cases Written / Verification:
+    - `open_selected_file_without_capability_is_rejected_with_diagnostic`: raw `OpenSelectedFile` with empty capability is rejected with `clay.client.selected_file_open.unauthorized`, the server re-issues a pending capability, and no document is registered for the rejected path.
+    - `selected_file_open_without_capability_sends_empty_token`: the client sends an empty capability when no token is pending.
+    - `selected_file_open_request_emits_non_edit_message`: the client attaches the stored token when one is pending.
+    - Existing `connection_open_selected_file_sends_snapshot_and_single_file_grant` and `selected_markdown_file_publishes_manifest_and_decorations`: updated to read the issued token, send it, and read the replenishment; both still pass.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: passed with the pre-existing 32 dead-code warnings, no new errors.
+    - `cargo test --locked --lib server::connection`: 17 passed.
+    - `cargo test --locked --lib client::` (excluding the 2 pre-existing flaky `windows_named_pipe_*` tests): 35 passed.
+    - `cargo test --locked --lib protocol::`: 25 passed.
+    - `cargo test --locked --lib selected_file_open`: 4 passed (includes the new rejection test).
+    - `cargo test --locked --test manual_smoke_docs`: 5 passed.
+    - `cargo test --locked --test rust_visibility_api_mapping`: 8 passed.
+    - `cargo clippy --locked --lib --no-deps`: no new warnings from this task's code (remaining warnings are the pre-existing dead-code/large-enum/too_many_arguments backlog).
+    - Pre-existing/Unrelated: `windows_named_pipe_client_receives_initial_snapshot` and `windows_named_pipe_stale_edit_rejected_then_resynced` fail on this machine with `behavior_version: 2` and timed out on a clean `git stash` checkout too; these are environment/flaky named-pipe failures, not caused by this task (my changes do not touch behavior versions or named-pipe setup).
 
 - [ ] Harden IPC endpoint ownership and permissions
   - Acceptance Criteria:
