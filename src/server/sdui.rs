@@ -96,6 +96,11 @@ impl StaticSduiState {
         self.replace_for_document_with_runtime_tree(self.document_id, tree)
     }
 
+    /// The document id this static SDUI state is currently bound to.
+    pub(crate) fn document_id(&self) -> DocumentId {
+        self.document_id
+    }
+
     pub(crate) fn replace_for_document_with_runtime_tree(
         &mut self,
         document_id: u64,

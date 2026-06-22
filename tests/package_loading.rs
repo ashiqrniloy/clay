@@ -1121,6 +1121,99 @@ fn package_cli_subcommands_route_through_shared_service() {
     assert_eq!(inspection.api_prefix, "markdown");
 }
 
+/// `clay package list` reflects packages installed by a *previous* `clay
+/// package add` process. Each CLI invocation is a fresh process with a fresh
+/// `PackageService`, so a freshly-constructed service must call
+/// `refresh_installed()` to repopulate its in-memory `installed` map from the
+/// package-manager store. This test simulates the cross-process boundary by
+/// constructing two independent services backed by the same discovered store.
+///
+/// `FakeBackend::list_results` is the in-memory stand-in for the on-disk pnpm
+/// store that a real `pnpm list --json` would rediscover; it never executes
+/// package code.
+#[test]
+fn package_service_list_persists_across_service_instances() {
+    let package_json = valid_markdown_package_json();
+
+    // Process 1: a package is installed. Its package.json lands in the store.
+    let mut first = PackageService::new("/tmp/clay-test-store", Box::new(FakeBackend::new()));
+    first
+        .install_from_value(package_json.clone())
+        .expect("install_from_value must succeed");
+    drop(first);
+
+    // Process 2: a brand-new service. Without refresh, it sees nothing.
+    let backend = FakeBackend::new();
+    let mut second = PackageService::new("/tmp/clay-test-store", Box::new(backend));
+    assert_eq!(
+        second.list().len(),
+        0,
+        "fresh service without refresh sees no installed packages"
+    );
+
+    // The package-manager store (simulated by list_results) still contains the
+    // package; refresh repopulates `installed` without executing package code.
+    let backend = FakeBackend {
+        list_results: vec![clay::packages::manager::DiscoveredPackage {
+            package_json: package_json.clone(),
+            package_root: std::path::PathBuf::from("/tmp/clay-test-store/@clay/markdown"),
+        }],
+        ..FakeBackend::new()
+    };
+    second = PackageService::new("/tmp/clay-test-store", Box::new(backend));
+    second
+        .refresh_installed()
+        .expect("refresh_installed must succeed against a healthy store");
+
+    let packages = second.list();
+    assert_eq!(
+        packages.len(),
+        1,
+        "refresh must repopulate installed packages"
+    );
+    assert_eq!(packages[0].name, "@clay/markdown");
+    assert!(!packages[0].is_enabled, "refresh must not enable packages");
+}
+
+/// After a fresh service refreshes its installed map from the store, `enable`
+/// works on the previously-installed package without requiring a re-install.
+/// This is the core correctness guarantee of CLI state persistence: install in
+/// one process, enable in another.
+#[test]
+fn package_service_enable_after_refresh_does_not_require_reinstall() {
+    let package_json = valid_markdown_package_json();
+
+    // Process 2 starts cold; the store (list_results) already contains the
+    // package installed by an earlier process.
+    let backend = FakeBackend {
+        list_results: vec![clay::packages::manager::DiscoveredPackage {
+            package_json: package_json.clone(),
+            package_root: std::path::PathBuf::from("/tmp/clay-test-store/@clay/markdown"),
+        }],
+        ..FakeBackend::new()
+    };
+    let mut service = PackageService::new("/tmp/clay-test-store", Box::new(backend));
+
+    // Without refresh, enable fails because the package is not in the map.
+    let err = service.enable("@clay/markdown").unwrap_err();
+    assert!(matches!(
+        err,
+        clay::packages::service::PackageServiceError::NotInstalled { .. }
+    ));
+
+    // After refresh, enable succeeds without any install call.
+    service.refresh_installed().expect("refresh must succeed");
+    service
+        .enable("@clay/markdown")
+        .expect("enable must succeed on a previously-installed package after refresh");
+    assert!(
+        service
+            .inspect("@clay/markdown")
+            .expect("inspect after enable")
+            .is_enabled
+    );
+}
+
 // ── Fixtures (Task 3) ─────────────────────────────────────────────────────────
 
 /// Assemble a validated PackageRecord from a raw fixture JSON value.

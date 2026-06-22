@@ -7,6 +7,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use deno_core::{
@@ -17,6 +18,7 @@ use deno_core::{
 use deno_error::JsErrorBox;
 use tokio::task;
 
+use crate::perf::budgets::JS_RUNTIME_EVALUATION_TIMEOUT_MS;
 use crate::perf::metrics::global_recorder;
 use crate::protocol::RuntimeDiagnostic;
 
@@ -254,12 +256,33 @@ export function clientSetViewport(options) { void options; unavailable("clay.edi
 "#;
 
 /// Isolated server-side Clay JavaScript runtime boundary.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct ClayJsRuntimeService {
     evaluations: Arc<AtomicU64>,
+    timeout: Duration,
+}
+
+impl Default for ClayJsRuntimeService {
+    fn default() -> Self {
+        Self {
+            evaluations: Arc::new(AtomicU64::new(0)),
+            timeout: Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+        }
+    }
 }
 
 impl ClayJsRuntimeService {
+    /// Sets a custom evaluation timeout. The default is
+    /// [`JS_RUNTIME_EVALUATION_TIMEOUT_MS`]; tests use a short timeout to
+    /// exercise the termination path quickly.
+    #[cfg(test)]
+    pub(crate) fn with_timeout(timeout: Duration) -> Self {
+        Self {
+            evaluations: Arc::new(AtomicU64::new(0)),
+            timeout,
+        }
+    }
+
     /// Evaluates a controlled server-owned ES module on a blocking runtime worker.
     pub(crate) async fn evaluate_controlled_module(
         &self,
@@ -267,10 +290,11 @@ impl ClayJsRuntimeService {
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         let source = source.into();
         let evaluations = Arc::clone(&self.evaluations);
+        let timeout = self.timeout;
         task::spawn_blocking(move || {
             let recorder = global_recorder();
             let _scope = recorder.scope("runtime.evaluate_controlled_module");
-            evaluate_module_on_runtime(RuntimeEntry::ControlledSource(source), None, 1)
+            evaluate_module_on_runtime(RuntimeEntry::ControlledSource(source), None, 1, timeout)
         })
         .await
         .map_err(ClayRuntimeError::Join)?
@@ -285,10 +309,16 @@ impl ClayJsRuntimeService {
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         let config_root = config_root.into();
         let evaluations = Arc::clone(&self.evaluations);
+        let timeout = self.timeout;
         task::spawn_blocking(move || {
             let recorder = global_recorder();
             let _scope = recorder.scope("runtime.load_configuration");
-            evaluate_module_on_runtime(RuntimeEntry::ConfigurationRoot(config_root), None, 1)
+            evaluate_module_on_runtime(
+                RuntimeEntry::ConfigurationRoot(config_root),
+                None,
+                1,
+                timeout,
+            )
         })
         .await
         .map_err(ClayRuntimeError::Join)?
@@ -304,6 +334,7 @@ impl ClayJsRuntimeService {
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         let config_root = config_root.into();
         let evaluations = Arc::clone(&self.evaluations);
+        let timeout = self.timeout;
         task::spawn_blocking(move || {
             let recorder = global_recorder();
             let _scope = recorder.scope("runtime.load_configuration_with_workspace");
@@ -311,6 +342,7 @@ impl ClayJsRuntimeService {
                 RuntimeEntry::ConfigurationRoot(config_root),
                 Some(workspace),
                 1,
+                timeout,
             )
         })
         .await
@@ -327,6 +359,7 @@ impl ClayJsRuntimeService {
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         let config_root = config_root.into();
         let evaluations = Arc::clone(&self.evaluations);
+        let timeout = self.timeout;
         task::spawn_blocking(move || {
             let recorder = global_recorder();
             let _scope = recorder.scope("runtime.load_configuration_for_document");
@@ -334,6 +367,7 @@ impl ClayJsRuntimeService {
                 RuntimeEntry::ConfigurationRoot(config_root),
                 None,
                 runtime_document_id,
+                timeout,
             )
         })
         .await
@@ -394,6 +428,7 @@ pub(crate) enum ClayRuntimeError {
     Configuration(ConfigurationError),
     InvalidMainSpecifier(String),
     Runtime(String),
+    Timeout,
     Join(task::JoinError),
 }
 
@@ -405,6 +440,10 @@ impl fmt::Display for ClayRuntimeError {
                 write!(formatter, "invalid main module: {message}")
             }
             Self::Runtime(message) => write!(formatter, "JavaScript runtime error: {message}"),
+            Self::Timeout => write!(
+                formatter,
+                "JavaScript runtime evaluation exceeded the configured timeout"
+            ),
             Self::Join(error) => write!(formatter, "JavaScript runtime task failed: {error}"),
         }
     }
@@ -415,7 +454,7 @@ impl Error for ClayRuntimeError {
         match self {
             Self::Configuration(error) => Some(error),
             Self::Join(error) => Some(error),
-            Self::InvalidMainSpecifier(_) | Self::Runtime(_) => None,
+            Self::InvalidMainSpecifier(_) | Self::Runtime(_) | Self::Timeout => None,
         }
     }
 }
@@ -432,6 +471,10 @@ impl ClayRuntimeError {
                 "Runtime configuration entry point could not be parsed.",
             ),
             Self::Runtime(message) => runtime_error_diagnostic(message),
+            Self::Timeout => RuntimeDiagnostic::error(
+                "clay.runtime.timeout",
+                "JavaScript runtime evaluation timed out and was terminated.",
+            ),
             Self::Join(_) => RuntimeDiagnostic::error(
                 "clay.runtime.task_failed",
                 "JavaScript runtime worker failed before configuration completed.",
@@ -512,6 +555,7 @@ fn evaluate_module_on_runtime(
     entry: RuntimeEntry,
     workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
     runtime_document_id: crate::protocol::DocumentId,
+    timeout: Duration,
 ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
     let op_state = Arc::new(ClayOpState::new_for_document(
         workspace.unwrap_or_else(|| Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()))),
@@ -563,35 +607,113 @@ fn evaluate_module_on_runtime(
         .build()
         .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?
         .block_on(async move {
-            let module_id = if let Some(source) = loaded_configuration.main_source {
+            // Capture a thread-safe handle so a watchdog thread can terminate the
+            // isolate if evaluation runs past `timeout`. `thread_safe_handle`
+            // borrows the isolate only for the call; `runtime` stays owned and
+            // is moved into the evaluation future below.
+            let terminate_handle = runtime.v8_isolate().thread_safe_handle();
+            let timer = TerminationTimer::start(timeout, terminate_handle);
+
+            let evaluation_result: Result<ClayRuntimeEvaluation, ClayRuntimeError> = async {
+                let module_id = if let Some(source) = loaded_configuration.main_source {
+                    runtime
+                        .load_main_es_module_from_code(&loaded_configuration.main_specifier, source)
+                        .await
+                } else {
+                    runtime
+                        .load_main_es_module(&loaded_configuration.main_specifier)
+                        .await
+                }
+                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+                let result = runtime.mod_evaluate(module_id);
                 runtime
-                    .load_main_es_module_from_code(&loaded_configuration.main_specifier, source)
+                    .run_event_loop(Default::default())
                     .await
-            } else {
-                runtime
-                    .load_main_es_module(&loaded_configuration.main_specifier)
+                    .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+                result
                     .await
+                    .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+                let behavior_manifest = op_state.behavior_manifest();
+                Ok(ClayRuntimeEvaluation {
+                    op_records: op_state.records(),
+                    published_sdui_tree: op_state.published_sdui_tree(),
+                    published_decoration_set: op_state.published_decoration_set(),
+                    parse_handlers: op_state.parse_handlers(),
+                    behavior_manifest: (behavior_manifest.behavior_version > 1)
+                        .then_some(behavior_manifest),
+                    ui_contributions: op_state.ui_contributions(),
+                })
             }
-            .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-            let result = runtime.mod_evaluate(module_id);
-            runtime
-                .run_event_loop(Default::default())
-                .await
-                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-            result
-                .await
-                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-            let behavior_manifest = op_state.behavior_manifest();
-            Ok(ClayRuntimeEvaluation {
-                op_records: op_state.records(),
-                published_sdui_tree: op_state.published_sdui_tree(),
-                published_decoration_set: op_state.published_decoration_set(),
-                parse_handlers: op_state.parse_handlers(),
-                behavior_manifest: (behavior_manifest.behavior_version > 1)
-                    .then_some(behavior_manifest),
-                ui_contributions: op_state.ui_contributions(),
-            })
+            .await;
+
+            // If the watchdog terminated the isolate, report a timeout even if
+            // v8 surfaced the termination as a runtime exception.
+            if timer.did_fire() {
+                return Err(ClayRuntimeError::Timeout);
+            }
+            evaluation_result
         })
+}
+
+/// Watchdog that terminates a V8 isolate when an evaluation exceeds a budget.
+///
+/// Spawns a lightweight OS thread that sleeps in 10 ms ticks until either the
+/// timeout elapses (then calls `terminate_execution`) or [`did_fire`] cancels
+/// it. `did_fire` is called on the happy path after evaluation completes and
+/// atomically reports whether the watchdog already fired.
+///
+/// ponytail: one thread per evaluation. Ceiling: evaluations are infrequent
+/// (startup config load, per-document loadEntry) so a polling thread per
+/// evaluation is cheap; if evaluation frequency rises, switch to a shared
+/// timer wheel or `tokio::time::timeout` on a `LocalSet`-spawned task.
+struct TerminationTimer {
+    fired: Arc<std::sync::atomic::AtomicBool>,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl TerminationTimer {
+    fn start(timeout: Duration, handle: deno_core::v8::IsolateHandle) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let fired = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (fired_clone, cancel_clone) = (Arc::clone(&fired), Arc::clone(&cancel));
+        let join = std::thread::Builder::new()
+            .name("clay-js-runtime-timeout".to_string())
+            .spawn(move || {
+                let start = std::time::Instant::now();
+                while start.elapsed() < timeout {
+                    if cancel_clone.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                // Timeout elapsed before cancellation: terminate the isolate so
+                // the blocked evaluation returns control.
+                fired_clone.store(true, Ordering::Relaxed);
+                handle.terminate_execution();
+            })
+            .expect("failed to spawn JS runtime timeout watchdog thread");
+        Self {
+            fired,
+            cancel,
+            join: Some(join),
+        }
+    }
+
+    /// Cancels the watchdog and returns whether it had already fired.
+    fn did_fire(mut self) -> bool {
+        use std::sync::atomic::Ordering;
+
+        self.cancel.store(true, Ordering::Relaxed);
+        let fired = self.fired.load(Ordering::Relaxed);
+        // Detach rather than join: the thread observes `cancel` and exits within
+        // a 10 ms tick. Joining is safe (terminate is non-blocking) but detaching
+        // keeps the happy path off any thread-synchronization latency.
+        self.join.take();
+        fired
+    }
 }
 
 struct LoadedRuntimeEntry {
@@ -803,7 +925,7 @@ mod tests {
         fs,
         path::PathBuf,
         sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use tokio::sync::Mutex;
@@ -847,6 +969,49 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.op_records, vec!["configured"]);
+        assert_eq!(service.evaluation_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn js_runtime_infinite_loop_is_terminated_with_timeout() {
+        let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(150));
+        let start = std::time::Instant::now();
+        let error = service
+            .evaluate_controlled_module(r#"while (true) {}"#)
+            .await
+            .unwrap_err();
+        let elapsed = start.elapsed();
+
+        assert!(
+            matches!(error, ClayRuntimeError::Timeout),
+            "expected Timeout, got {error:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "timeout test should finish quickly, took {elapsed:?}"
+        );
+        assert_eq!(
+            error.diagnostic().code,
+            "clay.runtime.timeout",
+            "timeout should surface the clay.runtime.timeout diagnostic"
+        );
+        // Timed-out evaluations are not counted as successful completions.
+        assert_eq!(service.evaluation_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn js_runtime_short_timeout_does_not_break_fast_evaluation() {
+        let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(150));
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                Deno.core.ops.op_clay_runtime_record("fast");
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["fast"]);
         assert_eq!(service.evaluation_count(), 1);
     }
 

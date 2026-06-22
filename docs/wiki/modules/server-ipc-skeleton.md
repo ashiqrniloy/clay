@@ -24,6 +24,7 @@ Each connection must send `ClientMessage::Hello` first. The server responds with
 3. `ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))`
 4. `ServerMessage::SduiSnapshot` for the static or runtime-replaced server-generated UI tree
 5. Zero or more `ServerMessage::RuntimeDiagnostic` frames when startup/runtime configuration produced safe diagnostics
+6. `ServerMessage::FileOpenCapabilityIssued` with a single-use token for the `OpenSelectedFile` authority gate (Phase 21)
 
 During the handshake, `DocumentState::acquire_access` grants the first connected client an editable lease and returns later clients as read-only observers. After the handshake, edit messages and editor intents are translated into `EditOperation`s and applied to the target `DocumentState`. Workspace-backed document IDs are resolved through `WorkspaceState::document_handle`; otherwise the connection uses the bootstrap scratch document. The document state owns the canonical Phase 5 `crop::Rope`, validates document IDs, base versions, lease authority, region locks, byte ranges, and UTF-8 boundaries before mutating, then returns `EditAck` only for accepted mutations.
 
@@ -34,6 +35,16 @@ During the handshake, `DocumentState::acquire_access` grants the first connected
 Runtime diagnostics are shared server state populated by startup configuration evaluation and runtime SDUI/behavior application. The connection bootstrap clones and sends the current diagnostics after the SDUI snapshot. Diagnostics are typed and sanitized (`RuntimeDiagnostic`) so clients and GUI tests can observe syntax errors, invalid imports, permission denials, op validation failures, and validation rejections without exposing absolute paths, source snippets, secrets, or capability handles.
 
 Phase 9 file/workspace dispatch keeps filesystem operations behind the server workspace lock. `OpenDocument` calls `WorkspaceState::open_existing_file`, returns `DocumentOpened` with a full initial snapshot plus metadata, and then publishes the current behavior manifest for the opened document. `SaveDocument` and `ReloadDocument` call the workspace save/reload state machine; reload returns a snapshot, while save returns version/dirty metadata only. `GetDocumentStatus` and `ListDocuments` return `DocumentMetadata` without full text. Workspace errors are mapped to `FileOperationFailed` with stable `FileErrorCode` values and sanitized messages for outside-root paths. Connection shutdown releases the editable lease from both the bootstrap document and all workspace documents held by that client.
+
+## Transport Hardening
+
+Phase 21 hardens the local transport endpoints so that only the owning user can connect by default.
+
+- **Unix domain sockets**: `IpcServer::run` validates the socket parent directory, removes only stale socket files, binds `UnixListener`, and then applies `0o600` permissions via `fs::set_permissions`. It also verifies that the parent directory is owned by the current process UID (`libc::getuid()`); if another user owns the directory, binding fails with `ServerError::EndpointOwnership` before a socket is created. This prevents an attacker from pre-creating a world-writable directory and tricking the server into exposing a socket there.
+- **Windows named pipes**: `create_named_pipe_server` builds a custom `SECURITY_DESCRIPTOR` with a discretionary ACL containing a single access-allowed ACE for the current user SID. The descriptor is passed to `CreateNamedPipe` through `ServerOptions::create_with_security_attributes_raw`, replacing the default descriptor that would also grant read access to `Everyone` and the anonymous account. The token/ACL memory is allocated only for the duration of `CreateNamedPipe`; the kernel copies the descriptor into the pipe object, so the user-mode buffers are freed on return.
+- **Temp-directory fallback**: the default endpoint still falls back to a per-user temp socket when `XDG_RUNTIME_DIR` is unavailable. The ownership check applies to the temp directory as well, so this fallback remains user-scoped in practice on single-user desktops. The long-term recommendation is still to run under a private runtime directory such as `XDG_RUNTIME_DIR`.
+
+These changes are transport-layer boundaries, not application-level authentication. They complement the workspace/file authority model by ensuring another unprivileged same-machine account cannot connect to the IPC endpoint in the first place.
 
 ## Invariants and Constraints
 
@@ -54,8 +65,8 @@ Phase 9 file/workspace dispatch keeps filesystem operations behind the server wo
 - `src/server/document.rs`: canonical rope edit application, base-version enforcement, lease validation, region-lock rejection, and UTF-8 boundary rejection.
 - `src/ipc.rs`: endpoint tests verify platform-valid default endpoint selection, isolated smoke endpoints, and printable diagnostics.
 - `src/main.rs`: launch tests verify direct child-process command construction, config-fixture smoke forwarding, bounded readiness retry diagnostics, local-fallback messages, and early child-exit handling for smoke mode.
-- `src/server/mod.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync and region-lock rejection coverage.
-- `src/client/mod.rs`: Windows named-pipe integration tests cover initial snapshot delivery, edit acknowledgement, read-only second-client behavior, and stale-edit resync recovery.
+- `src/server/mod.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync and region-lock rejection coverage; Phase 21 adds `unix_socket_is_created_with_owner_only_permissions` and `windows_pipe_creation_applies_current_user_security_descriptor` to verify `0o600` permissions and the current-user-only DACL respectively.
+- `src/client/mod.rs`: Windows named-pipe integration tests cover initial snapshot delivery, edit acknowledgement, read-only second-client behavior, and stale-edit resync recovery; tests are now robust to an ambient default `~/.config/clay/init.js` that publishes a behavior manifest.
 - Relevant commands: `cargo test server --quiet`, `cargo test protocol --quiet`, `cargo check --quiet`.
 
 ## Related

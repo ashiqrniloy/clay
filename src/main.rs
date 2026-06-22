@@ -679,6 +679,16 @@ fn run_package_subcommand(subcommand: PackageCliSubcommand) -> Result<(), Box<dy
     let store_root = dirs_home_config_clay_packages();
     let mut service = PackageService::new(store_root, Box::new(PnpmBackend::new()));
 
+    // A fresh service starts with an empty installed map. Repopulate it from
+    // the package-manager store so `list`/`enable`/`disable`/`inspect`/`remove`
+    // reflect packages installed by previous `clay package add` invocations.
+    // `add` skips this: it installs via the backend (which re-discovers
+    // internally) and a missing pnpm binary should fail at `pnpm add`, not at
+    // the pre-list step.
+    if !matches!(&subcommand, PackageCliSubcommand::Add { .. }) {
+        service.refresh_installed()?;
+    }
+
     match subcommand {
         PackageCliSubcommand::Add {
             package_spec,

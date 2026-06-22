@@ -804,6 +804,7 @@ dependencies = [
  "crop",
  "deno_core",
  "deno_error",
+ "libc",
  "masonry",
  "masonry_winit",
  "parley",

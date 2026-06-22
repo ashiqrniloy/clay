@@ -2020,7 +2020,13 @@ mod tests {
             session.initial_state.access,
             DocumentAccess::Editable { lease_id: 1 }
         ));
-        assert_eq!(session.initial_state.behavior_manifest.behavior_version, 1);
+        // The ambient default configuration (e.g. ~/.config/clay/init.js) may
+        // publish a behavior manifest, so the exact version is not fixed.
+        assert!(
+            session.initial_state.behavior_manifest.behavior_version >= 1,
+            "expected a loaded behavior manifest, got version {}",
+            session.initial_state.behavior_manifest.behavior_version
+        );
 
         server_task.abort();
     }
@@ -2139,8 +2145,14 @@ mod tests {
                 }
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
-        let _manifest = codec.read_server_message(&mut stream).await.unwrap();
-        let _sdui = codec.read_server_message(&mut stream).await.unwrap();
+        let server_behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            message => panic!("expected BehaviorManifest, got {message:?}"),
+        };
+        // The server may also send an SDUI snapshot, runtime diagnostics, and a
+        // post-handshake FileOpenCapabilityIssued token before entering the
+        // request loop. We send the edit and then skip those messages when
+        // reading the response.
 
         codec
             .write_client_message(
@@ -2150,7 +2162,7 @@ mod tests {
                     client_id,
                     lease_id: Some(lease_id),
                     base_version: version - 1,
-                    behavior_version: 1,
+                    behavior_version: server_behavior_version,
                     transaction_id: 99,
                     operation: EditOperation::Insert {
                         byte_offset: 0,
@@ -2161,15 +2173,25 @@ mod tests {
             .await
             .unwrap();
 
+        let reason = loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::EditRejected {
+                    document_id: rejected_document_id,
+                    transaction_id: 99,
+                    reason,
+                } if rejected_document_id == document_id => break reason,
+                ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::FileOpenCapabilityIssued { .. }
+                | ServerMessage::RuntimeDiagnostic(_) => continue,
+                message => panic!("expected EditRejected, got {message:?}"),
+            }
+        };
+
         assert_eq!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::EditRejected {
-                document_id,
-                transaction_id: 99,
-                reason: EditRejection::StaleVersion {
-                    client_base_version: version - 1,
-                    server_version: version,
-                },
+            reason,
+            EditRejection::StaleVersion {
+                client_base_version: version - 1,
+                server_version: version,
             }
         );
 
@@ -2237,8 +2259,14 @@ mod tests {
                 }
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
-        let _manifest = codec.read_server_message(&mut stream).await.unwrap();
-        let _sdui = codec.read_server_message(&mut stream).await.unwrap();
+        let server_behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            message => panic!("expected BehaviorManifest, got {message:?}"),
+        };
+        // The server may also send an SDUI snapshot, runtime diagnostics, and a
+        // post-handshake FileOpenCapabilityIssued token before entering the
+        // request loop. We send the edit and then skip those messages when
+        // reading the response.
 
         codec
             .write_client_message(
@@ -2248,7 +2276,7 @@ mod tests {
                     client_id,
                     lease_id: Some(lease_id),
                     base_version: version - 1,
-                    behavior_version: 1,
+                    behavior_version: server_behavior_version,
                     transaction_id: 99,
                     operation: EditOperation::Insert {
                         byte_offset: 0,
@@ -2259,15 +2287,25 @@ mod tests {
             .await
             .unwrap();
 
+        let reason = loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::EditRejected {
+                    document_id: rejected_document_id,
+                    transaction_id: 99,
+                    reason,
+                } if rejected_document_id == document_id => break reason,
+                ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::FileOpenCapabilityIssued { .. }
+                | ServerMessage::RuntimeDiagnostic(_) => continue,
+                message => panic!("expected EditRejected, got {message:?}"),
+            }
+        };
+
         assert_eq!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::EditRejected {
-                document_id,
-                transaction_id: 99,
-                reason: EditRejection::StaleVersion {
-                    client_base_version: version - 1,
-                    server_version: version,
-                },
+            reason,
+            EditRejection::StaleVersion {
+                client_base_version: version - 1,
+                server_version: version,
             }
         );
 

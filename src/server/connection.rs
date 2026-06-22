@@ -595,40 +595,34 @@ async fn selected_file_open_followup_messages(
 
     match evaluate_markdown_open(metadata, text).await {
         Ok(evaluation) => {
-            let mut messages = Vec::new();
-            if let Some(manifest) = evaluation.behavior_manifest {
-                match behavior.lock().await.publish_replacement(manifest.clone()) {
-                    Ok(installed) => messages.push(ServerMessage::BehaviorManifest(installed)),
-                    Err(_) => {
-                        messages.push(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                            "clay.markdown.invalid_open_manifest",
-                            "Markdown behavior manifest for the opened document failed validation.",
-                        )))
-                    }
-                }
-            } else {
-                messages.push(behavior.lock().await.manifest_message());
-            }
+            // Reuse the single shared output-application primitive so behavior
+            // and SDUI state mutation + validation live in exactly one place.
+            // The Markdown flow only composes the per-client messages that the
+            // startup path reads lazily (BehaviorManifest, DecorationSet,
+            // SduiSnapshot with this client's id).
+            let application =
+                super::apply_runtime_outputs(&evaluation, metadata.document_id, behavior, sdui)
+                    .await;
+            // Unified diagnostics for any output that failed validation.
+            let failed: Vec<ServerMessage> = application
+                .diagnostics()
+                .into_iter()
+                .map(ServerMessage::RuntimeDiagnostic)
+                .collect();
 
-            if let Some(set) = evaluation.published_decoration_set {
+            let mut messages = Vec::new();
+            match application.behavior {
+                Some(Ok(installed)) => messages.push(ServerMessage::BehaviorManifest(installed)),
+                None => messages.push(behavior.lock().await.manifest_message()),
+                _ => {}
+            }
+            if let Some(set) = application.decorations {
                 messages.push(ServerMessage::DecorationSet(set));
             }
-
-            if let Some(tree) = evaluation.published_sdui_tree {
-                match sdui
-                    .lock()
-                    .await
-                    .replace_for_document_with_runtime_tree(metadata.document_id, tree.clone())
-                {
-                    Ok(()) => messages.push(ServerMessage::SduiSnapshot { client_id, tree }),
-                    Err(_) => {
-                        messages.push(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                            "clay.markdown.invalid_open_sdui",
-                            "Markdown status UI for the opened document failed validation.",
-                        )))
-                    }
-                }
+            if let Some(Ok(tree)) = application.sdui {
+                messages.push(ServerMessage::SduiSnapshot { client_id, tree });
             }
+            messages.extend(failed);
             messages
         }
         Err(error) => vec![

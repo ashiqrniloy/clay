@@ -125,6 +125,11 @@ pub struct PackageService {
 
 impl PackageService {
     /// Create a new service with the given store root and backend.
+    ///
+    /// The service starts with an empty installed set; call
+    /// [`PackageService::refresh_installed`] after construction to repopulate
+    /// `installed` from the package-manager store so CLI invocations reflect
+    /// packages installed by previous processes.
     pub fn new(store_root: impl Into<PathBuf>, backend: Box<dyn PackageManagerBackend>) -> Self {
         Self {
             store: PackageStore::new(store_root),
@@ -132,6 +137,40 @@ impl PackageService {
             installed: HashMap::new(),
             enabled: HashMap::new(),
         }
+    }
+
+    /// Repopulate the `installed` map from the package-manager store.
+    ///
+    /// Each CLI invocation is a fresh process with a fresh [`PackageService`],
+    /// so without this call `installed` is empty even though packages were
+    /// installed by a previous `clay package add`. Discovery delegates to the
+    /// backend's `list_installed` (e.g. `pnpm list --json`) and does **not**
+    /// execute package code; it only reads `package.json` metadata. Enabled
+    /// state is intentionally kept in memory per process.
+    ///
+    /// The store is the single source of truth: this replaces the entire
+    /// `installed` map with the discovered set.
+    pub fn refresh_installed(&mut self) -> Result<(), PackageServiceError> {
+        let discovered = self
+            .backend
+            .list_installed(&self.store)
+            .map_err(PackageServiceError::BackendError)?;
+        self.installed.clear();
+        for pkg in discovered {
+            let Some(name) = pkg.package_json.get("name").and_then(Value::as_str) else {
+                // Skip packages without a name field rather than failing the
+                // whole discovery; a real package always has a name.
+                continue;
+            };
+            self.installed.insert(
+                name.to_string(),
+                InstalledPackage {
+                    package_json: pkg.package_json,
+                    package_root: pkg.package_root,
+                },
+            );
+        }
+        Ok(())
     }
 
     /// Install a package by spec.

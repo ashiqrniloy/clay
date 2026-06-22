@@ -8,6 +8,10 @@ use deno_error::JsErrorBox;
 use serde_json::{Map, Value};
 
 use crate::{
+    perf::budgets::{
+        RUNTIME_SDUI_TREE_MAX_DEPTH, RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS,
+        RUNTIME_SDUI_TREE_MAX_NODES, RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES,
+    },
     protocol::{
         SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue, SduiEditorBinding,
         SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
@@ -89,6 +93,15 @@ fn runtime_tree_from_json(
     registered_command_ids: Vec<String>,
     runtime_document_id: crate::protocol::DocumentId,
 ) -> Result<SduiTree, JsErrorBox> {
+    // Reject oversized raw input before `serde_json` allocates a proportional
+    // `Value` tree.
+    if tree_json.len() > RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES {
+        return Err(sdui_error(format!(
+            "clay.sdui.invalid_tree: published tree payload ({} bytes) exceeds the {} byte budget",
+            tree_json.len(),
+            RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES
+        )));
+    }
     let root = serde_json::from_str::<Value>(tree_json).map_err(|error| {
         sdui_error(format!(
             "clay.sdui.invalid_tree: published tree must be valid JSON ({error})"
@@ -98,7 +111,7 @@ fn runtime_tree_from_json(
         registered_command_ids: registered_command_ids.into_iter().collect(),
         ..RuntimeTreeBuilder::default()
     };
-    let root_id = builder.convert_node(&root)?;
+    let root_id = builder.convert_node(&root, 0)?;
     let tree = SduiTree {
         ui_version: DEFAULT_RUNTIME_UI_VERSION,
         root_id,
@@ -117,7 +130,13 @@ struct RuntimeTreeBuilder {
 }
 
 impl RuntimeTreeBuilder {
-    fn convert_node(&mut self, value: &Value) -> Result<SduiNodeId, JsErrorBox> {
+    fn convert_node(&mut self, value: &Value, depth: usize) -> Result<SduiNodeId, JsErrorBox> {
+        if depth > RUNTIME_SDUI_TREE_MAX_DEPTH {
+            return Err(sdui_error(format!(
+                "clay.sdui.invalid_tree: SDUI node nesting depth {depth} exceeds the {} limit",
+                RUNTIME_SDUI_TREE_MAX_DEPTH
+            )));
+        }
         let object = value.as_object().ok_or_else(|| {
             sdui_error("clay.sdui.invalid_node: each SDUI node must be an object")
         })?;
@@ -125,14 +144,14 @@ impl RuntimeTreeBuilder {
         let id = self.node_id(object.get("id"))?;
         let node_kind = match kind {
             "panel" => SduiNodeKind::Panel {
-                title: required_str(object, "title")?.to_string(),
-                children: self.convert_children(object.get("children"))?,
+                title: bounded_text(object, "title")?.to_string(),
+                children: self.convert_children(object.get("children"), depth)?,
             },
             "label" => SduiNodeKind::Label {
-                text: required_str(object, "text")?.to_string(),
+                text: bounded_text(object, "text")?.to_string(),
             },
             "button" => SduiNodeKind::Button {
-                label: required_str(object, "label")?.to_string(),
+                label: bounded_text(object, "label")?.to_string(),
                 action: self.convert_action(
                     required_object(object, "action")?,
                     SduiActionSource::Button { node_id: id },
@@ -157,10 +176,10 @@ impl RuntimeTreeBuilder {
                         )));
                     }
                 },
-                children: self.convert_children(object.get("children"))?,
+                children: self.convert_children(object.get("children"), depth)?,
             },
             "stack" => SduiNodeKind::Stack {
-                children: self.convert_children(object.get("children"))?,
+                children: self.convert_children(object.get("children"), depth)?,
             },
             other => {
                 return Err(sdui_error(format!(
@@ -169,6 +188,13 @@ impl RuntimeTreeBuilder {
             }
         };
         self.nodes.push(SduiNode::new(id, node_kind));
+        if self.nodes.len() > RUNTIME_SDUI_TREE_MAX_NODES {
+            return Err(sdui_error(format!(
+                "clay.sdui.invalid_tree: SDUI node count ({}) exceeds the {} limit",
+                self.nodes.len(),
+                RUNTIME_SDUI_TREE_MAX_NODES
+            )));
+        }
         Ok(id)
     }
 
@@ -207,7 +233,11 @@ impl RuntimeTreeBuilder {
         SduiNodeId(self.next_id)
     }
 
-    fn convert_children(&mut self, value: Option<&Value>) -> Result<Vec<SduiNodeId>, JsErrorBox> {
+    fn convert_children(
+        &mut self,
+        value: Option<&Value>,
+        parent_depth: usize,
+    ) -> Result<Vec<SduiNodeId>, JsErrorBox> {
         let Some(value) = value else {
             return Ok(Vec::new());
         };
@@ -216,7 +246,7 @@ impl RuntimeTreeBuilder {
             .ok_or_else(|| sdui_error("clay.sdui.invalid_node: children must be an array"))?;
         children
             .iter()
-            .map(|child| self.convert_node(child))
+            .map(|child| self.convert_node(child, parent_depth + 1))
             .collect()
     }
 
@@ -240,8 +270,8 @@ impl RuntimeTreeBuilder {
                 let item_id = required_str(object, "id")?.to_string();
                 Ok(SduiListItem {
                     id: item_id.clone(),
-                    label: required_str(object, "label")?.to_string(),
-                    detail: optional_string(object.get("detail"))?,
+                    label: bounded_text(object, "label")?.to_string(),
+                    detail: bounded_optional_string(object.get("detail"))?,
                     action: match object.get("action") {
                         Some(Value::Null) | None => None,
                         Some(Value::Object(action)) => Some(self.convert_action(
@@ -347,10 +377,33 @@ fn optional_u64(value: Option<&Value>) -> Result<Option<u64>, JsErrorBox> {
     }
 }
 
-fn optional_string(value: Option<&Value>) -> Result<Option<String>, JsErrorBox> {
+/// Required non-empty free-text node field capped at
+/// `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS`.
+fn bounded_text<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a str, JsErrorBox> {
+    let value = required_str(object, field)?;
+    if value.chars().count() > RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS {
+        return Err(sdui_error(format!(
+            "clay.sdui.invalid_node: `{field}` must be at most {} characters",
+            RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS
+        )));
+    }
+    Ok(value)
+}
+
+/// Optional free-text node field capped at
+/// `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS`.
+fn bounded_optional_string(value: Option<&Value>) -> Result<Option<String>, JsErrorBox> {
     match value {
         Some(Value::Null) | None => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(Value::String(value)) => {
+            if value.chars().count() > RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS {
+                return Err(sdui_error(format!(
+                    "clay.sdui.invalid_node: optional detail must be at most {} characters",
+                    RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS
+                )));
+            }
+            Ok(Some(value.clone()))
+        }
         Some(_) => Err(sdui_error(
             "clay.sdui.invalid_node: optional string fields must be strings",
         )),
@@ -386,4 +439,93 @@ fn runtime_validation_error(error: SduiValidationError) -> JsErrorBox {
 
 fn sdui_error(message: impl Into<String>) -> JsErrorBox {
     JsErrorBox::generic(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::perf::budgets::RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES;
+
+    fn convert(tree_json: &str) -> Result<SduiTree, JsErrorBox> {
+        runtime_tree_from_json(tree_json, Vec::new(), 1)
+    }
+
+    #[test]
+    fn runtime_tree_too_large_rejected() {
+        // Build a payload whose raw `tree_json.len()` exceeds the budget. The
+        // oversized label sits inside a single valid node so the only failing
+        // check is the pre-parse byte budget.
+        let oversize = "a".repeat(RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES + 1);
+        let tree_json = format!(r#"{{"kind":"label","text":"{oversize}","documentId":1}}"#);
+        assert!(tree_json.len() > RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES);
+
+        let error = convert(&tree_json).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("clay.sdui.invalid_tree") && message.contains("exceeds"),
+            "expected budget-rejection, got: {message}"
+        );
+    }
+
+    #[test]
+    fn runtime_tree_too_deep_rejected() {
+        // Nest one stack inside another past the depth limit. Each stack node
+        // is tiny, so this exercises the depth check rather than the byte or
+        // node-count budgets.
+        let mut inner = r#"{"kind":"label","text":"deep","documentId":1}"#.to_string();
+        for _ in 0..(RUNTIME_SDUI_TREE_MAX_DEPTH + 1) {
+            inner = format!(r#"{{"kind":"stack","children":[{inner}]}}"#);
+        }
+
+        let error = convert(&inner).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("nesting depth") && message.contains("exceeds"),
+            "expected depth-rejection, got: {message}"
+        );
+    }
+
+    #[test]
+    fn runtime_tree_too_many_nodes_rejected() {
+        // A flat panel with more than MAX_NODES label children exercises the
+        // node-count budget while staying shallow and well under the byte cap.
+        let count = RUNTIME_SDUI_TREE_MAX_NODES + 1;
+        let children: Vec<String> = (0..count)
+            .map(|index| format!(r#"{{"kind":"label","text":"n{index}"}}"#))
+            .collect();
+        let tree_json = format!(
+            r#"{{"kind":"panel","title":"P","children":[{}]}}"#,
+            children.join(",")
+        );
+
+        let error = convert(&tree_json).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("node count") && message.contains("exceeds"),
+            "expected node-count-rejection, got: {message}"
+        );
+    }
+
+    #[test]
+    fn runtime_tree_text_too_long_rejected() {
+        let oversize = "a".repeat(RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS + 1);
+        // Keep total size under the byte budget so only the per-node text cap
+        // is exercised.
+        let tree_json = format!(r#"{{"kind":"label","text":"{oversize}"}}"#);
+        assert!(tree_json.len() <= RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES);
+
+        let error = convert(&tree_json).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("clay.sdui.invalid_node") && message.contains("at most"),
+            "expected text-length-rejection, got: {message}"
+        );
+    }
+
+    #[test]
+    fn runtime_tree_within_budgets_loads() {
+        let tree_json = r#"{"kind":"label","text":"OK","documentId":1}"#;
+        let tree = convert(tree_json).expect("small tree must pass all budgets");
+        assert_eq!(tree.root_id, SduiNodeId(1));
+    }
 }

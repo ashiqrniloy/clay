@@ -31,6 +31,18 @@ use tokio::{sync::Mutex, task::JoinSet};
 use tokio::net::UnixListener;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+#[cfg(windows)]
+use windows::Win32::{
+    Foundation::{CloseHandle, HANDLE, LocalFree},
+    Security::{
+        ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAce, GetLengthSid,
+        GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor, PSECURITY_DESCRIPTOR,
+        PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SetSecurityDescriptorDacl, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
+    },
+    System::Memory::{LPTR, LocalAlloc},
+    System::Threading::{GetCurrentProcess, OpenProcessToken},
+};
 
 use crate::{
     ipc::IpcEndpoint,
@@ -194,31 +206,25 @@ impl IpcServer {
     }
 
     async fn apply_runtime_evaluation(&self, evaluation: js_runtime::ClayRuntimeEvaluation) {
-        if let Some(tree) = evaluation.published_sdui_tree {
-            if let Err(error) = self.sdui.lock().await.replace_with_runtime_tree(tree) {
-                let diagnostic = RuntimeDiagnostic::error(
-                    "clay.sdui.invalid_tree",
-                    "Published SDUI tree failed server validation.",
-                );
-                eprintln!(
-                    "clay server rejected runtime SDUI tree [{}]: {} ({error:?})",
-                    diagnostic.code, diagnostic.message
-                );
-                self.runtime_diagnostics.lock().await.push(diagnostic);
-            }
-        }
-        if let Some(manifest) = evaluation.behavior_manifest {
-            if let Err(error) = self.behavior.lock().await.publish_replacement(manifest) {
-                let diagnostic = RuntimeDiagnostic::error(
-                    "clay.behavior.invalid_manifest",
-                    "Runtime behavior manifest failed server validation.",
-                );
-                eprintln!(
-                    "clay server rejected runtime behavior manifest [{}]: {} ({error:?})",
-                    diagnostic.code, diagnostic.message
-                );
-                self.runtime_diagnostics.lock().await.push(diagnostic);
-            }
+        let application = apply_runtime_outputs(
+            &evaluation,
+            self.sdui.lock().await.document_id(),
+            &self.behavior,
+            &self.sdui,
+        )
+        .await;
+
+        // Startup reads the shared behavior/SDUI state lazily during the
+        // welcome handshake, so only validation failures produce diagnostics
+        // here. Decorations are pass-through (no startup client / decoration
+        // store); parse-handler and UI-contribution metadata are not applied
+        // at this short-lived config-eval boundary — see `apply_runtime_outputs`.
+        for diagnostic in application.diagnostics() {
+            eprintln!(
+                "clay server rejected runtime output [{}]: {}",
+                diagnostic.code, diagnostic.message
+            );
+            self.runtime_diagnostics.lock().await.push(diagnostic);
         }
     }
 
@@ -252,11 +258,125 @@ impl IpcServer {
     }
 }
 
+/// Outcome of applying a [`js_runtime::ClayRuntimeEvaluation`]'s shared
+/// outputs to server state.
+///
+/// Built by [`apply_runtime_outputs`]; both the server-startup path
+/// (`IpcServer::apply_runtime_evaluation`) and the selected-file-open path
+/// (`connection::selected_file_open_followup_messages`) compose their
+/// flow-specific client messages from this single result so that behavior and
+/// SDUI state mutation + validation live in exactly one place.
+#[derive(Default)]
+pub(crate) struct RuntimeOutputApplication {
+    /// `Some(Ok(installed))` when a behavior manifest replaced the active
+    /// manifest; `Some(Err(()))` when the manifest failed validation; `None`
+    /// when the evaluation carried no manifest.
+    pub(crate) behavior: Option<Result<crate::protocol::BehaviorManifest, ()>>,
+    /// `Some(Ok(tree))` when a runtime tree replaced the per-document SDUI
+    /// state — the caller builds the `SduiSnapshot` message with its own
+    /// `client_id`. `Some(Err(()))` on validation failure; `None` when no
+    /// tree was published.
+    pub(crate) sdui: Option<Result<crate::protocol::SduiTree, ()>>,
+    /// Published decoration set, passed through for the caller to emit. The
+    /// config-eval boundary holds no per-document decoration store, so this is
+    /// not applied to shared state here.
+    pub(crate) decorations: Option<crate::protocol::DecorationSet>,
+}
+
+impl RuntimeOutputApplication {
+    /// Unified diagnostics for outputs that failed validation. Both call sites
+    /// surface these so the diagnostic codes stay identical across flows
+    /// (`clay.behavior.invalid_manifest`, `clay.sdui.invalid_tree`).
+    pub(crate) fn diagnostics(&self) -> Vec<RuntimeDiagnostic> {
+        let mut diagnostics = Vec::new();
+        if matches!(self.behavior, Some(Err(()))) {
+            diagnostics.push(RuntimeDiagnostic::error(
+                "clay.behavior.invalid_manifest",
+                "Runtime behavior manifest failed server validation.",
+            ));
+        }
+        if matches!(self.sdui, Some(Err(()))) {
+            diagnostics.push(RuntimeDiagnostic::error(
+                "clay.sdui.invalid_tree",
+                "Published SDUI tree failed server validation.",
+            ));
+        }
+        diagnostics
+    }
+}
+
+/// Apply the client-independent outputs of a runtime evaluation to shared
+/// server state: the behavior manifest and the per-document SDUI tree.
+///
+/// `parse_handlers` and `ui_contributions` on the evaluation are intentionally
+/// not applied here:
+/// - The config-eval runtime is short-lived, so the JS parse-handler closures
+///   are already gone by the time Rust observes the `ParseHandlerMeta` list.
+///   Real handler registration happens in the persistent runtime op-state that
+///   owns the live closures, not at this boundary.
+/// - The shell owns the package-UI registry; `IpcServer` does not hold one to
+///   merge a `PackageUiRegistrySnapshot` into.
+///
+/// Both fields are still collected on `ClayRuntimeEvaluation` for test
+/// inspection. Wiring them requires persistent op-state plumbing and is
+/// tracked as plan 030 follow-ups rather than silently faked here.
+///
+/// `ponytail:` no speculative decoration store / UI-registry merge / parse
+/// re-registration at this boundary; upgrade path is the persistent
+/// server-side runtime that owns live JS closures and the shell UI registry.
+pub(crate) async fn apply_runtime_outputs(
+    evaluation: &js_runtime::ClayRuntimeEvaluation,
+    document_id: crate::protocol::DocumentId,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+) -> RuntimeOutputApplication {
+    let behavior_out = match &evaluation.behavior_manifest {
+        Some(manifest) => Some(
+            behavior
+                .lock()
+                .await
+                .publish_replacement(manifest.clone())
+                .map_err(|_| ()),
+        ),
+        None => None,
+    };
+
+    let sdui_out = match evaluation.published_sdui_tree.clone() {
+        Some(tree) => {
+            let applied = sdui
+                .lock()
+                .await
+                .replace_for_document_with_runtime_tree(document_id, tree.clone())
+                .map(|_| tree)
+                .map_err(|_| ());
+            Some(applied)
+        }
+        None => None,
+    };
+
+    RuntimeOutputApplication {
+        behavior: behavior_out,
+        sdui: sdui_out,
+        decorations: evaluation.published_decoration_set.clone(),
+    }
+}
+
 #[cfg(unix)]
 fn bind_unix_listener(socket_path: &Path) -> Result<UnixListener, ServerError> {
     validate_socket_path(socket_path)?;
     remove_stale_socket(socket_path)?;
-    UnixListener::bind(socket_path).map_err(ServerError::Bind)
+    let listener = UnixListener::bind(socket_path).map_err(ServerError::Bind)?;
+    restrict_unix_socket_permissions(socket_path)?;
+    Ok(listener)
+}
+
+#[cfg(unix)]
+fn restrict_unix_socket_permissions(socket_path: &Path) -> Result<(), ServerError> {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let permissions = Permissions::from_mode(0o600);
+    fs::set_permissions(socket_path, permissions).map_err(ServerError::EndpointPermissions)
 }
 
 #[cfg(unix)]
@@ -280,6 +400,30 @@ fn validate_socket_path(socket_path: &Path) -> Result<(), ServerError> {
         )));
     }
 
+    validate_parent_directory_ownership(parent, &metadata)?;
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_parent_directory_ownership(
+    parent: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), ServerError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let dir_uid = metadata.uid();
+    // SAFETY: getuid has no failure mode and is async-signal-safe.
+    let process_uid = unsafe { libc::getuid() };
+    if dir_uid != process_uid {
+        return Err(ServerError::EndpointOwnership(format!(
+            "socket parent {} is owned by uid {}, but this process runs as uid {}. \
+             Refusing to create an IPC endpoint in a directory not owned by the current user.",
+            parent.display(),
+            dir_uid,
+            process_uid
+        )));
+    }
     Ok(())
 }
 
@@ -302,9 +446,156 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), ServerError> {
 
 #[cfg(windows)]
 fn create_named_pipe_server(pipe_name: &str) -> Result<NamedPipeServer, ServerError> {
-    ServerOptions::new()
-        .create(pipe_name)
-        .map_err(ServerError::Bind)
+    let mut security =
+        CurrentUserSecurityAttributes::new().map_err(ServerError::InvalidEndpoint)?;
+    // SAFETY: `security.attributes` points at heap-allocated descriptor/ACL
+    // owned by `security`, which outlives this synchronous CreateNamedPipe call.
+    unsafe {
+        ServerOptions::new()
+            .create_with_security_attributes_raw(
+                pipe_name,
+                &mut security.attributes as *mut _ as *mut std::ffi::c_void,
+            )
+            .map_err(ServerError::Bind)
+    }
+    // `security` drops here, freeing the descriptor and ACL after the pipe is created.
+}
+
+#[cfg(windows)]
+struct CurrentUserSecurityAttributes {
+    token_user: windows::Win32::Foundation::HLOCAL,
+    acl: windows::Win32::Foundation::HLOCAL,
+    #[allow(dead_code)]
+    security_descriptor: Box<SECURITY_DESCRIPTOR>,
+    attributes: SECURITY_ATTRIBUTES,
+}
+
+#[cfg(windows)]
+impl CurrentUserSecurityAttributes {
+    fn new() -> Result<Self, String> {
+        // Standard access-mask constants; the `windows` crate does not expose
+        // GENERIC_ALL as a standalone constant in this version.
+        const GENERIC_ALL: u32 = 0x1000_0000;
+        const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+
+        unsafe {
+            // Open the current process token to read the user SID.
+            let mut token = HANDLE(std::ptr::null_mut());
+            OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+                .map_err(|error| format!("OpenProcessToken failed: {error}"))?;
+
+            // Query the size required for TokenUser.
+            let mut required = 0u32;
+            let _ = GetTokenInformation(token, TokenUser, None, 0, &mut required);
+
+            // Allocate the TokenUser buffer.
+            let token_user = LocalAlloc(LPTR, required as usize).map_err(|error| {
+                let _ = CloseHandle(token);
+                format!("LocalAlloc failed for token user buffer: {error}")
+            })?;
+            if token_user.0.is_null() {
+                let _ = CloseHandle(token);
+                return Err("LocalAlloc returned null for token user buffer".to_string());
+            }
+
+            // Read TokenUser.
+            if let Err(error) = GetTokenInformation(
+                token,
+                TokenUser,
+                Some(token_user.0),
+                required,
+                &mut required,
+            ) {
+                let _ = CloseHandle(token);
+                let _ = LocalFree(Some(token_user));
+                return Err(format!("GetTokenInformation failed: {error}"));
+            }
+
+            let user = &*(token_user.0 as *const TOKEN_USER);
+            let user_sid: PSID = user.User.Sid;
+
+            // Build a DACL containing one ACE that grants the current user full access.
+            let sid_length = GetLengthSid(user_sid);
+            let acl_size = std::mem::size_of::<ACL>() as u32
+                + sid_length
+                + (std::mem::size_of::<ACCESS_ALLOWED_ACE>() as u32)
+                - (std::mem::size_of::<u32>() as u32);
+            let acl = LocalAlloc(LPTR, acl_size as usize).map_err(|error| {
+                let _ = CloseHandle(token);
+                let _ = LocalFree(Some(token_user));
+                format!("LocalAlloc failed for ACL: {error}")
+            })?;
+            if acl.0.is_null() {
+                let _ = CloseHandle(token);
+                let _ = LocalFree(Some(token_user));
+                return Err("LocalAlloc returned null for ACL".to_string());
+            }
+
+            InitializeAcl(acl.0 as *mut ACL, acl_size, ACL_REVISION).map_err(|error| {
+                let _ = CloseHandle(token);
+                let _ = LocalFree(Some(token_user));
+                let _ = LocalFree(Some(acl));
+                format!("InitializeAcl failed: {error}")
+            })?;
+
+            // GENERIC_ALL is broader than needed for a pipe, but it mirrors the
+            // creator-owner rights the default DACL grants. For a least-privilege
+            // refinement, use FILE_GENERIC_READ | FILE_GENERIC_WRITE.
+            AddAccessAllowedAce(acl.0 as *mut ACL, ACL_REVISION, GENERIC_ALL, user_sid).map_err(
+                |error| {
+                    let _ = CloseHandle(token);
+                    let _ = LocalFree(Some(token_user));
+                    let _ = LocalFree(Some(acl));
+                    format!("AddAccessAllowedAce failed: {error}")
+                },
+            )?;
+
+            let _ = CloseHandle(token);
+
+            // Build a security descriptor owning the DACL.
+            let mut security_descriptor = Box::new(std::mem::zeroed());
+            let sd_ptr =
+                PSECURITY_DESCRIPTOR(&mut *security_descriptor as *mut _ as *mut std::ffi::c_void);
+            InitializeSecurityDescriptor(sd_ptr, SECURITY_DESCRIPTOR_REVISION).map_err(
+                |error| {
+                    let _ = LocalFree(Some(token_user));
+                    let _ = LocalFree(Some(acl));
+                    format!("InitializeSecurityDescriptor failed: {error}")
+                },
+            )?;
+
+            SetSecurityDescriptorDacl(sd_ptr, true.into(), Some(acl.0 as *mut ACL), false.into())
+                .map_err(|error| {
+                let _ = LocalFree(Some(token_user));
+                let _ = LocalFree(Some(acl));
+                format!("SetSecurityDescriptorDacl failed: {error}")
+            })?;
+
+            let attributes = SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: sd_ptr.0,
+                bInheritHandle: false.into(),
+            };
+
+            Ok(Self {
+                token_user,
+                acl,
+                security_descriptor,
+                attributes,
+            })
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for CurrentUserSecurityAttributes {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = LocalFree(Some(self.token_user));
+            let _ = LocalFree(Some(self.acl));
+            // self.security_descriptor is freed by Box::drop.
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -320,6 +611,8 @@ async fn connect_named_pipe_server(pipe: NamedPipeServer) -> io::Result<NamedPip
 pub enum ServerError {
     InvalidEndpoint(String),
     EndpointDirectory(io::Error),
+    EndpointOwnership(String),
+    EndpointPermissions(io::Error),
     RemoveStaleSocket(io::Error),
     Bind(io::Error),
     Accept(io::Error),
@@ -334,6 +627,18 @@ impl fmt::Display for ServerError {
                 write!(
                     formatter,
                     "failed to inspect IPC endpoint directory: {error}"
+                )
+            }
+            Self::EndpointOwnership(message) => {
+                write!(
+                    formatter,
+                    "IPC endpoint directory ownership check failed: {message}"
+                )
+            }
+            Self::EndpointPermissions(error) => {
+                write!(
+                    formatter,
+                    "failed to restrict IPC endpoint permissions: {error}"
                 )
             }
             Self::RemoveStaleSocket(error) => {
@@ -352,11 +657,148 @@ impl Error for ServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::EndpointDirectory(error)
+            | Self::EndpointPermissions(error)
             | Self::RemoveStaleSocket(error)
             | Self::Bind(error)
             | Self::Accept(error) => Some(error),
-            Self::InvalidEndpoint(_) | Self::InvalidWorkspaceRoot(_) => None,
+            Self::InvalidEndpoint(_)
+            | Self::EndpointOwnership(_)
+            | Self::InvalidWorkspaceRoot(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod runtime_outputs_tests {
+    use std::sync::Arc;
+
+    use tokio::sync::Mutex;
+
+    use super::{ActiveBehaviorManifest, StaticSduiState, apply_runtime_outputs};
+    use crate::{
+        protocol::{BehaviorManifest, DecorationSet, DocumentId},
+        server::{js_runtime::ClayRuntimeEvaluation, sdui::default_document_tree},
+    };
+
+    fn valid_manifest() -> BehaviorManifest {
+        let mut manifest = BehaviorManifest::minimal_text_editing(99);
+        manifest.manifest_id = "clay.test.manifest".to_string();
+        manifest
+    }
+
+    fn empty_decoration_set(document_id: DocumentId) -> DecorationSet {
+        DecorationSet {
+            document_id,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: 0,
+            spans: vec![],
+        }
+    }
+
+    fn harness(
+        document_id: DocumentId,
+    ) -> (
+        Arc<Mutex<ActiveBehaviorManifest>>,
+        Arc<Mutex<StaticSduiState>>,
+    ) {
+        (
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            Arc::new(Mutex::new(StaticSduiState::empty_for_document(document_id))),
+        )
+    }
+
+    /// Behavior manifest and SDUI tree are applied to shared state in one
+    /// primitive, and no diagnostics are produced when both are valid.
+    #[tokio::test]
+    async fn apply_runtime_outputs_applies_behavior_and_sdui_to_shared_state() {
+        let (behavior, sdui) = harness(1);
+        let evaluation = ClayRuntimeEvaluation {
+            op_records: vec![],
+            published_sdui_tree: Some(default_document_tree(1, 1)),
+            published_decoration_set: None,
+            parse_handlers: vec![],
+            behavior_manifest: Some(valid_manifest()),
+            ui_contributions: Default::default(),
+        };
+
+        let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
+
+        assert!(
+            application.diagnostics().is_empty(),
+            "no diagnostics for valid outputs"
+        );
+        assert!(
+            application.behavior.is_some_and(|r| r.is_ok()),
+            "behavior applied"
+        );
+        assert!(application.sdui.is_some_and(|r| r.is_ok()), "sdui applied");
+        assert_eq!(
+            behavior.lock().await.version(),
+            2,
+            "shared behavior advanced"
+        );
+    }
+
+    /// An SDUI tree bound to a different document fails per-document
+    /// validation and surfaces the unified `clay.sdui.invalid_tree` diagnostic
+    /// regardless of which flow called the primitive.
+    #[tokio::test]
+    async fn apply_runtime_outputs_reports_unified_diagnostic_for_invalid_sdui() {
+        let (behavior, sdui) = harness(1);
+        // Tree built for document 2, applied against document 1 -> binding
+        // validation fails.
+        let evaluation = ClayRuntimeEvaluation {
+            op_records: vec![],
+            published_sdui_tree: Some(default_document_tree(2, 1)),
+            published_decoration_set: None,
+            parse_handlers: vec![],
+            behavior_manifest: None,
+            ui_contributions: Default::default(),
+        };
+
+        let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
+
+        assert!(
+            matches!(application.sdui, Some(Err(()))),
+            "sdui failed validation"
+        );
+        let diagnostics = application.diagnostics();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "clay.sdui.invalid_tree");
+        assert_eq!(
+            behavior.lock().await.version(),
+            1,
+            "behavior untouched when absent"
+        );
+    }
+
+    /// Decoration sets are passed through for the caller to emit; the
+    /// config-eval boundary holds no decoration store, so they are not applied
+    /// to shared state here. This makes the previously-silent drop explicit.
+    #[tokio::test]
+    async fn apply_runtime_outputs_passes_decorations_through() {
+        let (behavior, sdui) = harness(1);
+        let set = empty_decoration_set(1);
+        let evaluation = ClayRuntimeEvaluation {
+            op_records: vec![],
+            published_sdui_tree: None,
+            published_decoration_set: Some(set.clone()),
+            parse_handlers: vec![],
+            behavior_manifest: None,
+            ui_contributions: Default::default(),
+        };
+
+        let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
+
+        assert_eq!(
+            application.decorations,
+            Some(set),
+            "decorations passed through"
+        );
+        assert!(application.behavior.is_none(), "no manifest present");
+        assert!(application.sdui.is_none(), "no tree present");
+        assert!(application.diagnostics().is_empty());
     }
 }
 
@@ -579,5 +1021,100 @@ mod tests {
             }
         }
         panic!("failed to connect to test socket: {:?}", last_error);
+    }
+
+    #[tokio::test]
+    async fn unix_socket_is_created_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let socket_path = unique_socket_path("owner-only");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+
+        let stream = connect_with_retry(&socket_path).await;
+        drop(stream);
+
+        let metadata = std::fs::metadata(&socket_path).unwrap();
+        let mode = metadata.permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "socket must be created with owner-only permissions, got {mode:o}"
+        );
+
+        server_task.abort();
+        let _ = std::fs::remove_file(&socket_path);
+        let _ = std::fs::remove_dir(socket_path.parent().unwrap());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::os::windows::io::AsRawHandle;
+
+    use windows::Win32::{
+        Foundation::HANDLE,
+        Security::{
+            ACL,
+            Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT},
+            DACL_SECURITY_INFORMATION,
+        },
+    };
+
+    use super::create_named_pipe_server;
+
+    #[tokio::test]
+    async fn windows_pipe_creation_applies_current_user_security_descriptor() {
+        let pipe_name = format!(
+            r"\\.\pipe\clay-test-security-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let pipe = create_named_pipe_server(&pipe_name)
+            .expect("pipe creation with current-user-only security descriptor should succeed");
+
+        // Read back the DACL and verify the pipe no longer uses the default
+        // descriptor (which has multiple ACEs for LocalSystem/Admins/Owner/
+        // Everyone/Anonymous). A single-ACE DACL confirms we installed a
+        // custom, restricted descriptor.
+        unsafe {
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            GetSecurityInfo(
+                HANDLE(pipe.as_raw_handle() as *mut std::ffi::c_void),
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut dacl),
+                None,
+                None,
+            )
+            .ok()
+            .expect("GetSecurityInfo should succeed on the pipe we created");
+
+            assert!(
+                !dacl.is_null(),
+                "pipe must have a DACL after custom descriptor is applied"
+            );
+            assert_eq!(
+                (*dacl).AceCount,
+                1,
+                "current-user-only DACL must have exactly one ACE"
+            );
+
+            // LocalFree expects the descriptor returned by GetSecurityInfo, but
+            // because we passed null for ppSecurityDescriptor we only need to
+            // free the DACL if GetSecurityInfo allocated it. In practice
+            // GetSecurityInfo returns a self-relative descriptor whose DACL is
+            // internal; passing the handle-owned descriptor pointer to LocalFree
+            // is undefined. We therefore do not free `dacl` here — it is valid
+            // only while the pipe handle remains open.
+        }
+
+        drop(pipe);
     }
 }

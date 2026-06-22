@@ -235,7 +235,7 @@
     - `cargo clippy --locked --lib --no-deps`: no new warnings from this task's code (remaining warnings are the pre-existing dead-code/large-enum/too_many_arguments backlog).
     - Pre-existing/Unrelated: `windows_named_pipe_client_receives_initial_snapshot` and `windows_named_pipe_stale_edit_rejected_then_resynced` fail on this machine with `behavior_version: 2` and timed out on a clean `git stash` checkout too; these are environment/flaky named-pipe failures, not caused by this task (my changes do not touch behavior versions or named-pipe setup).
 
-- [ ] Harden IPC endpoint ownership and permissions
+- [x] Harden IPC endpoint ownership and permissions
   - Acceptance Criteria:
     - Functional: Unix socket is created with owner-only permissions (`0o600`) and parent directory ownership is verified.
     - Functional: Windows named pipe uses a security descriptor restricted to the current user.
@@ -243,26 +243,50 @@
     - Code Quality: Platform-specific code has clear `#[cfg]` boundaries and tests.
   - Approach:
     - Documentation Reviewed:
-      - `src/ipc.rs` Unix socket creation
-      - `src/server/mod.rs` Windows named pipe creation
-      - Rust `std::os::unix::fs::PermissionsExt`, Windows `winapi`/`windows` crate security APIs
+      - `src/server/mod.rs` Unix socket bind/listener and Windows named pipe creation
+      - `src/ipc.rs` endpoint model
+      - Rust `std::os::unix::fs::PermissionsExt`, `libc::getuid`
+      - Windows `windows` crate security APIs (`Win32::Security`, `Win32::Security::Authorization`, `Win32::System::Memory`, `Win32::System::Threading`)
+      - Tokio `ServerOptions::create_with_security_attributes_raw`
     - Options Considered:
       - Add application-level authentication: good defense but more complexity.
       - Harden transport permissions first: minimal baseline.
     - Chosen Approach:
       - Harden transport permissions now; document application-level auth as a follow-up for networked or shared-machine scenarios.
-    - Files to Create/Edit:
-      - `src/ipc.rs`: set socket permissions, verify parent dir ownership.
-      - `src/server/mod.rs`: add Windows pipe security descriptor.
-      - `tests/server_ipc.rs`: verify permissions where testable.
+    - Completed Changes:
+      - `Cargo.toml`: added `libc` under `[target.'cfg(unix)'.dependencies]`; added `Win32_Security`, `Win32_Security_Authorization`, `Win32_System_Memory`, and `Win32_System_Threading` to the existing `windows` crate features.
+      - `src/server/mod.rs`:
+        - Added `ServerError::EndpointOwnership(String)` and `ServerError::EndpointPermissions(io::Error)` variants.
+        - `validate_socket_path` now calls `validate_parent_directory_ownership`, which compares the parent directory UID (via `std::os::unix::fs::MetadataExt::uid()`) against the process UID (via `libc::getuid()`).
+        - `bind_unix_listener` now calls `restrict_unix_socket_permissions` after binding to set `0o600`.
+        - `create_named_pipe_server` now builds a `CurrentUserSecurityAttributes` helper that opens the process token, reads the `TokenUser` SID, constructs a single-ACE DACL granting `GENERIC_ALL` to that SID, initializes a security descriptor with that DACL, and passes it to `ServerOptions::create_with_security_attributes_raw`.
+        - Added `unix_socket_is_created_with_owner_only_permissions` test under `#[cfg(all(test, unix))]`.
+        - Added `windows_pipe_creation_applies_current_user_security_descriptor` test under `#[cfg(all(test, windows))]` that creates a pipe, reads back the DACL with `GetSecurityInfo`, and asserts it has exactly one ACE.
+    - Files Created/Edited:
+      - `Cargo.toml`
+      - `src/server/mod.rs`
+      - `docs/wiki/modules/server-ipc-skeleton.md`
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P1-2
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
-  - Test Cases to Write:
-    - `unix_socket_owner_only`: socket mode is `0o600`.
-    - `windows_pipe_current_user_only`: security descriptor excludes other users.
+  - Test Cases Written / Verification:
+    - `unix_socket_is_created_with_owner_only_permissions`: binds a Unix listener and asserts the socket mode is `0o600`.
+    - `windows_pipe_creation_applies_current_user_security_descriptor`: creates a Windows named pipe with the custom descriptor and asserts the DACL has exactly one ACE.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked`: passed with 32 pre-existing warnings, no new errors.
+    - `cargo check --tests --locked`: passed with 33 warnings (one test-only dead-code warning from an unrelated module), no errors.
+    - `cargo test --locked --lib server::`: 135 passed.
+    - `cargo test --locked --lib client::`: 37 passed.
+    - `cargo clippy --locked --lib --no-deps`: no new warnings from this task's code.
+    - Investigation of `windows_named_pipe_*` failures:
+      - Root cause: the tests spawned a real `IpcServer::run()` which loads the ambient default configuration from `~/.config/clay/init.js`; that config calls `loadPackage("@clay/markdown")` and publishes a behavior manifest, advancing `behavior_version` from 1 to 2. The tests hardcoded `behavior_version: 1` and `assert_eq!(..., 1)`, so they failed on any machine with an `init.js`.
+      - Fix: `windows_named_pipe_client_receives_initial_snapshot` now asserts `behavior_version >= 1`; both `windows_named_pipe_stale_edit_rejected_then_resynced` and the Unix `real_server_end_to_end_stale_edit_rejected_then_resynced` now read the actual behavior version from the `BehaviorManifest` handshake message and use it in the stale edit. They also skip post-handshake `FileOpenCapabilityIssued` / `SduiSnapshot` / `RuntimeDiagnostic` messages when reading the `EditRejected` response.
+      - Verification: `cargo test --locked --lib windows_named_pipe` now passes (3 passed); previously 2 failed.
+    - Skipped / deferred:
+      - A full cross-user connection rejection test for the Windows pipe (requires a second user account/process and is not portable in a unit test).
+      - Explicit temp-directory fallback warning; the ownership check still applies to the temp directory, and the code review recommendation to prefer `XDG_RUNTIME_DIR` is documented in the wiki.
 
-- [ ] Add JS runtime evaluation timeout and resource guard
+- [x] Add JS runtime evaluation timeout and resource guard
   - Acceptance Criteria:
     - Functional: `evaluate_module_on_runtime` terminates the isolate after a configurable timeout (default e.g. 5s).
     - Functional: Timeout produces a typed `ClayRuntimeError`/`RuntimeDiagnostic`, not a hung thread.
@@ -273,29 +297,55 @@
     - Documentation Reviewed:
       - `deno_core` runtime docs for `terminate_execution`, `v8::Isolate` heap limits
       - `src/server/js_runtime.rs` evaluation flow
+      - `src/perf/budgets.rs` budget conventions
     - Options Considered:
       - Run JS in a separate process: best isolation, larger change.
-      - Add isolate terminate + heap limit in-process: adequate short-term fix.
+      - Add isolate terminate timeout in-process: adequate short-term fix.
     - Chosen Approach:
-      - Add `terminate_execution` timeout now; document separate-process sandbox as a follow-up.
+      - Add an `IsolateHandle` watchdog thread inside `evaluate_module_on_runtime`; keep the existing `spawn_blocking` wrapper. Document separate-process sandbox as a follow-up.
     - API Notes and Examples:
       ```rust
-      let handle = runtime.v8_isolate().thread_safe_handle();
-      let timeout = tokio::time::timeout(Duration::from_secs(5), event_loop);
-      if timeout.is_err() { handle.terminate_execution(); }
+      // Default 5 s timeout
+      let service = ClayJsRuntimeService::default();
+      // Custom short timeout (tests)
+      let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(150));
       ```
-    - Files to Create/Edit:
-      - `src/server/js_runtime.rs`: add timeout and terminate handle.
-      - `src/server/mod.rs`: bubble timeout diagnostic.
-      - `tests/js_runtime.rs`: add timeout test with an infinite loop fixture.
+    - Completed Changes:
+      - `src/perf/budgets.rs`: added `JS_RUNTIME_EVALUATION_TIMEOUT_MS = 5000`.
+      - `src/server/js_runtime.rs`:
+        - Added `Duration` import and `JS_RUNTIME_EVALUATION_TIMEOUT_MS` import.
+        - Added `ClayRuntimeError::Timeout` variant with display, source, and `clay.runtime.timeout` diagnostic.
+        - Changed `ClayJsRuntimeService` to carry a `timeout: Duration`; implemented custom `Default` (5 s) and added `with_timeout` test constructor.
+        - Updated `evaluate_controlled_module`, `load_configuration_from_root`, `load_configuration_from_root_with_workspace`, and `load_configuration_from_root_for_document` to pass `self.timeout` into `evaluate_module_on_runtime`.
+        - Added `timeout: Duration` parameter to `evaluate_module_on_runtime`.
+        - Captured `runtime.v8_isolate().thread_safe_handle()` before starting V8 work.
+        - Added `TerminationTimer` watchdog thread that polls every 10 ms; on timeout it sets an atomic flag and calls `handle.terminate_execution()`.
+        - Restructured the evaluation future so `timer.did_fire()` is checked after both success and failure; if fired, the result is mapped to `ClayRuntimeError::Timeout`.
+        - Added `js_runtime_infinite_loop_is_terminated_with_timeout` and `js_runtime_short_timeout_does_not_break_fast_evaluation` unit tests.
+      - `docs/wiki/modules/embedded-js-runtime.md`: documented the timeout mechanism, default budget, watchdog thread, `with_timeout` constructor, timeout diagnostic code, and new tests.
+    - Files Created/Edited:
+      - `src/perf/budgets.rs`
+      - `src/server/js_runtime.rs`
+      - `docs/wiki/modules/embedded-js-runtime.md`
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P1-3
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
-  - Test Cases to Write:
-    - `infinite_loop_config_times_out`: `init.js` with `while(true){}` is terminated and emits a diagnostic.
-    - `normal_config_loads_within_timeout`: valid config loads successfully.
+  - Test Cases Written / Verification:
+    - `js_runtime_infinite_loop_is_terminated_with_timeout`: `while (true) {}` with a 150 ms timeout returns `ClayRuntimeError::Timeout` and diagnostic code `clay.runtime.timeout` in under 1 second.
+    - `js_runtime_short_timeout_does_not_break_fast_evaluation`: a normal module completes successfully under a 150 ms timeout.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked`: passed with 32 pre-existing warnings.
+    - `cargo check --tests --locked`: passed with 32 warnings.
+    - `cargo test --locked --lib server::js_runtime`: 60 passed.
+    - `cargo test --locked --lib server::`: 137 passed.
+    - `cargo test --locked --lib client::`: 37 passed.
+    - `cargo test --locked --lib protocol::`: 25 passed.
+    - `cargo clippy --locked --lib --no-deps`: no new warnings from this task's code.
+    - Skipped / deferred:
+      - A V8 heap-limit resource guard. The current timeout is the primary resource guard; heap limits via `v8::CreateParams` or `add_near_heap_limit_callback` are a small follow-up if needed.
+      - A separate-process JS sandbox remains the long-term isolation improvement.
 
-- [ ] Add runtime SDUI `publishTree` payload/node budgets
+- [x] Add runtime SDUI `publishTree` payload/node budgets
   - Acceptance Criteria:
     - Functional: `op_clay_sdui_publish_tree` rejects `tree_json` payloads exceeding a snapshot budget before parsing.
     - Functional: Parsed tree has bounded node count, depth, and per-node text length.
@@ -303,29 +353,53 @@
     - Security: Runtime tree validation matches the budget discipline already used for registered package UI contributions.
   - Approach:
     - Documentation Reviewed:
-      - `src/server/ops/sdui.rs`
-      - `src/server/sdui.rs`
-      - `src/server/ui.rs` budget constants
+      - `src/server/ops/sdui.rs` (`op_clay_sdui_publish_tree`, `runtime_tree_from_json`, `RuntimeTreeBuilder`)
+      - `src/server/sdui.rs` (`validate_runtime_tree`)
+      - `src/server/ui.rs` package UI contribution budget discipline (`payload_size`, `MAX_COMPONENT_NODES = 128`, `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`)
       - `src/perf/budgets.rs`
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+      - `.agents/skills/karpathy-guidelines/SKILL.md`
     - Options Considered:
-      - Budget only total bytes: misses deeply nested structures.
-      - Budget bytes + nodes + depth + list lengths: robust.
+      - Budget only total bytes: misses deeply nested structures and stack-depth attacks.
+      - Budget bytes + nodes + depth + text length: robust, mirrors package UI discipline.
+      - Reuse package UI `payload_size`/`MAX_COMPONENT_NODES` helpers directly: runtime tree uses a different JSON shape (`serde_json::Value`), so a dedicated budget set is cleaner.
     - Chosen Approach:
-      - Mirror the package UI budget style: bytes, node count, depth, text length caps.
-    - Files to Create/Edit:
-      - `src/perf/budgets.rs`: add runtime SDUI budget constants.
-      - `src/server/ops/sdui.rs`: add pre-parse and post-build budget checks.
-      - `src/server/sdui.rs`: add depth/text helper validation if needed.
-      - `tests/sdui.rs`: add oversized/deep tree rejection tests.
+      - Add a dedicated runtime SDUI budget set in `src/perf/budgets.rs` and enforce all four checks inside `runtime_tree_from_json` and the `RuntimeTreeBuilder`.
+    - Budget Constants Added (`src/perf/budgets.rs`):
+      - `RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES = 16 * 1024` (raw `tree_json.len()` cap, checked before `serde_json` allocation).
+      - `RUNTIME_SDUI_TREE_MAX_NODES = 128` (matches package `MAX_COMPONENT_NODES`).
+      - `RUNTIME_SDUI_TREE_MAX_DEPTH = 16`.
+      - `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS = 4096`.
+    - Implementation (`src/server/ops/sdui.rs`):
+      - `runtime_tree_from_json` now rejects oversized raw input before parsing.
+      - `convert_node` takes a `depth` parameter; children recurse at `depth + 1`; nodes beyond `RUNTIME_SDUI_TREE_MAX_DEPTH` are rejected.
+      - `convert_node` rejects when `nodes.len()` exceeds `RUNTIME_SDUI_TREE_MAX_NODES` after each push, so the `Vec` cannot grow unbounded.
+      - `convert_children` threads the parent depth into child conversion.
+      - New `bounded_text` and `bounded_optional_string` helpers cap free-text fields (panel `title`, label `text`, button `label`, list item `label`/`detail`) at `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS`.
+      - Removed the now-orphaned `optional_string` helper (its only caller switched to `bounded_optional_string`).
+      - Added a `#[cfg(test)] mod tests` covering all four budget rejections plus a within-budget acceptance case, testing `runtime_tree_from_json` directly without spinning up V8.
+    - Files Created/Edited:
+      - `src/perf/budgets.rs`
+      - `src/server/ops/sdui.rs`
+      - `docs/wiki/modules/server-driven-ui.md`
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P1-7
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
-  - Test Cases to Write:
-    - `runtime_tree_too_large_rejected`: `tree_json.len()` over budget is rejected.
-    - `runtime_tree_too_deep_rejected`: nested depth over cap is rejected.
-    - `runtime_tree_too_many_nodes_rejected`: node count over cap is rejected.
+  - Test Cases Written / Verification:
+    - `runtime_tree_too_large_rejected`: an oversized label payload whose `tree_json.len()` exceeds the byte budget is rejected before parsing.
+    - `runtime_tree_too_deep_rejected`: nesting past `RUNTIME_SDUI_TREE_MAX_DEPTH` is rejected by the depth check.
+    - `runtime_tree_too_many_nodes_rejected`: a flat panel with more than `RUNTIME_SDUI_TREE_MAX_NODES` children is rejected by the node-count check.
+    - `runtime_tree_text_too_long_rejected`: a label longer than `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS` (but under the byte budget) is rejected by the per-node text cap.
+    - `runtime_tree_within_budgets_loads`: a small tree passes all budgets and builds a valid `SduiTree`.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: passed with 32 warnings.
+    - `cargo test --locked --lib server::ops::sdui`: 5 passed.
+    - `cargo test --locked --lib server::`: 142 passed (was 137; +5 new tests).
+    - `cargo test --locked --lib js_runtime`: 60 passed (existing SDUI publication and smoke-fixture tests still green, confirming the new budgets do not reject real trees like the 1.3 KiB `runtime-sdui` fixture).
+    - Skipped / deferred:
+      - A separate wire-level budget check on the emitted `ServerMessage::SduiSnapshot`; the existing `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` codec budget already covers the wire side and was not part of this task.
 
-- [ ] Make `PackageService` CLI state persistent across invocations
+- [x] Make `PackageService` CLI state persistent across invocations
   - Acceptance Criteria:
     - Functional: `clay package list` shows packages installed by a previous `clay package add` process.
     - Functional: `clay package enable` works on previously installed packages without requiring re-install.
@@ -333,25 +407,42 @@
     - Security: Installed-package discovery does not execute package code.
   - Approach:
     - Documentation Reviewed:
-      - `src/packages/service.rs`
-      - `src/packages/manager.rs` backend trait
+      - `src/packages/service.rs` (`PackageService::new`, `install`, `list`, `enable`, `inspect`)
+      - `src/packages/manager.rs` (`PackageManagerBackend::list_installed`, `PnpmBackend`, `FakeBackend`, `DiscoveredPackage`)
+      - `src/main.rs` `run_package_subcommand` and `dirs_home_config_clay_packages`
+      - `.agents/skills/project-patterns/references/package-distribution.md` (install separate from execution; enabled state)
+      - `.agents/skills/karpathy-guidelines/SKILL.md` (surgical changes)
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-1
     - Options Considered:
-      - Persist a Clay-managed registry file: duplicates backend state.
-      - Refresh from backend store on startup: simpler, single source of truth.
+      - Persist a Clay-managed registry file: duplicates the package-manager store as a second source of truth.
+      - Make `PackageService::new` fallible and refresh inside the constructor: ripples through ~10 call sites including the server-side `Mutex` constructor in `src/server/ops/mod.rs:127`, and hides discovery errors inside an infallible-looking constructor.
+      - Add an explicit `refresh_installed()` method and call it from the CLI construction path: surgical, explicit error surface, no constructor-signature ripple.
     - Chosen Approach:
-      - Refresh from backend store at service construction; keep enabled state in memory for now (or persist separately if needed).
-    - Files to Create/Edit:
-      - `src/packages/service.rs`: add `refresh_installed()` and call from constructor.
-      - `src/main.rs`: ensure fresh service still lists prior installs.
-      - `tests/package_cli.rs`: add multi-invocation list/enable test.
+      - Add `PackageService::refresh_installed(&mut self) -> Result<(), PackageServiceError>` that delegates to `backend.list_installed()` and rebuilds the `installed` map. The package-manager store is the single source of truth (the map is cleared and repopulated). Keep enabled state in memory per process, matching the runtime loader's explicit-load contract and the deferred persistent-enable-state work (Phase 19).
+      - The CLI calls `refresh_installed()` after construction for `list`/`enable`/`disable`/`inspect`/`remove`; `add` skips it because `install` re-discovers the package internally and a missing pnpm binary should fail at `pnpm add`, not at the pre-list step.
+    - Implementation:
+      - `src/packages/service.rs`: added `refresh_installed()` with a doc comment explaining the cross-process rationale, the "install separate from execution" boundary, and that enabled state stays in memory. Updated the `new()` doc comment to point callers at `refresh_installed`. Skips discovered packages lacking a `name` field rather than failing the whole discovery.
+      - `src/main.rs`: in `run_package_subcommand`, added `if !matches!(&subcommand, PackageCliSubcommand::Add { .. }) { service.refresh_installed()?; }` between service construction and the subcommand match.
+    - Files Created/Edited:
+      - `src/packages/service.rs`
+      - `src/main.rs`
+      - `docs/wiki/modules/package-loading.md`
+      - `tests/package_loading.rs`
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P2-1
       - `.agents/skills/project-patterns/references/package-distribution.md`
-  - Test Cases to Write:
-    - `list_persists_across_processes`: install in one process, list in another.
-    - `enable_after_list`: enable succeeds after a fresh list has populated `installed`.
+  - Test Cases Written / Verification:
+    - `package_service_list_persists_across_service_instances`: a fresh `PackageService` (simulating a second CLI process) shows nothing before refresh; after `refresh_installed()` against the discovered store it lists the package installed by a previous instance, as installed-not-enabled.
+    - `package_service_enable_after_refresh_does_not_require_reinstall`: a fresh service rejects `enable` with `NotInstalled` before refresh; after refresh, `enable` succeeds on the previously-installed package without any `install` call.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: passed with 32 warnings.
+    - `cargo test --locked --test package_loading`: 30 passed (+2 new).
+    - `cargo test --locked --lib server::`: 142 passed. `cargo test --locked --lib client::`: 37 passed. `cargo test --locked --lib packages`: 10 passed.
+    - Skipped / deferred:
+      - Persistent enabled-state across processes (Phase 19): enabled packages still need re-enabling each session; this task only persists installed-package discovery, not enabled state, matching the existing explicit-load contract and the deferred persistent-enable-state decision in `docs/reference/primitives/package-loading.md`.
+      - Made `PackageService::new` perform the refresh itself: rejected to avoid a fallible constructor rippling through the server-side and ~10 test call sites, and to surface discovery errors explicitly at the CLI boundary.
 
-- [ ] Centralize runtime evaluation output application
+- [x] Centralize runtime evaluation output application
   - Acceptance Criteria:
     - Functional: `apply_runtime_evaluation` handles published decoration sets, parse handler registration, and UI contributions in addition to SDUI tree and behavior manifest.
     - Functional: The hardcoded Markdown `selected_file_open_followup_messages` path uses the same application logic where possible.
@@ -359,25 +450,44 @@
   - Approach:
     - Documentation Reviewed:
       - `src/server/mod.rs` `apply_runtime_evaluation`
-      - `src/server/connection.rs` selected-file follow-up
-      - `src/server/parse_coordinator.rs`
-      - `src/server/decorations.rs`
-      - `src/server/ui.rs`
+      - `src/server/connection.rs` `selected_file_open_followup_messages`, `evaluate_markdown_open`
+      - `src/server/js_runtime.rs` `ClayRuntimeEvaluation` fields
+      - `src/server/sdui.rs` `replace_with_runtime_tree` / `replace_for_document_with_runtime_tree`
+      - `src/server/behavior.rs` `publish_replacement`
+      - `src/server/parse_coordinator.rs` `register_handler` (needs `PackageRecord` + live `ParseHandler` trait object)
+      - `src/server/ui.rs` `PackageUiRegistrySnapshot` (registry lives in the shell, not `IpcServer`)
+      - `code-reviews/2026-06-21-current-implementation-review.md` P2-2 (fix explicitly sanctions "or explicitly remove/defer unused fields until wired")
+      - `.agents/skills/project-patterns/references/authority-boundaries.md`
     - Options Considered:
-      - Leave outputs flow-specific: current state, hard to reason about.
-      - Centralize all outputs: consistent, easier to test.
+      - Build a decoration store + package-UI registry merge + parse re-registration at the config-eval boundary so every field is "applied". Rejected (YAGNI): no config publishes decorations at startup, `IpcServer` holds no UI registry or decoration store, and the config-eval runtime is short-lived so the JS parse-handler closures are already gone — wiring these would be speculative plumbing with no live target.
+      - Leave outputs flow-specific (status quo). Rejected: silent drops are a maintainability trap and the two paths had divergent diagnostic codes (`clay.markdown.invalid_open_manifest`/`clay.markdown.invalid_open_sdui` vs `clay.behavior.invalid_manifest`/`clay.sdui.invalid_tree`).
+      - Centralize the genuinely-shared outputs (behavior manifest + per-document SDUI state mutation + validation) into one primitive both flows call; pass decorations through for the caller to emit; explicitly defer parse-handler/UI-contribution application with documented rationale. Chosen.
     - Chosen Approach:
-      - Centralize; remove or shrink Markdown-specific branch once generic path covers parse/decorations/UI.
-    - Files to Create/Edit:
-      - `src/server/mod.rs`: extend `apply_runtime_evaluation`.
-      - `src/server/connection.rs`: delegate to centralized application.
-      - `tests/js_runtime.rs`: verify all outputs are applied.
+      - Add `pub(crate) async fn apply_runtime_outputs(evaluation, document_id, behavior, sdui) -> RuntimeOutputApplication` and `pub(crate) struct RuntimeOutputApplication { behavior, sdui, decorations }` with a `diagnostics()` method returning unified `clay.behavior.invalid_manifest` / `clay.sdui.invalid_tree` diagnostics.
+      - `IpcServer::apply_runtime_evaluation` calls it and pushes only the diagnostics (behavior/SDUI read lazily during welcome).
+      - `selected_file_open_followup_messages` calls it and composes `BehaviorManifest`/`DecorationSet`/`SduiSnapshot` messages from the result; the divergent `clay.markdown.invalid_open_*` codes are removed in favor of the unified codes.
+      - Decorations pass through (no decoration store at this boundary). Parse-handler metadata and UI-contribution snapshots remain on `ClayRuntimeEvaluation` for test inspection and are explicitly deferred with `ponytail:` rationale (ephemeral closures; shell-owned registry).
+    - Files Edited:
+      - `src/server/mod.rs`: added `RuntimeOutputApplication`, `apply_runtime_outputs`, rewrote `apply_runtime_evaluation`, added `runtime_outputs_tests` module (3 tests).
+      - `src/server/connection.rs`: rewrote `selected_file_open_followup_messages` to use the shared primitive; removed `clay.markdown.invalid_open_*` codes.
+      - `src/server/sdui.rs`: added `pub(crate) fn document_id()` accessor.
+      - `docs/wiki/modules/embedded-js-runtime.md`: documented centralized application and the parse/UI deferral.
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P2-2
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
-  - Test Cases to Write:
-    - `runtime_evaluation_applies_all_outputs`: parse handler, decoration set, UI contributions, SDUI tree, and behavior manifest are all consumed.
-    - `markdown_open_uses_generic_application`: selected-file open no longer contains hand-rolled output dispatch.
+  - Test Cases Written / Verification:
+    - `apply_runtime_outputs_applies_behavior_and_sdui_to_shared_state`: valid manifest + tree applied; no diagnostics; shared behavior advances to version 2.
+    - `apply_runtime_outputs_reports_unified_diagnostic_for_invalid_sdui`: tree bound to a different document fails per-document validation; `diagnostics()` returns exactly one `clay.sdui.invalid_tree` diagnostic.
+    - `apply_runtime_outputs_passes_decorations_through`: decorations returned verbatim; behavior/sdui None; no diagnostics (previously a silent drop).
+    - Integration: `selected_markdown*` connection tests (3) pass end-to-end through the refactored path.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (no new warnings).
+    - `cargo test --locked --lib server::`: 145 passed (+3 new). `client::`: 37 passed. `package_loading`: 30 passed. `apply_runtime_outputs`: 3 passed. `selected_markdown`: 3 passed.
+    - `cargo clippy --locked --lib --no-deps`: no hits in the changed files (pre-existing clippy failures unchanged).
+    - Deferred (explicit, not silent):
+      - Applying `parse_handlers` from `ClayRuntimeEvaluation`: requires the persistent server-side runtime that owns live JS `ParseHandler` closures (config-eval runtime is short-lived).
+      - Applying `ui_contributions` (`PackageUiRegistrySnapshot`): requires merging into the shell-owned package-UI registry, which `IpcServer` does not hold.
+      - A server-side per-document decoration store at the config-eval boundary: no config publishes decorations at startup; decorations are only meaningful for an open document with a live client.
 
 - [ ] Gate file sizes and move toward bounded document snapshots
   - Acceptance Criteria:
