@@ -105,7 +105,7 @@ Phase 14 adds `src/perf/budgets.rs` which centralises all typed budget constants
 | `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` | 25 ms | `cargo bench --bench runtime_sdui_baselines runtime_configuration_baselines` |
 | `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` | 256 MiB | local profiler during `smoke-gui` fixture workflow |
 
-Advisory values are local-machine comparison targets only; they must not become hard CI thresholds until proven stable across platforms.
+Advisory values are local-machine comparison targets only; they must not become hard CI thresholds until proven stable across platforms. For Phase 18.7 protocol comparisons, use target-specific Criterion commands (`cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline` or `--baseline-lenient phase14-baseline`) rather than `cargo bench --benches -- --baseline-lenient ...`, which can route flags to non-Criterion harnesses.
 
 Security guardrails: profiling/benchmark workflows must not expose document contents, secrets, open network listeners, grant shell authority, or execute arbitrary JavaScript in the client.
 

@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use clay::{
     packages::record::{PackageRecord, assemble_package_record},
@@ -513,6 +519,156 @@ fn parse_window_snapshot_rejects_oversized_or_mismatched_windows() {
             .unwrap_err(),
         ParseCoordinatorError::InvalidParsePolicy
     ));
+}
+
+#[tokio::test]
+async fn generation_replacement_uses_new_handler_for_subsequent_parse() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let old_calls = Arc::clone(&calls);
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            1,
+            "markdown",
+            move |_notification: ParseEditNotification| {
+                let old_calls = Arc::clone(&old_calls);
+                async move {
+                    old_calls.fetch_add(100, Ordering::SeqCst);
+                    Ok(update(1))
+                }
+            },
+        )
+        .unwrap();
+    let new_calls = Arc::clone(&calls);
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            2,
+            "markdown",
+            move |notification: ParseEditNotification| {
+                let new_calls = Arc::clone(&new_calls);
+                async move {
+                    new_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(update(notification.document_version))
+                }
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(11)).unwrap();
+    let parsed = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(parsed.document_version, 11);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn replacing_generation_cancels_old_in_flight_parse_work() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            1,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                Ok(update(notification.document_version))
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(12)).unwrap();
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            2,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                Ok(update(notification.document_version))
+            },
+        )
+        .unwrap();
+    coordinator.schedule_parse(request(13)).unwrap();
+
+    let parsed = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed.document_version, 13);
+    assert_eq!(coordinator.stats().cancelled_superseded_tasks, 1);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), coordinator.next_update())
+            .await
+            .is_err(),
+        "old-generation parse work must not publish after replacement"
+    );
+}
+
+#[tokio::test]
+async fn handler_failures_are_instrumented_after_generation_replacement() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            1,
+            "markdown",
+            |_notification: ParseEditNotification| async move { Ok(update(1)) },
+        )
+        .unwrap();
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            2,
+            "markdown",
+            |_notification: ParseEditNotification| async move {
+                Err(ParseCoordinatorError::HandlerFailed(
+                    "clay.runtime.timeout".to_string(),
+                ))
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(14)).unwrap();
+
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert_eq!(coordinator.stats().failed_tasks, 1);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), coordinator.next_update())
+            .await
+            .is_err(),
+        "failed parse work must not publish half-updated results"
+    );
+}
+
+#[tokio::test]
+async fn handler_failures_are_instrumented_and_not_published() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(&package, "markdown", |_notification| async move {
+            Err(ParseCoordinatorError::HandlerFailed(
+                "clay.runtime.timeout".to_string(),
+            ))
+        })
+        .unwrap();
+
+    coordinator.schedule_parse(request(6)).unwrap();
+
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert_eq!(coordinator.stats().failed_tasks, 1);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), coordinator.next_update())
+            .await
+            .is_err(),
+        "failed parse work must not publish half-updated results"
+    );
 }
 
 #[tokio::test]

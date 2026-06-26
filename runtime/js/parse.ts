@@ -18,6 +18,12 @@ function parseResult(json: string): unknown {
 }
 
 export type ServerRegisterParseHandlerOptions = {
+  module?: Record<string, unknown>;
+  handler?: never;
+  callback?: never;
+  onParse?: never;
+  function?: never;
+  exportName?: string;
   packageManifest?: unknown;
   packageName?: string;
   packageVersion?: string;
@@ -35,5 +41,20 @@ export type ServerRegisterParseHandlerOptions = {
 };
 
 export function serverRegisterParseHandler(options: ServerRegisterParseHandlerOptions): unknown {
-  return parseResult(requireOps()["op_clay_parse_register_parse_handler"](JSON.stringify(options ?? null)));
+  for (const key of ["handler", "callback", "onParse", "function"]) {
+    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
+      throw new Error(`clay.parse.invalid_handler: executable ${key} callbacks are not accepted by the public registration contract`);
+    }
+  }
+  const { module, exportName = "default", ...opOptions } = options ?? {};
+  const registration = parseResult(requireOps()["op_clay_parse_register_parse_handler"](JSON.stringify({ ...(opOptions ?? {}), runtimeBridge: module !== undefined }))) as { token?: string };
+  if (module !== undefined) {
+    const handler = module[exportName];
+    if (typeof handler !== "function") {
+      throw new Error(`clay.parse.invalid_handler: module export ${exportName} must be a function`);
+    }
+    (globalThis as typeof globalThis & { __clayParseHandlers?: Record<string, unknown> }).__clayParseHandlers ??= Object.create(null);
+    (globalThis as typeof globalThis & { __clayParseHandlers: Record<string, unknown> }).__clayParseHandlers[registration.token ?? ""] = handler;
+  }
+  return registration;
 }

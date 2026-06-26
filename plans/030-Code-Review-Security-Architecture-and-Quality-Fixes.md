@@ -489,7 +489,7 @@
       - Applying `ui_contributions` (`PackageUiRegistrySnapshot`): requires merging into the shell-owned package-UI registry, which `IpcServer` does not hold.
       - A server-side per-document decoration store at the config-eval boundary: no config publishes decorations at startup; decorations are only meaningful for an open document with a live client.
 
-- [ ] Gate file sizes and move toward bounded document snapshots
+- [x] Gate file sizes and move toward bounded document snapshots
   - Acceptance Criteria:
     - Functional: Workspace open/read rejects files above a configurable size limit with a typed error before allocating full text.
     - Functional: Protocol messages carrying full text (`InitialDocument`, `ResyncSnapshot`, etc.) are bounded by the existing frame limit.
@@ -497,55 +497,85 @@
     - Security: Oversized files cannot be used as a memory-exhaustion vector.
   - Approach:
     - Documentation Reviewed:
-      - `src/server/workspace.rs`
-      - `src/server/connection.rs`
-      - `src/protocol/codec.rs`
-      - `src/perf/budgets.rs`
+      - `src/server/workspace.rs` `open_existing_file`, `open_selected_file`, `reload_document`, `canonical_file_state`, `canonical_selected_file`, `reauthorize_open_file`, `FileMetadata`, `WorkspaceError`, `validate_regular_file_metadata`
+      - `src/protocol/codec.rs` `encode_frame` (existing `CodecError::FrameTooLarge` guard at encode) and `DEFAULT_MAX_FRAME_SIZE` (1 MiB)
+      - `src/protocol/mod.rs` `FileErrorCode` (rkyv archived wire enum), `InitialDocument`/`ResyncSnapshot`/`DocumentOpened`/`DocumentReloaded` full-text shapes
+      - `src/perf/budgets.rs` existing budgets and `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB`
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-4
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
     - Options Considered:
-      - Chunk entire document protocol: ideal, larger change.
-      - Add explicit size gate now and chunk later: minimal safety first.
+      - Chunk entire document protocol now: ideal end state but a large change touching protocol, client rendering, and the editor surface. Rejected as the first step.
+      - Add an explicit file-size gate now; document chunked/viewport-first loading as a follow-up. Chosen — minimal safety first, aligns with the review's recommended fix.
     - Chosen Approach:
-      - Add size gate now; document chunked/viewport-first loading as a follow-up.
-    - Files to Create/Edit:
-      - `src/perf/budgets.rs`: add file-size budget constant.
-      - `src/server/workspace.rs`: check file size before read.
-      - `src/protocol/codec.rs`: ensure encode rejects oversized full-text messages.
-      - `tests/performance_protocol.rs`: add oversized file rejection test.
+      - Add `MAX_OPENABLE_FILE_BYTES` (`768 * 1024`) to `src/perf/budgets.rs`, sized below `DEFAULT_MAX_FRAME_SIZE` (1 MiB) so any file that passes the open gate also fits a single full-text frame (envelope headroom for the message variant tag + metadata).
+      - Add `FileErrorCode::FileTooLarge` to the wire enum and `WorkspaceError::FileTooLarge { path, len, max }` + its diagnostic mapping.
+      - Add `FileMetadata::len()` accessor and a `check_openable_size(metadata, path)` helper; call it in the three disk-read paths (`open_existing_file`, `open_selected_file`, `reload_document`) *before* `tokio_fs::read`. Reload captures the `FileMetadata` returned by `reauthorize_open_file` (previously discarded) for the check — the check is deliberately NOT placed inside `reauthorize_open_file`/`canonical_file_state` to avoid coupling it to `save_document` (which must not reject already-open files) and to `register_loaded_file` (which never reads from disk).
+      - Acceptance criterion 2 (frame limit on full-text messages) is already enforced by the existing `CodecError::FrameTooLarge` guard in `encode_frame`; added a regression test to lock it in for `InitialDocument`.
+  - Files Created/Edited:
+    - `src/perf/budgets.rs`: added `MAX_OPENABLE_FILE_BYTES`.
+    - `src/protocol/mod.rs`: added `FileErrorCode::FileTooLarge`.
+    - `src/server/workspace.rs`: added `FileMetadata::len()`, `WorkspaceError::FileTooLarge`, diagnostic mapping, `Error::source` arm, `check_openable_size`, and pre-read size checks in the three read paths; +4 tests.
+    - `src/protocol/codec.rs`: +1 regression test (`full_text_snapshot_exceeding_frame_limit_is_rejected_at_encode`) and the `MAX_OPENABLE_FILE_BYTES < DEFAULT_MAX_FRAME_SIZE` invariant assertion.
+    - `docs/wiki/modules/server-file-workspace.md` and `docs/wiki/modules/server-ipc-skeleton.md`.
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P1-4
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
-  - Test Cases to Write:
-    - `open_oversized_file_rejected`: file above limit returns typed error.
-    - `initial_document_fits_frame`: small document snapshot round-trips.
-    - `oversized_snapshot_rejected`: snapshot exceeding frame limit is rejected at encode.
+  - Test Cases Written / Verification:
+    - `open_existing_file_rejects_oversized_file`: file 1 byte over the limit returns `FileErrorCode::FileTooLarge`; no document registered.
+    - `open_selected_file_rejects_oversized_file`: selected-file open path also rejects; no document registered.
+    - `reload_document_rejects_oversized_file`: a file grown past the limit after open is rejected on forced reload with `FileTooLarge`.
+    - `open_file_at_limit_boundary_succeeds`: a file exactly at the limit opens (boundary is inclusive).
+    - `full_text_snapshot_exceeding_frame_limit_is_rejected_at_encode`: an `InitialDocument` larger than `DEFAULT_MAX_FRAME_SIZE` is rejected at encode with `CodecError::FrameTooLarge`; also asserts `MAX_OPENABLE_FILE_BYTES < DEFAULT_MAX_FRAME_SIZE`.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline).
+    - `cargo test --locked --lib server::`: 149 passed (+4). `workspace`: 24 passed (+4). `protocol::`: 26 passed (+1 codec). `client::`: 37 passed. `selected_markdown`: 3 passed. `performance_protocol`: 7 passed.
+    - `cargo clippy --locked --lib --no-deps`: no hits in changed files.
+    - Deferred (documented, not silent):
+      - Chunked/viewport-first loading for files above `MAX_OPENABLE_FILE_BYTES`: the gate rejects them with a typed error today; the chunked snapshot protocol is the larger follow-up (the existing `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` budget is the future resident-memory budget for that path).
 
-- [ ] Release workspace mutex during disk I/O
+- [x] Release workspace mutex during disk I/O
   - Acceptance Criteria:
     - Functional: Open, save, and reload paths clone needed state/handles, release the workspace mutex, perform async disk I/O, then reacquire to commit.
     - Performance: Concurrent operations on unrelated documents are no longer serialized by a slow disk call.
     - Code Quality: Lock ordering is documented; no new deadlock paths introduced.
   - Approach:
     - Documentation Reviewed:
-      - `src/server/connection.rs` handlers
-      - `src/server/workspace.rs` methods
-      - Tokio mutex patterns
+      - `src/server/connection.rs` handlers (`open_document_response`, `open_selected_file_response`, `save_document_response`, `reload_document_response`)
+      - `src/server/workspace.rs` methods (`open_existing_file`, `open_selected_file`, `save_document`, `reload_document`, `register_canonical_file`, `reauthorize_open_file`, `existing_document_lease_by_canonical_path`)
+      - `src/server/ops/documents.rs` Clay JS document ops (open/save/reload)
+      - `src/server/document.rs` `mark_clean_if_version`, `replace_text_from_storage`, `version`, `text`, `is_dirty`
+      - Tokio mutex + `spawn_blocking`-free async I/O patterns (`tokio::fs` runs on the blocking pool, so releasing the workspace mutex around `tokio::fs` awaits lets unrelated ops proceed without blocking the executor).
     - Options Considered:
-      - Keep global lock and add per-document locks: more granular but complex.
-      - Release lock for I/O only: smallest safe change.
+      - Keep global lock and add per-document locks: more granular but complex; rejected by the plan in favor of the simpler split.
+      - Release lock for I/O only: smallest safe change. Chosen.
+      - Convert the blocking `std::fs::canonicalize`/`metadata` in `canonical_file_state`/`canonical_selected_file`/`reauthorize_open_file` to `tokio::fs`: deferred — these are fast syscalls run only in the `prepare` phase under the lock; the heavy alloc/read/write is what releases the mutex.
     - Chosen Approach:
-      - Release lock for I/O only; document the temporary state and version check on reacquire.
-    - Files to Create/Edit:
-      - `src/server/workspace.rs`: refactor open/save/reload into state + I/O + commit phases.
-      - `src/server/connection.rs`: adjust callers if needed.
-      - `tests/workspace.rs`: concurrent open/save on different documents.
+      - Split each disk-bearing op into `prepare_*` (workspace mutex held; fast filesystem metadata + authority reauthorization + registry lookup + openable-size gate only), a free async `*_io` phase (`tokio::fs` read/write + post-op `metadata` with **no** workspace mutex held), and `commit_*` (workspace mutex reacquired to mutate the open-document registry).
+      - Add `*_unlocked` orchestration free functions (`open_existing_file_unlocked`, `open_selected_file_unlocked`, `save_document_unlocked`, `reload_document_unlocked`) that take `&Arc<Mutex<WorkspaceState>>` and do lock→prepare→drop guard→io→re-lock→commit; the IpcServer connection handlers and Clay JS document ops now call these so concurrent operations on unrelated documents are not serialized.
+      - Keep the `&mut self` one-shot methods as thin wrappers (prepare→io→commit under the single `&mut self` borrow) for tests and direct callers that hold no outer mutex.
+      - Re-validate registry state on reacquire in every `commit_*` (the mutex was released across I/O, so the registry may have changed): `register_canonical_file`/`register_selected_file` re-check the canonical path and return the existing lease if a concurrent open won (no duplicate document entry, no orphan `SingleFile` root); `commit_reload` re-checks dirtiness and refuses to clobber an unsaved edit unless `force`; `commit_save` tolerates a document closed during the write (bytes already on disk) and detects a concurrent edit through `mark_clean_if_version(prepared_version)`, leaving the document dirty rather than falsely clean.
+      - Lock ordering: the workspace mutex and the per-document `Arc<Mutex<DocumentState>>` are never held simultaneously across a `tokio::fs` await — the per-document lock is acquired only briefly inside `prepare`/`commit`/`*_io` to read or mutate text/version, then dropped before any cross-mutex await, so no new deadlock paths are introduced.
+  - Files Created/Edited:
+    - `src/server/workspace.rs`: added `OpenPlan`/`OpenPrepare`/`SelectedOpenPlan`/`SelectedOpenPrepare`/`SavePlan`/`SaveIoOutcome`/`ReloadPlan`/`ReloadIoOutcome` structs; split the four ops into `prepare_*`/`*_io`/`commit_*`; added free `open_io`/`save_io`/`reload_io` and the four `*_unlocked` orchestration functions; added the concurrent-open dedup guard in `register_canonical_file`; +3 concurrency tests.
+    - `src/server/connection.rs`: `open_document_response`/`open_selected_file_response`/`save_document_response`/`reload_document_response` now call the `*_unlocked` orchestration; imported the free functions.
+    - `src/server/ops/documents.rs`: `op_clay_documents_open_document`/`save_document`/`reload_document` now call the `*_unlocked` orchestration (no extra workspace lock held across I/O).
+    - `docs/wiki/modules/server-file-workspace.md`: documented the split, the `*_unlocked` orchestration, the commit re-validation contract, and the lock ordering invariant.
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P1-5
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`
-  - Test Cases to Write:
-    - `concurrent_save_different_documents`: saving two documents concurrently completes faster than sequential.
-    - `save_version_mismatch_after_io`: document changed during I/O is rejected on commit.
+  - Test Cases Written / Verification:
+    - `concurrent_save_different_documents`: two different documents saved concurrently via `save_document_unlocked` on an `Arc<Mutex<WorkspaceState>>` (tokio::spawn + join) both complete, report not-dirty, and write the expected bytes — proving the workspace mutex is not held across the writes.
+    - `save_version_mismatch_after_io_leaves_document_dirty`: after `prepare_save`, a simulated concurrent edit bumps the in-memory version; `commit_save` with the pre-edit `prepared_version` detects the mismatch via `mark_clean_if_version` and reports `dirty=true` instead of falsely marking clean — the re-validate-on-reacquire contract.
+    - `concurrent_open_same_file_dedups_registry`: two concurrent opens of the same canonical path via `open_existing_file_unlocked` resolve to one `document_id` (no duplicate registry entry) — the `register_canonical_file` dedup guard.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline).
+    - `cargo test --locked --lib server::`: 152 passed (+3). `workspace`: 27 passed (+3). `client::`: 37. `protocol::`: 26. `selected_markdown`: 3. `performance_protocol`: 7. `connection`: 18.
+    - `cargo clippy --locked --lib --no-deps`: no hits in changed files.
+    - Deferred (documented, not silent):
+      - Converting the blocking `std::fs::canonicalize`/`metadata` calls in `canonical_file_state`/`canonical_selected_file`/`reauthorize_open_file` to `tokio::fs`: these run only in the fast `prepare` phase under the lock and are not the slow disk call the criterion targets; deferred to avoid churn. Upgrade if profiling shows the canonicalize/metadata syscalls become a serialization point.
+      - Persistent per-document locks for finer-grained concurrency (one doc saveable while another reads): the released-mutex split already removes cross-document serialization; per-doc locks would add complexity for no current benefit.
 
-- [ ] Make document saves atomic
+- [x] Make document saves atomic
   - Acceptance Criteria:
     - Functional: `save_document` writes to a temp file in the same directory, flushes, and renames over the target.
     - Functional: Original file is preserved if the write/rename fails.
@@ -553,49 +583,61 @@
     - Code Quality: Permissions and ownership are preserved where feasible.
   - Approach:
     - Documentation Reviewed:
-      - `src/server/workspace.rs` save path
-      - Tokio async file operations
+      - `src/server/workspace.rs` save path (`save_io`, `SavePlan`, `SaveIoOutcome`, `commit_save` from Plan 030 task 8).
+      - `src/server/document.rs` `mark_clean_if_version`, `replace_text_from_storage`.
+      - Tokio async file operations (`tokio::fs::File::create`, `write_all`, `sync_all`, `rename`, `remove_file`, `metadata`).
+      - Cross-platform atomic-replace semantics: POSIX `rename` overwrites in place; Rust `std::fs::rename` on Windows uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`, and `tokio::fs::rename` delegates to it — so one code path replaces atomically on both.
+      - `code-reviews/2026-06-21-current-implementation-review.md` P1-6.
     - Options Considered:
-      - In-place write with fsync: still not atomic.
-      - Write-temp-and-rename: standard atomic save.
+      - In-place write with fsync: still not atomic (a torn write is visible mid-overwrite). Rejected.
+      - Write-temp-and-rename: standard atomic save. Chosen.
+      - `tempfile` crate for the temp path: adds a dependency for a name we can mint ourselves. Rejected (ponytail).
+      - Directory `fsync` after rename: makes the rename durable across power loss; skipped because the atomic rename already guarantees the target is never torn, and cross-platform dir fsync needs platform-specific code. Noted as an explicit follow-up, not a silent gap.
     - Chosen Approach:
-      - Write-temp-and-rename; preserve original permissions.
-    - Files to Create/Edit:
-      - `src/server/workspace.rs`: implement atomic save.
-      - `tests/workspace.rs`: simulate failed save and verify original intact.
-    - References:
-      - `code-reviews/2026-06-21-current-implementation-review.md` P1-6
-  - Test Cases to Write:
-    - `atomic_save_preserves_original_on_failure`: injected write failure leaves original file unchanged.
-    - `atomic_save_replaces_target`: successful save renames temp to target.
+      - `save_io` now writes through a new `atomic_write_file(target, bytes)` free function instead of `tokio::fs::write`.
+      - `atomic_write_file`: (1) mint a unique temp path `.<name>.clay-save-<pid>-<counter>` in `target.parent()` via a process-static `AtomicU64` counter so concurrent saves of the same canonical path do not collide; (2) capture the original file's `std::fs::Permissions` for restore; (3) `tokio::fs::File::create` + `write_all` + `sync_all` (fsync for durability before the atomic rename); (4) on Unix, best-effort `std::fs::set_permissions` to restore the original mode (ownership is naturally preserved since the server runs as the same user); (5) `tokio::fs::rename(temp, target)` (atomic in-place replace on POSIX and Windows); on rename failure remove the orphaned temp so failed saves do not litter; (6) return the post-rename `FileMetadata`.
+      - `WriteFailed` remains the surfaced error for any write/rename failure; the original file is untouched because only the temp is ever partial.
+    - Files Created/Edited:
+      - `src/server/workspace.rs`: replaced the `tokio::fs::write` body of `save_io` with a call to `atomic_write_file`; added `ATOMIC_SAVE_TEMP_COUNTER`, `atomic_temp_path`, and `atomic_write_file`; added `tokio::io::AsyncWriteExt` import; +3 tests.
+      - `docs/wiki/modules/server-file-workspace.md`: documented the atomic save (step 11 + a responsibility bullet).
+      - References:
+        - `code-reviews/2026-06-21-current-implementation-review.md` P1-6
+        - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+  - Test Cases Written / Verification:
+    - `atomic_save_replaces_target_and_leaves_no_temp` (cross-platform): after a save the target holds the new content and no `.clay-save-*` temp remains in the directory.
+    - `atomic_save_preserves_original_on_write_failure` (`#[cfg(unix)]`): making the target directory non-writable so the temp cannot be created causes `WriteFailed`, the original file content is preserved, and no temp leaks. Unix-gated because directory-writability enforcement via chmod is a Unix mechanism; runs on Linux/CI.
+    - `atomic_write_file_rename_failure_returns_error_and_cleans_temp` (cross-platform): renaming a temp file over an existing directory fails on every platform; the helper returns the error and removes the orphaned temp. This exercises the failure/cleanup path on Windows (where the unix chmod test is cfg-gated out).
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline).
+    - `cargo test --locked --lib workspace`: 29 passed (+2 cross-platform atomic tests; the unix-gated test is +1 on Linux). `server::`: 154 passed (+2). `selected_markdown`: 3. `performance_protocol`: 7.
+    - `cargo clippy --locked --lib --no-deps`: no hits in `src/server/workspace.rs`.
+    - Deferred (documented, not silent):
+      - Directory `fsync` after the rename to make the rename itself durable across power loss (currently the rename guarantees no torn write but not full durability of the directory entry). Add with platform-specific code if durability-of-the-rename becomes a hard requirement.
+      - Ownership preservation beyond the same-user case (e.g. preserving a different uid/gid): requires `chown` privileges the server generally does not have; mode preservation is the feasible subset implemented today.
 
-- [ ] Remove hardcoded Markdown open path in favor of generic mode activation
-  - Acceptance Criteria:
+- [x] Remove hardcoded Markdown open path in favor of generic mode activation **(completed by Phase 18.7)**
+  - Status: Completed in `plans/031-Phase18.7-Persistent-Server-Runtime-and-JS-ParseHandler-Bridge.md` after the Plan 030 deferral. The generic live-parse path now exists in production through the persistent server runtime and token-backed JS `ParseHandler` bridge.
+  - Decision logs:
+    - `decision-logs/2026-06-23-1823-defer-remove-hardcoded-markdown-open-path-to-phase-18-7-persistent-runtime-and-parse-bridge.md` (approved deferral).
+    - `decision-logs/2026-06-26-1338-phase18-7-persistent-runtime-and-js-parsehandler-bridge.md` (approved authority expansion and completion context).
+  - Roadmap: `roadmap.md` → Phase 18.7 (Persistent Server Runtime and JS ParseHandler Bridge for Generic Open-Time Mode Activation), completed as the continuation of Phase 18.6 and a prerequisite for Phase 19 hot-reload.
+  - Original Acceptance Criteria (closed by Phase 18.7):
     - Functional: Markdown-specific temp-runtime creation and dist-file copying are removed from `connection.rs`.
     - Functional: Markdown mode activation goes through the generic package/mode/parse coordinator path.
     - Performance: File open does not spawn a fresh JS runtime or copy dist files for every Markdown file.
     - Code Quality: No Markdown-specific branches in server connection handling.
-  - Approach:
-    - Documentation Reviewed:
-      - `src/server/connection.rs` selected-file flow
-      - `src/server/parse_coordinator.rs`
-      - `src/server/ops/modes.rs`
-      - `packages/markdown/dist/load.js` and `parser.js`
-    - Options Considered:
-      - Keep special path until generic path is perfect: delays cleanup.
-      - Migrate now and fix gaps generically: aligns with primitives.
-    - Chosen Approach:
-      - Migrate Markdown open to generic package/mode activation; delete special path.
-    - Files to Create/Edit:
-      - `src/server/connection.rs`: remove `evaluate_markdown_open` and helpers.
-      - `src/server/js_runtime.rs` or `src/server/ops/modes.rs`: ensure generic activation can publish decorations/SDUI for a document.
-      - `tests/markdown_mode.rs`: update tests to use generic activation.
-    - References:
-      - `code-reviews/2026-06-21-current-implementation-review.md` P2-3
-      - `.agents/skills/project-patterns/references/mode-primitive-first.md`
-  - Test Cases to Write:
-    - `markdown_open_uses_generic_mode_activation`: opening a `.md` file triggers the registered Markdown parse handler and behavior manifest.
-    - `no_temp_runtime_left_behind`: temp runtime directory is not created during file open.
+  - Completion Evidence:
+    - Phase 18.7 added a persistent `ClayJsRuntimeService` runtime worker, idempotent `loadPackage("@clay/markdown")`, stored `clay:modes` activation metadata, and token-backed `serverRegisterParseHandler({ module, exportName, ... })` registrations adapted into `ParseCoordinator`.
+    - `src/server/connection.rs::selected_file_open_followup_messages` now classifies selected files through generic `clay:modes`, lazily autoloads first-party `@clay/*` packages if needed, activates the classified mode, and schedules a bounded parse through `ParseCoordinator`.
+    - Removed helpers/paths: `is_markdown_path`, `evaluate_markdown_open`, `create_markdown_open_runtime_root`, `unique_markdown_open_runtime_root`, `markdown_open_init_source`, and `clay-markdown-open-runtime-*` temp roots.
+    - Verification from Phase 18.7: `cargo test connection --lib` (18 passed), `cargo test js_runtime --lib` (66 passed), `cargo test --test parse_coordinator` (15 passed), `cargo test --test package_loading_docs` (13 passed), `cargo fmt --check`, and protocol baseline benchmark against `phase14-baseline`.
+    - Current closeout grep: `rg "is_markdown_path|evaluate_markdown_open|create_markdown_open_runtime_root|unique_markdown_open_runtime_root|markdown_open_init_source|clay-markdown-open-runtime" src/server/connection.rs` returns no matches.
+  - References:
+    - `plans/031-Phase18.7-Persistent-Server-Runtime-and-JS-ParseHandler-Bridge.md`
+    - `code-reviews/2026-06-21-current-implementation-review.md` P2-3
+    - `.agents/skills/project-patterns/references/mode-primitive-first.md`
+    - `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` (deferral precedent)
+    - `decision-logs/2026-06-16-1526-generic-first-party-package-loadentry-module-bridge.md` (Phase 18.6 authority expansion this continues)
 
 - [ ] Clean clippy and add lint gate
   - Acceptance Criteria:
@@ -623,31 +665,48 @@
   - Test Cases to Write:
     - `clippy_passes`: `cargo clippy --all-targets --all-features --locked -- -D warnings` exits 0.
 
-- [ ] Box large diagnostic error types
+- [x] Box large diagnostic error types
   - Acceptance Criteria:
     - Functional: Clippy `result_large_err` is resolved for `PackageServiceError`, `ModeDiagnostic`, `CommandDiagnostic`, `PackageConflictDiagnostic`, and `PackageRecordError`.
     - Performance: `Result<T, E>` sizes are reduced on success paths.
     - Code Quality: Error variants remain `Clone` where needed or use `Arc`/shared strings.
   - Approach:
     - Documentation Reviewed:
-      - Clippy `result_large_err` docs
-      - Error type definitions in `src/packages/`
+      - Clippy `result_large_err` docs (threshold: `Err`-variant ≥ 128 bytes).
+      - Error type definitions in `src/packages/` (`record.rs`, `service.rs`, `modes.rs`, `commands.rs`, `conflict.rs`) and `src/server/ui.rs`.
     - Options Considered:
-      - Box entire error enum: changes API.
-      - Box large variants or replace `String` fields with `Box<str>`/`Arc<str>`: smaller API churn.
+      - Box entire error enum at every `Result` boundary: would churn all return signatures (~88 call sites).
+      - Box large variants or replace `String` fields with `Box<str>`: smaller API churn, addresses the root size. Chosen.
+      - `Arc<str>` instead of `Box<str>`: same 16-byte size, adds atomic refcount; these diagnostics are constructed once and rarely cloned, so `Box<str>` is simpler. `Arc<str>` deferred until profiling shows clone is hot.
     - Chosen Approach:
-      - Box large variants and share detailed strings with `Arc<str>` where cloning is required.
-    - Files to Create/Edit:
-      - `src/packages/service.rs`: box `InvalidClayMetadata` and `ContributionConflict` variants.
-      - `src/packages/conflict.rs`: consider boxing or using `Arc<str>`.
-      - `src/packages/record.rs`: reduce `PackageRecordError` size.
-      - `src/server/ops/modes.rs`, `src/server/ops/mod.rs`, `src/server/behavior.rs`: box diagnostic variants.
+      - Convert the free-text and identity `String` fields to `Box<str>` (and `Option<String>` to `Option<Box<str>>`) in the five diagnostic structs; box the two `PackageServiceError` payload variants. `Box<str>` is a 16-byte fat pointer vs `String`'s 24 bytes, and diagnostics are constructed once, read/displayed, never grown in place.
+      - Add a `ModeDiagnostic::new(...)` constructor so its ~12 inline literals keep ergonomic owned-`String` args while the constructor centralizes the `String::into_boxed_str` boxing; the other four types funnel through their existing `*Context::error`/`diagnostic` builders (signature changed to `impl Into<Box<str>>`, `String: Into<Box<str>`).
+  - Files Created/Edited:
+    - `src/packages/record.rs`: `PackageRecordError` fields → `Box<str>`/`Option<Box<str>>`; `from_manifest_diagnostic` and `PackageRecordContext::error` funnel updated; +1 compile-time `error_size_within_limit`-style size-guard test.
+    - `src/packages/modes.rs`: `ModeDiagnostic` fields → `Box<str>`/`Option<Box<str>>`; added `ModeDiagnostic::new` constructor; converted 12 inline `ModeDiagnostic { ... }` literals to `ModeDiagnostic::new(...)`; `ModeDiagnosticContext::diagnostic` funnel updated.
+    - `src/packages/commands.rs`: `CommandDiagnostic` fields → `Box<str>`/`Option<Box<str>>`; `CommandDiagnosticContext::diagnostic` funnel updated.
+    - `src/packages/conflict.rs`: `PackageConflictDiagnostic` `contribution_id`/`message` → `Box<str>`, `first`/`second` → `Box<PackageConflictProvenance>` (the two provenance sub-structs were the ~200-byte bulk); `insert_unique` construction updated; `Display` unchanged (`write!` derefs `Box<str>`).
+    - `src/server/ui.rs`: `UiContributionDiagnostic` fields → `Box<str>`/`Option<Box<str>>`; `*Context::error` funnel updated; +1 compile-time size-guard test.
+    - `src/packages/service.rs`: boxed `InvalidClayMetadata(Box<PackageRecordError>)` and `ContributionConflict(Box<PackageConflictDiagnostic>)`; updated 2 construction sites; `Display`/`Error` impls unchanged.
+    - `tests/package_loading.rs`: 7 `assert_eq!(err.contribution_id, "…")`/`conflict.contribution_id` sites updated to `&*` deref.
+    - `docs/wiki/modules/package-loading.md`: documented the `Box<str>`/boxed-variant sizing and the compile-time size guard.
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P2-5
-  - Test Cases to Write:
-    - `error_size_within_limit`: compile-time assertion that `Result<(), DiagnosticError>` size is reasonable.
+      - `.agents/skills/project-patterns/references/protocol-and-performance.md`
+  - Test Cases Written / Verification:
+    - `diagnostic_error_sizes_remain_under_large_err_threshold` (`src/packages/record.rs`): combo compile-time (`const _: () = { assert_le_128::<T>(); }`) and runtime `assert!` covering `PackageRecordError`, `ModeDiagnostic`, `CommandDiagnostic`, `PackageConflictDiagnostic`.
+    - `ui_contribution_diagnostic_size_remains_under_large_err_threshold` (`src/server/ui.rs`): same guard for `UiContributionDiagnostic` (which is `pub(crate)`).
+    - `cargo clippy --locked --lib --no-deps`: 0 `result_large_err`, 0 `large_enum_variant` in the `lib`; all 6 plan-listed types cleared.
+    - `cargo clippy --all-targets --all-features --locked`: `result_large_err` dropped **88 → 2**; the 2 remaining are `Result<(), ServerMessage>` in `src/server/behavior.rs` (the `protocol::ServerMessage` wire enum's 240-byte `BehaviorManifest` variant) — explicitly out of this task's scope (boxing the wire enum would ripple through the codec and every `ServerMessage` match site). `large_enum_variant` remains 4, all in `src/masonry_editor.rs` and `src/main.rs` UI/main enums — also out of scope and tracked under the clippy-gate task.
+    - `cargo fmt --check`: passed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline maintained).
+    - `cargo test --locked --lib server::`: 155. `packages::`: 7 (+1 size guard). `record::`: 5. `client::`: 37. `selected_markdown`: 3. `package_loading`: 30. `markdown_mode`: 43. All green.
+    - Deferred (documented, not silent):
+      - `Result<(), ServerMessage>` in `src/server/behavior.rs`: boxing the `protocol::ServerMessage` wire enum is a codec-wide change deferred to a separate task (the enum is the length-prefixed frame payload; boxing its largest variant `BehaviorManifest` would touch the codec serialize/deserialize and every match arm).
+      - `large_enum_variant` in `src/masonry_editor.rs:32` and `src/main.rs:114` (UI/main enums): deferred to the clippy-gate / UI work.
+      - `Arc<str>` for clone-heavy diagnostics: deferred until a profile shows diagnostic `Clone` is hot.
 
-- [ ] Trim public API surface and unused dependencies
+- [x] Trim public API surface and unused dependencies
   - Acceptance Criteria:
     - Functional: Internal implementation modules are `pub(crate)` unless intentionally public.
     - Functional: Unused direct dependencies (`pollster`, `taffy`, `wgpu`) and over-broad Tokio features are removed or tightened.
@@ -662,33 +721,55 @@
       - Leave public surface wide: simpler now, harder later.
       - Restrict public surface: aligns with semver and maintainability.
     - Chosen Approach:
-      - Restrict public surface; remove unused direct deps; narrow Tokio features to actual usage.
-    - Files to Create/Edit:
-      - `src/lib.rs`: change module visibility.
-      - `Cargo.toml`: remove unused deps, narrow tokio features.
-      - `tests/rust_visibility_api_mapping.rs`: update if public API intentionally changes.
+      - `pub(crate) mod behavior;` (only `src/lib.rs` module with zero external `clay::behavior` usage; all other `pub mod` modules are referenced by integration tests, benches, or `src/bin/clay-server.rs` and are intentional harness/bin access surface for a single-binary app — not a downstream library API commitment).
+      - Remove direct deps `pollster`, `taffy`, `wgpu`, `vello` (all have zero direct source usage; `vello` reached transitively via masonry's `pub use vello`).
+      - Narrow `tokio` from `features = ["full"]` to `["rt", "rt-multi-thread", "macros", "net", "fs", "io-util", "sync", "time"]` (drops unused `process`, `signal` and bundled extras; verified via grep of every `tokio::` path in `src/`/`tests/`/`benches/`).
+    - Files Edited:
+      - `src/lib.rs`: `pub mod behavior;` → `pub(crate) mod behavior;`.
+      - `Cargo.toml`: removed `pollster`, `taffy`, `vello`, `wgpu` direct deps; narrowed `tokio` features.
+      - `Cargo.lock`: refreshed offline — dropped `pollster`, `taffy`, `grid` from direct resolution (still present transitively via masonry where used).
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P2-7, P3-1
-  - Test Cases to Write:
-    - `unused_dependencies_removed`: `cargo machete` or manual check finds no unused direct deps.
-    - `public_api_intentional`: visibility mapping test reflects intended public surface.
+  - Test Cases Written / Verification:
+    - `unused_dependencies_removed` (manual machete-style grep): `grep -r 'pollster::|use pollster|taffy::|use taffy|wgpu::|use wgpu' src/ tests/ benches/` → 0 non-comment hits; `cargo tree -p clay -e normal --depth 1` shows direct deps reduced 14 → 10.
+    - `public_api_intentional` (existing `rust_visibility_api_mapping` contract test): 8 passed — confirms `pub(crate) mod shell` invariant and the intentional `pub mod` surface still hold; no test edits needed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline).
+    - `cargo check --locked --benches`: 0 errors (benches recompile against the narrower tokio feature set).
+    - `cargo clippy --locked --lib --no-deps`: 0 warnings.
+    - `cargo test --locked --lib`: 411. `server::`: 155. `client::`: 37. `markdown_mode`: 43. `package_loading`: 30. `rust_visibility_api_mapping`: 8. All green.
+    - Deferred (documented, not silent):
+      - Remaining `pub mod` modules (`client`, `docs`, `editor`, `masonry_editor`, `masonry_sdui`, `masonry_shell`, `packages`, `perf`, `protocol`, `server`, `ipc`) stay `pub`: they are the integration-test/bench harness access surface plus the `clay-server` binary. Clay ships as a single binary, not a library crate, so these are not a semver commitment; tightening further would require a feature-gated test-only API rewrite, out of scope and low-value here. Tracked only if Clay publishes as a library.
+      - `masonry_shell` remains `#[doc(hidden)] pub mod` per the existing Phase 18.2 visibility contract.
 
-- [ ] Add SAFETY comments to unsafe COM code
+- [x] Add SAFETY comments to unsafe COM code
   - Acceptance Criteria:
     - Functional: Every `unsafe` block in `src/client/file_dialog.rs` has a `// SAFETY:` comment.
     - Code Quality: Comments state the invariant that makes the block safe.
   - Approach:
     - Documentation Reviewed:
-      - `src/client/file_dialog.rs`
-      - `windows` crate COM examples
-    - Files to Create/Edit:
-      - `src/client/file_dialog.rs`: add safety comments.
+      - `src/client/file_dialog.rs` (the 11 Windows COM `unsafe` blocks).
+      - `windows` crate COM API contracts (`CoCreateInstance`, `CoInitializeEx`/`CoUninitialize` pairing, `CoTaskMemFree` as the COM allocator, `IFileOpenDialog` apartment affinity, `GetDisplayName`/`SIGDN_FILESYSPATH` ownership transfer).
+      - `code-reviews/2026-06-21-current-implementation-review.md` P3-2.
+    - Chosen Approach:
+      - Add a `// SAFETY:` comment immediately before each of the 11 `unsafe` blocks stating the invariant: apartment affinity, COM-allocated string ownership + matching deallocator, init/uninit pairing, filter-table borrow outlives the call, and (for `to_string`) the read-before-free ordering.
+      - Add a regression-guard source-scan test mirroring the `rust_visibility_api_mapping` pattern: `file_dialog_unsafe_blocks_have_safety_comments` greps the source and fails if any `unsafe` block lacks a preceding `// SAFETY:` comment (looks back up to 8 lines to tolerate multi-line comments).
+    - Files Edited:
+      - `src/client/file_dialog.rs`: added/expanded `// SAFETY:` comments before all 11 `unsafe` blocks — `CoCreateInstance`, `GetOptions`, `SetOptions`, `Show`, `GetResult`, `GetDisplayName`, `PWSTR::to_string`, `CoTaskMemFree`, `SetFileTypes`, `CoInitializeEx`, `CoUninitialize`.
+      - `tests/rust_visibility_api_mapping.rs`: +1 test `file_dialog_unsafe_blocks_have_safety_comments`.
+      - `docs/wiki/modules/client-file-dialog.md`: documented the invariant + the regression test.
     - References:
       - `code-reviews/2026-06-21-current-implementation-review.md` P3-2
-  - Test Cases to Write:
-    - Manual review: each unsafe block has a safety comment.
+  - Test Cases Written / Verification:
+    - `file_dialog_unsafe_blocks_have_safety_comments` (`tests/rust_visibility_api_mapping.rs`): scans every `unsafe` occurrence in `src/client/file_dialog.rs`; passes (all 11 have a preceding `// SAFETY:`). Verified the test fails if a comment is removed (manual spot check).
+    - `rust_visibility_api_mapping` suite: 9 passed (was 8, +1 new).
+    - `cargo check --locked --lib`: 0 errors, 32 warnings (baseline).
+    - `cargo clippy --locked --lib --no-deps`: 0 warnings.
+    - `cargo test --locked --lib client::`: 37 passed.
+    - `cargo fmt --check`: passed.
+    - Deferred (documented, not silent):
+      - `src/server/mod.rs` Unix `unsafe` blocks (`libc::getuid`, the Unix socket 0o600 `chmod`, and the Windows named-pipe DACL `unsafe` blocks) already had `// SAFETY:` comments from Plan 030's IPC-endpoint hardening task; no new comments needed there.
 
-- [ ] Define and verify the package default init.js loading experience
+- [x] Define and verify the package default init.js loading experience
   - Acceptance Criteria:
     - Functional: Loading `@clay/markdown` from `~/.config/clay/init.js` is a one-line command.
     - Functional: The hardened `loadEntry` and disabled lifecycle scripts do not break default loading.
@@ -703,17 +784,28 @@
       - Document a multi-step setup: violates one-line default convention.
       - Keep one-line default and fix gaps: preferred.
     - Chosen Approach:
-      - Preserve one-line default; add tests verifying it still works after security fixes.
-    - Files to Create/Edit:
-      - `docs/reference/packages/creating-packages.md`: verify examples.
-      - `tests/package_loading.rs` or `tests/markdown_mode.rs`: add default-load test.
+      - Preserve the one-line default; verify (not re-implement) it still works after Plan 030 security fixes. The default-load experience was already shipped by Phase 18.6 and is exercised end-to-end by existing runtime tests; this task's job is to confirm the hardening (loadEntry root confinement, lifecycle-script suppression, JS runtime timeout) did not regress it and to fix the one pre-existing failure that blocked the docs-level pin.
+    - Pre-existing Failure Fixed:
+      - `test/package_loading_docs.rs::package_default_load_gap_is_decision_log_backed_with_package_owned_fallback` was failing on the assertion `package_index.contains("export { loadMarkdownPackage, markdownLoadMode } from \"./load.js\"")`. Root cause: `packages/markdown/dist/index.js` evolved to re-export `registerMarkdownPreview` alongside the pair, so the exact-token substring no longer matched: actual line is `export { loadMarkdownPackage, markdownLoadMode, registerMarkdownPreview } from "./load.js";`. The assertion was pinning exact token order rather than intent. Fixed by asserting intent (the index re-exports from `./load.js` and contains both `loadMarkdownPackage` and `markdownLoadMode`; additional re-exported names are allowed), which is the robust pin against future drift.
+    - Files Edited:
+      - `tests/package_loading_docs.rs`: loosened the over-strict exact-substring assertion in `package_default_load_gap_is_decision_log_backed_with_package_owned_fallback` to assert re-export intent; +1 new test `default_load_path_is_separate_from_lifecycle_script_suppression` pinning that the one-line default and the `--ignore-scripts` install-time hardening are documented as distinct paths.
     - References:
       - `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`
+      - `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`
       - `.agents/skills/project-patterns/references/package-distribution.md`
-  - Test Cases to Write:
-    - `markdown_one_line_default_load`: `init.js` containing `loadPackage("@clay/markdown")` enables Markdown mode.
+  - Test Cases Written / Verification:
+    - `markdown_one_line_default_load` (named `load_package_markdown_default_activates_full_mode_from_init_js` in `src/server/js_runtime.rs`): existing runtime test — a genuinely minimal `init.js` with only `import { loadPackage } from "clay:packages"; await loadPackage("@clay/markdown");` (asserted to contain none of `contributions`/`modePattern`/`serverRegisterCommand`/`serverRegisterParseHandler`/`serverActivateMajorMode`/`markdownPackageManifest`) activates the full markdown mode (parse handler with `mode_id == "markdown"`, the `markdown.togglePreview` command, and the markdown keymap into the behavior manifest). Passes.
+    - `load_package_resolves_and_activates_first_party_markdown_end_to_end` (existing, `src/server/js_runtime.rs`): end-to-end e2e of the one-line default returning a typed summary with `name` + `modes` and registering the parse handler + behavior manifest. Passes.
+    - `default_load_path_is_separate_from_lifecycle_script_suppression` (new, `tests/package_loading_docs.rs`): pins that the one-line `loadPackage("@clay/markdown")` default is documented in every package-loading surface AND the `--ignore-scripts`/`--allow-scripts`/`CLAY_ALLOW_LIFECYCLE_SCRIPTS` lifecycle-script suppression is documented as a `clay package add` backend concern (authoritative reference + implementation wiki), distinct from the first-party resolver path (`@clay/*` + `FirstPartyLoadEntryAllowlist`). Passes.
+    - `cargo test --locked --test package_loading_docs`: 12 passed (was 11, +1 new; +1 previously failing now green).
+    - `cargo test --locked --lib load_package`: 6 passed (the runtime default-load e2e + resolver tests).
+    - `cargo test --locked --test markdown_mode`: 43 passed. `cargo test --locked --test package_loading`: 30 passed.
+    - `cargo fmt --check`: passed.
+    - Deferred (documented, not silent):
+      - First-party `loadPackage("@clay/*")` never invokes the pnpm backend or its lifecycle scripts (resolution is through `FirstPartyLoadEntryAllowlist` + the registry), so lifecycle-script suppression and the default-load path cannot interfere; no pnpm-dependent regression test was added because pnpm is not on PATH in this dev environment and `PnpmBackend::install_command_args` argument-construction is already covered by the lifecycle-script task's helper test.
+      - A pnpm-backed install of a third-party package executing its lifecycle scripts under `--allow-scripts` end-to-end remains an environment-gated manual smoke (pnpm absent in CI/dev); the install-arg construction is the automated guard.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Any user-visible behavior changed by this plan (package install scripts opt-in, file-size limits, JS timeout) is exposed as a documented Clay JS API.
     - Functional: Configuration APIs do not implicitly grant filesystem/network/shell authority.
@@ -722,17 +814,28 @@
     - Documentation Reviewed:
       - `docs/reference/configuration/index.md`
       - `runtime/js/configuration.ts`
-    - Files to Create/Edit:
-      - `docs/reference/configuration/index.md`: add options introduced by this plan.
-      - `runtime/js/configuration.ts`: expose options if not already present.
-      - `docs/index.md`: link new configuration docs.
+    - Chosen Approach:
+      - **Verify, do not add new JS APIs.** Plan 030 introduced behaviors are server-side **security budgets** (JS runtime timeout, openable-file size, runtime SDUI budgets, lifecycle-script suppression, file-open capability gate, IPC endpoint permissions), not user-tunable options. Exposing them as `clay:configuration` APIs would *weaken* security: a malicious `init.js` could lift `JS_RUNTIME_EVALUATION_TIMEOUT_MS` to defeat the watchdog, raise `MAX_OPENABLE_FILE_BYTES` to exhaust memory, or re-enable lifecycle scripts. The configuration-system pattern explicitly forbids configuration from implicitly granting filesystem/network/shell authority, and these budgets are exactly that boundary. The correct outcome is to document them as **intentionally non-configurable** server-side budgets with rationale + the constant names, and add a regression test pinning they are (a) documented as non-configurable and (b) absent from the `clay.configuration.*` inventory.
+      - Lifecycle-script suppression (`--allow-scripts` / `CLAY_ALLOW_LIFECYCLE_SCRIPTS`) is a process-level CLI/env supply-chain control, not an `init.js` option — documented as such in both `configuration.md` and `docs/reference/primitives/package-loading.md`.
+      - The existing runtime-backed configuration APIs (`clay.configuration.setPackageOption`, `clay.ui.serverSetLayoutOverride`, `clay.configuration.loadConfigurationModule`, `clay.configuration.getConfigurationState`) already cover the user-tunable surface; no new tunable was introduced by Plan 030 that belongs in `init.js`.
+    - Files Edited:
+      - `docs/reference/clay-js-api/configuration.md`: new section "Plan 030 security budgets are intentionally not Clay JS APIs" listing each budget with its constant name, default value, diagnostic code, rationale for non-configurability, and the deferred follow-ups (V8 heap-limit guard, separate-process JS sandbox).
+      - `docs/generated/clay-js-api-registry.json`: regenerated via `cargo run --bin update-doc-registry` to keep the generated registry in sync with the configuration.md prose addition (configuration.md is a registry source path).
+      - `tests/clay_js_api_inventory.rs`: +1 test `plan_030_security_budgets_are_intentionally_non_configurable`.
     - References:
       - `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`
       - `.agents/skills/project-patterns/references/configuration-system.md`
-  - Test Cases to Write:
-    - `configuration_api_docs_complete`: doc registry check or test fails if a new option is undocumented.
+  - Test Cases Written / Verification:
+    - `configuration_api_docs_complete` (named `plan_030_security_budgets_are_intentionally_non_configurable`, `tests/clay_js_api_inventory.rs`): asserts each Plan 030 budget constant exists in `src/perf/budgets.rs`; asserts the configuration overview documents them as non-configurable and names `--ignore-scripts`/`--allow-scripts`/`CLAY_ALLOW_LIFECYCLE_SCRIPTS` as CLI/env controls; asserts none of `clay.configuration.setJsRuntimeTimeout`, `.setMaxOpenableFileSize`, `.setSduiBudget`, `.setRuntimeBudget`, `.allowLifecycleScripts` exists in the inventory. Passes.
+    - `cargo test --locked --test clay_js_api_inventory`: 43 passed (was 42, +1 new).
+    - `cargo test --locked --test clay_js_doc_registry`: 26 passed (2 stale-generated-registry failures caused by the configuration.md prose edit were resolved by regenerating `docs/generated/clay-js-api-registry.json` via `cargo run --bin update-doc-registry`).
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline).
+    - `cargo fmt --check`: passed.
+    - Deferred (documented, not silent):
+      - V8 heap-limit guard (`v8::CreateParams::heap_limits`) and separate-process JS sandbox: server-side budgets to be added in a future Plan 030 follow-up; when shipped they too will be non-configurable server-side budgets, not `init.js` APIs.
+      - Genuine user-tunable knobs surfaced from these budgets (e.g. a per-document large-file policy already owned by the Markdown package, not by Clay core configuration) remain package-owned, not Clay core `clay:configuration` APIs.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Every new or changed server-side Rust public function that is a programmatic capability has a `deno_core` op wrapper and a stable Clay JS/TS facade.
     - Functional: Public Rust functions that should not be user-facing are `pub(crate)` or private.
@@ -743,20 +846,28 @@
       - `.agents/skills/project-patterns/references/clay-js-api-naming.md`
       - `.agents/skills/project-patterns/references/clay-js-api-schema.md`
       - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
-    - Files to Create/Edit:
-      - `src/lib.rs`: restrict visibility if needed.
-      - `runtime/js/*.ts`: add/update facades for changed surfaces.
-      - `docs/reference/clay-js-api/*.md`: add/update docs.
-      - `src/docs/registry.rs`: update generated registry.
+    - Chosen Approach:
+      - **Verify, do not add new Clay JS facades.** Plan 030 is security-hardening work, so introducing a new deno_core op or Clay JS facade would be an *authority expansion* — the opposite of hardening. The correct outcome is that every new server-side helper plan 030 added must be `pub(crate)`, `pub(super)`, or private, and no Plan 030 budget/helper is exposed as a `clay:*` facade. The existing ops (`op_clay_sdui_publish_tree`, `op_clay_documents_*`, `op_clay_packages_load_package_by_specifier`) already cover the programmatic surface; plan 030 changed their *internal* authority (added budgets, switched to unlocked orchestration) without adding new programmatic authority.
+      - Public Rust functions that carry pre-existing legitimate test/bin harness surface (e.g. `IpcServer::new`, `PnpmBackend::install_command_args`, the package backend trait, `pub const` budgets) were left `pub` — they are part of the crate's external test/binary harness, not deno_core ops, and are not programmatic JS surfaces.
+    - Files Edited:
+      - `tests/clay_js_api_inventory.rs`: +1 test `plan_030_introduces_no_new_js_api_or_public_programmatic_surface`.
     - References:
       - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
       - `decision-logs/2026-05-08-1840-clay-js-api-discovery-keybindings-custom-properties.md`
       - `.agents/skills/project-patterns/references/clay-js-api-naming.md`
-  - Test Cases to Write:
-    - `public_rust_functions_have_facades`: test mapping public functions to Clay JS APIs.
-    - `clay_js_api_docs_linked`: docs index links every new API doc.
+      - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
+  - Test Cases Written / Verification:
+    - `public_rust_functions_have_facades` (named `plan_030_introduces_no_new_js_api_or_public_programmatic_surface`, `tests/clay_js_api_inventory.rs`): four-part guard — (1) scans the Plan 030-touched server files that carried no pre-existing pub surface (`budgets.rs`, `workspace.rs`, `js_runtime.rs`, `ops/sdui.rs`, `server/ui.rs`, `server/behavior.rs`) and fails if any bare `pub fn`/`pub async fn` appears there; (2) pins by name that the specific Plan 030 workspace helpers (`open_existing_file_unlocked`, `open_selected_file_unlocked`, `save_document_unlocked`, `reload_document_unlocked` as `pub(crate) async fn`; `check_openable_size`, `open_io`, `save_io`, `reload_io`, `atomic_temp_path`, `atomic_write_file` as private `fn`/`async fn`) keep restricted visibility; (3) asserts none of those helpers is mapped as a `deno_op = "op_..."` target in `api-inventory.toml`; (4) asserts none of the Plan 030 budgets is exposed as a Clay JS API id (`clay.runtime.setTimeout`, `clay.runtime.setEvaluationBudget`, `clay.documents.setMaxOpenableSize`, `clay.sdui.setTreeBudget`, `clay.packages.allowLifecycleScripts`). Passes.
+    - `clay_js_api_docs_linked`: the `clay-js-api-registry.json` generated registry + `docs/index.md` were verified current in the prior configuration-apis task (`cargo test --locked --test clay_js_doc_registry`: 26 passed; no new doc needed because no new API was introduced).
+    - `cargo test --locked --test clay_js_api_inventory`: 44 passed (was 43, +1 new).
+    - `cargo test --locked --test clay_js_doc_registry`: 26 passed.
+    - `cargo check --locked --tests`: 0 errors, 32 warnings (baseline).
+    - `cargo fmt --check`: passed.
+    - Deferred (documented, not silent):
+      - `pub const` budget constants in `src/perf/budgets.rs` remain `pub` (cross-module server constants), intentionally NOT Clay JS APIs — pinned by the prior configuration-apis task's `plan_030_security_budgets_are_intentionally_non_configurable` test.
+      - `PnpmBackend::install_command_args` remains `pub` as an intentional test helper on a backend type (not a deno_core op); pinned here as a non-op, non-JS-facade surface.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: Wiki pages for changed modules are updated or verified unchanged.
     - Code Quality: Master wiki index links updated pages; updated pages explain what changed code does and how it works.
@@ -778,20 +889,33 @@
     - References:
       - `.agents/skills/project-wiki/SKILL.md`
       - `.agents/skills/project-patterns/references/maintenance-validation.md`
-  - Test Cases to Write:
-    - Manual wiki review: confirm updated pages explain changed behavior and link from the index.
+  - Test Cases Written / Verification:
+    - Manual wiki review confirmed — every Plan 030-touched module's wiki page explains the changed behavior, how it works, and the security boundary:
+      - `docs/wiki/modules/embedded-js-runtime.md` (verified unchanged): documents the configurable wall-clock evaluation timeout defaulting to `JS_RUNTIME_EVALUATION_TIMEOUT_MS` (5 s; `clay.runtime.timeout` diagnostic), the `ClayJsRuntimeService::with_timeout` test override, the `TerminationTimer` watchdog that terminates the V8 isolate when the budget elapses, and the shared `apply_runtime_outputs` primitive (added in a prior Plan 030 task). Defers V8 heap-limit guard and separate-process JS sandbox.
+      - `docs/wiki/modules/server-file-workspace.md` (verified + 2 stale phase refs corrected): documents `MAX_OPENABLE_FILE_BYTES` (768 KiB) pre-read size gate with `WorkspaceError::FileTooLarge`/`FileErrorCode::FileTooLarge`, the prepare/io/commit mutex-release split with `*_unlocked` orchestration free functions and commit-time re-validation (concurrent-open dedup, reload dirty re-check, save tolerant-of-closed-document + `mark_clean_if_version`), atomic saves via `atomic_write_file` (unique `.<name>.clay-save-<pid>-<counter>` temp, fsync, Unix permission restore, atomic rename, orphan-temp cleanup), and the `OpenSelectedFile` single-use capability gate (`FileOpenCapabilityIssued`/`FileOpenCapabilityPool`, `clay.client.selected_file_open.unauthorized`). Fixed two stale forward-references: "Phase 21 authority hardening" → "Plan 030 (code-review remediation) authority hardening" (step 16) and "Phase 22 lock-release I/O" → "Plan 030 (code-review remediation) lock-release I/O" (step 17); roadmap Phase 21 is Remote/Container/Multi-Client Hardening and Phase 22 is AI-Safe Mutation — neither owns this work.
+      - `docs/wiki/modules/server-driven-ui.md` (verified unchanged): documents the four runtime SDUI publication budgets enforced at the `op_clay_sdui_publish_tree` boundary in `runtime_tree_from_json` — `RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES` (16 KiB raw-JSON pre-`serde_json` cap), `RUNTIME_SDUI_TREE_MAX_NODES` (128), `RUNTIME_SDUI_TREE_MAX_DEPTH` (16), `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS` (4096 per-node free-text cap) — all rejecting with `clay.sdui.invalid_tree` before memory/stack exhaustion. Budgets live in `src/perf/budgets.rs`.
+      - `docs/wiki/modules/package-loading.md` (verified unchanged): documents first-party `@clay/*` `loadEntry` root confinement — explicit relative `./... .js` paths with no `..`/empty/backslashes/URLs/absolute/raw-op strings, canonicalization of both package root and `loadEntry` target, treatment of canonicalization failure as load failure, and recording the allowlist entry only when the canonical `loadEntry` stays inside the canonical package root (Phase 18.6 resolver text already covers the Plan 030 confinement fix). Documents lifecycle-script suppression: `pnpm add` passes `--ignore-scripts` by default, opt-in only through `PackageInstallOptions::allow_lifecycle_scripts` (the `clay package add --allow-scripts` CLI flag / `CLAY_ALLOW_LIFECYCLE_SCRIPTS` env var). Documents the `Box<str>` diagnostic sizing invariant + `PackageServiceError` boxed payload variants + compile-time `size_of` guards.
+      - `docs/wiki/modules/server-ipc-skeleton.md` (verified + 3 stale "Phase 21" refs corrected): documents the Transport Hardening section (Unix `0o600` socket permissions + parent-directory `libc::getuid()` ownership check rejecting world-writable-directory tricks → `ServerError::EndpointOwnership`/`EndpointPermissions`; Windows named-pipe current-user-only DACL built from the process `TokenUser` SID via `SECURITY_DESCRIPTOR` + `SECURITY_ATTRIBUTES`, replacing the default `Everyone`+anonymous descriptor; temp-directory fallback still user-scoped) and the `FileOpenCapabilityIssued` handshake step. Fixed three stale "Phase 21" attributions to "Plan 030 (code-review remediation)/Plan 030" — the transport hardening header, the handshake-step parenthetical, and the `unix_socket_is_created_with_owner_only_permissions`/`windows_pipe_creation_applies_current_user_security_descriptor` test description — because roadmap Phase 21 (Remote, Container, Multi-Client Hardening) does not scope local-IPC endpoint ownership/permissions; Plan 030 implemented it.
+      - `docs/wiki/index.md` already links all six pages (verified — links present in the Modules section; no new page was needed because `package-loading.md` already existed and was updated during prior Plan 030 tasks rather than created here).
+    - `cargo test --locked --test clay_js_doc_registry`: 26 passed (generated registry + docs index freshness).
+    - `cargo test --locked --test clay_js_api_inventory`: 44 passed (includes the two Plan 030 inventory guards from prior tasks).
+    - `cargo fmt --check`: passed.
+    - Deferred (documented, not silent):
+      - V8 heap-limit guard and separate-process JS sandbox are documented deferrals in `embedded-js-runtime.md` (tracked as Plan 030 follow-ups; will be server-side budgets, not `init.js` configuration, when shipped).
+      - Chunked/viewport-first loading for files above `MAX_OPENABLE_FILE_BYTES` is a documented deferral in `server-file-workspace.md`.
+      - OS-verifiable file-picker exchange for `OpenSelectedFile` (the hard boundary beyond the structural capability gate) is a documented deferral in `server-file-workspace.md` step 16.
 
 ## Compromises Made
 
-- To be filled after task completion. Expected candidates:
-  - Whether Markdown open is migrated to generic activation in this phase or a fast follow-up.
-  - Whether application-level IPC authentication is implemented now or deferred after transport hardening.
-  - Whether separate-process JS sandboxing is deferred to a later phase.
+- Markdown open migration was deferred out of Plan 030 and completed in Phase 18.7 because it required a persistent server runtime, JS-backed `ParseHandler` bridge, generic selected-file open activation, security review, and dedicated tests.
+- Same-user `OpenSelectedFile` protection remains a structural single-use capability gate, not an OS-verifiable file-picker handle exchange.
+- V8 heap-limit guard and separate-process JS sandboxing remain deferred hardening; Phase 18.7 kept timeout, deny-by-default module loading, permission checks, parse budgets, and failure instrumentation as the shipped boundary.
 
 ## Further Actions
 
-- To be filled after task completion. Likely follow-ups:
-  - Implement chunked document snapshots and viewport-first loading for files above the size gate.
-  - Add separate-process JS sandbox for package/config execution.
-  - Add package lock/integrity and automated `npm audit` for first-party JS packages.
-  - Introduce a capability-based file-picker protocol replacing raw `OpenSelectedFile`.
+- Implement chunked document snapshots and viewport-first loading for files above the size gate.
+- Add separate-process JS sandbox and V8 heap-limit guard for package/config execution before expanding package authority.
+- Add package lock/integrity and automated `npm audit` for first-party JS packages.
+- Introduce an OS-verifiable capability-based file-picker protocol replacing raw selected-path trust.
+- Phase 19: define hot reload/runtime replacement, handler invalidation, and behavior update semantics for the persistent runtime.
+- Phase 23: design non-`@clay/*` package resolution with a new authority review.

@@ -1244,6 +1244,105 @@ fn open_file_dialog_configuration_does_not_grant_broad_filesystem_authority() {
 }
 
 #[test]
+fn phase19_hot_reload_configuration_review_rejects_hidden_reload_keys() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let runtime_doc = fs::read_to_string(root.join("docs/wiki/modules/embedded-js-runtime.md"))
+        .expect("read embedded runtime wiki");
+    let entries = inventory_entries();
+
+    for required in [
+        "Phase 19 persistent-runtime hot reload configuration review",
+        "did **not** promote a new user-facing reload setting",
+        "internal/developer-only server lifecycle primitive",
+        "not callable from `~/.config/clay/init.js`",
+        "hidden JSON/TOML/ad hoc keys",
+        "startup or explicit developer-triggered reload work only",
+        "deny-by-default module resolution",
+        "sanitized diagnostics",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 19 hot reload config rule `{required}`"
+        );
+    }
+    for forbidden_key in [
+        "hotReload",
+        "hot_reload",
+        "reloadOnSave",
+        "autoReload",
+        "reloadPackages",
+        "reloadConfiguration",
+    ] {
+        assert!(
+            configuration_doc.contains(forbidden_key),
+            "configuration overview must explicitly reject hidden key `{forbidden_key}`"
+        );
+        assert!(
+            entries
+                .iter()
+                .all(|entry| !entry.get("id").contains(forbidden_key)
+                    && !entry.get("custom_properties").contains(forbidden_key)),
+            "API inventory must not add hidden reload config key `{forbidden_key}`"
+        );
+    }
+    assert!(runtime_doc.contains("IpcServer::trigger_developer_hot_reload"));
+    assert!(entries.iter().all(|entry| {
+        !(entry.get("js_module") == "clay:configuration"
+            && entry.get("id").to_ascii_lowercase().contains("reload"))
+    }));
+    for denied in denied_configuration_authorities() {
+        assert!(
+            configuration_doc.contains(denied),
+            "hot reload configuration docs must deny {denied} authority"
+        );
+    }
+}
+
+#[test]
+fn phase19_hot_reload_has_no_public_clay_js_api_surface() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let server_mod = fs::read_to_string(root.join("src/server/mod.rs")).expect("read server mod");
+    let runtime_js = fs::read_to_string(root.join("runtime/js/application.ts"))
+        .unwrap_or_else(|_| String::new())
+        + &fs::read_to_string(root.join("runtime/js/packages.ts")).expect("read packages facade")
+        + &fs::read_to_string(root.join("runtime/js/configuration.ts"))
+            .expect("read config facade");
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    let entries = inventory_entries();
+
+    for rust_surface in [
+        "pub struct ReloadedDocumentRefresh",
+        "pub struct RuntimeReloadOutcome",
+        "pub async fn trigger_developer_hot_reload",
+    ] {
+        let position = server_mod
+            .find(rust_surface)
+            .unwrap_or_else(|| panic!("server mod must contain {rust_surface}"));
+        let prefix_start = position.saturating_sub(80);
+        let prefix = &server_mod[prefix_start..position];
+        assert!(
+            prefix.contains("#[doc(hidden)]"),
+            "{rust_surface} must remain doc-hidden until promoted to a public Clay JS API"
+        );
+    }
+    assert!(server_mod.contains("pub(crate) async fn reload_runtime_generation"));
+    assert!(!runtime_js.contains("triggerDeveloperHotReload"));
+    assert!(!runtime_js.contains("reloadConfiguration"));
+    assert!(!runtime_js.contains("reloadPackages"));
+    assert!(entries.iter().all(|entry| {
+        !(entry.get("id").starts_with("clay.runtime.")
+            || (entry.get("id").to_ascii_lowercase().contains("reload")
+                && entry.get("id") != "clay.documents.serverReloadDocument"))
+    }));
+    assert!(!registry.contains("triggerDeveloperHotReload"));
+    assert!(!registry.contains("clay.runtime.reload"));
+}
+
+#[test]
 fn configuration_docs_cover_open_file_dialog_defaults_or_options() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let configuration_doc =
@@ -1529,7 +1628,8 @@ fn api_inventory_primitive_gate_entries_are_implemented_or_planned() {
         "op_clay_runtime_unavailable"
     );
 
-    for id in ["clay.folding.serverPublishFoldingRanges"] {
+    {
+        let id = "clay.folding.serverPublishFoldingRanges";
         let entry = entry_by_id(id);
         assert_eq!(
             entry.get("status"),
@@ -2373,12 +2473,11 @@ fn generated_registry_contains_phase18_5_public_apis() {
             .unwrap_or_else(|| panic!("generated registry missing {id}"));
         // Must have user_facing_name
         assert!(
-            entry
+            !entry
                 .get("user_facing_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
-                .len()
-                > 0,
+                .is_empty(),
             "{id} must have a user_facing_name"
         );
         // Must have custom_properties (even if empty list for clientOpenFileDialog)
@@ -2489,15 +2588,10 @@ fn phase18_5_public_rust_surfaces_have_clay_js_mapping_or_internal_visibility() 
                 continue;
             }
             // Detect pub fn / pub async fn that is NOT pub(crate)
-            if (trimmed.starts_with("pub fn ") || trimmed.starts_with("pub async fn "))
-                && !trimmed.starts_with("pub(crate)")
+            if let Some(fn_decl) = trimmed
+                .strip_prefix("pub async fn ")
+                .or_else(|| trimmed.strip_prefix("pub fn "))
             {
-                // Extract function name
-                let fn_decl = if trimmed.starts_with("pub async fn ") {
-                    &trimmed["pub async fn ".len()..]
-                } else {
-                    &trimmed["pub fn ".len()..]
-                };
                 let fn_name = fn_decl.split('(').next().unwrap_or("").trim();
                 // Check if this function is mapped in the Clay JS API inventory
                 // (as backing_rust, current_rust_owner, or deno_op_path)
@@ -3015,7 +3109,8 @@ fn phase20_rust_public_functions_have_api_mappings_or_internal_visibility() {
             continue;
         }
 
-        let content = fs::read_to_string(&full_path).expect(&format!("read {}", file_path));
+        let content =
+            fs::read_to_string(&full_path).unwrap_or_else(|_| panic!("read {}", file_path));
 
         // Find all pub fn declarations (excluding pub(crate))
         let lines: Vec<&str> = content.lines().collect();
@@ -3041,5 +3136,283 @@ fn phase20_rust_public_functions_have_api_mappings_or_internal_visibility() {
                 }
             }
         }
+    }
+}
+
+/// Plan 030 task "Create or verify Clay configuration APIs": the security
+/// budgets introduced by Plan 030 (JS runtime timeout, openable file size,
+/// runtime SDUI budgets, lifecycle-script suppression, file-open capability
+/// gate, IPC endpoint permissions) are server-side security boundaries, not
+/// user-tunable `init.js` options. They must NOT appear as configurable
+/// `clay:configuration` inventory entries (raising them from user JavaScript
+/// would defeat the boundary — e.g. lift the timeout to bypass the watchdog).
+/// This test pins that they remain documented as intentionally non-configurable
+/// and absent from the runtime-backed configuration inventory.
+#[test]
+fn plan_030_security_budgets_are_intentionally_non_configurable() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let budgets =
+        fs::read_to_string(root.join("src/perf/budgets.rs")).expect("read src/perf/budgets.rs");
+    let entries = inventory_entries();
+
+    // Each Plan 030 security budget is present as a compiled constant...
+    for constant in [
+        "JS_RUNTIME_EVALUATION_TIMEOUT_MS",
+        "MAX_OPENABLE_FILE_BYTES",
+        "RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES",
+        "RUNTIME_SDUI_TREE_MAX_NODES",
+        "RUNTIME_SDUI_TREE_MAX_DEPTH",
+        "RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS",
+        "LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB",
+    ] {
+        assert!(
+            budgets.contains(constant),
+            "src/perf/budgets.rs must define Plan 030 budget `{constant}`"
+        );
+    }
+
+    // ...and is documented in the configuration overview as non-configurable.
+    assert!(
+        configuration_doc.contains("Plan 030 security budgets are intentionally not Clay JS APIs"),
+        "configuration overview must document Plan 030 budgets as non-configurable"
+    );
+    for budget in [
+        "JS_RUNTIME_EVALUATION_TIMEOUT_MS",
+        "MAX_OPENABLE_FILE_BYTES",
+        "RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES",
+        "LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB",
+    ] {
+        assert!(
+            configuration_doc.contains(budget),
+            "configuration overview must mention budget `{budget}`"
+        );
+    }
+    assert!(
+        configuration_doc.contains("--ignore-scripts")
+            && configuration_doc.contains("CLAY_ALLOW_LIFECYCLE_SCRIPTS")
+            && configuration_doc.contains("--allow-scripts"),
+        "configuration overview must document lifecycle-script suppression as a CLI/env control, not an init.js API"
+    );
+
+    // None of these budgets is exposed as a configurable Clay configuration API.
+    // `setPackageOption` / `setModePreference` / `setDecorationTheme` /
+    // `setParsePolicy` / `loadConfigurationModule` / `getConfigurationState` are
+    // the configuration inventory entries; none accepts a timeout/file-size/
+    // SDUI-budget parameter.
+    let config_api_ids: BTreeSet<&str> = entries
+        .iter()
+        .filter(|entry| entry.get("id").starts_with("clay.configuration."))
+        .map(|entry| entry.get("id"))
+        .collect();
+    for forbidden_id in [
+        "clay.configuration.setJsRuntimeTimeout",
+        "clay.configuration.setMaxOpenableFileSize",
+        "clay.configuration.setSduiBudget",
+        "clay.configuration.setRuntimeBudget",
+        "clay.configuration.allowLifecycleScripts",
+        "clay.configuration.setRuntimeHeapLimit",
+        "clay.configuration.setV8HeapLimit",
+        "clay.configuration.disableRuntimeHeapLimit",
+    ] {
+        assert!(
+            !config_api_ids.contains(forbidden_id),
+            "Plan 030 security budgets must not be exposed as configurable Clay JS APIs: \
+             `{forbidden_id}` must not exist in the inventory"
+        );
+    }
+}
+
+/// Phase 18.7 task "Create or verify Clay configuration APIs": persistent
+/// runtime and token-backed parse handlers do not add a new user-tunable
+/// configuration API. Users load packages with `loadPackage`; package authors
+/// declare parse budgets on `serverRegisterParseHandler`; runtime timeouts
+/// surface as diagnostics, not mutable `init.js` settings.
+#[test]
+fn phase18_7_persistent_runtime_does_not_add_hidden_configuration_knobs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let parse_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/parse/server-register-parse-handler.md"),
+    )
+    .expect("read parse API docs");
+    let entries = inventory_entries();
+
+    for required in [
+        "Phase 18.7 persistent runtime and parse bridge configuration review",
+        "does **not** promote a new user-tunable configuration API",
+        "await loadPackage(\"@clay/markdown\")",
+        "serverActivateClassifiedMode",
+        "ParseCoordinator",
+        "clay.runtime.timeout",
+        "not a callable `clay:configuration` API",
+        "setParsePolicy` facade remains unavailable",
+        "do not execute user configuration JavaScript",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 18.7 config boundary phrase `{required}`"
+        );
+    }
+
+    for required in [
+        "timeoutMs",
+        "maxWindowBytes",
+        "guardBytes",
+        "memoryBudgetBytes",
+        "INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+    ] {
+        assert!(
+            configuration_doc.contains(required) || parse_doc.contains(required),
+            "Phase 18.7 parse budget `{required}` must be documented without hidden config keys"
+        );
+    }
+
+    let set_parse_policy = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.configuration.setParsePolicy")
+        .expect("setParsePolicy inventory entry remains as planned surface");
+    assert_eq!(set_parse_policy.get("status"), "planned");
+    assert_eq!(set_parse_policy.get("registry_public"), "false");
+    assert!(set_parse_policy.get("runtime_path").contains("planned"));
+
+    let config_api_ids: BTreeSet<&str> = entries
+        .iter()
+        .filter(|entry| entry.get("id").starts_with("clay.configuration."))
+        .map(|entry| entry.get("id"))
+        .collect();
+    for forbidden_id in [
+        "clay.configuration.setRuntimeTimeout",
+        "clay.configuration.setJsRuntimeTimeout",
+        "clay.configuration.setParseHandlerTimeout",
+        "clay.configuration.setRuntimeHeapLimit",
+        "clay.configuration.setSandboxDisabled",
+        "clay.configuration.enableThirdPartyPackages",
+        "clay.configuration.setParseWindowBytes",
+        "clay.configuration.setSyntaxCacheBudget",
+        "clay.configuration.setDecorationPayloadBudget",
+    ] {
+        assert!(
+            !config_api_ids.contains(forbidden_id),
+            "Phase 18.7 must not expose hidden/tunable security budget API `{forbidden_id}`"
+        );
+    }
+}
+
+/// Plan 030 task "Create or verify Clay JS APIs for public programmatic
+/// surfaces": Plan 030 is security-hardening work, so it must NOT introduce new
+/// deno_core ops or new Clay JS API facades (a new programmatic JS capability
+/// would be an authority expansion, the opposite of hardening). Every new
+/// server-side helper added by Plan 030 must be `pub(crate)`, `pub(super)`, or
+/// private — never a bare `pub fn` exposed as a programmatic surface without an
+/// op wrapper + inventory entry. This test pins both invariants for the files
+/// Plan 030 touched.
+#[test]
+fn plan_030_introduces_no_new_js_api_or_public_programmatic_surface() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+        .expect("read api-inventory.toml");
+
+    // (1) No bare `pub fn`/`pub async fn` in Plan 030-touched server files
+    // that carried NO pre-existing public surface (so any new `pub fn` there
+    // is genuinely new programmatic surface Plan 030 would be introducing).
+    // Files like `src/server/mod.rs`, `connection.rs`, and `packages/*.rs`
+    // carry legitimate pre-existing pub API for the `clay-server` binary and
+    // the package backend trait used by tests, so they are excluded; the
+    // specific Plan 030 helpers in `workspace.rs` are pinned by name below.
+    let plan_030_new_surface_files = [
+        "src/perf/budgets.rs",
+        "src/server/workspace.rs",
+        "src/server/js_runtime.rs",
+        "src/server/ops/sdui.rs",
+        "src/server/ui.rs",
+        "src/server/behavior.rs",
+    ];
+    for file in plan_030_new_surface_files {
+        let path = root.join(file);
+        if !path.exists() {
+            continue;
+        }
+        let src = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {file}: {e}"));
+        for (i, line) in src.lines().enumerate() {
+            let t = line.trim_start();
+            // Allow `pub(crate)`, `pub(super)`, `pub(crate) async`, etc.
+            if t.starts_with("pub fn ") || t.starts_with("pub async fn ") {
+                panic!(
+                    "Plan 030 file {file}: line {} introduces a bare `pub fn`/`pub async fn` \
+                     (`{}`). New programmatic surface must use pub(crate)/pub(super) or route \
+                     through an existing deno_core op + Clay JS facade mapped in \
+                     api-inventory.toml.",
+                    i + 1,
+                    t.trim()
+                );
+            }
+        }
+    }
+
+    // (2) The specific Plan 030 server-internal helpers are restricted-visibility
+    // (pub(crate) or private), never bare `pub`.
+    let workspace_src =
+        fs::read_to_string(root.join("src/server/workspace.rs")).expect("read workspace.rs");
+    for restricted in [
+        "pub(crate) async fn open_existing_file_unlocked",
+        "pub(crate) async fn open_selected_file_unlocked",
+        "pub(crate) async fn save_document_unlocked",
+        "pub(crate) async fn reload_document_unlocked",
+        "fn check_openable_size",
+        "async fn open_io",
+        "async fn save_io",
+        "async fn reload_io",
+        "fn atomic_temp_path",
+        "async fn atomic_write_file",
+    ] {
+        assert!(
+            workspace_src.contains(restricted),
+            "Plan 030 workspace helper must keep restricted visibility: `{restricted}`"
+        );
+    }
+
+    // (3) Plan 030 internal-only helpers must NOT be mapped as Clay JS APIs.
+    // `install_command_args` is intentionally a pub test helper on PnpmBackend
+    // (a backend type, not a deno_core op); it is not a programmatic JS surface.
+    for forbidden_inventory_substring in [
+        "open_existing_file_unlocked",
+        "open_selected_file_unlocked",
+        "save_document_unlocked",
+        "reload_document_unlocked",
+        "with_timeout",
+        "install_command_args",
+        "atomic_write_file",
+        "check_openable_size",
+    ] {
+        // These names must not appear as a deno_op mapping target.
+        assert!(
+            !inventory.contains(&format!("deno_op = \"op_{forbidden_inventory_substring}\"")),
+            "Plan 030 internal helper `{forbidden_inventory_substring}` must not be exposed as a deno_core op"
+        );
+    }
+
+    // (4) No Plan 030 budget became a Clay JS API id. The configuration task
+    // already pins the configuration namespace; this pins the broader Clay JS
+    // API namespace against the same budget surfaces.
+    for forbidden_id in [
+        "clay.runtime.setTimeout",
+        "clay.runtime.setEvaluationBudget",
+        "clay.documents.setMaxOpenableSize",
+        "clay.sdui.setTreeBudget",
+        "clay.packages.allowLifecycleScripts",
+    ] {
+        assert!(
+            inventory_entries()
+                .iter()
+                .all(|entry| entry.get("id") != forbidden_id),
+            "Plan 030 budget must not be exposed as Clay JS API `{forbidden_id}`"
+        );
     }
 }

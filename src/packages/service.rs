@@ -50,9 +50,14 @@ pub enum PackageServiceError {
     /// The underlying package-manager backend failed.
     BackendError(BackendError),
     /// Clay's enable/load validator rejected the package.
-    InvalidClayMetadata(PackageRecordError),
+    ///
+    /// Boxed to keep `Result<T, PackageServiceError>` under clippy's
+    /// `result_large_err` threshold (the inner diagnostic is ~120 bytes).
+    InvalidClayMetadata(Box<PackageRecordError>),
     /// Enabled package contribution conflicts would result from the operation.
-    ContributionConflict(PackageConflictDiagnostic),
+    ///
+    /// Boxed for the same reason as `InvalidClayMetadata`.
+    ContributionConflict(Box<PackageConflictDiagnostic>),
     /// The package is not installed.
     NotInstalled { package_name: String },
     /// The package is already enabled.
@@ -291,12 +296,12 @@ impl PackageService {
 
         // Clay-owned validation: must pass before any contribution is activated.
         let record = assemble_package_record(&installed.package_json)
-            .map_err(PackageServiceError::InvalidClayMetadata)?;
+            .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
 
         self.enabled.insert(package_name.to_string(), record);
         if let Err(err) = check_enabled_packages(self.enabled.values()) {
             self.enabled.remove(package_name);
-            return Err(PackageServiceError::ContributionConflict(err));
+            return Err(PackageServiceError::ContributionConflict(Box::new(err)));
         }
         Ok(self.enabled.get(package_name).unwrap())
     }

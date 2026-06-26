@@ -6,6 +6,11 @@
 //! native handles, raw CSS, raw ops, renderer callbacks, or executable package
 //! code to packages.
 
+#![allow(
+    dead_code,
+    reason = "package UI runtime descriptors are validated and documented before all shell callsites are enabled"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use masonry::kurbo::Rect;

@@ -48,7 +48,7 @@ A complete package may declare or implement these surfaces:
 | Surface | Purpose | Examples |
 | --- | --- | --- |
 | Manifest | Identity, entry points, permissions, docs, primitive contributions | `package.json` `clay` block |
-| Loading | Default setup and optional customization | Planned target `loadPackage("@clay/markdown")`; current validation helper `serverLoadPackage(packageJson)` |
+| Loading | Default setup and optional customization | Implemented default `loadPackage("@clay/markdown")`; validation helper `serverLoadPackage(packageJson)` |
 | UI/layout | Panels, components, editor views, overlays | main editor, preview panel, file tree |
 | Input | Key/mouse/focus interests | Enter transform, click action, panel focus |
 | Actions | Commands users/components can invoke | `markdown.togglePreview` |
@@ -116,7 +116,7 @@ Still planned for package authors:
 - Package state/data scopes.
 - User layout/style/input/theme overrides through documented configuration APIs.
 - Updated Markdown package defaults after these package-facing foundations are consumed by first-party packages.
-- A future one-line end-user package load wrapper such as `loadPackage("@clay/markdown")` once package spec resolution, install/enable/load-entry authority, and `init.js` package-service state recording are implemented and documented.
+- The one-line end-user package load wrapper `loadPackage("@clay/markdown")`, backed by first-party spec resolution, enable validation, load-entry execution, and persistent runtime state.
 
 Expected shell/layout/package guide updates by phase:
 
@@ -125,10 +125,12 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.1 | Architecture vocabulary, Masonry boundary, status markers, planned API inventory, conflicts/precedence, and anti-patterns documented here and in the primitive reference. |
 | Phase 18.2 | Document implemented internal shell root, `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` runtime behavior while keeping public `clay:ui` package APIs marked planned/unavailable. |
 | Phase 18.3 | Document runtime-backed public APIs for slot-aware `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration` registration, examples, diagnostics, package metadata, package permissions, and generated registry/API coverage. |
-| Phase 18.4 | Document implemented `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, and package option customization APIs; verify the one-line `loadPackage("@clay/markdown")` default loader remains a planned generic package-service gap rather than a shipped end-user API. |
+| Phase 18.4 | Document implemented `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, and package option customization APIs. |
 | Phase 18.5 | Document the Phase 18.5 authoring contract: no default fixed panel unless explicitly registered, optional preview as `PanelContribution` with `defaultVisibility: "hidden"`, main editor placement via `PaneSlotLayout.main`, theme token usage, and `setPackageOption`/`serverSetLayoutOverride` customization. Update Markdown package docs to consume generic shell/layout primitives and remove fixture-only UI guidance from user-facing defaults. |
+| Phase 18.6 | Document the shipped one-line `loadPackage("@clay/markdown")` first-party loader and its deny-by-default `FirstPartyLoadEntryAllowlist` boundary. |
+| Phase 18.7 | Document persistent-runtime parse-handler registration, generic open-time mode activation, no-client-JS/no-hot-path-JS invariants, parse budgets, and forbidden per-mode/per-open shortcuts. |
 
-Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.4 `serverRegisterInputContribution`, `serverRegisterUiStateScope`, `serverSetLayoutOverride`, and `setPackageOption` examples are also runtime-backed public APIs. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and the future `loadPackage("@clay/markdown")` one-line loader remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
+Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.4 `serverRegisterInputContribution`, `serverRegisterUiStateScope`, `serverSetLayoutOverride`, and `setPackageOption` examples are also runtime-backed public APIs. Phase 18.6/18.7 promote the first-party `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, non-`@clay/*` registry loading, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
 ## Package Manifest
 
@@ -266,11 +268,11 @@ A permission declaration does not grant broad authority. Packages still cannot a
 
 Package loading status:
 
-- **Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js` with `await loadPackage("@clay/markdown")`. The resolver validates the specifier, runs the package metadata through `PackageService`, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the deny-by-default boundary and the carried-forward deferrals (non-`@clay/*` registry, hot reload, persistent enable state).
+- **Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js` with `await loadPackage("@clay/markdown")`. The resolver validates the specifier, runs the package metadata through `PackageService`, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the deny-by-default boundary, runtime-generation hot reload behavior, and carried-forward deferrals (non-`@clay/*` registry and persistent enable state).
 - **Implemented/runtime-backed today:** `loadPackage("@clay/*")` is the one-line end-user default. `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and controlled configuration tests.
 - **Phase 18.4 customization status:** optional customization after the future one-line load uses documented `setPackageOption` and `serverSetLayoutOverride` APIs. These are startup/configuration-change/package-load/update-time validators, not hidden JSON/TOML/ad hoc keys and not package enable/disable authority.
 
-Planned preferred default form:
+**Implemented default loader shape**:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -298,7 +300,7 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Phase 18.6 shipped the generic one-line loader. The current deny-by-default runtime (`src/server/js_runtime.rs::ClayModuleLoader`) now accepts resolver-validated first-party `@clay/*` `loadEntry` modules through a shared `FirstPartyLoadEntryAllowlist` gate. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a constrained first-party allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the original deferral rationale and the carried-forward deferrals (non-`@clay/*` registry resolution, hot reload, persistent shared enable state). The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
+Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, imports its declared `loadEntry`, registers mode metadata and parse handlers, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. The current deny-by-default runtime (`src/server/js_runtime.rs::ClayModuleLoader`) accepts resolver-validated first-party `@clay/*` `loadEntry` modules through a shared `FirstPartyLoadEntryAllowlist` gate. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the first-party `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a constrained first-party allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the original deferral rationale and the carried-forward deferrals (non-`@clay/*` registry resolution and persistent shared enable state). The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
 
 If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
 
@@ -317,39 +319,160 @@ src/theme.js       optional theme token declarations
 
 Compiled packages may publish `dist/` equivalents.
 
-**Implemented default loader shape** for a package load entry (the loadEntry contract is now implemented since Phase 18.6):
+**Implemented persistent-runtime load entry shape** for a package `loadEntry`:
 
 ```js
 import { serverRegisterCommand } from "clay:commands";
 import { serverRegisterModePattern, serverActivateMajorMode } from "clay:modes";
+import { serverLoadPackage } from "clay:packages";
 import { serverRegisterParseHandler } from "clay:parse";
-import { parseMarkdownDecorations } from "./parser.js";
+import { markdownPackageManifest } from "./index.js";
 
-export async function markdownLoadPackage(options = {}) {
-  serverRegisterCommand({
-    id: "markdown.togglePreview",
-    label: "Toggle Markdown Preview",
-    routing: "ServerFirst",
-  });
+export async function loadMarkdownPackage(clay, options = {}) {
+  const packageManifest = markdownPackageManifest();
 
-  serverRegisterModePattern({
-    mode: "markdown",
+  await clay.packages.serverLoadPackage(packageManifest);
+
+  await clay.modes.serverRegisterModePattern(packageManifest, {
+    modeId: "markdown",
+    displayName: "Markdown",
     extensions: ["md", "markdown", "mdown"],
     mimeTypes: ["text/markdown"],
+    editorRules: MARKDOWN_EDITOR_RULES,
+    commands: MARKDOWN_COMMANDS,
+    keymaps: MARKDOWN_KEYMAPS,
   });
 
-  serverRegisterParseHandler({
-    mode: "markdown",
-    parse: parseMarkdownDecorations,
+  // Optional load-time activation for an explicit document. Selected-file open
+  // later uses serverActivateClassifiedMode with the metadata stored above.
+  await clay.modes.serverActivateMajorMode(packageManifest, {
+    documentId: Number(options.documentId ?? 1),
+    path: String(options.path ?? "sample.md"),
+    editorRules: MARKDOWN_EDITOR_RULES,
+    commands: MARKDOWN_COMMANDS,
+    keymaps: MARKDOWN_KEYMAPS,
   });
 
-  if (options.activateDocumentId) {
-    await serverActivateMajorMode(options.activateDocumentId, "markdown");
+  for (const command of MARKDOWN_COMMANDS) {
+    await clay.commands.serverRegisterCommand(packageManifest, {
+      commandId: command.id,
+      displayName: command.displayName,
+      routingPolicy: command.routingPolicy,
+    });
   }
+
+  const parserModule = await import("./parser.js");
+  await clay.parse.serverRegisterParseHandler({
+    packageManifest,
+    mode: "markdown",
+    parseUnit: "line-group",
+    viewportPriority: true,
+    module: parserModule,
+    exportName: "parseMarkdownDecorationUpdate",
+    maxWindowBytes: 64 * 1024,
+    guardBytes: 4 * 1024,
+    memoryBudgetBytes: 30 * 1024 * 1024,
+    timeoutMs: 50,
+  });
+}
+
+export default async function markdownLoadMode(options = {}) {
+  return loadMarkdownPackage({
+    packages: { serverLoadPackage },
+    modes: { serverRegisterModePattern, serverActivateMajorMode },
+    commands: { serverRegisterCommand },
+    parse: { serverRegisterParseHandler },
+  }, options);
 }
 ```
 
-The exact implemented API names may differ by phase. Keep package docs current with the implemented Clay JS API reference.
+The public registration contract is token-backed. `serverRegisterParseHandler` accepts a package module object plus `exportName`; the facade stores that function in the persistent server runtime behind a server-issued token. Rust never receives a JavaScript callback value. The op validates package identity, `PackagePermission::ParseDocument` / `"parse-document"`, parse unit, window/memory budgets, and timeout bounds before a `ParseCoordinator` handler is registered.
+
+**Generic future-mode shape** (same primitives, no Markdown-specific Rust branch):
+
+```js
+import { serverRegisterCommand } from "clay:commands";
+import { serverActivateMajorMode, serverRegisterModePattern } from "clay:modes";
+import { serverLoadPackage } from "clay:packages";
+import { serverRegisterParseHandler } from "clay:parse";
+import * as parserModule from "./parser.js";
+import { myLanguageManifest } from "./index.js";
+
+export default async function loadMyLanguage(options = {}) {
+  const packageManifest = myLanguageManifest();
+  await serverLoadPackage(packageManifest);
+  await serverRegisterModePattern(packageManifest, {
+    modeId: "my-language",
+    displayName: "My Language",
+    extensions: ["my"],
+    editorRules: MY_LANGUAGE_EDITOR_RULES,
+    commands: MY_LANGUAGE_COMMANDS,
+    keymaps: MY_LANGUAGE_KEYMAPS,
+  });
+  await serverActivateMajorMode(packageManifest, {
+    documentId: Number(options.documentId ?? 1),
+    path: String(options.path ?? "example.my"),
+    editorRules: MY_LANGUAGE_EDITOR_RULES,
+    commands: MY_LANGUAGE_COMMANDS,
+    keymaps: MY_LANGUAGE_KEYMAPS,
+  });
+  for (const command of MY_LANGUAGE_COMMANDS) {
+    await serverRegisterCommand(packageManifest, command);
+  }
+  await serverRegisterParseHandler({
+    packageManifest,
+    mode: "my-language",
+    parseUnit: "line-group",
+    module: parserModule,
+    exportName: "parseMyLanguageUpdate",
+    maxWindowBytes: 64 * 1024,
+    guardBytes: 4 * 1024,
+    memoryBudgetBytes: 30 * 1024 * 1024,
+    timeoutMs: 50,
+  });
+}
+```
+
+Keep package docs current with the implemented Clay JS API reference; do not invent raw op or callback shortcuts.
+
+### Persistent runtime, open-time activation, and parse boundaries
+
+The end-user default stays one line in `~/.config/clay/init.js`:
+
+```js
+import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");
+```
+
+`loadPackage` executes the package `loadEntry` once per runtime generation. The registered mode patterns, activation metadata, command declarations, and parse-handler token remain resident in that generation. Phase 19 hot reload replaces the runtime generation, reruns `~/.config/clay/init.js`, rebuilds package state, and reruns the same package `loadEntry` with an empty `globalThis.__clayLoadedPackages` cache. Package authors should rebuild all runtime state from `loadEntry`; they should not rely on mutable JavaScript globals surviving reload. Failed reloads keep the previous generation active and report sanitized diagnostics.
+
+On selected-file open or successful reload refresh, Clay classifies the path through the generic `clay:modes` registry, uses `serverActivateClassifiedMode` with the stored activation metadata to activate the matching major mode for that document, then schedules a bounded parse through `ParseCoordinator`. User config does not reload the package per open and does not manually register every primitive. Parse handler registrations are generation-scoped: a newer generation replaces old handler tokens, cancels old-generation parse work, and rejects late old-runtime-generation task results before publication.
+
+Package parse work follows the no-client-JS / no-hot-path-JS invariant: it is never client JavaScript and never hot-path JavaScript. Parser functions run only on the server runtime worker after edit/open work has already been accepted. Ordinary keypress, Masonry paint/layout, pointer, scroll, and text-event handling read inert manifests/protocol data and do not call package JS. Slow parse work can make decorations stale, but it must not block local text display or edit acknowledgement.
+
+Budget contract for package parse handlers:
+
+- `timeoutMs`: package-declared parse timeout, validated as `1..=5000` ms; JS invocation uses the smaller of this value and the service guard, and runaway handlers surface as `clay.runtime.timeout`.
+- `maxWindowBytes` / `parseWindowBytes`: max bytes per bounded parse window; Markdown uses `64 * 1024`.
+- `guardBytes`: optional context bytes around a window; Markdown uses `4 * 1024`.
+- `memoryBudgetBytes`: total syntax/parse memory budget, capped by `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB).
+- Emitted `IncrementalParseUpdate` payloads must fit `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; parse-produced decorations also pass `DECORATION_PAYLOAD_BUDGET_BYTES` validation before client delivery.
+
+Security and authority contract:
+
+- Handler registration requires `PackagePermission::ParseDocument` / `"parse-document"` in package metadata.
+- Only validated packages register live handlers; install/enable metadata alone does not grant parser execution.
+- `ClayModuleLoader` is deny-by-default. It loads curated `clay:*` facades, controlled config modules, the vendored first-party parser shim, and resolver-validated first-party `@clay/*` `loadEntry` modules through `FirstPartyLoadEntryAllowlist`; hot reload preserves the first-party-only boundary and rebuilds the allowlist in the fresh generation.
+- Packages do not gain arbitrary filesystem, network, shell, AI, WASM, raw-op, native-widget, package-manager, package-enable/disable, or client-JS authority through loading, activation, UI contribution registration, or parsing.
+
+Forbidden anti-patterns:
+
+- Per-open runtimes or per-open `dist/` copies.
+- Executable `handler`, `callback`, `onParse`, or `function` fields in the public parse registration payload.
+- Raw `Deno.core.ops` calls as package/user-facing API.
+- Markdown-only Rust branches such as `if path.ends_with(".md")`, `if mode_id == "markdown"`, or handwritten markdown-it token handling in server/client Rust.
+- Publishing representative/fake decorations from `init.js` instead of returning an `IncrementalParseUpdate` from the package parse handler.
+- Client-side JavaScript, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, or layout mutation hidden inside package UI/layout declarations.
 
 ## UI and Layout Model
 

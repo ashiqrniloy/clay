@@ -326,12 +326,11 @@ fn markdown_package_contract_validates_with_required_metadata() {
         json!(["md", "markdown", "mdown"])
     );
     assert_eq!(mode_patterns[0]["mimeTypes"], json!(["text/markdown"]));
-    assert_eq!(
+    assert!(
         clay["performance"]["hotPathPolicy"]
             .as_str()
             .unwrap()
-            .contains("keypress"),
-        true
+            .contains("keypress")
     );
 }
 
@@ -504,7 +503,7 @@ fn enabled_package_conflicts_reject_duplicate_slot_ui_ids_and_slots() {
 
     let err = check_enabled_packages([&first, &second]).unwrap_err();
     assert_eq!(err.kind, PackageConflictKind::UiFixedSlotCollision);
-    assert_eq!(err.contribution_id, "right");
+    assert_eq!(&*err.contribution_id, "right");
 }
 
 #[test]
@@ -629,7 +628,7 @@ fn enabled_package_conflicts_reject_duplicate_input_state_config_targets() {
     let second = assemble_package_record(&second_input).unwrap();
     let err = check_enabled_packages([&first, &second]).unwrap_err();
     assert_eq!(err.kind, PackageConflictKind::InputContributionCollision);
-    assert_eq!(err.contribution_id, "markdown.preview.input");
+    assert_eq!(&*err.contribution_id, "markdown.preview.input");
 
     let mut second_option =
         phase18_4_input_state_config_fixture("@clay/markdown-options", "markdown");
@@ -654,7 +653,7 @@ fn enabled_package_conflicts_reject_duplicate_input_state_config_targets() {
     let second = assemble_package_record(&second_option).unwrap();
     let err = check_enabled_packages([&first, &second]).unwrap_err();
     assert_eq!(err.kind, PackageConflictKind::PackageOptionCollision);
-    assert_eq!(err.contribution_id, "markdown.layout.defaultVisibility");
+    assert_eq!(&*err.contribution_id, "markdown.layout.defaultVisibility");
 }
 
 #[test]
@@ -1755,14 +1754,14 @@ fn enable_rejects_duplicate_prefix_and_mode_and_command() {
     let dup_prefix = conflict_record("@clay/one-alt", "one", "one.alt", "one.altRun");
     let err = check_enabled_packages([&first, &dup_prefix]).unwrap_err();
     assert_eq!(err.kind, PackageConflictKind::DuplicatePrefix);
-    assert_eq!(err.contribution_id, "one");
+    assert_eq!(&*err.contribution_id, "one");
     assert_eq!(err.first.package_name, "@clay/one");
     assert_eq!(err.second.package_name, "@clay/one-alt");
 
     let dup_mode = conflict_record("@clay/two", "one", "one", "one.twoRun");
     let err = check_enabled_packages([&first, &dup_mode]).unwrap_err();
     assert_eq!(err.kind, PackageConflictKind::DuplicateMode);
-    assert_eq!(err.contribution_id, "one");
+    assert_eq!(&*err.contribution_id, "one");
     assert!(err.message.contains("@clay/one"));
     assert!(err.message.contains("@clay/two"));
 
@@ -1787,7 +1786,7 @@ fn enable_rejects_duplicate_prefix_and_mode_and_command() {
     }));
     let err = check_enabled_packages([&first, &duplicate_command]).unwrap_err();
     assert_eq!(err.kind, PackageConflictKind::DuplicateCommand);
-    assert_eq!(err.contribution_id, "one.run");
+    assert_eq!(&*err.contribution_id, "one.run");
 
     // The service runs the same conflict pass during enable and rolls back the candidate.
     let mut service = PackageService::new("/tmp/clay-conflict-store", Box::new(FakeBackend::new()));
@@ -1824,7 +1823,7 @@ fn enable_rejects_duplicate_prefix_and_mode_and_command() {
     match err {
         PackageServiceError::ContributionConflict(conflict) => {
             assert_eq!(conflict.kind, PackageConflictKind::DuplicatePrefix);
-            assert_eq!(conflict.contribution_id, "one");
+            assert_eq!(&*conflict.contribution_id, "one");
         }
         other => panic!("expected ContributionConflict, got {other:?}"),
     }

@@ -79,12 +79,12 @@ node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8
 node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json
 ```
 
-Save and compare an advisory local baseline before performance-sensitive changes:
+Save and compare advisory local baselines before performance-sensitive changes. Run target-specific Criterion commands so CLI flags are consumed by Criterion rather than by unrelated bench harnesses:
 
 ```text
-cargo bench --benches -- --save-baseline phase14-baseline
-cargo bench --benches -- --baseline phase14-baseline
-cargo bench --benches -- --baseline-lenient phase14-baseline
+cargo bench --bench protocol_server_baselines -- --save-baseline phase14-baseline
+cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline
+cargo bench --bench protocol_server_baselines -- --baseline-lenient phase14-baseline
 ```
 
 Use absolute timing results as local guidance only. Machine-variant Criterion results should not become hard CI failures unless a future task proves a threshold is stable. Prefer deterministic tests for hard guards such as payload ceilings, bounded queues, viewport-bounded extraction invariants, and invalid-frame rejection.
@@ -150,20 +150,22 @@ Treat these as **comparison targets** for local regression triage, not cross-mac
 
 ### Local baseline workflow
 
-Save a baseline before performance-sensitive refactors:
+Save a target-specific baseline before performance-sensitive refactors:
 
 ```text
-cargo bench --benches -- --save-baseline phase14-baseline
+cargo bench --bench protocol_server_baselines -- --save-baseline phase14-baseline
 ```
 
 Compare after changes:
 
 ```text
-cargo bench --benches -- --baseline phase14-baseline
-cargo bench --benches -- --baseline-lenient phase14-baseline
+cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline
+cargo bench --bench protocol_server_baselines -- --baseline-lenient phase14-baseline
 ```
 
-Use `--baseline-lenient` for noisy machines and investigate only sustained regressions across repeated local runs.
+Use `--baseline-lenient` only on target-specific Criterion commands. On this codebase, `cargo bench --benches -- --baseline-lenient ...` can route the flag to a non-Criterion bench harness and fail before the comparison runs.
+
+Investigate only sustained regressions across repeated local runs. Phase 18.7 repeated local protocol comparisons showed stable nanosecond-scale regressions versus the old Phase 14 baseline for `hello_roundtrip` (~+28–32%) and `client_edit/16` (~+19–20%), while larger payloads and server-document groups varied between regression, no-change, and improvement. No deterministic payload budget regressed (`cargo test --test performance_protocol` passed), and the benchmark code path changed only by Clippy-equivalent match simplification, so the Phase 18.7 result is accepted as a machine/local-baseline refresh signal rather than a protocol shape blocker.
 
 ### Security and authority guardrails for profiling/benchmark workflows
 

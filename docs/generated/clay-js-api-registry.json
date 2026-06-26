@@ -1359,7 +1359,7 @@
       "deno_op_path": "src/server/ops/parse.rs::op_clay_parse_register_parse_handler",
       "name": "serverRegisterParseHandler",
       "user_facing_name": "Register Parse Handler",
-      "summary": "Register a server-side background parse provider for an active package mode.",
+      "summary": "Register a token-backed server-side background parse provider for a validated package mode.",
       "owner": "server",
       "phase": "Phase 18",
       "visibility": "public",
@@ -1367,13 +1367,25 @@
       "key_bindings": [],
       "custom_properties": [
         {
+          "name": "module",
+          "type": "object",
+          "default": "required-for-runtime-bridge",
+          "description": "Package module object whose exported parser function stays inside the persistent server runtime behind a server-issued token."
+        },
+        {
+          "name": "exportName",
+          "type": "string",
+          "default": "default",
+          "description": "Export name resolved from module; the export must be a function and is never serialized to Rust."
+        },
+        {
           "name": "modeId",
           "type": "string",
           "default": "required",
           "description": "Active mode ID this handler serves."
         },
         {
-          "name": "parseUnits",
+          "name": "parseUnit",
           "type": "enum",
           "default": "line-group",
           "description": "Coarsest incremental parse unit: file, region, or line-group."
@@ -1415,8 +1427,8 @@
           "description": "Incremental parse result budget enforced before publication."
         }
       ],
-      "security": "Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, bounded parse-window snapshots, syntax memory budget, and bounded parse result publication; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.",
-      "agent_guidance": "Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser. Do not pass executable callbacks in registration payloads or put parse work on the client hot path.",
+      "security": "Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, bounded parse-window snapshots, syntax memory budget, and bounded parse result publication; handler functions stay in the persistent server runtime behind a server-issued token and executable handler/callback/onParse/function payload keys are rejected; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.",
+      "agent_guidance": "Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser with `{ module, exportName }`. Do not pass executable callbacks in registration payloads or put parse work on the client hot path. Treat `clay.runtime.timeout` as the diagnostic for a handler/runtime evaluation that exceeds its validated timeout budget.",
       "lookup_tags": ["js-api", "parse", "markdown", "incrementalparseupdate", "parser"],
       "app_visible": true,
       "help_visible": true,

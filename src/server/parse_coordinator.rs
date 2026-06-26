@@ -13,7 +13,7 @@ use crate::{
     perf::budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     protocol::{
         BehaviorVersion, DocumentId, DocumentVersion, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification, ParsePolicy, ParseWindowSnapshot, SyntaxMemoryBudget,
+        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot, SyntaxMemoryBudget,
     },
     server::decorations::validate_decoration_set,
 };
@@ -93,12 +93,25 @@ pub enum ParseCoordinatorError {
     SerializationFailed,
     ResultChannelClosed,
     HandlerFailed(String),
+    StaleRuntimeGeneration {
+        task_generation: u64,
+        active_generation: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseHandlerMeta {
     pub package_prefix: String,
     pub mode_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JsParseHandlerRegistration {
+    pub(crate) package: PackageRecord,
+    pub(crate) meta: ParseHandlerMeta,
+    pub(crate) token: String,
+    pub(crate) parse_unit: ParseUnit,
+    pub(crate) timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +157,7 @@ pub struct ParseCoordinatorStats {
     pub cancelled_superseded_tasks: usize,
     pub published_updates: usize,
     pub stale_results_rejected: usize,
+    pub failed_tasks: usize,
 }
 
 #[derive(Clone)]
@@ -154,10 +168,15 @@ pub struct ParseCoordinator {
 }
 
 struct ParseCoordinatorInner {
-    handlers: HashMap<HandlerKey, Arc<dyn ParseHandler>>,
+    handlers: HashMap<HandlerKey, RegisteredParseHandler>,
     active_tasks: HashMap<TaskKey, JoinHandle<()>>,
     current_versions: HashMap<DocumentId, DocumentVersion>,
     stats: ParseCoordinatorStats,
+}
+
+struct RegisteredParseHandler {
+    generation_id: u64,
+    handler: Arc<dyn ParseHandler>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -170,6 +189,7 @@ type TaskKey = HandlerKeyWithDocument;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct HandlerKeyWithDocument {
+    generation_id: u64,
     document_id: DocumentId,
     package_prefix: String,
     mode_id: String,
@@ -196,6 +216,16 @@ impl ParseCoordinator {
         mode_id: impl Into<String>,
         handler: impl ParseHandler,
     ) -> Result<ParseHandlerMeta, ParseCoordinatorError> {
+        self.register_handler_for_generation(package, 0, mode_id, handler)
+    }
+
+    pub fn register_handler_for_generation(
+        &self,
+        package: &PackageRecord,
+        generation_id: u64,
+        mode_id: impl Into<String>,
+        handler: impl ParseHandler,
+    ) -> Result<ParseHandlerMeta, ParseCoordinatorError> {
         if !package
             .manifest
             .clay
@@ -207,23 +237,80 @@ impl ParseCoordinator {
             });
         }
 
-        let meta = ParseHandlerMeta {
-            package_prefix: package.manifest.clay.api_prefix.clone(),
-            mode_id: mode_id.into(),
-        };
+        self.register_handler_meta_for_generation(
+            generation_id,
+            ParseHandlerMeta {
+                package_prefix: package.manifest.clay.api_prefix.clone(),
+                mode_id: mode_id.into(),
+            },
+            handler,
+        )
+    }
+
+    pub(crate) fn register_handler_meta_for_generation(
+        &self,
+        generation_id: u64,
+        meta: ParseHandlerMeta,
+        handler: impl ParseHandler,
+    ) -> Result<ParseHandlerMeta, ParseCoordinatorError> {
         let key = HandlerKey {
             package_prefix: meta.package_prefix.clone(),
             mode_id: meta.mode_id.clone(),
         };
         let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-        if inner.handlers.contains_key(&key) {
+        if inner
+            .handlers
+            .get(&key)
+            .is_some_and(|registered| registered.generation_id == generation_id)
+        {
             return Err(ParseCoordinatorError::HandlerAlreadyRegistered {
                 package_prefix: key.package_prefix,
                 mode_id: key.mode_id,
             });
         }
-        inner.handlers.insert(key, Arc::new(handler));
+        let stale_task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|task_key| {
+                task_key.package_prefix == key.package_prefix
+                    && task_key.mode_id == key.mode_id
+                    && task_key.generation_id != generation_id
+            })
+            .cloned()
+            .collect();
+        for task_key in stale_task_keys {
+            if let Some(task) = inner.active_tasks.remove(&task_key) {
+                task.abort();
+                inner.stats.cancelled_superseded_tasks += 1;
+            }
+        }
+        inner.handlers.insert(
+            key,
+            RegisteredParseHandler {
+                generation_id,
+                handler: Arc::new(handler),
+            },
+        );
         Ok(meta)
+    }
+
+    pub fn cancel_generation(&self, generation_id: u64) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner
+            .handlers
+            .retain(|_, registered| registered.generation_id != generation_id);
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|task_key| task_key.generation_id == generation_id)
+            .cloned()
+            .collect();
+        for task_key in task_keys {
+            if let Some(task) = inner.active_tasks.remove(&task_key) {
+                task.abort();
+                inner.stats.cancelled_superseded_tasks += 1;
+            }
+        }
     }
 
     /// Schedule parse work after an edit/viewport change has already been
@@ -256,6 +343,7 @@ impl ParseCoordinator {
             mode_id: request.mode_id.clone(),
         };
         let task_key = TaskKey {
+            generation_id: 0,
             document_id: request.document_id,
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
@@ -267,14 +355,19 @@ impl ParseCoordinator {
         }
         notification.parse_windows = parse_windows;
 
-        let handler = {
+        let (handler, task_key) = {
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-            let handler = inner.handlers.get(&handler_key).cloned().ok_or_else(|| {
+            let registered = inner.handlers.get(&handler_key).ok_or_else(|| {
                 ParseCoordinatorError::HandlerNotRegistered {
                     package_prefix: handler_key.package_prefix.clone(),
                     mode_id: handler_key.mode_id.clone(),
                 }
             })?;
+            let handler = registered.handler.clone();
+            let task_key = TaskKey {
+                generation_id: registered.generation_id,
+                ..task_key
+            };
 
             inner
                 .current_versions
@@ -284,7 +377,7 @@ impl ParseCoordinator {
                 inner.stats.cancelled_superseded_tasks += 1;
             }
             inner.stats.scheduled_tasks += 1;
-            handler
+            (handler, task_key)
         };
 
         let coordinator = self.clone();
@@ -310,8 +403,16 @@ impl ParseCoordinator {
         let Ok(update) = result else {
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
             inner.active_tasks.remove(&task_key);
+            inner.stats.failed_tasks += 1;
             return;
         };
+
+        if self.validate_task_generation(&task_key).is_err() {
+            let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            inner.active_tasks.remove(&task_key);
+            inner.stats.stale_results_rejected += 1;
+            return;
+        }
 
         match self.validate_update(&update) {
             Ok(()) => {
@@ -329,7 +430,30 @@ impl ParseCoordinator {
             Err(_) => {
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
                 inner.active_tasks.remove(&task_key);
+                inner.stats.failed_tasks += 1;
             }
+        }
+    }
+
+    fn validate_task_generation(&self, task_key: &TaskKey) -> Result<(), ParseCoordinatorError> {
+        let handler_key = HandlerKey {
+            package_prefix: task_key.package_prefix.clone(),
+            mode_id: task_key.mode_id.clone(),
+        };
+        let active_generation = self
+            .inner
+            .lock()
+            .expect("parse coordinator lock poisoned")
+            .handlers
+            .get(&handler_key)
+            .map(|registered| registered.generation_id);
+        if active_generation == Some(task_key.generation_id) {
+            Ok(())
+        } else {
+            Err(ParseCoordinatorError::StaleRuntimeGeneration {
+                task_generation: task_key.generation_id,
+                active_generation: active_generation.unwrap_or_default(),
+            })
         }
     }
 

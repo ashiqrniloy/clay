@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    path::{Path, PathBuf},
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -12,19 +11,29 @@ use tokio::{
 };
 
 use crate::protocol::{
-    ClientId, ClientMessage, DocumentId, DocumentMetadata, PROTOCOL_VERSION, ProtocolErrorCode,
-    RuntimeDiagnostic, ServerMessage, WorkspaceRootId,
+    ClientId, ClientMessage, DocumentId, DocumentMetadata, PROTOCOL_VERSION, ParseByteRange,
+    ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, ServerMessage,
+    WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
 use super::{
+    RuntimeGenerationStore,
     behavior::ActiveBehaviorManifest,
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
+    parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
     sdui::{StaticSduiState, sdui_action_response},
-    workspace::{WorkspaceError, WorkspaceState},
+    workspace::{
+        WorkspaceError, WorkspaceState, open_existing_file_unlocked, open_selected_file_unlocked,
+        reload_document_unlocked, save_document_unlocked,
+    },
 };
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "connection handler receives server-owned state explicitly instead of hiding authority in a context bag"
+)]
 pub(crate) async fn handle_connection<S>(
     mut stream: S,
     client_id: u64,
@@ -33,6 +42,8 @@ pub(crate) async fn handle_connection<S>(
     workspace: Arc<Mutex<WorkspaceState>>,
     sdui: Arc<Mutex<StaticSduiState>>,
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_generation: RuntimeGenerationStore,
+    parse_coordinator: ParseCoordinator,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -249,8 +260,16 @@ where
                     open_selected_file_response(&workspace, selected_path, client_id).await;
                 codec.write_server_message(&mut stream, &response).await?;
                 if let ServerMessage::DocumentOpened { metadata, text } = &response {
+                    let runtime = runtime_generation.current().await;
                     let messages = selected_file_open_followup_messages(
-                        client_id, metadata, text, &behavior, &sdui,
+                        client_id,
+                        metadata,
+                        text,
+                        &behavior,
+                        &sdui,
+                        runtime.id,
+                        &runtime.service,
+                        &parse_coordinator,
                     )
                     .await;
                     for message in messages {
@@ -441,15 +460,11 @@ async fn open_document_response(
     path: String,
     client_id: ClientId,
 ) -> ServerMessage {
-    let opened = match workspace
-        .lock()
-        .await
-        .open_existing_file(workspace_root_id, &path, client_id)
-        .await
-    {
-        Ok(opened) => opened,
-        Err(error) => return file_operation_failed(error, Some(workspace_root_id), None),
-    };
+    let opened =
+        match open_existing_file_unlocked(workspace, workspace_root_id, &path, client_id).await {
+            Ok(opened) => opened,
+            Err(error) => return file_operation_failed(error, Some(workspace_root_id), None),
+        };
 
     let document = opened.document.lock().await;
     let metadata = DocumentMetadata {
@@ -472,11 +487,12 @@ async fn open_selected_file_response(
     selected_path: String,
     client_id: ClientId,
 ) -> ServerMessage {
-    let opened = match workspace
-        .lock()
-        .await
-        .open_selected_file(std::path::PathBuf::from(&selected_path), client_id)
-        .await
+    let opened = match open_selected_file_unlocked(
+        workspace,
+        std::path::PathBuf::from(&selected_path),
+        client_id,
+    )
+    .await
     {
         Ok(opened) => opened,
         Err(error) => return file_operation_failed(error, None, None),
@@ -502,7 +518,7 @@ async fn save_document_response(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
 ) -> ServerMessage {
-    match workspace.lock().await.save_document(document_id).await {
+    match save_document_unlocked(workspace, document_id).await {
         Ok(outcome) => ServerMessage::DocumentSaved {
             document_id: outcome.document_id,
             version: outcome.version,
@@ -518,12 +534,7 @@ async fn reload_document_response(
     client_id: ClientId,
     force: bool,
 ) -> ServerMessage {
-    let outcome = match workspace
-        .lock()
-        .await
-        .reload_document(document_id, force)
-        .await
-    {
+    let outcome = match reload_document_unlocked(workspace, document_id, force).await {
         Ok(outcome) => outcome,
         Err(error) => return file_operation_failed(error, None, Some(document_id)),
     };
@@ -582,124 +593,156 @@ fn file_operation_failed(
     }
 }
 
-async fn selected_file_open_followup_messages(
-    client_id: ClientId,
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared selected-file/reload follow-up primitive keeps server-owned state explicit"
+)]
+pub(crate) async fn selected_file_open_followup_messages(
+    _client_id: ClientId,
     metadata: &DocumentMetadata,
     text: &str,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
+    generation_id: u64,
+    js_runtime: &ClayJsRuntimeService,
+    parse_coordinator: &ParseCoordinator,
 ) -> Vec<ServerMessage> {
-    if !is_markdown_path(&metadata.path) || !markdown_package_is_loaded(behavior).await {
+    let Some(activation) = classify_open_document(
+        generation_id,
+        js_runtime,
+        parse_coordinator,
+        metadata,
+        behavior,
+        sdui,
+    )
+    .await
+    else {
         return vec![behavior.lock().await.manifest_message()];
+    };
+
+    let mut messages = vec![behavior.lock().await.manifest_message()];
+    match schedule_open_parse(parse_coordinator, metadata, text, behavior, &activation).await {
+        Ok(Some(set)) => messages.push(ServerMessage::DecorationSet(set)),
+        Ok(None) => {}
+        Err(diagnostic) => messages.push(ServerMessage::RuntimeDiagnostic(diagnostic)),
     }
 
-    match evaluate_markdown_open(metadata, text).await {
-        Ok(evaluation) => {
-            // Reuse the single shared output-application primitive so behavior
-            // and SDUI state mutation + validation live in exactly one place.
-            // The Markdown flow only composes the per-client messages that the
-            // startup path reads lazily (BehaviorManifest, DecorationSet,
-            // SduiSnapshot with this client's id).
-            let application =
-                super::apply_runtime_outputs(&evaluation, metadata.document_id, behavior, sdui)
-                    .await;
-            // Unified diagnostics for any output that failed validation.
-            let failed: Vec<ServerMessage> = application
-                .diagnostics()
-                .into_iter()
-                .map(ServerMessage::RuntimeDiagnostic)
-                .collect();
-
-            let mut messages = Vec::new();
-            match application.behavior {
-                Some(Ok(installed)) => messages.push(ServerMessage::BehaviorManifest(installed)),
-                None => messages.push(behavior.lock().await.manifest_message()),
-                _ => {}
-            }
-            if let Some(set) = application.decorations {
-                messages.push(ServerMessage::DecorationSet(set));
-            }
-            if let Some(Ok(tree)) = application.sdui {
-                messages.push(ServerMessage::SduiSnapshot { client_id, tree });
-            }
-            messages.extend(failed);
-            messages
-        }
-        Err(error) => vec![
-            behavior.lock().await.manifest_message(),
-            ServerMessage::RuntimeDiagnostic(error.diagnostic()),
-        ],
-    }
+    messages
 }
 
-async fn markdown_package_is_loaded(behavior: &Arc<Mutex<ActiveBehaviorManifest>>) -> bool {
-    behavior
-        .lock()
-        .await
-        .manifest()
-        .commands
-        .iter()
-        .any(|command| command.command_id.starts_with("markdown."))
+#[derive(Debug)]
+struct OpenModeActivation {
+    package_prefix: String,
+    mode_id: String,
 }
 
-fn is_markdown_path(path: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "mdown"
-            )
-        })
-        .unwrap_or(false)
+async fn classify_open_document(
+    generation_id: u64,
+    js_runtime: &ClayJsRuntimeService,
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+) -> Option<OpenModeActivation> {
+    let source = format!(
+        r#"
+import {{ serverActivateClassifiedMode, serverClassifyDocument }} from "clay:modes";
+import {{ loadPackage, serverListFirstPartyPackageSpecifiers }} from "clay:packages";
+const input = {{ documentId: {}, path: {} }};
+let classification = null;
+try {{ classification = serverClassifyDocument(input); }} catch {{}}
+if (!classification) {{
+  for (const specifier of serverListFirstPartyPackageSpecifiers()) {{
+    try {{
+      await loadPackage(specifier);
+      classification = serverClassifyDocument(input);
+      if (classification) break;
+    }} catch {{}}
+  }}
+}}
+if (classification) {{
+  serverActivateClassifiedMode(classification, input);
+}}
+Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
+"#,
+        metadata.document_id,
+        serde_json::to_string(&metadata.path).ok()?
+    );
+    let evaluation = js_runtime.evaluate_controlled_module(source).await.ok()?;
+    let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
+    super::apply_runtime_outputs(&evaluation, metadata.document_id, behavior, sdui).await;
+    let record = evaluation.op_records.last()?;
+    let value: serde_json::Value = serde_json::from_str(record).ok()?;
+    Some(OpenModeActivation {
+        package_prefix: value.get("apiPrefix")?.as_str()?.to_string(),
+        mode_id: value.get("modeId")?.as_str()?.to_string(),
+    })
 }
 
-async fn evaluate_markdown_open(
+async fn schedule_open_parse(
+    parse_coordinator: &ParseCoordinator,
     metadata: &DocumentMetadata,
     text: &str,
-) -> Result<super::js_runtime::ClayRuntimeEvaluation, super::js_runtime::ClayRuntimeError> {
-    let config_root = create_markdown_open_runtime_root(metadata, text)?;
-    let result = ClayJsRuntimeService::default()
-        .load_configuration_from_root_for_document(config_root.clone(), metadata.document_id)
-        .await;
-    let _ = std::fs::remove_dir_all(config_root);
-    result
-}
-
-fn create_markdown_open_runtime_root(
-    metadata: &DocumentMetadata,
-    text: &str,
-) -> Result<PathBuf, super::js_runtime::ClayRuntimeError> {
-    let config_root = unique_markdown_open_runtime_root();
-    std::fs::create_dir_all(&config_root)
-        .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
-    let dist_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("packages")
-        .join("markdown")
-        .join("dist");
-    for file_name in ["index.js", "load.js", "parser.js"] {
-        std::fs::copy(dist_root.join(file_name), config_root.join(file_name))
-            .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
-    }
-
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    activation: &OpenModeActivation,
+) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
     let (window_text, window_byte_end) = bounded_utf8_prefix(text, 64 * 1024);
-    let init_source =
-        markdown_open_init_source(metadata, text.len() as u64, window_text, window_byte_end);
-    std::fs::write(config_root.join("init.js"), init_source)
-        .map_err(|error| super::js_runtime::ClayRuntimeError::Runtime(error.to_string()))?;
-    Ok(config_root)
-}
+    let behavior_version = behavior.lock().await.version();
+    let request = ParseScheduleRequest {
+        document_id: metadata.document_id,
+        document_version: metadata.version,
+        behavior_version,
+        package_prefix: activation.package_prefix.clone(),
+        mode_id: activation.mode_id.clone(),
+        viewport: ParseByteRange::new(0, window_byte_end),
+        invalidated_ranges: vec![ParseByteRange::new(0, window_byte_end)],
+    };
+    let windows = vec![ParseWindowSnapshot {
+        document_id: metadata.document_id,
+        document_version: metadata.version,
+        package_prefix: activation.package_prefix.clone(),
+        mode_id: activation.mode_id.clone(),
+        byte_start: 0,
+        byte_end: window_byte_end,
+        base_line: 0,
+        text: window_text.to_string(),
+    }];
+    parse_coordinator
+        .schedule_parse_with_windows(
+            request,
+            windows,
+            Some(ParsePolicy::new(64 * 1024, 4 * 1024, 30 * 1024 * 1024, 50)),
+        )
+        .map_err(|error| {
+            RuntimeDiagnostic::error(
+                "clay.parse.open_activation_failed",
+                format!("Open-time parse scheduling failed: {error:?}"),
+            )
+        })?;
 
-fn unique_markdown_open_runtime_root() -> PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "clay-markdown-open-runtime-{}-{unique}",
-        std::process::id()
-    ))
+    let deadline = tokio::time::Duration::from_millis(1000);
+    loop {
+        let update = tokio::time::timeout(deadline, parse_coordinator.next_update())
+            .await
+            .map_err(|_| {
+                RuntimeDiagnostic::error(
+                    "clay.parse.open_activation_timeout",
+                    "Open-time parse did not finish before the decoration freshness deadline.",
+                )
+            })?
+            .ok_or_else(|| {
+                RuntimeDiagnostic::error(
+                    "clay.parse.open_activation_closed",
+                    "Open-time parse coordinator closed before publishing decorations.",
+                )
+            })?;
+        if update.document_id == metadata.document_id
+            && update.package_prefix == activation.package_prefix
+            && update.mode_id == activation.mode_id
+        {
+            return Ok(update.decoration_update);
+        }
+    }
 }
 
 fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
@@ -711,61 +754,6 @@ fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
         end -= 1;
     }
     (&text[..end], end as u64)
-}
-
-fn markdown_open_init_source(
-    metadata: &DocumentMetadata,
-    document_byte_length: u64,
-    window_text: &str,
-    window_byte_end: u64,
-) -> String {
-    let document_id = metadata.document_id;
-    let document_version = metadata.version;
-    let document_path = serde_json::to_string(&metadata.path).expect("path serializes");
-    let window_text = serde_json::to_string(window_text).expect("text serializes");
-    format!(
-        r#"
-import * as commands from "clay:commands";
-import * as decorations from "clay:decorations";
-import * as modes from "clay:modes";
-import * as packages from "clay:packages";
-import * as parse from "clay:parse";
-import {{ getActiveBehaviorManifest }} from "clay:behavior";
-import {{ loadMarkdownPackage }} from "./load.js";
-import {{ publishMarkdownDecorations }} from "./parser.js";
-
-const clay = {{ commands, decorations, modes, packages, parse }};
-const documentId = {document_id};
-const documentVersion = {document_version};
-const documentPath = {document_path};
-const windowText = {window_text};
-const documentByteLength = {document_byte_length};
-const viewport = {{ byteStart: 0, byteEnd: {window_byte_end} }};
-
-await loadMarkdownPackage(clay, {{ documentId, path: documentPath }});
-const manifest = getActiveBehaviorManifest(documentId);
-const behaviorVersion = Number(manifest.behaviorVersion ?? manifest.behavior_version ?? manifest.version ?? 2);
-await publishMarkdownDecorations(clay, {{
-  documentId,
-  documentVersion,
-  currentDocumentVersion: documentVersion,
-  behaviorVersion,
-  documentByteLength,
-  fileSizeBytes: documentByteLength,
-  viewport,
-  parseWindows: [{{
-    documentId,
-    documentVersion,
-    packagePrefix: "markdown",
-    mode: "markdown",
-    byteStart: 0,
-    byteEnd: {window_byte_end},
-    baseLine: 0,
-    text: windowText
-  }}]
-}});
-"#
-    )
 }
 
 #[cfg(test)]
@@ -796,6 +784,47 @@ mod tests {
         Arc::new(Mutex::new(Vec::new()))
     }
 
+    fn js_runtime() -> ClayJsRuntimeService {
+        ClayJsRuntimeService::default()
+    }
+
+    fn runtime_generation() -> super::RuntimeGenerationStore {
+        runtime_generation_from(js_runtime())
+    }
+
+    fn runtime_generation_from(runtime: ClayJsRuntimeService) -> super::RuntimeGenerationStore {
+        super::RuntimeGenerationStore {
+            current: Arc::new(Mutex::new(super::super::RuntimeGeneration {
+                id: 1,
+                service: runtime,
+                diagnostics: Vec::new(),
+            })),
+        }
+    }
+
+    fn parse_coordinator() -> ParseCoordinator {
+        ParseCoordinator::default()
+    }
+
+    async fn load_markdown_runtime(
+        runtime: &ClayJsRuntimeService,
+        coordinator: &ParseCoordinator,
+        behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+        sdui: &Arc<Mutex<StaticSduiState>>,
+    ) {
+        let evaluation = runtime
+            .evaluate_controlled_module(
+                r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");"#,
+            )
+            .await
+            .expect("Markdown package load should evaluate");
+        runtime
+            .register_parse_handlers(coordinator, 1, &evaluation)
+            .expect("Markdown parse handler should register");
+        super::super::apply_runtime_outputs(&evaluation, 1, behavior, sdui).await;
+    }
+
     fn temp_workspace(name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -810,13 +839,14 @@ mod tests {
     }
     use crate::{
         protocol::{
-            BehaviorManifest, ClientMessage, CommandDeclaration, DecorationKind, DocumentAccess,
+            BehaviorManifest, BehaviorScope, ClientMessage, DecorationKind, DocumentAccess,
             DocumentMetadata, EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION,
             RuntimeDiagnostic, SduiNodeKind, ServerMessage, codec::Codec,
         },
         server::{
-            behavior::ActiveBehaviorManifest, document::DocumentState, sdui::StaticSduiState,
-            workspace::WorkspaceState,
+            behavior::ActiveBehaviorManifest, document::DocumentState,
+            js_runtime::ClayJsRuntimeService, parse_coordinator::ParseCoordinator,
+            sdui::StaticSduiState, workspace::WorkspaceState,
         },
     };
 
@@ -838,6 +868,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -889,6 +921,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -933,6 +967,8 @@ mod tests {
             workspace_state(),
             empty_sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1024,6 +1060,8 @@ mod tests {
             workspace_state(),
             Arc::clone(&sdui),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1074,6 +1112,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             diagnostics,
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1123,6 +1163,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1193,6 +1235,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1294,6 +1338,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1367,6 +1413,8 @@ mod tests {
             Arc::clone(&workspace),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1480,6 +1528,7 @@ mod tests {
 
     #[tokio::test]
     async fn selected_markdown_file_publishes_manifest_and_decorations() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let root = temp_workspace("selected-markdown-runtime");
         let selected = root.join("note.md");
         fs::write(
@@ -1491,16 +1540,10 @@ mod tests {
         workspace_state_value.reserve_document_ids_from(2);
         let workspace = Arc::new(Mutex::new(workspace_state_value));
 
-        let mut loaded_markdown_manifest = BehaviorManifest::minimal_text_editing(7);
-        loaded_markdown_manifest
-            .commands
-            .push(CommandDeclaration::server_intent(
-                "markdown.togglePreview",
-                "Toggle Markdown Preview",
-            ));
-        let behavior = Arc::new(Mutex::new(
-            ActiveBehaviorManifest::new(loaded_markdown_manifest).unwrap(),
-        ));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = sdui_state();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
 
         let (client, server) = duplex(16 * 1024 * 1024);
         let codec = Codec::default();
@@ -1515,8 +1558,10 @@ mod tests {
             document,
             Arc::clone(&behavior),
             Arc::clone(&workspace),
-            sdui_state(),
+            Arc::clone(&sdui),
             runtime_diagnostics(),
+            runtime_generation_from(runtime),
+            coordinator,
             codec,
         ));
         let mut client = client;
@@ -1566,6 +1611,10 @@ mod tests {
         match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::BehaviorManifest(manifest) => {
                 assert_eq!(manifest.manifest_id, "markdown.markdown");
+                assert!(matches!(
+                    manifest.scope,
+                    BehaviorScope::Document { document_id: 2 }
+                ));
                 assert!(
                     manifest
                         .commands
@@ -1596,11 +1645,9 @@ mod tests {
             ServerMessage::FileOpenCapabilityIssued { .. }
         ));
 
-        // Phase 20 task 4: selected-file Markdown activation publishes behavior
-        // and decorations ONLY — no default preview/status side panel. The
-        // runtime evaluation produces no SDUI tree, so no SduiSnapshot follows.
-        // (The dedicated `selected_markdown_file_opens_without_default_panel`
-        // test below asserts `evaluate_markdown_open` yields no SDUI tree.)
+        // Selected-file activation publishes behavior and decorations only;
+        // optional package UI panels stay opt-in, so no extra SduiSnapshot
+        // follows before the replenished capability.
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -1609,14 +1656,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selected_markdown_file_opens_without_default_panel() {
-        // Phase 20 task 4: `evaluate_markdown_open` (the connection selected-file
-        // open evaluation) must publish a behavior manifest and decorations but
-        // NO default preview/status SDUI side panel. The optional preview is a
-        // package PanelContribution published only by an explicit opt-in, never
-        // by the selected-file-open path.
+    async fn default_init_js_load_package_powers_selected_markdown_open() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let config_root = temp_workspace("default-init-loadpackage");
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/markdown");
+            "#,
+        )
+        .unwrap();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = empty_sdui_state();
+        let evaluation = runtime
+            .load_configuration_from_root(config_root.clone())
+            .await
+            .expect("default init.js loadPackage should evaluate");
+        runtime
+            .register_parse_handlers(&coordinator, 1, &evaluation)
+            .expect("init.js loadPackage should register parse handler");
+        super::super::apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
+        assert_eq!(runtime.evaluation_count(), 1);
+
         let metadata = DocumentMetadata {
-            document_id: 1,
+            document_id: 2,
             version: 1,
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
@@ -1624,86 +1690,65 @@ mod tests {
             workspace_root_id: 1,
             path: "note.md".to_string(),
         };
-        let text = "# Opened note\n\n- item\n";
+        let messages = super::selected_file_open_followup_messages(
+            99,
+            &metadata,
+            "# Loaded from init.js\n",
+            &behavior,
+            &sdui,
+            1,
+            &runtime,
+            &coordinator,
+        )
+        .await;
 
-        let evaluation = super::evaluate_markdown_open(&metadata, text)
-            .await
-            .expect("Markdown open runtime should evaluate");
-
-        assert!(
-            evaluation.published_sdui_tree.is_none(),
-            "selected-file Markdown open must not publish a default side panel SDUI tree, got {:?}",
-            evaluation.published_sdui_tree
+        assert_eq!(
+            runtime.evaluation_count(),
+            2,
+            "open should classify/activate on the persistent runtime without a fresh per-open runtime"
         );
-        assert!(
-            evaluation.behavior_manifest.is_some(),
-            "selected-file Markdown open must still publish a behavior manifest"
-        );
-        assert!(
-            evaluation.published_decoration_set.is_some(),
-            "selected-file Markdown open must still publish decorations"
-        );
+        assert!(matches!(
+            &messages[0],
+            ServerMessage::BehaviorManifest(manifest)
+                if manifest.manifest_id == "markdown.markdown"
+                    && matches!(manifest.scope, BehaviorScope::Document { document_id: 2 })
+        ));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::DecorationSet(set)
+                if set.document_id == 2
+                    && set.spans.iter().any(|span| span.style_token == "markup.heading.1")
+        )));
+        let _ = fs::remove_file(config_root.join("init.js"));
+        let _ = fs::remove_dir(config_root);
     }
 
     #[test]
-    fn selected_markdown_open_uses_generic_mode_activation() {
-        // Phase 20 task 5: the selected-file Markdown open path must reuse the
-        // package-owned loader (`loadMarkdownPackage`) and generic mode
-        // activation primitives (`clay:modes`, `clay:parse`, `clay:decorations`,
-        // `clay:behavior`) rather than generating a divergent init script or
-        // hardcoding Rust-side Markdown branches. The init script is a generic
-        // facade-driven activation path.
-        let metadata = DocumentMetadata {
-            document_id: 1,
-            version: 1,
-            access: DocumentAccess::Editable { lease_id: 1 },
-            lease_id: Some(1),
-            dirty: false,
-            workspace_root_id: 1,
-            path: "note.md".to_string(),
-        };
-        let init_source = super::markdown_open_init_source(&metadata, 16, "# Opened note\n", 16);
-
-        // Generic facade imports — the init script uses Clay's generic primitives.
-        for import_line in [
-            "import * as commands from \"clay:commands\"",
-            "import * as decorations from \"clay:decorations\"",
-            "import * as modes from \"clay:modes\"",
-            "import * as packages from \"clay:packages\"",
-            "import * as parse from \"clay:parse\"",
-            "from \"clay:behavior\"",
+    fn connection_has_no_markdown_specific_open_runtime_branch() {
+        let source = include_str!("connection.rs");
+        for (left, right) in [
+            ("evaluate_", "markdown_open"),
+            ("create_", "markdown_open_runtime_root"),
+            ("unique_", "markdown_open_runtime_root"),
+            ("markdown_", "open_init_source"),
+            ("is_", "markdown_path"),
         ] {
+            let removed = format!("{left}{right}");
             assert!(
-                init_source.contains(import_line),
-                "selected-file Markdown init must use generic facade import `{import_line}`, got:\n{init_source}"
+                !source.contains(&removed),
+                "connection.rs must not contain removed mode-specific helper `{removed}`"
             );
         }
-
-        // Reuses the package-owned loader — not a divergent Rust-side activation.
-        assert!(
-            init_source.contains("loadMarkdownPackage"),
-            "selected-file Markdown init must reuse the package-owned loader `loadMarkdownPackage`"
-        );
-
-        // No hardcoded Rust-side Markdown branches — the init script does not
-        // bypass the clay facades with raw ops.
-        assert!(
-            !init_source.contains("op_clay_modes_server_register_mode_pattern"),
-            "selected-file Markdown init must not bypass the clay:modes facade with raw ops"
-        );
-        assert!(
-            !init_source.contains("op_clay_parse_server_register_parse_handler"),
-            "selected-file Markdown init must not bypass the clay:parse facade with raw ops"
-        );
     }
 
     #[tokio::test]
-    async fn markdown_open_runtime_uses_bounded_parse_window_for_large_file() {
+    async fn generic_open_parse_uses_bounded_window_for_large_file() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let mut text = "# Top\n\n".to_string();
         text.push_str(&"a".repeat(80 * 1024));
         text.push_str("\n# Outside initial window\n");
         let metadata = DocumentMetadata {
-            document_id: 1,
+            document_id: 2,
             version: 1,
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
@@ -1711,15 +1756,23 @@ mod tests {
             workspace_root_id: 1,
             path: "large.md".to_string(),
         };
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = empty_sdui_state();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+        let activation =
+            super::classify_open_document(1, &runtime, &coordinator, &metadata, &behavior, &sdui)
+                .await
+                .expect("loaded package should classify markdown path");
 
-        let evaluation = super::evaluate_markdown_open(&metadata, &text)
-            .await
-            .expect("Markdown open runtime should evaluate");
-        let set = evaluation
-            .published_decoration_set
-            .expect("Markdown decorations should publish");
+        let set =
+            super::schedule_open_parse(&coordinator, &metadata, &text, &behavior, &activation)
+                .await
+                .expect("open parse should schedule")
+                .expect("open parse should publish decorations");
 
-        assert_eq!(set.document_id, 1);
+        assert_eq!(set.document_id, 2);
         assert_eq!(set.viewport_byte_start, 0);
         assert_eq!(set.viewport_byte_end, 64 * 1024);
         assert!(set.spans.iter().all(|span| span.byte_end <= 64 * 1024));
@@ -1756,6 +1809,8 @@ mod tests {
             Arc::clone(&workspace),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1802,15 +1857,18 @@ mod tests {
             }
             message => panic!("expected selected DocumentOpened, got {message:?}"),
         };
-        assert_eq!(
-            codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))
-        );
-        // Server re-issues one pending capability after the successful open.
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::FileOpenCapabilityIssued { .. }
+            ServerMessage::BehaviorManifest(_)
         ));
+        loop {
+            if matches!(
+                codec.read_server_message(&mut client).await.unwrap(),
+                ServerMessage::FileOpenCapabilityIssued { .. }
+            ) {
+                break;
+            }
+        }
 
         codec
             .write_client_message(
@@ -1859,6 +1917,8 @@ mod tests {
             workspace,
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1943,6 +2003,8 @@ mod tests {
             workspace_state(),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
 
@@ -1978,6 +2040,8 @@ mod tests {
             Arc::clone(&workspace),
             sdui_state(),
             runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
             codec,
         ));
         let mut client = client;

@@ -108,20 +108,19 @@ fn public_items_in_dir(relative_dir: &str) -> Vec<String> {
                         *token,
                         "struct" | "enum" | "trait" | "type" | "const" | "static" | "fn"
                     )
-                }) {
-                    if let Some(name) = tokens.get(kind_index + 1) {
-                        let name = name.trim_end_matches(':');
-                        let rust_path = match tokens[kind_index] {
-                            "fn" => match &current_impl {
-                                Some(owner) => {
-                                    format!("{relative_dir}/{file_name}::{owner}::{name}")
-                                }
-                                None => format!("{relative_dir}/{file_name}::{name}"),
-                            },
-                            _ => format!("{relative_dir}/{file_name}::{name}"),
-                        };
-                        items.push(rust_path);
-                    }
+                }) && let Some(name) = tokens.get(kind_index + 1)
+                {
+                    let name = name.trim_end_matches(':');
+                    let rust_path = match tokens[kind_index] {
+                        "fn" => match &current_impl {
+                            Some(owner) => {
+                                format!("{relative_dir}/{file_name}::{owner}::{name}")
+                            }
+                            None => format!("{relative_dir}/{file_name}::{name}"),
+                        },
+                        _ => format!("{relative_dir}/{file_name}::{name}"),
+                    };
+                    items.push(rust_path);
                 }
             }
 
@@ -154,13 +153,18 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/mod.rs::IpcServer::new",
         "src/server/mod.rs::IpcServer::try_new",
         "src/server/mod.rs::IpcServer::run",
+        "src/server/mod.rs::IpcServer::trigger_developer_hot_reload",
+        "src/server/mod.rs::ReloadedDocumentRefresh",
+        "src/server/mod.rs::RuntimeReloadOutcome",
         "src/server/mod.rs::ServerConfig::new",
         "src/server/decorations.rs::DecorationValidationError",
         "src/server/decorations.rs::validate_decoration_publication",
         "src/server/decorations.rs::validate_decoration_set",
+        "src/server/parse_coordinator.rs::ParseCoordinator::cancel_generation",
         "src/server/parse_coordinator.rs::ParseCoordinator::new",
         "src/server/parse_coordinator.rs::ParseCoordinator::next_update",
         "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
+        "src/server/parse_coordinator.rs::ParseCoordinator::register_handler_for_generation",
         "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse",
         "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse_with_windows",
         "src/server/parse_coordinator.rs::ParseCoordinator::stats",
@@ -580,5 +584,36 @@ fn docs_public_items_are_internal_registry_infrastructure() {
     assert!(
         unclassified.is_empty(),
         "public src/docs Rust items must be classified as internal documentation-registry infrastructure or promoted through Clay JS API docs/inventory before becoming user-facing APIs: {unclassified:?}"
+    );
+}
+
+/// Every `unsafe` block in the COM file-dialog module must carry a `// SAFETY:`
+/// comment stating the invariant that makes it safe (Plan 030 P3-2).
+#[test]
+fn file_dialog_unsafe_blocks_have_safety_comments() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(root.join("src/client/file_dialog.rs"))
+        .expect("read src/client/file_dialog.rs");
+
+    let mut missing: Vec<usize> = Vec::new();
+    for (lineno, line) in source.lines().enumerate() {
+        if !line.contains("unsafe") || line.trim_start().starts_with("//") {
+            continue;
+        }
+        // Look back up to 8 lines for a `// SAFETY:` comment, skipping blanks
+        // and other comments, so multi-line comments still count.
+        let start = lineno.saturating_sub(8);
+        let preceding = &source.lines().collect::<Vec<_>>()[start..lineno];
+        let has_safety = preceding.iter().any(|prev| prev.contains("SAFETY:"));
+        if !has_safety {
+            missing.push(lineno + 1);
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "each `unsafe` block in src/client/file_dialog.rs must have a preceding
+         `// SAFETY:` comment stating its invariant (Plan 030 P3-2); missing at
+         lines: {missing:?}"
     );
 }

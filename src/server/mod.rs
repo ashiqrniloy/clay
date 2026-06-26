@@ -8,6 +8,8 @@ mod js_runtime;
 #[allow(dead_code)]
 mod ops;
 pub mod parse_coordinator;
+#[doc(hidden)]
+pub mod runtime_sandbox;
 mod sdui;
 mod ui;
 mod workspace;
@@ -46,7 +48,7 @@ use windows::Win32::{
 
 use crate::{
     ipc::IpcEndpoint,
-    protocol::{RuntimeDiagnostic, codec::Codec},
+    protocol::{DocumentId, RuntimeDiagnostic, ServerMessage, codec::Codec},
 };
 
 use self::{
@@ -57,6 +59,9 @@ use self::{
 
 #[cfg(windows)]
 const ERROR_PIPE_CONNECTED: i32 = 535;
+
+#[cfg(test)]
+pub(crate) static JS_RUNTIME_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -75,6 +80,73 @@ impl ServerConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeGeneration {
+    id: u64,
+    service: ClayJsRuntimeService,
+    diagnostics: Vec<RuntimeDiagnostic>,
+}
+
+impl RuntimeGeneration {
+    fn initial() -> Self {
+        Self {
+            id: 1,
+            service: ClayJsRuntimeService::default(),
+            diagnostics: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeGenerationStore {
+    current: Arc<Mutex<RuntimeGeneration>>,
+}
+
+impl RuntimeGenerationStore {
+    fn initial() -> Self {
+        Self {
+            current: Arc::new(Mutex::new(RuntimeGeneration::initial())),
+        }
+    }
+
+    pub(crate) async fn generation_id(&self) -> u64 {
+        self.current.lock().await.id
+    }
+
+    pub(crate) async fn current(&self) -> RuntimeGeneration {
+        self.current.lock().await.clone()
+    }
+
+    pub(crate) async fn current_service(&self) -> ClayJsRuntimeService {
+        self.current().await.service
+    }
+
+    async fn push_diagnostic(&self, diagnostic: RuntimeDiagnostic) {
+        self.current.lock().await.diagnostics.push(diagnostic);
+    }
+
+    async fn swap(&self, next: RuntimeGeneration) {
+        *self.current.lock().await = next;
+    }
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReloadedDocumentRefresh {
+    pub document_id: DocumentId,
+    pub messages: Vec<ServerMessage>,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeReloadOutcome {
+    pub previous_generation_id: u64,
+    pub active_generation_id: u64,
+    pub reloaded: bool,
+    pub diagnostics: Vec<RuntimeDiagnostic>,
+    pub refreshed_documents: Vec<ReloadedDocumentRefresh>,
+}
+
 #[derive(Debug)]
 pub struct IpcServer {
     config: ServerConfig,
@@ -86,8 +158,7 @@ pub struct IpcServer {
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     #[allow(dead_code)]
     parse_coordinator: ParseCoordinator,
-    #[allow(dead_code)]
-    js_runtime: ClayJsRuntimeService,
+    runtime_generation: RuntimeGenerationStore,
     next_client_id: AtomicU64,
 }
 
@@ -114,7 +185,7 @@ impl IpcServer {
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
-            js_runtime: ClayJsRuntimeService::default(),
+            runtime_generation: RuntimeGenerationStore::initial(),
             next_client_id: AtomicU64::new(1),
         })
     }
@@ -177,8 +248,32 @@ impl IpcServer {
     }
 
     async fn load_default_configuration(&self) {
-        let evaluation = if let Some(config_root) = self.config.configuration_root.clone() {
-            self.js_runtime
+        let service = self.runtime_generation.current_service().await;
+        let evaluation = self.load_configuration_for_service(&service).await;
+
+        match evaluation {
+            Ok(Some(evaluation)) => {
+                self.apply_runtime_evaluation(
+                    self.runtime_generation.generation_id().await,
+                    &service,
+                    evaluation,
+                )
+                .await
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.record_runtime_error("clay server configuration failed", error)
+                    .await;
+            }
+        }
+    }
+
+    async fn load_configuration_for_service(
+        &self,
+        service: &ClayJsRuntimeService,
+    ) -> Result<Option<js_runtime::ClayRuntimeEvaluation>, js_runtime::ClayRuntimeError> {
+        if let Some(config_root) = self.config.configuration_root.clone() {
+            service
                 .load_configuration_from_root_with_workspace(
                     config_root,
                     Arc::clone(&self.workspace),
@@ -186,26 +281,122 @@ impl IpcServer {
                 .await
                 .map(Some)
         } else {
-            self.js_runtime
+            service
                 .load_default_configuration_with_workspace(Arc::clone(&self.workspace))
                 .await
-        };
+        }
+    }
 
-        match evaluation {
-            Ok(Some(evaluation)) => self.apply_runtime_evaluation(evaluation).await,
-            Ok(None) => {}
+    async fn record_runtime_error(&self, context: &str, error: js_runtime::ClayRuntimeError) {
+        let diagnostic = error.diagnostic();
+        eprintln!("{context} [{}]: {}", diagnostic.code, diagnostic.message);
+        self.runtime_generation
+            .push_diagnostic(diagnostic.clone())
+            .await;
+        self.runtime_diagnostics.lock().await.push(diagnostic);
+    }
+
+    #[doc(hidden)]
+    pub async fn trigger_developer_hot_reload(&self) -> RuntimeReloadOutcome {
+        self.reload_runtime_generation().await
+    }
+
+    pub(crate) async fn reload_runtime_generation(&self) -> RuntimeReloadOutcome {
+        let previous_generation_id = self.runtime_generation.generation_id().await;
+        let next_generation_id = previous_generation_id.saturating_add(1);
+        let next_service = ClayJsRuntimeService::default();
+
+        match self.load_configuration_for_service(&next_service).await {
+            Ok(evaluation) => {
+                let diagnostics = Vec::new();
+                if let Some(evaluation) = evaluation {
+                    self.apply_runtime_evaluation(next_generation_id, &next_service, evaluation)
+                        .await;
+                }
+                self.parse_coordinator
+                    .cancel_generation(previous_generation_id);
+                self.runtime_generation
+                    .swap(RuntimeGeneration {
+                        id: next_generation_id,
+                        service: next_service.clone(),
+                        diagnostics: Vec::new(),
+                    })
+                    .await;
+                let refreshed_documents = self
+                    .refresh_open_documents_after_reload(next_generation_id, &next_service)
+                    .await;
+                RuntimeReloadOutcome {
+                    previous_generation_id,
+                    active_generation_id: next_generation_id,
+                    reloaded: true,
+                    diagnostics,
+                    refreshed_documents,
+                }
+            }
             Err(error) => {
                 let diagnostic = error.diagnostic();
-                eprintln!(
-                    "clay server configuration failed [{}]: {}",
-                    diagnostic.code, diagnostic.message
-                );
-                self.runtime_diagnostics.lock().await.push(diagnostic);
+                self.record_runtime_error("clay server runtime reload failed", error)
+                    .await;
+                RuntimeReloadOutcome {
+                    previous_generation_id,
+                    active_generation_id: previous_generation_id,
+                    reloaded: false,
+                    diagnostics: vec![diagnostic],
+                    refreshed_documents: Vec::new(),
+                }
             }
         }
     }
 
-    async fn apply_runtime_evaluation(&self, evaluation: js_runtime::ClayRuntimeEvaluation) {
+    async fn refresh_open_documents_after_reload(
+        &self,
+        generation_id: u64,
+        service: &ClayJsRuntimeService,
+    ) -> Vec<ReloadedDocumentRefresh> {
+        let snapshots = match self.workspace.lock().await.open_document_snapshots(0).await {
+            Ok(snapshots) => snapshots,
+            Err(error) => {
+                self.runtime_diagnostics
+                    .lock()
+                    .await
+                    .push(RuntimeDiagnostic::error(
+                        "clay.runtime.reload_refresh_failed",
+                        format!(
+                            "Reload open-document refresh failed: {:?}",
+                            error.diagnostic()
+                        ),
+                    ));
+                return Vec::new();
+            }
+        };
+
+        let mut refreshed = Vec::with_capacity(snapshots.len());
+        for snapshot in snapshots {
+            let messages = connection::selected_file_open_followup_messages(
+                0,
+                &snapshot.metadata,
+                &snapshot.text,
+                &self.behavior,
+                &self.sdui,
+                generation_id,
+                service,
+                &self.parse_coordinator,
+            )
+            .await;
+            refreshed.push(ReloadedDocumentRefresh {
+                document_id: snapshot.metadata.document_id,
+                messages,
+            });
+        }
+        refreshed
+    }
+
+    async fn apply_runtime_evaluation(
+        &self,
+        generation_id: u64,
+        service: &ClayJsRuntimeService,
+        evaluation: js_runtime::ClayRuntimeEvaluation,
+    ) {
         let application = apply_runtime_outputs(
             &evaluation,
             self.sdui.lock().await.document_id(),
@@ -214,11 +405,21 @@ impl IpcServer {
         )
         .await;
 
+        if let Err(error) =
+            service.register_parse_handlers(&self.parse_coordinator, generation_id, &evaluation)
+        {
+            self.runtime_diagnostics
+                .lock()
+                .await
+                .push(RuntimeDiagnostic::error(
+                    "clay.parse.registration_failed",
+                    format!("Runtime parse handler registration failed: {error:?}"),
+                ));
+        }
+
         // Startup reads the shared behavior/SDUI state lazily during the
         // welcome handshake, so only validation failures produce diagnostics
-        // here. Decorations are pass-through (no startup client / decoration
-        // store); parse-handler and UI-contribution metadata are not applied
-        // at this short-lived config-eval boundary — see `apply_runtime_outputs`.
+        // here. Decorations are pass-through (no startup client / decoration store).
         for diagnostic in application.diagnostics() {
             eprintln!(
                 "clay server rejected runtime output [{}]: {}",
@@ -238,6 +439,8 @@ impl IpcServer {
         let workspace = Arc::clone(&self.workspace);
         let sdui = Arc::clone(&self.sdui);
         let runtime_diagnostics = Arc::clone(&self.runtime_diagnostics);
+        let runtime_generation = self.runtime_generation.clone();
+        let parse_coordinator = self.parse_coordinator.clone();
         let codec = self.codec;
         connections.spawn(async move {
             if let Err(error) = handle_connection(
@@ -248,6 +451,8 @@ impl IpcServer {
                 workspace,
                 sdui,
                 runtime_diagnostics,
+                runtime_generation,
+                parse_coordinator,
                 codec,
             )
             .await
@@ -280,6 +485,10 @@ pub(crate) struct RuntimeOutputApplication {
     /// Published decoration set, passed through for the caller to emit. The
     /// config-eval boundary holds no per-document decoration store, so this is
     /// not applied to shared state here.
+    #[allow(
+        dead_code,
+        reason = "selected-file activation consumes decoration output directly; startup config keeps it for future caller parity"
+    )]
     pub(crate) decorations: Option<crate::protocol::DecorationSet>,
 }
 
@@ -308,22 +517,11 @@ impl RuntimeOutputApplication {
 /// Apply the client-independent outputs of a runtime evaluation to shared
 /// server state: the behavior manifest and the per-document SDUI tree.
 ///
-/// `parse_handlers` and `ui_contributions` on the evaluation are intentionally
-/// not applied here:
-/// - The config-eval runtime is short-lived, so the JS parse-handler closures
-///   are already gone by the time Rust observes the `ParseHandlerMeta` list.
-///   Real handler registration happens in the persistent runtime op-state that
-///   owns the live closures, not at this boundary.
-/// - The shell owns the package-UI registry; `IpcServer` does not hold one to
-///   merge a `PackageUiRegistrySnapshot` into.
-///
-/// Both fields are still collected on `ClayRuntimeEvaluation` for test
-/// inspection. Wiring them requires persistent op-state plumbing and is
-/// tracked as plan 030 follow-ups rather than silently faked here.
-///
-/// `ponytail:` no speculative decoration store / UI-registry merge / parse
-/// re-registration at this boundary; upgrade path is the persistent
-/// server-side runtime that owns live JS closures and the shell UI registry.
+/// `ui_contributions` on the evaluation are intentionally not applied here:
+/// the shell owns the package-UI registry; `IpcServer` does not hold one to
+/// merge a `PackageUiRegistrySnapshot` into. JS parse handlers are registered
+/// separately by `IpcServer::apply_runtime_evaluation` because they need the
+/// persistent runtime service, not just this output-application primitive.
 pub(crate) async fn apply_runtime_outputs(
     evaluation: &js_runtime::ClayRuntimeEvaluation,
     document_id: crate::protocol::DocumentId,
@@ -564,12 +762,13 @@ impl CurrentUserSecurityAttributes {
                 },
             )?;
 
-            SetSecurityDescriptorDacl(sd_ptr, true.into(), Some(acl.0 as *mut ACL), false.into())
-                .map_err(|error| {
-                let _ = LocalFree(Some(token_user));
-                let _ = LocalFree(Some(acl));
-                format!("SetSecurityDescriptorDacl failed: {error}")
-            })?;
+            SetSecurityDescriptorDacl(sd_ptr, true, Some(acl.0 as *mut ACL), false).map_err(
+                |error| {
+                    let _ = LocalFree(Some(token_user));
+                    let _ = LocalFree(Some(acl));
+                    format!("SetSecurityDescriptorDacl failed: {error}")
+                },
+            )?;
 
             let attributes = SECURITY_ATTRIBUTES {
                 nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -718,6 +917,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: Some(default_document_tree(1, 1)),
             published_decoration_set: None,
             parse_handlers: vec![],
+            js_parse_handlers: vec![],
             behavior_manifest: Some(valid_manifest()),
             ui_contributions: Default::default(),
         };
@@ -753,6 +953,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: Some(default_document_tree(2, 1)),
             published_decoration_set: None,
             parse_handlers: vec![],
+            js_parse_handlers: vec![],
             behavior_manifest: None,
             ui_contributions: Default::default(),
         };
@@ -785,6 +986,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: None,
             published_decoration_set: Some(set.clone()),
             parse_handlers: vec![],
+            js_parse_handlers: vec![],
             behavior_manifest: None,
             ui_contributions: Default::default(),
         };
@@ -802,6 +1004,250 @@ mod runtime_outputs_tests {
     }
 }
 
+#[cfg(test)]
+mod runtime_generation_tests {
+    use std::{fs, time::SystemTime};
+
+    use crate::{ipc::IpcEndpoint, protocol::ServerMessage};
+
+    use super::{IpcServer, ServerConfig};
+
+    fn temp_config_root(name: &str, init_js: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clay-runtime-generation-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("init.js"), init_js).unwrap();
+        root
+    }
+
+    fn server_with_config(root: std::path::PathBuf) -> IpcServer {
+        let mut config = ServerConfig::new(IpcEndpoint::from_argument("runtime-generation-test"));
+        config.configuration_root = Some(root);
+        IpcServer::new(config)
+    }
+
+    #[tokio::test]
+    async fn reload_runtime_generation_swaps_only_after_successful_configuration_load() {
+        let root = temp_config_root(
+            "success",
+            r#"Deno.core.ops.op_clay_runtime_record("reload ok");"#,
+        );
+        let server = server_with_config(root);
+        let opened_path = temp_config_root("opened-doc", "").join("note.md");
+        fs::write(&opened_path, "# kept open\n").unwrap();
+        let opened = server
+            .workspace
+            .lock()
+            .await
+            .open_selected_file(&opened_path, 77)
+            .await
+            .unwrap();
+        let original_service = server.runtime_generation.current_service().await;
+        original_service
+            .evaluate_controlled_module("globalThis.__reloadMarker = 41;")
+            .await
+            .unwrap();
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.previous_generation_id, 1);
+        assert_eq!(outcome.active_generation_id, 2);
+        let documents = server
+            .workspace
+            .lock()
+            .await
+            .list_documents(77)
+            .await
+            .unwrap();
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].document_id, opened.document_id);
+        assert_eq!(documents[0].lease_id, opened.access.lease_id());
+        let current_service = server.runtime_generation.current_service().await;
+        let evaluation = current_service
+            .evaluate_controlled_module(
+                r#"Deno.core.ops.op_clay_runtime_record(String(globalThis.__reloadMarker ?? "empty"));"#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(evaluation.op_records.last().unwrap(), "empty");
+    }
+
+    #[tokio::test]
+    async fn successful_reload_refreshes_open_documents_without_full_snapshots() {
+        let root = temp_config_root(
+            "open-refresh",
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");"#,
+        );
+        let server = server_with_config(root);
+        let file_root = temp_config_root("open-refresh-docs", "");
+        let markdown_path = file_root.join("note.md");
+        let text_path = file_root.join("plain.txt");
+        fs::write(&markdown_path, "# Reloaded\n").unwrap();
+        fs::write(&text_path, "plain text\n").unwrap();
+        let markdown = server
+            .workspace
+            .lock()
+            .await
+            .open_selected_file(&markdown_path, 77)
+            .await
+            .unwrap();
+        let text = server
+            .workspace
+            .lock()
+            .await
+            .open_selected_file(&text_path, 77)
+            .await
+            .unwrap();
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.refreshed_documents.len(), 2);
+        let markdown_refresh = outcome
+            .refreshed_documents
+            .iter()
+            .find(|refresh| refresh.document_id == markdown.document_id)
+            .unwrap();
+        assert!(markdown_refresh.messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::BehaviorManifest(manifest)
+                if manifest.manifest_id == "markdown.markdown"
+                    && matches!(manifest.scope, crate::protocol::BehaviorScope::Document { document_id } if document_id == markdown.document_id)
+        )));
+        assert!(
+            markdown_refresh
+                .messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::DecorationSet(_)))
+        );
+        assert!(
+            outcome
+                .refreshed_documents
+                .iter()
+                .all(|refresh| refresh.messages.iter().all(|message| !matches!(
+                    message,
+                    ServerMessage::DocumentOpened { .. } | ServerMessage::DocumentReloaded { .. }
+                )))
+        );
+        let text_refresh = outcome
+            .refreshed_documents
+            .iter()
+            .find(|refresh| refresh.document_id == text.document_id)
+            .unwrap();
+        assert!(
+            text_refresh
+                .messages
+                .iter()
+                .all(|message| !matches!(message, ServerMessage::DecorationSet(_)))
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_reruns_init_js_package_load_in_fresh_generation_and_preserves_old_on_failure() {
+        let root = temp_config_root(
+            "package-cache",
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");
+await loadPackage("@clay/markdown");"#,
+        );
+        let server = server_with_config(root.clone());
+
+        let loaded = server.reload_runtime_generation().await;
+        assert!(loaded.reloaded);
+        assert_eq!(loaded.active_generation_id, 2);
+        let current_service = server.runtime_generation.current_service().await;
+        let cached = current_service
+            .evaluate_controlled_module(
+                r#"import { loadPackage } from "clay:packages";
+Deno.core.ops.op_clay_runtime_record(String(Boolean(globalThis.__clayLoadedPackages?.["@clay/markdown"])));
+await loadPackage("@clay/markdown");
+Deno.core.ops.op_clay_runtime_record("cached");"#,
+            )
+            .await
+            .unwrap();
+        assert!(cached.op_records.iter().any(|record| record == "true"));
+        assert_eq!(cached.op_records.last().unwrap(), "cached");
+
+        fs::write(
+            root.join("init.js"),
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/not-installed");"#,
+        )
+        .unwrap();
+        let failed = server.reload_runtime_generation().await;
+        assert!(!failed.reloaded);
+        assert_eq!(failed.active_generation_id, 2);
+        let still_cached = server
+            .runtime_generation
+            .current_service()
+            .await
+            .evaluate_controlled_module(
+                r#"import { loadPackage } from "clay:packages";
+Deno.core.ops.op_clay_runtime_record(String(Boolean(globalThis.__clayLoadedPackages?.["@clay/markdown"])));
+await loadPackage("@clay/markdown");
+Deno.core.ops.op_clay_runtime_record("still-cached");"#,
+            )
+            .await
+            .unwrap();
+        assert!(
+            still_cached
+                .op_records
+                .iter()
+                .any(|record| record == "true")
+        );
+        assert_eq!(still_cached.op_records.last().unwrap(), "still-cached");
+        assert!(
+            server
+                .runtime_diagnostics
+                .lock()
+                .await
+                .iter()
+                .any(|diagnostic| diagnostic.code == "clay.packages.not_installed")
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_reload_keeps_previous_runtime_generation_active() {
+        let root = temp_config_root("failure", "export const = ;");
+        let server = server_with_config(root);
+        let original_service = server.runtime_generation.current_service().await;
+        original_service
+            .evaluate_controlled_module("globalThis.__reloadMarker = 7;")
+            .await
+            .unwrap();
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(!outcome.reloaded);
+        assert_eq!(outcome.previous_generation_id, 1);
+        assert_eq!(outcome.active_generation_id, 1);
+        let current_service = server.runtime_generation.current_service().await;
+        let evaluation = current_service
+            .evaluate_controlled_module(
+                r#"Deno.core.ops.op_clay_runtime_record(String(globalThis.__reloadMarker));"#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(evaluation.op_records.last().unwrap(), "7");
+        assert!(
+            server
+                .runtime_diagnostics
+                .lock()
+                .await
+                .iter()
+                .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
+        );
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::{
@@ -812,7 +1258,7 @@ mod tests {
 
     use tokio::{net::UnixStream, sync::Mutex};
 
-    use super::{ActiveBehaviorManifest, ClayJsRuntimeService, IpcServer, ServerConfig};
+    use super::{ActiveBehaviorManifest, IpcServer, RuntimeGenerationStore, ServerConfig};
     use crate::{
         protocol::{
             ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
@@ -845,7 +1291,7 @@ mod tests {
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
-            js_runtime: ClayJsRuntimeService::default(),
+            runtime_generation: RuntimeGenerationStore::initial(),
             next_client_id: AtomicU64::new(1),
         }
     }
@@ -1084,7 +1530,7 @@ mod windows_tests {
         unsafe {
             let mut dacl: *mut ACL = std::ptr::null_mut();
             GetSecurityInfo(
-                HANDLE(pipe.as_raw_handle() as *mut std::ffi::c_void),
+                HANDLE(pipe.as_raw_handle()),
                 SE_KERNEL_OBJECT,
                 DACL_SECURITY_INFORMATION,
                 None,

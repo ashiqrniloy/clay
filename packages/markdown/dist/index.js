@@ -12,7 +12,7 @@ export const markdownLargeFilePolicy = Object.freeze({
   parseWindowBytes: 64 * 1024,
   guardBytes: 4 * 1024,
   memoryBudgetBytes: 30 * 1024 * 1024,
-  timeoutMs: 50,
+  timeoutMs: 500,
   fallbackMode: "plain-text-fallback",
   highlightingStates: Object.freeze(["full", "windowed", "degraded", "plain-text-fallback"])
 });

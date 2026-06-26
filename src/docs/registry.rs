@@ -652,7 +652,7 @@ fn parse_inline_list(value: &str) -> Option<Vec<String>> {
     Some(
         inner
             .split(',')
-            .map(|item| clean_scalar(item))
+            .map(clean_scalar)
             .filter(|item| !item.is_empty())
             .collect(),
     )

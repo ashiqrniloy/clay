@@ -35,6 +35,10 @@ impl ActiveBehaviorManifest {
         ServerMessage::BehaviorManifest(self.manifest.clone())
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "callers send protocol ServerMessage directly on rejection; boxing would complicate a cold error path"
+    )]
     pub(crate) fn validate_message_version(
         &self,
         document_id: DocumentId,

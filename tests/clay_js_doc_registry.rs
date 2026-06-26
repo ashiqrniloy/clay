@@ -253,8 +253,10 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
             .any(|permission| permission == "parse-document")
     );
     for property in [
+        "module",
+        "exportName",
         "modeId",
-        "parseUnits",
+        "parseUnit",
         "viewportPriority",
         "timeoutMs",
         "maxWindowBytes",
@@ -307,6 +309,8 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
                 "cancellable",
                 "viewport-prioritized",
                 "memoryBudgetBytes",
+                "server-issued token",
+                "clay.runtime.timeout",
                 "Do not expose internal parse-window snapshot structs",
             ],
         ),
@@ -318,6 +322,8 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
                 "30 MiB",
                 "stale-version rejection",
                 "Do not expose or call internal chunk-cache helpers",
+                "DECORATION_PAYLOAD_BUDGET_BYTES",
+                "server-side package code",
             ],
         ),
     ] {

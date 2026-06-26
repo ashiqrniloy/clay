@@ -185,6 +185,38 @@ pub(super) fn op_clay_packages_load_package(
 
 #[op2]
 #[string]
+pub(super) fn op_clay_packages_list_first_party_specifiers(
+    _state: &mut OpState,
+) -> Result<String, JsErrorBox> {
+    let packages_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("packages");
+    let mut specifiers = Vec::new();
+    let entries = std::fs::read_dir(packages_root).map_err(|error| {
+        JsErrorBox::generic(format!(
+            "clay.packages.list_failed: failed to read first-party package root ({error})"
+        ))
+    })?;
+    for entry in entries.flatten() {
+        let package_json = entry.path().join("package.json");
+        let Ok(text) = std::fs::read_to_string(package_json) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let Some(name) = value.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if name.starts_with("@clay/") {
+            specifiers.push(name.to_string());
+        }
+    }
+    specifiers.sort();
+    serde_json::to_string(&json!({ "specifiers": specifiers }))
+        .map_err(serialize_error("clay.packages.list_failed"))
+}
+
+#[op2]
+#[string]
 pub(super) fn op_clay_packages_validate_permissions(
     _state: &mut OpState,
     #[string] permissions_json: String,

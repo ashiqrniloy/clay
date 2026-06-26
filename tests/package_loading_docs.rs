@@ -64,6 +64,274 @@ fn package_loading_keeps_validation_and_parsing_out_of_typing_hot_path() {
 }
 
 #[test]
+fn persistent_runtime_hardening_gate_doc_covers_threat_model() {
+    let hardening = read("docs/wiki/modules/persistent-runtime-hardening.md");
+    let sandbox_design = read("docs/design/persistent-runtime-sandbox.md");
+    let wiki_index = read("docs/wiki/index.md");
+
+    assert!(
+        wiki_index.contains("modules/persistent-runtime-hardening.md"),
+        "wiki index must link the persistent runtime hardening gate"
+    );
+
+    assert!(
+        hardening.contains("docs/design/persistent-runtime-sandbox.md"),
+        "hardening wiki must link the sandbox design gate"
+    );
+    assert!(
+        sandbox_design
+            .contains("This document defines the separate-process JavaScript runtime sandbox gate"),
+        "sandbox design must exist and state its scope"
+    );
+
+    for phrase in [
+        "first-party `@clay/*`",
+        "Non-`@clay/*` package execution is blocked by default",
+        "separate-process JavaScript runtime sandbox",
+        "V8 heap limits",
+        "approved decision log",
+        "No approved decision log means no non-`@clay/*` runtime execution",
+        "filesystem",
+        "network",
+        "shell",
+        "WASM",
+        "AI mutation",
+        "raw-op",
+        "native-widget",
+        "client-side JavaScript",
+        "package-manager execution",
+        "keypress, paint, layout, scroll, edit acknowledgement, or text-event handlers",
+        "sanitized `clay.runtime.heap_limit` diagnostics",
+    ] {
+        assert!(
+            hardening.contains(phrase),
+            "hardening gate doc must document `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn persistent_runtime_sandbox_design_pins_process_boundary() {
+    let design = read("docs/design/persistent-runtime-sandbox.md");
+    let hardening = read("docs/wiki/modules/persistent-runtime-hardening.md");
+
+    for phrase in [
+        "Parent process owns canonical documents",
+        "Child process owns only V8/`deno_core` evaluation",
+        "Protocol messages carry inert request/result data only",
+        "length-prefixed and bounded",
+        "parent-side validation",
+        "Per-request timeout kills the child process",
+        "Restart creates a fresh child",
+        "stable Clay error code",
+        "filesystem outside parent-provided open document data",
+        "network",
+        "shell",
+        "WASM",
+        "AI mutation",
+        "package-manager execution",
+        "native-widget handles",
+        "client-side JavaScript",
+        "raw-op / raw `Deno.core.ops` public authority",
+        "keypress, paint, layout, scroll, text-event, or edit-ack handlers",
+        "approved decision log",
+        "Non-`@clay/*` package execution is not allowed by this design alone",
+    ] {
+        assert!(
+            design.contains(phrase),
+            "sandbox design must pin `{phrase}`"
+        );
+    }
+
+    assert!(
+        hardening.contains("docs/design/persistent-runtime-sandbox.md"),
+        "hardening wiki must link the sandbox design"
+    );
+}
+
+#[test]
+fn phase19_hot_reload_primitive_review_is_linked_and_pins_generic_gaps() {
+    let review =
+        read("docs/wiki/modules/phase19-persistent-runtime-hot-reload-primitive-review.md");
+    let wiki_index = read("docs/wiki/index.md");
+    let embedded_runtime = read("docs/wiki/modules/embedded-js-runtime.md");
+    let parse_coordinator = read("docs/wiki/modules/parse-coordinator.md");
+    let server_ipc = read("docs/wiki/modules/server-ipc-skeleton.md");
+    let workspace = read("docs/wiki/modules/server-file-workspace.md");
+    let maintenance = read("docs/wiki/modules/maintenance-validation.md");
+    let hot_reload_wiki = read("docs/wiki/modules/persistent-runtime-hot-reload.md");
+
+    assert!(
+        wiki_index.contains("modules/phase19-persistent-runtime-hot-reload-primitive-review.md"),
+        "wiki index must link the Phase 19 hot reload primitive review"
+    );
+    assert!(
+        wiki_index.contains("modules/persistent-runtime-hot-reload.md"),
+        "wiki index must link the Phase 19 hot reload implementation page"
+    );
+
+    for phrase in [
+        "RuntimeGeneration holder",
+        "Generation-scoped package state",
+        "Generation-scoped parse registrations",
+        "Late-result guard",
+        "Open-document refresh primitive",
+        "Non-GUI trigger",
+        "stale handler invalidation",
+        "generation swap",
+        "No JavaScript should be added to keypress, paint, layout, scroll",
+        "deny-by-default module resolution",
+        "resolver-validated first-party `@clay/*` loading only",
+        "no Markdown-specific branch",
+    ] {
+        assert!(
+            review.contains(phrase),
+            "Phase 19 hot reload primitive review must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "RuntimeGenerationStore",
+        "IpcServer::reload_runtime_generation",
+        "keeps the previous generation ID/service active",
+        "`current()` before selected-file activation",
+    ] {
+        assert!(
+            embedded_runtime.contains(phrase),
+            "embedded runtime wiki must document generation swap implementation phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "register_handler_for_generation",
+        "owning runtime generation ID",
+        "aborts old-generation active tasks",
+        "task generation still matches the active handler generation",
+        "old-runtime-generation task results",
+    ] {
+        assert!(
+            parse_coordinator.contains(phrase),
+            "parse coordinator wiki must document generation replacement phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "refresh_open_documents_after_reload",
+        "generic mode classification/activation",
+        "bounded parse refresh",
+        "no `DocumentOpened`/`DocumentReloaded` full-text snapshots",
+    ] {
+        assert!(
+            server_ipc.contains(phrase),
+            "server IPC wiki must document reload open-document refresh phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "open_document_snapshots",
+        "reload-refresh",
+        "does not authorize new paths",
+    ] {
+        assert!(
+            workspace.contains(phrase),
+            "workspace wiki must document reload snapshot phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "RuntimeGenerationStore",
+        "atomic reload swap",
+        "package cache invalidation",
+        "parse-handler generation replacement",
+        "open-document refresh",
+        "No JavaScript in keypress, paint, layout, scroll, edit acknowledgement, or text-event hot paths",
+        "No public Clay JS reload API",
+        "sanitized diagnostics",
+        "Tests",
+    ] {
+        assert!(
+            hot_reload_wiki.contains(phrase),
+            "hot reload implementation wiki must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "trigger_developer_hot_reload",
+        "deterministic non-GUI reload trigger",
+        "shared reload primitive",
+        "does not run during ordinary client event processing",
+    ] {
+        assert!(
+            embedded_runtime.contains(phrase) || maintenance.contains(phrase),
+            "docs must document non-GUI reload trigger phrase `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn phase19_load_package_cache_docs_pin_generation_invalidation() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let primitive = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let facade = read("runtime/js/packages.ts");
+    let embedded_facade = read("src/server/js_runtime.rs");
+
+    for source in [&package_guide, &primitive, &wiki] {
+        for phrase in [
+            "runtime generation",
+            "`init.js`",
+            "globalThis.__clayLoadedPackages",
+            "first-party `loadEntry` allowlist",
+            "persistent",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "package cache docs must document generation invalidation phrase `{phrase}`"
+            );
+        }
+    }
+
+    for source in [&facade, &embedded_facade] {
+        assert!(
+            source.contains("Per-runtime-generation cache")
+                && (source.contains("hot reload invalidates")
+                    || source.contains("Hot reload invalidates")),
+            "loadPackage facade must explain cache lifetime and hot reload invalidation"
+        );
+    }
+}
+
+#[test]
+fn phase19_package_author_docs_cover_reload_runtime_lifecycle() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let markdown = read("docs/reference/packages/markdown.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let runtime = read("docs/wiki/modules/embedded-js-runtime.md");
+
+    for phrase in [
+        "runtime generation",
+        "empty `globalThis.__clayLoadedPackages` cache",
+        "reruns `~/.config/clay/init.js`",
+        "Package authors should rebuild all runtime state from `loadEntry`",
+        "Failed reloads keep the previous generation active",
+        "sanitized diagnostics",
+        "generation-scoped",
+        "old-runtime-generation parse results",
+        "deny-by-default",
+        "resolver-validated first-party `@clay/*`",
+        "executable callback payload rejection",
+        "never in keypress, paint, layout, scroll, edit acknowledgement, or text-event handlers",
+    ] {
+        assert!(
+            [&package_guide, &markdown, &wiki, &runtime]
+                .iter()
+                .any(|source| source.contains(phrase)),
+            "package author/runtime docs must cover Phase 19 reload phrase `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
     let package_guide = read("docs/reference/packages/creating-packages.md");
     let package_loading = read("docs/reference/primitives/package-loading.md");
@@ -158,6 +426,31 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
                 && package_loading.contains("src/server/ops/packages.rs"),
             "package loading reference must document the concrete resolver op"
         );
+        for source in [&package_guide, &package_loading, &wiki] {
+            for phrase in [
+                "Phase 18.7",
+                "persistent runtime",
+                "selected-file open",
+                "ParseCoordinator",
+                "idempotent",
+            ] {
+                assert!(
+                    source.contains(phrase),
+                    "default init.js docs/wiki must cover open-time activation phrase `{phrase}`"
+                );
+            }
+            for forbidden in [
+                "copy package manifests",
+                "manual primitive registration",
+                "representative decoration publication",
+                "per-open runtime roots",
+            ] {
+                assert!(
+                    source.contains(forbidden),
+                    "default init.js docs/wiki must forbid `{forbidden}`"
+                );
+            }
+        }
         assert!(
             package_loading.contains("constrained first-party")
                 && (package_loading.contains("Non-`@clay/*`")
@@ -238,9 +531,13 @@ fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback()
         "markdownLoadMode must reuse loadMarkdownPackage and must not declare an inline manifest"
     );
     assert!(
-        package_index
-            .contains("export { loadMarkdownPackage, markdownLoadMode } from \"./load.js\""),
-        "package root index must re-export markdownLoadMode so the @clay/markdown fallback import resolves"
+        package_index.contains("from \"./load.js\"")
+            && package_index.contains("export {")
+            && package_index.contains("loadMarkdownPackage")
+            && package_index.contains("markdownLoadMode"),
+        "package root index must re-export `loadMarkdownPackage` and `markdownLoadMode` \
+         from `./load.js` so the `import {{ markdownLoadMode }} from \"@clay/markdown\"` \
+         documented fallback resolves (additional re-exported names are allowed)"
     );
 
     // The documented fallback is concise and uses implemented generic primitives.
@@ -252,6 +549,53 @@ fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback()
         assert!(
             source.contains("await markdownLoadMode();"),
             "docs must show the concise package-owned fallback call"
+        );
+    }
+}
+
+#[test]
+fn package_author_guide_documents_persistent_parse_and_open_time_contract() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+
+    for phrase in [
+        "Persistent runtime, open-time activation, and parse boundaries",
+        "loadPackage(\"@clay/markdown\")",
+        "serverRegisterParseHandler",
+        "module: parserModule",
+        "exportName",
+        "server-issued token",
+        "PackagePermission::ParseDocument",
+        "ParseCoordinator",
+        "serverActivateClassifiedMode",
+        "no-client-JS",
+        "no-hot-path-JS",
+        "clay.runtime.timeout",
+        "INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+        "FirstPartyLoadEntryAllowlist",
+        "deny-by-default",
+        "Generic future-mode shape",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "package author guide must document Phase 18.7 parse/open contract phrase `{phrase}`"
+        );
+    }
+
+    for forbidden in [
+        "Per-open runtimes",
+        "per-open `dist/` copies",
+        "Executable `handler`, `callback`, `onParse`, or `function` fields",
+        "Raw `Deno.core.ops` calls",
+        "Markdown-only Rust branches",
+        "Publishing representative/fake decorations",
+        "Client-side JavaScript",
+        "direct Masonry widgets",
+    ] {
+        assert!(
+            package_guide.contains(forbidden),
+            "package author guide must list forbidden anti-pattern `{forbidden}`"
         );
     }
 }
@@ -296,6 +640,59 @@ fn package_customization_uses_documented_configuration_apis() {
             "customization docs must cover supported option/override `{phrase}`"
         );
     }
+}
+
+/// Plan 030 task "Define and verify the package default init.js loading
+/// experience": pins that the one-line default (`loadPackage("@clay/markdown")`)
+/// and the hardened lifecycle-script suppression are two distinct paths that do
+/// not interfere. First-party `loadPackage` resolves through the registry/
+/// `FirstPartyLoadEntryAllowlist` and never invokes the pnpm backend or its
+/// lifecycle scripts; `--ignore-scripts` applies only to `clay package add`.
+/// This guards against a future regression where the two paths get conflated
+/// and the default-load experience breaks because of install-time hardening.
+#[test]
+fn default_load_path_is_separate_from_lifecycle_script_suppression() {
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+
+    // One-line default is documented in every package-loading surface.
+    for source in [&package_loading, &package_guide, &wiki] {
+        assert!(
+            source.contains("loadPackage(\"@clay/markdown\")"),
+            "package loading docs/wiki must preserve the one-line explicit init.js default"
+        );
+    }
+
+    // Lifecycle-script suppression is documented as a `clay package add`
+    // concern in the authoritative reference + implementation wiki (the
+    // end-user package-creation guide intentionally does not surface the
+    // install-time flag detail).
+    for source in [&package_loading, &wiki] {
+        assert!(
+            source.contains("--ignore-scripts"),
+            "package loading docs/wiki must document the `--ignore-scripts` default"
+        );
+    }
+    assert!(
+        package_loading.contains("--allow-scripts")
+            && package_loading.contains("CLAY_ALLOW_LIFECYCLE_SCRIPTS"),
+        "package loading reference must document the `--allow-scripts` flag and `CLAY_ALLOW_LIFECYCLE_SCRIPTS` env var opt-in"
+    );
+
+    // The two paths are distinct: the install/backend paragraph is about
+    // `clay package add`, not about first-party `loadPackage`. The docs must
+    // keep `clay package add` (backend) text separate from the resolver text.
+    assert!(
+        package_loading.contains("clay package add <spec>")
+            && package_loading.contains("PnpmBackend"),
+        "package loading reference must document the `clay package add` backend path separately"
+    );
+    assert!(
+        package_loading.contains("@clay/*")
+            && package_loading.contains("FirstPartyLoadEntryAllowlist"),
+        "package loading reference must document the first-party resolver path as distinct from install"
+    );
 }
 
 #[test]

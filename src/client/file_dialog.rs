@@ -71,6 +71,11 @@ mod platform {
 
     fn show_file_open_dialog() -> windows::core::Result<Option<PathBuf>> {
         let _com = ApartmentCom::initialize()?;
+        // SAFETY: `CoCreateInstance` instantiates a fresh COM object on the
+        // apartment initialized above; `FileOpenDialog` is a documented
+        // in-process shell dialog class with `CLSCTX_INPROC_SERVER` server.
+        // No raw pointers are passed; the returned `IFileOpenDialog` owns its
+        // refcount and is released on drop.
         let dialog: IFileOpenDialog =
             unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)? };
 
@@ -90,6 +95,9 @@ mod platform {
             )?;
         }
 
+        // SAFETY: `Show` runs a modal UI on the owning apartment; the dialog
+        // has valid options/filters set above. A user cancel surfaces as an
+        // `ERROR_CANCELLED` HRESULT that we map to `Ok(None)`, not UB.
         if let Err(error) = unsafe { dialog.Show(None) } {
             if is_cancelled(&error) {
                 return Ok(None);
@@ -100,10 +108,20 @@ mod platform {
         // SAFETY: `Show` succeeded, so `GetResult` may return the user-selected
         // shell item for this single-selection dialog.
         let item = unsafe { dialog.GetResult()? };
+        // SAFETY: The shell item is valid (returned by `GetResult`) and
+        // `SIGDN_FILESYSPATH` requests a file-system path; the returned
+        // `PWSTR` is COM-allocated and freed via `CoTaskMemFree` below before
+        // any other use of the apartment.
         let raw_path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH)? };
         // SAFETY: `GetDisplayName(SIGDN_FILESYSPATH)` returns a null-terminated
-        // file-system path string allocated by COM for the selected shell item.
+        // file-system path string allocated by COM for the selected shell item;
+        // `to_string` copies it out into a Rust `String` before `CoTaskMemFree`
+        // releases the COM allocation below.
         let path_text = unsafe { raw_path.to_string() };
+        // SAFETY: `raw_path` is a COM-allocated string obtained from
+        // `GetDisplayName`; `CoTaskMemFree` is its matching deallocator. The
+        // pointer is cast to `c_void` per the API and is not used after this
+        // call (the path has already been copied into `path_text`).
         unsafe {
             CoTaskMemFree(Some(raw_path.as_ptr().cast::<c_void>()));
         }
@@ -128,6 +146,10 @@ mod platform {
             })
             .collect();
 
+        // SAFETY: `specs` lives for the duration of this call and each
+        // `COMDLG_FILTERSPEC` points at UTF-16 null-terminated buffers (`wide_null`)
+        // that outlive `SetFileTypes`'s internal read; the dialog copies the
+        // filter table, so no borrows escape.
         unsafe { dialog.SetFileTypes(&specs) }
     }
 
@@ -145,6 +167,10 @@ mod platform {
 
     impl ApartmentCom {
         fn initialize() -> windows::core::Result<Self> {
+            // SAFETY: `CoInitializeEx` with `COINIT_APARTMENTTHREADED` is
+            // called once per thread at the start of `show_file_open_dialog`;
+            // a prior init returns `S_FALSE`/`RPC_E_CHANGED_MODE` which `.ok()`
+            // tolerates, and the matching `CoUninitialize` runs in `Drop`.
             unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok()?;
             Ok(Self { initialized: true })
         }
@@ -153,6 +179,9 @@ mod platform {
     impl Drop for ApartmentCom {
         fn drop(&mut self) {
             if self.initialized {
+                // SAFETY: `CoUninitialize` is the symmetric counterpart to the
+                // `CoInitializeEx` call recorded by `initialized`; it balances
+                // the apartment's COM refcount on this thread only.
                 unsafe { CoUninitialize() };
             }
         }

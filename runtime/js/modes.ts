@@ -17,8 +17,22 @@ function parse<T>(json: string): T {
   return JSON.parse(json) as T;
 }
 
+const activationRegistry = ((globalThis as typeof globalThis & { __clayModeActivations?: Record<string, unknown> }).__clayModeActivations ??= Object.create(null));
+const activationKey = (apiPrefix: string, modeId: string): string => `${apiPrefix}:${modeId}`;
+
 export function serverRegisterModePattern(packageManifest: unknown, declaration: unknown): unknown {
-  return parse(requireOps().op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
+  const result = parse(requireOps().op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
+  const manifest = packageManifest as { clay?: { apiPrefix?: string } } | null;
+  const mode = declaration as { modeId?: string; editorRules?: unknown; commands?: unknown; keymaps?: unknown } | null;
+  if (manifest?.clay?.apiPrefix && mode?.modeId) {
+    activationRegistry[activationKey(manifest.clay.apiPrefix, mode.modeId)] = {
+      packageManifest,
+      editorRules: mode.editorRules,
+      commands: mode.commands,
+      keymaps: mode.keymaps,
+    };
+  }
+  return result;
 }
 
 export function serverClassifyDocument(input: unknown): unknown {
@@ -27,6 +41,27 @@ export function serverClassifyDocument(input: unknown): unknown {
 
 export function serverActivateMajorMode(packageManifest: unknown, input: unknown): unknown {
   return parse(requireOps().op_clay_modes_activate_major_mode(JSON.stringify(packageManifest ?? null), JSON.stringify(input ?? null)));
+}
+
+export function serverActivateClassifiedMode(classification: unknown, input: unknown = {}): unknown {
+  const classified = classification as { apiPrefix?: string; modeId?: string; documentId?: number } | null;
+  const activation = activationRegistry[activationKey(String(classified?.apiPrefix), String(classified?.modeId))] as {
+    packageManifest: unknown;
+    editorRules?: unknown;
+    commands?: unknown;
+    keymaps?: unknown;
+  } | undefined;
+  if (!activation || classified?.documentId === undefined || !classified?.modeId) {
+    throw new Error("clay.modes.activation_failed: classified mode has no registered activation metadata");
+  }
+  return serverActivateMajorMode(activation.packageManifest, {
+    ...(input as Record<string, unknown>),
+    documentId: classified.documentId,
+    modeId: classified.modeId,
+    editorRules: activation.editorRules,
+    commands: activation.commands,
+    keymaps: activation.keymaps,
+  });
 }
 
 export function serverSelectDocumentManifest(options: unknown): never {

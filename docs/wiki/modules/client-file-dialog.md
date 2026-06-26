@@ -41,6 +41,7 @@ On non-Windows platforms, the same API compiles and returns `Unsupported` so the
 - Cancellation is a non-error no-op.
 - Unsupported platforms report a diagnostic/status through the app command handler.
 - A selected path is not an authorization grant by itself; the server validates it through `WorkspaceState::open_selected_file` before granting only that canonical file.
+- Every `unsafe` block in the Windows COM path (`CoCreateInstance`, `GetOptions`/`SetOptions`, `Show`, `GetResult`, `GetDisplayName`, `PWSTR::to_string`, `CoTaskMemFree`, `SetFileTypes`, `CoInitializeEx`, `CoUninitialize`) carries a `// SAFETY:` comment stating the invariant that makes it safe (apartment affinity, COM-allocated string ownership + matching deallocator, filter-table borrow outlives the call, init/uninit pairing via `ApartmentCom::Drop`). The `file_dialog_unsafe_blocks_have_safety_comments` regression test scans the source and fails if any `unsafe` block lacks a preceding `// SAFETY:` comment.
 
 ## Tests
 

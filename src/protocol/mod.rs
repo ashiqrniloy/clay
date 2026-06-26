@@ -43,6 +43,7 @@ pub enum FileErrorCode {
     DirectoryOpen,
     DirtyDocument,
     StaleFileMetadata,
+    FileTooLarge,
     InternalError,
 }
 

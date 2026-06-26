@@ -45,6 +45,29 @@ pub const SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS: u64 = 16;
 // this; the isolate is terminated via `v8::IsolateHandle::terminate_execution`
 // and surfaced as a `clay.runtime.timeout` diagnostic.
 pub const JS_RUNTIME_EVALUATION_TIMEOUT_MS: u64 = 5000;
+// Hard V8 heap ceiling for Clay's in-process first-party JavaScript runtime.
+// Server-owned security budget, not user configuration. Near-limit callback
+// terminates execution and surfaces `clay.runtime.heap_limit`.
+pub const JS_RUNTIME_HEAP_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 pub const RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS: u64 = 25;
 pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;
 pub const LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB: u64 = 256;
+
+// Hard size gate for opening a file from disk into a server document.
+//
+// Full-text protocol messages (`InitialDocument`, `ResyncSnapshot`,
+// `DocumentOpened`, `DocumentReloaded`) carry the entire document `String` in a
+// single rkyv frame, and the IPC codec caps a frame at
+// `DEFAULT_MAX_FRAME_SIZE` (1 MiB). A file at or near that limit would open
+// successfully only to fail at frame encode, and reading it into memory first
+// is a memory-exhaustion vector. This gate is checked against already-fetched
+// file metadata *before* `tokio_fs::read` allocates, so oversized files are
+// rejected with a typed `FileTooLarge` error without ever being read.
+//
+// The value sits below the 1 MiB frame limit to leave headroom for the message
+// envelope (variant tag + `DocumentMetadata` + rkyv overhead) so any file that
+// passes this gate also fits in a single full-text frame. Larger files require
+// the chunked/viewport-first loading path, which remains a documented follow-up
+// (see plan 030). `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` is the future
+// resident-memory budget for that chunked path and is intentionally much larger.
+pub const MAX_OPENABLE_FILE_BYTES: usize = 768 * 1024;

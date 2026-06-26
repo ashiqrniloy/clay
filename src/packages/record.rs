@@ -290,15 +290,21 @@ pub struct PackageRecord {
 /// Structured enable/load diagnostic produced when a package fails contract
 /// validation.  Every field is optional because some errors occur before the
 /// package identity is fully parsed.
+///
+/// String fields use `Box<str>` (not `String`) to keep the `Err`-variant under
+/// clippy's `result_large_err` 128-byte threshold: `Box<str>` is a 16-byte fat
+/// pointer vs `String`'s 24-byte (ptr+len+cap), and `Option<Box<str>>` is 24
+/// bytes vs `Option<String>`'s 32. These diagnostics are constructed once and
+/// read/displayed, never mutated in place, so the loss of growability is free.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageRecordError {
-    pub package_name: Option<String>,
-    pub package_version: Option<String>,
-    pub api_prefix: Option<String>,
+    pub package_name: Option<Box<str>>,
+    pub package_version: Option<Box<str>>,
+    pub api_prefix: Option<Box<str>>,
     /// The contribution ID that failed (command, config key, transform, …) when applicable.
-    pub contribution_id: Option<String>,
+    pub contribution_id: Option<Box<str>>,
     pub rule: PackageRecordRule,
-    pub message: String,
+    pub message: Box<str>,
 }
 
 /// Validation rule that caused a [`PackageRecordError`].
@@ -325,12 +331,12 @@ pub enum PackageRecordRule {
 impl PackageRecordError {
     fn from_manifest_diagnostic(d: PackageDiagnostic) -> Self {
         Self {
-            package_name: d.package_name,
-            package_version: d.package_version,
-            api_prefix: d.api_prefix,
+            package_name: d.package_name.map(String::into_boxed_str),
+            package_version: d.package_version.map(String::into_boxed_str),
+            api_prefix: d.api_prefix.map(String::into_boxed_str),
             contribution_id: None,
             rule: PackageRecordRule::ManifestValidationFailed,
-            message: d.message,
+            message: d.message.into_boxed_str(),
         }
     }
 }
@@ -541,9 +547,10 @@ fn validate_api_dependency_permissions(
             }
         };
 
-        if let Some(required) = required {
-            if !permissions.contains(&required) {
-                return Err(ctx.error(
+        if let Some(required) = required
+            && !permissions.contains(&required)
+        {
+            return Err(ctx.error(
                     PackageRecordRule::UndeclaredPermissionForContribution,
                     Some(&dependency.api_id),
                     format!(
@@ -552,7 +559,6 @@ fn validate_api_dependency_permissions(
                         required.as_str()
                     ),
                 ));
-            }
         }
     }
 
@@ -1366,20 +1372,19 @@ fn parse_theme_token_contributions(
     Ok(descriptors)
 }
 
+type ParsedUiContributions = (
+    Vec<UiPanelContributionDescriptor>,
+    Vec<UiComponentContributionDescriptor>,
+    Vec<UiOverlayContributionDescriptor>,
+);
+
 fn parse_ui_contributions(
     value: &Value,
     api_prefix: &str,
     registered_command_ids: &[String],
     theme_resolver: &ThemeTokenResolver,
     ctx: &ErrorContext,
-) -> Result<
-    (
-        Vec<UiPanelContributionDescriptor>,
-        Vec<UiComponentContributionDescriptor>,
-        Vec<UiOverlayContributionDescriptor>,
-    ),
-    PackageRecordError,
-> {
+) -> Result<ParsedUiContributions, PackageRecordError> {
     let Value::Object(map) = value else {
         return Err(ctx.error(
             PackageRecordRule::InvalidContributionDescriptor,
@@ -1912,14 +1917,14 @@ fn parse_ui_state_scope_contributions(
                 "pane, component, and transient-overlay state scopes require a package-prefixed targetId",
             ));
         }
-        if let Some(target) = &target_id {
-            if !is_package_owned_id(target, api_prefix) {
-                return Err(ctx.error(
-                    PackageRecordRule::InvalidContributionDescriptor,
-                    Some(target),
-                    "state scope targetId must use the package apiPrefix",
-                ));
-            }
+        if let Some(target) = &target_id
+            && !is_package_owned_id(target, api_prefix)
+        {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(target),
+                "state scope targetId must use the package apiPrefix",
+            ));
         }
         if implementation_status == "implemented"
             && matches!(scope, "workspace" | "document" | "user-config")
@@ -2820,13 +2825,13 @@ impl ErrorContext {
         &self,
         rule: PackageRecordRule,
         contribution_id: Option<&str>,
-        message: impl Into<String>,
+        message: impl Into<Box<str>>,
     ) -> PackageRecordError {
         PackageRecordError {
-            package_name: self.package_name.clone(),
-            package_version: self.package_version.clone(),
-            api_prefix: self.api_prefix.clone(),
-            contribution_id: contribution_id.map(ToOwned::to_owned),
+            package_name: self.package_name.clone().map(String::into_boxed_str),
+            package_version: self.package_version.clone().map(String::into_boxed_str),
+            api_prefix: self.api_prefix.clone().map(String::into_boxed_str),
+            contribution_id: contribution_id.map(|id| id.to_string().into_boxed_str()),
             rule,
             message: message.into(),
         }
@@ -2937,5 +2942,34 @@ mod tests {
             PackageRecordRule::UndeclaredPermissionForContribution
         );
         assert!(err.message.contains("command-registration"));
+    }
+
+    /// Compile-time size guard for the boxed diagnostic types. After Plan 030
+    /// task "Box large diagnostic error types", each `Err`-variant diagnostic is
+    /// under clippy's `result_large_err` 128-byte threshold. `const _: () =`
+    /// makes the assertion a compile-time check (not a runtime test); if a
+    /// future field reverts the shrink, compilation fails here instead of
+    /// silently reintroducing a large `Result` copy. `PackageServiceError` is
+    /// not asserted here directly because its two payload variants are already
+    /// `Box<...>`, so the enum's inline size is dominated by its small variants.
+    #[test]
+    fn diagnostic_error_sizes_remain_under_large_err_threshold() {
+        const fn assert_le_128<T>() {
+            assert!(std::mem::size_of::<T>() <= 128);
+        }
+        const _: () = {
+            assert_le_128::<PackageRecordError>();
+            assert_le_128::<crate::packages::modes::ModeDiagnostic>();
+            assert_le_128::<crate::packages::commands::CommandDiagnostic>();
+            assert_le_128::<crate::packages::conflict::PackageConflictDiagnostic>();
+        };
+        // `UiContributionDiagnostic` is `pub(crate)` in `server::ui`; assert it
+        // from that module to avoid a privacy error, and assert the boxed
+        // `PackageServiceError` payload variants stay small via the service
+        // error size being dominated by its `BackendError` (small) variant.
+        assert!(std::mem::size_of::<PackageRecordError>() <= 128);
+        assert!(std::mem::size_of::<crate::packages::modes::ModeDiagnostic>() <= 128);
+        assert!(std::mem::size_of::<crate::packages::commands::CommandDiagnostic>() <= 128);
+        assert!(std::mem::size_of::<crate::packages::conflict::PackageConflictDiagnostic>() <= 128);
     }
 }

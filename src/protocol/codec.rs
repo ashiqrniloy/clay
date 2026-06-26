@@ -249,9 +249,12 @@ impl Error for CodecError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Codec, CodecError, LENGTH_PREFIX_BYTES};
+    use super::{Codec, CodecError, DEFAULT_MAX_FRAME_SIZE, LENGTH_PREFIX_BYTES};
     use crate::{
-        perf::budgets::{SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES},
+        perf::budgets::{
+            MAX_OPENABLE_FILE_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
+            SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+        },
         protocol::{
             BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
             EditRejection, FileErrorCode, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
@@ -673,5 +676,35 @@ mod tests {
         let error = codec.decode_server_message(&frame).unwrap_err();
 
         assert!(matches!(error, CodecError::Deserialize(_)));
+    }
+
+    /// A full-text protocol message (`InitialDocument`) carrying more text than
+    /// the codec frame limit is rejected at encode. This is the transport-side
+    /// guard paired with the workspace-side `MAX_OPENABLE_FILE_BYTES` gate: any
+    /// file that passes the open gate must also fit in a single full-text frame.
+    #[test]
+    fn full_text_snapshot_exceeding_frame_limit_is_rejected_at_encode() {
+        // The openable-file budget must sit below the frame limit so a file that
+        // passes the workspace gate always fits in a full-text frame.
+        const {
+            assert!(
+                MAX_OPENABLE_FILE_BYTES < DEFAULT_MAX_FRAME_SIZE,
+                "openable-file budget must be below the IPC frame limit"
+            );
+        }
+
+        // A payload larger than the default frame limit is rejected at encode.
+        let codec = Codec::default();
+        let oversized_text = "x".repeat(DEFAULT_MAX_FRAME_SIZE + 1);
+        let message = ServerMessage::InitialDocument {
+            document_id: 1,
+            version: 1,
+            text: oversized_text,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+        };
+
+        let error = codec.encode_server_message(&message).unwrap_err();
+        assert!(matches!(error, CodecError::FrameTooLarge { .. }));
     }
 }

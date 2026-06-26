@@ -638,6 +638,10 @@ fn rejection_requests_resync(reason: &EditRejection) -> bool {
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "connection task entrypoint wires independent async channels and shared states explicitly"
+)]
 async fn run_connection<S>(
     stream: S,
     codec: Codec,

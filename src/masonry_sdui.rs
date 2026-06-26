@@ -1,3 +1,12 @@
+#![allow(
+    dead_code,
+    reason = "SDUI observability/package UI bridge structs are staged for runtime wiring and covered by docs/tests before every callsite is live"
+)]
+#![allow(
+    clippy::too_many_arguments,
+    reason = "Masonry paint/layout helpers pass explicit render context and geometry instead of hiding hot-path state in heap structs"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use masonry::accesskit::{Node, NodeId, Role};
@@ -251,26 +260,26 @@ impl SduiNativeState {
     pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
         self.actions.clear();
         self.paint_package_fixed_panels(ctx, scene);
-        if let Some(root_id) = self.root_id {
-            if let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self) {
-                scene.fill(
-                    Fill::NonZero,
-                    Affine::IDENTITY,
-                    sdui_theme_style().panel_background,
-                    None,
-                    &sidebar,
-                );
-                let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding;
-                self.paint_node(
-                    ctx,
-                    scene,
-                    root_id,
-                    0,
-                    &mut cursor_y,
-                    sidebar.width(),
-                    sidebar.x0,
-                );
-            }
+        if let Some(root_id) = self.root_id
+            && let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self)
+        {
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                sdui_theme_style().panel_background,
+                None,
+                &sidebar,
+            );
+            let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding;
+            self.paint_node(
+                ctx,
+                scene,
+                root_id,
+                0,
+                &mut cursor_y,
+                sidebar.width(),
+                sidebar.x0,
+            );
         }
         self.paint_package_overlays(ctx, scene);
     }
@@ -1047,12 +1056,11 @@ impl Widget for SduiNativeState {
         node.set_label("Server-driven UI");
         let mut visited = BTreeSet::new();
         let mut children = Vec::new();
-        if let Some(root_id) = self.root_id {
-            if let Some(root_access_id) =
+        if let Some(root_id) = self.root_id
+            && let Some(root_access_id) =
                 self.build_accessibility_subtree(root_id, &mut visited, ctx.tree_update())
-            {
-                children.push(root_access_id);
-            }
+        {
+            children.push(root_access_id);
         }
         node.set_children(children);
     }

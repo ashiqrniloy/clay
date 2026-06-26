@@ -28,6 +28,10 @@ const STATUS_TEXT_SIZE: f32 = 12.0;
 const STATUS_BACKGROUND: Color = Color::from_rgb8(0x18, 0x18, 0x1f);
 const STATUS_TEXT_COLOR: Color = Color::from_rgb8(0xd7, 0xd2, 0xe8);
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "editor event channel is low-volume; boxing would add churn without measured benefit"
+)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum EditorAction {
     ExitRequested,

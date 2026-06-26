@@ -1085,9 +1085,9 @@ deno_op = "op_clay_parse_register_parse_handler"
 deno_op_path = "src/server/ops/parse.rs::op_clay_parse_register_parse_handler"
 documentation_path = "docs/reference/clay-js-api/parse/server-register-parse-handler.md"
 key_bindings = []
-custom_properties = ["modeId:string=required", "parseUnits:enum=line-group", "timeoutMs:number=50", "viewportPriority:boolean=true", "maxWindowBytes:number=65536", "guardBytes:number=4096", "memoryBudgetBytes:number=31457280", "resultBudgetBytes:number=4096"]
+custom_properties = ["module:object=required-for-runtime-bridge", "exportName:string=default", "modeId:string=required", "parseUnit:enum=line-group", "timeoutMs:number=50", "viewportPriority:boolean=true", "maxWindowBytes:number=65536", "guardBytes:number=4096", "memoryBudgetBytes:number=31457280", "resultBudgetBytes:number=4096"]
 permissions = ["parse-document"]
-security_notes = "Requires parse-document permission and server validation of handler provenance, cancellation, timeout, document-version reads, bounded parse-window snapshots, syntax memory budget, and bounded DecorationUpdate output; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond open document content provided by Clay."
+security_notes = "Requires parse-document permission and server validation of handler provenance, cancellation, timeout, document-version reads, bounded parse-window snapshots, syntax memory budget, and bounded DecorationUpdate output; handler functions stay in the persistent server runtime behind a server-issued token and executable handler/callback/onParse/function payload keys are rejected; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond open document content provided by Clay."
 current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/server/js_runtime.rs"
 registry_public = true
 

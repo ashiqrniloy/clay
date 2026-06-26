@@ -68,12 +68,12 @@ pub struct RegisteredCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandDiagnostic {
-    pub package_name: Option<String>,
-    pub package_version: Option<String>,
-    pub api_prefix: Option<String>,
-    pub command_id: Option<String>,
+    pub package_name: Option<Box<str>>,
+    pub package_version: Option<Box<str>>,
+    pub api_prefix: Option<Box<str>>,
+    pub command_id: Option<Box<str>>,
     pub rule: CommandValidationRule,
-    pub message: String,
+    pub message: Box<str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,13 +378,13 @@ impl CommandDiagnosticContext {
     fn diagnostic(
         &self,
         rule: CommandValidationRule,
-        message: impl Into<String>,
+        message: impl Into<Box<str>>,
     ) -> CommandDiagnostic {
         CommandDiagnostic {
-            package_name: self.package_name.clone(),
-            package_version: self.package_version.clone(),
-            api_prefix: self.api_prefix.clone(),
-            command_id: self.command_id.clone(),
+            package_name: self.package_name.clone().map(String::into_boxed_str),
+            package_version: self.package_version.clone().map(String::into_boxed_str),
+            api_prefix: self.api_prefix.clone().map(String::into_boxed_str),
+            command_id: self.command_id.clone().map(String::into_boxed_str),
             rule,
             message: message.into(),
         }

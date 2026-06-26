@@ -102,10 +102,10 @@ pub fn encode_decode_client_edit(text_bytes: usize) -> usize {
         .decode_client_message(&frame)
         .expect("representative client edit should decode");
     match decoded {
-        ClientMessage::Edit { operation, .. } => match operation {
-            EditOperation::Insert { text, .. } => text.len(),
-            _ => 0,
-        },
+        ClientMessage::Edit {
+            operation: EditOperation::Insert { text, .. },
+            ..
+        } => text.len(),
         _ => 0,
     }
 }

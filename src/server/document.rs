@@ -344,7 +344,7 @@ impl DocumentState {
     }
 
     pub(crate) fn replace_text_from_storage(&mut self, text: String) {
-        if self.text.to_string() != text {
+        if self.text != text {
             self.text = Rope::from(text);
             self.version = self.version.saturating_add(1);
         }

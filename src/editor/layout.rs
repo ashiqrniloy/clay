@@ -69,6 +69,10 @@ impl fmt::Debug for LayoutState {
 }
 
 impl LayoutState {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "editor paint hot path passes render inputs explicitly to avoid per-frame heap context objects"
+    )]
     pub fn paint_text(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -224,12 +228,7 @@ impl LayoutState {
         let cursor = Cursor::from_byte_index(layout, byte_offset, Affinity::Downstream);
         let geometry = cursor.geometry(layout, CARET_WIDTH);
         Some(CaretGeometry {
-            rect: Rect::new(
-                geometry.x0 as f64,
-                geometry.y0 as f64,
-                geometry.x1 as f64,
-                geometry.y1 as f64,
-            ),
+            rect: Rect::new(geometry.x0, geometry.y0, geometry.x1, geometry.y1),
         })
     }
 

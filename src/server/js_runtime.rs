@@ -6,6 +6,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
+        mpsc,
     },
     time::Duration,
 };
@@ -13,14 +14,17 @@ use std::{
 use deno_core::{
     JsRuntime, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader,
     ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType, ResolutionKind, RuntimeOptions,
-    error::ModuleLoaderError,
+    error::ModuleLoaderError, v8,
 };
 use deno_error::JsErrorBox;
-use tokio::task;
+use tokio::{sync::oneshot, task};
 
-use crate::perf::budgets::JS_RUNTIME_EVALUATION_TIMEOUT_MS;
+use crate::perf::budgets::{JS_RUNTIME_EVALUATION_TIMEOUT_MS, JS_RUNTIME_HEAP_LIMIT_BYTES};
 use crate::perf::metrics::global_recorder;
-use crate::protocol::RuntimeDiagnostic;
+use crate::protocol::{
+    DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, IncrementalParseUpdate,
+    ParseByteRange, ParseEditNotification, RuntimeDiagnostic,
+};
 
 use super::{
     configuration::{ConfigurationError, ConfigurationRuntime},
@@ -172,6 +176,9 @@ export function listBehaviorRoutes(documentId) {
 const CLAY_FACADE_PACKAGES: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
+// Per-runtime-generation cache. Hot reload invalidates it by swapping to a
+// fresh ClayJsRuntimeService, not by mutating globals/module cache in place.
+const loadedPackages = globalThis.__clayLoadedPackages ??= Object.create(null);
 export function serverValidatePackageManifest(manifest) {
   return parse(ops.op_clay_packages_validate_manifest(JSON.stringify(manifest ?? null)));
 }
@@ -181,15 +188,22 @@ export function serverValidatePackagePermissions(permissions) {
 export function serverLoadPackage(packageJson) {
   return parse(ops.op_clay_packages_load_package(JSON.stringify(packageJson ?? null)));
 }
+export function serverListFirstPartyPackageSpecifiers() {
+  return parse(ops.op_clay_packages_list_first_party_specifiers()).specifiers;
+}
 export async function loadPackage(specifier) {
   if (typeof specifier !== "string") {
     throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
+  }
+  if (loadedPackages[specifier]) {
+    return loadedPackages[specifier];
   }
   const result = parse(ops.op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })));
   const loadEntry = await import(result.loadEntrySpecifier);
   if (typeof loadEntry.default === "function") {
     await loadEntry.default();
   }
+  loadedPackages[specifier] = result;
   return result;
 }
 "#;
@@ -197,14 +211,39 @@ export async function loadPackage(specifier) {
 const CLAY_FACADE_MODES: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
+const activationRegistry = globalThis.__clayModeActivations ??= Object.create(null);
+const activationKey = (apiPrefix, modeId) => `${apiPrefix}:${modeId}`;
 export function serverRegisterModePattern(packageManifest, declaration) {
-  return parse(ops.op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
+  const result = parse(ops.op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
+  if (packageManifest?.clay?.apiPrefix && declaration?.modeId) {
+    activationRegistry[activationKey(packageManifest.clay.apiPrefix, declaration.modeId)] = {
+      packageManifest,
+      editorRules: declaration.editorRules,
+      commands: declaration.commands,
+      keymaps: declaration.keymaps,
+    };
+  }
+  return result;
 }
 export function serverClassifyDocument(input) {
   return parse(ops.op_clay_modes_classify_document(JSON.stringify(input ?? null)));
 }
 export function serverActivateMajorMode(packageManifest, input) {
   return parse(ops.op_clay_modes_activate_major_mode(JSON.stringify(packageManifest ?? null), JSON.stringify(input ?? null)));
+}
+export function serverActivateClassifiedMode(classification, input = {}) {
+  const activation = activationRegistry[activationKey(classification?.apiPrefix, classification?.modeId)];
+  if (!activation) {
+    throw new Error("clay.modes.activation_failed: classified mode has no registered activation metadata");
+  }
+  return serverActivateMajorMode(activation.packageManifest, {
+    ...input,
+    documentId: classification.documentId,
+    modeId: classification.modeId,
+    editorRules: activation.editorRules,
+    commands: activation.commands,
+    keymaps: activation.keymaps,
+  });
 }
 export function serverSelectDocumentManifest(options) { void options; ops.op_clay_runtime_unavailable("clay.modes.serverSelectDocumentManifest"); }
 export function serverRegisterDecorationProvider(options) { void options; ops.op_clay_runtime_unavailable("clay.modes.serverRegisterDecorationProvider"); }
@@ -235,7 +274,22 @@ const CLAY_FACADE_PARSE: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
 export function serverRegisterParseHandler(options) {
-  return parse(ops.op_clay_parse_register_parse_handler(JSON.stringify(options ?? null)));
+  for (const key of ["handler", "callback", "onParse", "function"]) {
+    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
+      throw new Error(`clay.parse.invalid_handler: executable ${key} callbacks are not accepted by the public registration contract`);
+    }
+  }
+  const { module, exportName = "default", ...opOptions } = options ?? {};
+  const registration = parse(ops.op_clay_parse_register_parse_handler(JSON.stringify({ ...(opOptions ?? {}), runtimeBridge: module !== undefined })));
+  if (module !== undefined) {
+    const handler = module?.[exportName];
+    if (typeof handler !== "function") {
+      throw new Error(`clay.parse.invalid_handler: module export ${exportName} must be a function`);
+    }
+    globalThis.__clayParseHandlers ??= Object.create(null);
+    globalThis.__clayParseHandlers[registration.token] = handler;
+  }
+  return registration;
 }
 "#;
 
@@ -260,71 +314,73 @@ export function clientSetViewport(options) { void options; unavailable("clay.edi
 pub(crate) struct ClayJsRuntimeService {
     evaluations: Arc<AtomicU64>,
     timeout: Duration,
+    heap_limit_bytes: usize,
+    poisoned: Arc<std::sync::atomic::AtomicBool>,
+    worker: Arc<std::sync::Mutex<Arc<RuntimeWorker>>>,
 }
 
 impl Default for ClayJsRuntimeService {
     fn default() -> Self {
-        Self {
-            evaluations: Arc::new(AtomicU64::new(0)),
-            timeout: Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
-        }
+        Self::new(Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS))
     }
 }
 
 impl ClayJsRuntimeService {
+    fn new(timeout: Duration) -> Self {
+        Self::new_with_heap_limit(timeout, JS_RUNTIME_HEAP_LIMIT_BYTES)
+    }
+
+    fn new_with_heap_limit(timeout: Duration, heap_limit_bytes: usize) -> Self {
+        Self {
+            evaluations: Arc::new(AtomicU64::new(0)),
+            timeout,
+            heap_limit_bytes,
+            poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            worker: Arc::new(std::sync::Mutex::new(start_runtime_worker(
+                timeout,
+                heap_limit_bytes,
+            ))),
+        }
+    }
+
     /// Sets a custom evaluation timeout. The default is
     /// [`JS_RUNTIME_EVALUATION_TIMEOUT_MS`]; tests use a short timeout to
     /// exercise the termination path quickly.
     #[cfg(test)]
     pub(crate) fn with_timeout(timeout: Duration) -> Self {
-        Self {
-            evaluations: Arc::new(AtomicU64::new(0)),
-            timeout,
-        }
+        Self::new(timeout)
     }
 
-    /// Evaluates a controlled server-owned ES module on a blocking runtime worker.
+    #[cfg(test)]
+    pub(crate) fn with_timeout_and_heap_limit(timeout: Duration, heap_limit_bytes: usize) -> Self {
+        Self::new_with_heap_limit(timeout, heap_limit_bytes)
+    }
+
+    /// Evaluates a controlled server-owned ES module on the persistent runtime worker.
     pub(crate) async fn evaluate_controlled_module(
         &self,
         source: impl Into<String> + Send + 'static,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
-        let source = source.into();
-        let evaluations = Arc::clone(&self.evaluations);
-        let timeout = self.timeout;
-        task::spawn_blocking(move || {
-            let recorder = global_recorder();
-            let _scope = recorder.scope("runtime.evaluate_controlled_module");
-            evaluate_module_on_runtime(RuntimeEntry::ControlledSource(source), None, 1, timeout)
-        })
+        self.evaluate_entry(
+            RuntimeEntry::ControlledSource(source.into()),
+            None,
+            1,
+            "runtime.evaluate_controlled_module",
+        )
         .await
-        .map_err(ClayRuntimeError::Join)?
-        .inspect(|_| {
-            evaluations.fetch_add(1, Ordering::Relaxed);
-        })
     }
 
     pub(crate) async fn load_configuration_from_root(
         &self,
         config_root: impl Into<PathBuf> + Send + 'static,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
-        let config_root = config_root.into();
-        let evaluations = Arc::clone(&self.evaluations);
-        let timeout = self.timeout;
-        task::spawn_blocking(move || {
-            let recorder = global_recorder();
-            let _scope = recorder.scope("runtime.load_configuration");
-            evaluate_module_on_runtime(
-                RuntimeEntry::ConfigurationRoot(config_root),
-                None,
-                1,
-                timeout,
-            )
-        })
+        self.evaluate_entry(
+            RuntimeEntry::ConfigurationRoot(config_root.into()),
+            None,
+            1,
+            "runtime.load_configuration",
+        )
         .await
-        .map_err(ClayRuntimeError::Join)?
-        .inspect(|_| {
-            evaluations.fetch_add(1, Ordering::Relaxed);
-        })
     }
 
     pub(crate) async fn load_configuration_from_root_with_workspace(
@@ -332,24 +388,13 @@ impl ClayJsRuntimeService {
         config_root: impl Into<PathBuf> + Send + 'static,
         workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
-        let config_root = config_root.into();
-        let evaluations = Arc::clone(&self.evaluations);
-        let timeout = self.timeout;
-        task::spawn_blocking(move || {
-            let recorder = global_recorder();
-            let _scope = recorder.scope("runtime.load_configuration_with_workspace");
-            evaluate_module_on_runtime(
-                RuntimeEntry::ConfigurationRoot(config_root),
-                Some(workspace),
-                1,
-                timeout,
-            )
-        })
+        self.evaluate_entry(
+            RuntimeEntry::ConfigurationRoot(config_root.into()),
+            Some(workspace),
+            1,
+            "runtime.load_configuration_with_workspace",
+        )
         .await
-        .map_err(ClayRuntimeError::Join)?
-        .inspect(|_| {
-            evaluations.fetch_add(1, Ordering::Relaxed);
-        })
     }
 
     pub(crate) async fn load_configuration_from_root_for_document(
@@ -357,24 +402,53 @@ impl ClayJsRuntimeService {
         config_root: impl Into<PathBuf> + Send + 'static,
         runtime_document_id: crate::protocol::DocumentId,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
-        let config_root = config_root.into();
-        let evaluations = Arc::clone(&self.evaluations);
-        let timeout = self.timeout;
-        task::spawn_blocking(move || {
-            let recorder = global_recorder();
-            let _scope = recorder.scope("runtime.load_configuration_for_document");
-            evaluate_module_on_runtime(
-                RuntimeEntry::ConfigurationRoot(config_root),
-                None,
-                runtime_document_id,
-                timeout,
-            )
-        })
+        self.evaluate_entry(
+            RuntimeEntry::ConfigurationRoot(config_root.into()),
+            None,
+            runtime_document_id,
+            "runtime.load_configuration_for_document",
+        )
         .await
-        .map_err(ClayRuntimeError::Join)?
-        .inspect(|_| {
-            evaluations.fetch_add(1, Ordering::Relaxed);
-        })
+    }
+
+    async fn evaluate_entry(
+        &self,
+        entry: RuntimeEntry,
+        workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
+        runtime_document_id: crate::protocol::DocumentId,
+        metric: &'static str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        if self.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_worker();
+        }
+        let (response, receiver) = oneshot::channel();
+        let command = RuntimeCommand::Evaluate {
+            entry,
+            workspace,
+            runtime_document_id,
+            metric,
+            response,
+        };
+        if let Err(error) = self.worker().sender.send(command) {
+            self.replace_worker();
+            self.worker().sender.send(error.0).map_err(|_| {
+                ClayRuntimeError::Runtime(
+                    "persistent JavaScript runtime worker stopped".to_string(),
+                )
+            })?;
+        }
+        let result = receiver.await.map_err(|_| {
+            ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
+        })?;
+        if matches!(
+            result,
+            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
+        ) {
+            self.poisoned.store(true, Ordering::Relaxed);
+        } else if result.is_ok() {
+            self.evaluations.fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 
     pub(crate) async fn load_default_configuration(
@@ -406,9 +480,113 @@ impl ClayJsRuntimeService {
             .map(Some)
     }
 
+    pub(crate) fn register_parse_handlers(
+        &self,
+        coordinator: &crate::server::parse_coordinator::ParseCoordinator,
+        generation_id: u64,
+        evaluation: &ClayRuntimeEvaluation,
+    ) -> Result<
+        Vec<crate::server::parse_coordinator::ParseHandlerMeta>,
+        crate::server::parse_coordinator::ParseCoordinatorError,
+    > {
+        let mut registered = Vec::new();
+        for registration in &evaluation.js_parse_handlers {
+            match coordinator.register_handler_meta_for_generation(
+                generation_id,
+                registration.meta.clone(),
+                JsParseHandler {
+                    runtime: self.clone(),
+                    registration: registration.clone(),
+                },
+            ) {
+                Ok(meta) => registered.push(meta),
+                Err(crate::server::parse_coordinator::ParseCoordinatorError::HandlerAlreadyRegistered { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(registered)
+    }
+
+    async fn invoke_parse_handler(
+        &self,
+        registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
+        notification: ParseEditNotification,
+    ) -> Result<IncrementalParseUpdate, ClayRuntimeError> {
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(ClayRuntimeError::Runtime(
+                "persistent JavaScript runtime worker stopped".to_string(),
+            ));
+        }
+        let (response, receiver) = oneshot::channel();
+        self.worker()
+            .sender
+            .send(RuntimeCommand::Parse {
+                registration,
+                notification,
+                response,
+            })
+            .map_err(|_| {
+                ClayRuntimeError::Runtime(
+                    "persistent JavaScript runtime worker stopped".to_string(),
+                )
+            })?;
+        let result = receiver.await.map_err(|_| {
+            ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
+        })?;
+        if matches!(
+            result,
+            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
+        ) {
+            self.poisoned.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+
+    fn worker(&self) -> Arc<RuntimeWorker> {
+        Arc::clone(
+            &self
+                .worker
+                .lock()
+                .expect("Clay runtime service worker mutex poisoned"),
+        )
+    }
+
+    fn replace_worker(&self) {
+        *self
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned") =
+            start_runtime_worker(self.timeout, self.heap_limit_bytes);
+    }
+
     #[cfg(test)]
     pub(crate) fn evaluation_count(&self) -> u64 {
         self.evaluations.load(Ordering::Relaxed)
+    }
+}
+
+struct JsParseHandler {
+    runtime: ClayJsRuntimeService,
+    registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
+}
+
+impl crate::server::parse_coordinator::ParseHandler for JsParseHandler {
+    fn parse(
+        &self,
+        notification: ParseEditNotification,
+    ) -> crate::server::parse_coordinator::ParseHandlerFuture {
+        let runtime = self.runtime.clone();
+        let registration = self.registration.clone();
+        Box::pin(async move {
+            runtime
+                .invoke_parse_handler(registration, notification)
+                .await
+                .map_err(|error| {
+                    crate::server::parse_coordinator::ParseCoordinatorError::HandlerFailed(
+                        error.to_string(),
+                    )
+                })
+        })
     }
 }
 
@@ -419,6 +597,7 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) published_sdui_tree: Option<crate::protocol::SduiTree>,
     pub(crate) published_decoration_set: Option<crate::protocol::DecorationSet>,
     pub(crate) parse_handlers: Vec<crate::server::parse_coordinator::ParseHandlerMeta>,
+    pub(crate) js_parse_handlers: Vec<crate::server::parse_coordinator::JsParseHandlerRegistration>,
     pub(crate) behavior_manifest: Option<crate::protocol::BehaviorManifest>,
     pub(crate) ui_contributions: crate::server::ui::PackageUiRegistrySnapshot,
 }
@@ -429,6 +608,7 @@ pub(crate) enum ClayRuntimeError {
     InvalidMainSpecifier(String),
     Runtime(String),
     Timeout,
+    HeapLimit,
     Join(task::JoinError),
 }
 
@@ -444,6 +624,7 @@ impl fmt::Display for ClayRuntimeError {
                 formatter,
                 "JavaScript runtime evaluation exceeded the configured timeout"
             ),
+            Self::HeapLimit => write!(formatter, "JavaScript runtime exceeded the heap limit"),
             Self::Join(error) => write!(formatter, "JavaScript runtime task failed: {error}"),
         }
     }
@@ -454,7 +635,9 @@ impl Error for ClayRuntimeError {
         match self {
             Self::Configuration(error) => Some(error),
             Self::Join(error) => Some(error),
-            Self::InvalidMainSpecifier(_) | Self::Runtime(_) | Self::Timeout => None,
+            Self::InvalidMainSpecifier(_) | Self::Runtime(_) | Self::Timeout | Self::HeapLimit => {
+                None
+            }
         }
     }
 }
@@ -474,6 +657,10 @@ impl ClayRuntimeError {
             Self::Timeout => RuntimeDiagnostic::error(
                 "clay.runtime.timeout",
                 "JavaScript runtime evaluation timed out and was terminated.",
+            ),
+            Self::HeapLimit => RuntimeDiagnostic::error(
+                "clay.runtime.heap_limit",
+                "JavaScript runtime exceeded its heap budget and was terminated.",
             ),
             Self::Join(_) => RuntimeDiagnostic::error(
                 "clay.runtime.task_failed",
@@ -551,108 +738,491 @@ enum RuntimeEntry {
     ConfigurationRoot(PathBuf),
 }
 
-fn evaluate_module_on_runtime(
-    entry: RuntimeEntry,
-    workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
-    runtime_document_id: crate::protocol::DocumentId,
+struct RuntimeWorker {
+    sender: mpsc::Sender<RuntimeCommand>,
+    join: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+impl fmt::Debug for RuntimeWorker {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeWorker")
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for RuntimeWorker {
+    fn drop(&mut self) {
+        let _ = self.sender.send(RuntimeCommand::Shutdown);
+        if let Some(join) = self
+            .join
+            .lock()
+            .expect("Clay runtime worker join mutex poisoned")
+            .take()
+        {
+            let _ = join.join();
+        }
+    }
+}
+
+#[allow(
+    clippy::large_enum_variant,
+    reason = "runtime worker commands stay on a single internal channel; boxing parse payloads is unnecessary until profiling says otherwise"
+)]
+enum RuntimeCommand {
+    Evaluate {
+        entry: RuntimeEntry,
+        workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
+        runtime_document_id: crate::protocol::DocumentId,
+        metric: &'static str,
+        response: oneshot::Sender<Result<ClayRuntimeEvaluation, ClayRuntimeError>>,
+    },
+    Parse {
+        registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
+        notification: ParseEditNotification,
+        response: oneshot::Sender<Result<IncrementalParseUpdate, ClayRuntimeError>>,
+    },
+    Shutdown,
+}
+
+fn start_runtime_worker(timeout: Duration, heap_limit_bytes: usize) -> Arc<RuntimeWorker> {
+    let (sender, receiver) = mpsc::channel();
+    let join = std::thread::Builder::new()
+        .name("clay-js-runtime".to_string())
+        .spawn(move || run_runtime_worker(receiver, timeout, heap_limit_bytes))
+        .expect("failed to spawn persistent JS runtime worker");
+    Arc::new(RuntimeWorker {
+        sender,
+        join: std::sync::Mutex::new(Some(join)),
+    })
+}
+
+fn run_runtime_worker(
+    receiver: mpsc::Receiver<RuntimeCommand>,
     timeout: Duration,
-) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+    heap_limit_bytes: usize,
+) {
+    let default_workspace = Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()));
     let op_state = Arc::new(ClayOpState::new_for_document(
-        workspace.unwrap_or_else(|| Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()))),
-        runtime_document_id,
+        Arc::clone(&default_workspace),
+        1,
     ));
-    let loaded_configuration = match entry {
-        RuntimeEntry::ControlledSource(source) => LoadedRuntimeEntry {
-            main_specifier: ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER)
-                .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
+    let main_specifier = ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER)
+        .expect("controlled runtime specifier must parse");
+    let loader = Rc::new(ClayModuleLoader::new(
+        main_specifier,
+        None,
+        None,
+        op_state.load_entry_allowlist(),
+    ));
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("persistent JS runtime tokio runtime must build");
+    let (mut runtime, heap_limit_hit) =
+        create_js_runtime(Arc::clone(&op_state), Rc::clone(&loader), heap_limit_bytes);
+    let mut controlled_evaluation_id = 0_u64;
+    let mut main_module_loaded = false;
+
+    for command in receiver {
+        match command {
+            RuntimeCommand::Evaluate {
+                entry,
+                workspace,
+                runtime_document_id,
+                metric,
+                response,
+            } => {
+                controlled_evaluation_id = controlled_evaluation_id.saturating_add(1);
+                let result = prepare_runtime_entry(entry, controlled_evaluation_id).and_then(
+                    |loaded_entry| {
+                        op_state.set_runtime_context(
+                            workspace.unwrap_or_else(|| Arc::clone(&default_workspace)),
+                            runtime_document_id,
+                        );
+                        op_state.begin_evaluation();
+                        heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
+                        loader.set_entry(
+                            loaded_entry.main_specifier.clone(),
+                            loaded_entry.main_source.clone(),
+                            loaded_entry.configuration.clone(),
+                        );
+                        let recorder = global_recorder();
+                        let _scope = recorder.scope(metric);
+                        let result = tokio_runtime.block_on(evaluate_loaded_module(
+                            &mut runtime,
+                            &op_state,
+                            loaded_entry,
+                            timeout,
+                            !main_module_loaded,
+                            &heap_limit_hit,
+                        ));
+                        main_module_loaded = true;
+                        result
+                    },
+                );
+                let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
+                let heap_limited = matches!(result, Err(ClayRuntimeError::HeapLimit));
+                let _ = response.send(result);
+                if timed_out || heap_limited {
+                    break;
+                }
+            }
+            RuntimeCommand::Parse {
+                registration,
+                notification,
+                response,
+            } => {
+                op_state.begin_evaluation();
+                heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
+                let result = tokio_runtime.block_on(evaluate_js_parse_handler(
+                    &mut runtime,
+                    &op_state,
+                    &loader,
+                    &registration,
+                    notification,
+                    timeout.min(Duration::from_millis(registration.timeout_ms)),
+                    &heap_limit_hit,
+                ));
+                let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
+                let heap_limited = matches!(result, Err(ClayRuntimeError::HeapLimit));
+                let _ = response.send(result);
+                if timed_out || heap_limited {
+                    break;
+                }
+            }
+            RuntimeCommand::Shutdown => break,
+        }
+    }
+}
+
+fn create_js_runtime(
+    op_state: Arc<ClayOpState>,
+    loader: Rc<ClayModuleLoader>,
+    heap_limit_bytes: usize,
+) -> (JsRuntime, Arc<std::sync::atomic::AtomicBool>) {
+    let create_params = v8::Isolate::create_params().heap_limits(0, heap_limit_bytes);
+    let mut runtime = JsRuntime::new(RuntimeOptions {
+        module_loader: Some(loader),
+        extensions: vec![init_runtime_extension()],
+        create_params: Some(create_params),
+        ..Default::default()
+    });
+    let heap_limit_hit = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let callback_flag = Arc::clone(&heap_limit_hit);
+    let terminate_handle = runtime.v8_isolate().thread_safe_handle();
+    runtime.add_near_heap_limit_callback(move |current_limit, _initial_limit| {
+        callback_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        terminate_handle.terminate_execution();
+        current_limit.saturating_mul(2)
+    });
+    runtime.op_state().borrow_mut().put(op_state);
+    (runtime, heap_limit_hit)
+}
+
+fn prepare_runtime_entry(
+    entry: RuntimeEntry,
+    controlled_evaluation_id: u64,
+) -> Result<LoadedRuntimeEntry, ClayRuntimeError> {
+    match entry {
+        RuntimeEntry::ControlledSource(source) => Ok(LoadedRuntimeEntry {
+            main_specifier: ModuleSpecifier::parse(&format!(
+                "clay://runtime/main-{controlled_evaluation_id}.js"
+            ))
+            .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
             main_source: Some(source),
             configuration: None,
-        },
+        }),
         RuntimeEntry::ConfigurationRoot(config_root) => {
             let configuration = Arc::new(
                 ConfigurationRuntime::from_config_root(config_root)
                     .map_err(ClayRuntimeError::Configuration)?,
             );
-            LoadedRuntimeEntry {
+            Ok(LoadedRuntimeEntry {
                 main_specifier: configuration
                     .entry_specifier()
                     .map_err(ClayRuntimeError::Configuration)?,
                 main_source: None,
                 configuration: Some(configuration),
-            }
+            })
         }
-    };
+    }
+}
 
-    let mut runtime = JsRuntime::new(RuntimeOptions {
-        module_loader: Some(Rc::new(ClayModuleLoader::new(
-            loaded_configuration.main_specifier.clone(),
-            loaded_configuration.main_source.clone(),
-            loaded_configuration.configuration.clone(),
-            op_state.load_entry_allowlist(),
-        ))),
-        extensions: vec![init_runtime_extension()],
-        ..Default::default()
-    });
-
-    runtime.op_state().borrow_mut().put(Arc::clone(&op_state));
+async fn evaluate_loaded_module(
+    runtime: &mut JsRuntime,
+    op_state: &Arc<ClayOpState>,
+    loaded_configuration: LoadedRuntimeEntry,
+    timeout: Duration,
+    use_main_module: bool,
+    heap_limit_hit: &std::sync::atomic::AtomicBool,
+) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
     if let Some(configuration) = &loaded_configuration.configuration {
         runtime
             .op_state()
             .borrow_mut()
             .put(Arc::clone(configuration));
     }
+    let terminate_handle = runtime.v8_isolate().thread_safe_handle();
+    let timer = TerminationTimer::start(timeout, terminate_handle);
 
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?
-        .block_on(async move {
-            // Capture a thread-safe handle so a watchdog thread can terminate the
-            // isolate if evaluation runs past `timeout`. `thread_safe_handle`
-            // borrows the isolate only for the call; `runtime` stays owned and
-            // is moved into the evaluation future below.
-            let terminate_handle = runtime.v8_isolate().thread_safe_handle();
-            let timer = TerminationTimer::start(timeout, terminate_handle);
-
-            let evaluation_result: Result<ClayRuntimeEvaluation, ClayRuntimeError> = async {
-                let module_id = if let Some(source) = loaded_configuration.main_source {
-                    runtime
-                        .load_main_es_module_from_code(&loaded_configuration.main_specifier, source)
-                        .await
-                } else {
-                    runtime
-                        .load_main_es_module(&loaded_configuration.main_specifier)
-                        .await
-                }
-                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-                let result = runtime.mod_evaluate(module_id);
+    let evaluation_result: Result<ClayRuntimeEvaluation, ClayRuntimeError> = async {
+        let module_id = if use_main_module {
+            if let Some(source) = loaded_configuration.main_source {
                 runtime
-                    .run_event_loop(Default::default())
+                    .load_main_es_module_from_code(&loaded_configuration.main_specifier, source)
                     .await
-                    .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-                result
+            } else {
+                runtime
+                    .load_main_es_module(&loaded_configuration.main_specifier)
                     .await
-                    .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-                let behavior_manifest = op_state.behavior_manifest();
-                Ok(ClayRuntimeEvaluation {
-                    op_records: op_state.records(),
-                    published_sdui_tree: op_state.published_sdui_tree(),
-                    published_decoration_set: op_state.published_decoration_set(),
-                    parse_handlers: op_state.parse_handlers(),
-                    behavior_manifest: (behavior_manifest.behavior_version > 1)
-                        .then_some(behavior_manifest),
-                    ui_contributions: op_state.ui_contributions(),
-                })
             }
-            .await;
-
-            // If the watchdog terminated the isolate, report a timeout even if
-            // v8 surfaced the termination as a runtime exception.
-            if timer.did_fire() {
-                return Err(ClayRuntimeError::Timeout);
-            }
-            evaluation_result
+        } else if let Some(source) = loaded_configuration.main_source {
+            runtime
+                .load_side_es_module_from_code(&loaded_configuration.main_specifier, source)
+                .await
+        } else {
+            runtime
+                .load_side_es_module(&loaded_configuration.main_specifier)
+                .await
+        }
+        .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+        let result = runtime.mod_evaluate(module_id);
+        runtime
+            .run_event_loop(Default::default())
+            .await
+            .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+        result
+            .await
+            .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+        let behavior_manifest = op_state.behavior_manifest();
+        Ok(ClayRuntimeEvaluation {
+            op_records: op_state.records(),
+            published_sdui_tree: op_state.published_sdui_tree(),
+            published_decoration_set: op_state.published_decoration_set(),
+            parse_handlers: op_state.parse_handlers(),
+            js_parse_handlers: op_state.js_parse_handlers(),
+            behavior_manifest: (behavior_manifest.behavior_version > 1)
+                .then_some(behavior_manifest),
+            ui_contributions: op_state.ui_contributions(),
         })
+    }
+    .await;
+
+    if timer.did_fire() {
+        let _ = runtime.v8_isolate().cancel_terminate_execution();
+        return Err(ClayRuntimeError::Timeout);
+    }
+    if heap_limit_hit.load(std::sync::atomic::Ordering::Relaxed) {
+        let _ = runtime.v8_isolate().cancel_terminate_execution();
+        return Err(ClayRuntimeError::HeapLimit);
+    }
+    evaluation_result
+}
+
+async fn evaluate_js_parse_handler(
+    runtime: &mut JsRuntime,
+    op_state: &Arc<ClayOpState>,
+    loader: &Rc<ClayModuleLoader>,
+    registration: &crate::server::parse_coordinator::JsParseHandlerRegistration,
+    notification: ParseEditNotification,
+    timeout: Duration,
+    heap_limit_hit: &std::sync::atomic::AtomicBool,
+) -> Result<IncrementalParseUpdate, ClayRuntimeError> {
+    let source = format!(
+        r#"
+const registry = globalThis.__clayParseHandlers ?? Object.create(null);
+const handler = registry[{token:?}];
+if (typeof handler !== "function") {{
+  throw new Error("clay.parse.handler_missing: registered parse handler is unavailable");
+}}
+const notification = {notification};
+const update = await handler(notification);
+Deno.core.ops.op_clay_parse_store_update(JSON.stringify(update ?? null));
+"#,
+        token = registration.token,
+        notification = parse_notification_json(&notification),
+    );
+    let loaded = LoadedRuntimeEntry {
+        main_specifier: ModuleSpecifier::parse(&format!(
+            "clay://runtime/parse-{}.js",
+            registration.token.replace(':', "-")
+        ))
+        .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
+        main_source: Some(source),
+        configuration: None,
+    };
+    loader.set_entry(
+        loaded.main_specifier.clone(),
+        loaded.main_source.clone(),
+        loaded.configuration.clone(),
+    );
+    evaluate_loaded_module(runtime, op_state, loaded, timeout, false, heap_limit_hit).await?;
+    let update_json = op_state.take_parse_update_json().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.parse.invalid_update: handler produced no update".to_string(),
+        )
+    })?;
+    parse_update_json(&update_json, registration, notification)
+}
+
+fn parse_notification_json(notification: &ParseEditNotification) -> String {
+    serde_json::json!({
+        "documentId": notification.document_id,
+        "documentVersion": notification.document_version,
+        "behaviorVersion": notification.behavior_version,
+        "packagePrefix": notification.package_prefix,
+        "mode": notification.mode_id,
+        "viewport": range_json(notification.viewport),
+        "invalidatedRanges": notification.invalidated_ranges.iter().map(|range| range_json(*range)).collect::<Vec<_>>(),
+        "parseWindows": notification.parse_windows.iter().map(|window| serde_json::json!({
+            "documentId": window.document_id,
+            "documentVersion": window.document_version,
+            "packagePrefix": window.package_prefix,
+            "mode": window.mode_id,
+            "byteStart": window.byte_start,
+            "byteEnd": window.byte_end,
+            "baseLine": window.base_line,
+            "text": window.text,
+        })).collect::<Vec<_>>(),
+        "memoryBudget": notification.memory_budget.map(|budget| serde_json::json!({
+            "budgetBytes": budget.budget_bytes,
+            "retainedBytes": budget.retained_bytes,
+        })),
+    })
+    .to_string()
+}
+
+fn range_json(range: ParseByteRange) -> serde_json::Value {
+    serde_json::json!({ "byteStart": range.start, "byteEnd": range.end })
+}
+
+fn parse_update_json(
+    update_json: &str,
+    registration: &crate::server::parse_coordinator::JsParseHandlerRegistration,
+    fallback: ParseEditNotification,
+) -> Result<IncrementalParseUpdate, ClayRuntimeError> {
+    let value: serde_json::Value = serde_json::from_str(update_json).map_err(|error| {
+        ClayRuntimeError::Runtime(format!("clay.parse.invalid_update: {error}"))
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime("clay.parse.invalid_update: update must be an object".to_string())
+    })?;
+    let viewport = object
+        .get("viewport")
+        .and_then(parse_range_value)
+        .unwrap_or(fallback.viewport);
+    let spans = object
+        .get("spans")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| span_from_value(value, registration))
+                .collect()
+        })
+        .transpose()?;
+    Ok(IncrementalParseUpdate {
+        document_id: object
+            .get("documentId")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(fallback.document_id),
+        document_version: object
+            .get("documentVersion")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(fallback.document_version),
+        behavior_version: object
+            .get("behaviorVersion")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(fallback.behavior_version),
+        package_prefix: object
+            .get("packagePrefix")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&registration.meta.package_prefix)
+            .to_string(),
+        mode_id: object
+            .get("mode")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&registration.meta.mode_id)
+            .to_string(),
+        parse_unit: registration.parse_unit,
+        viewport,
+        invalidated_ranges: fallback.invalidated_ranges,
+        syntax_tree_delta: object
+            .get("syntaxTreeDelta")
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned),
+        decoration_update: spans.map(|spans| DecorationSet {
+            document_id: fallback.document_id,
+            document_version: fallback.document_version,
+            viewport_byte_start: viewport.start,
+            viewport_byte_end: viewport.end,
+            spans,
+        }),
+    })
+}
+
+fn parse_range_value(value: &serde_json::Value) -> Option<ParseByteRange> {
+    let object = value.as_object()?;
+    Some(ParseByteRange::new(
+        object
+            .get("byteStart")
+            .or_else(|| object.get("start"))?
+            .as_u64()?,
+        object
+            .get("byteEnd")
+            .or_else(|| object.get("end"))?
+            .as_u64()?,
+    ))
+}
+
+fn span_from_value(
+    value: &serde_json::Value,
+    registration: &crate::server::parse_coordinator::JsParseHandlerRegistration,
+) -> Result<DecorationSpan, ClayRuntimeError> {
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime("clay.parse.invalid_update: span must be an object".to_string())
+    })?;
+    let kind = match object
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("syntax")
+    {
+        "syntax" | "Syntax" => DecorationKind::Syntax,
+        "semantic" | "Semantic" => DecorationKind::Semantic,
+        "diagnostic" | "Diagnostic" => DecorationKind::Diagnostic,
+        "search-match" | "searchMatch" | "SearchMatch" => DecorationKind::SearchMatch,
+        other => {
+            return Err(ClayRuntimeError::Runtime(format!(
+                "clay.parse.invalid_update: unsupported decoration kind `{other}`"
+            )));
+        }
+    };
+    Ok(DecorationSpan {
+        byte_start: object
+            .get("byteStart")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        byte_end: object
+            .get("byteEnd")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        kind,
+        style_token: object
+            .get("styleToken")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("markup.plain")
+            .to_string(),
+        priority: object
+            .get("priority")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u16,
+        provenance: DecorationProvenance {
+            package_name: registration.package.manifest.name.clone(),
+            package_version: registration.package.manifest.version.clone(),
+            package_prefix: registration.package.manifest.clay.api_prefix.clone(),
+        },
+    })
 }
 
 /// Watchdog that terminates a V8 isolate when an evaluation exceeds a budget.
@@ -724,15 +1294,18 @@ struct LoadedRuntimeEntry {
 
 #[derive(Debug)]
 struct ClayModuleLoader {
+    state: std::sync::Mutex<ClayModuleLoaderState>,
+    // ponytail: shared validated first-party loadEntry gate. Populated by
+    // `op_clay_packages_load_package_by_specifier`, checked in resolve/load.
+    // Ceiling: one entry per loaded first-party package.
+    first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
+}
+
+#[derive(Debug)]
+struct ClayModuleLoaderState {
     main_specifier: ModuleSpecifier,
     main_source: Option<String>,
     configuration: Option<Arc<ConfigurationRuntime>>,
-    // ponytail: shared validated first-party loadEntry gate. Populated by
-    // `op_clay_packages_load_package_by_specifier`, checked in resolve/load.
-    // The loader branches that consume it are added in Phase 18.6 task 4;
-    // until then it is threaded but unused, so the deny-by-default boundary
-    // is unchanged. Ceiling: one entry per loaded first-party package.
-    first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
 }
 
 impl ClayModuleLoader {
@@ -743,11 +1316,29 @@ impl ClayModuleLoader {
         first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
     ) -> Self {
         Self {
+            state: std::sync::Mutex::new(ClayModuleLoaderState {
+                main_specifier,
+                main_source,
+                configuration,
+            }),
+            first_party_load_entry_allowlist,
+        }
+    }
+
+    fn set_entry(
+        &self,
+        main_specifier: ModuleSpecifier,
+        main_source: Option<String>,
+        configuration: Option<Arc<ConfigurationRuntime>>,
+    ) {
+        *self
+            .state
+            .lock()
+            .expect("Clay module loader state mutex poisoned") = ClayModuleLoaderState {
             main_specifier,
             main_source,
             configuration,
-            first_party_load_entry_allowlist,
-        }
+        };
     }
 
     fn denied(specifier: &str) -> JsErrorBox {
@@ -762,18 +1353,22 @@ impl ModuleLoader for ClayModuleLoader {
         &self,
         specifier: &str,
         referrer: &str,
-        kind: ResolutionKind,
+        _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
-        if matches!(kind, ResolutionKind::MainModule) && specifier == self.main_specifier.as_str() {
-            return Ok(self.main_specifier.clone());
+        let state = self
+            .state
+            .lock()
+            .expect("Clay module loader state mutex poisoned");
+        if specifier == state.main_specifier.as_str() {
+            return Ok(state.main_specifier.clone());
         }
         if clay_facade_source(specifier).is_some() {
             return ModuleSpecifier::parse(specifier)
-                .map_err(|error| Self::denied(&error.to_string()).into());
+                .map_err(|error| Self::denied(&error.to_string()));
         }
         if specifier == "markdown-it" {
             return ModuleSpecifier::parse(MARKDOWN_IT_MODULE_SPECIFIER)
-                .map_err(|error| Self::denied(&error.to_string()).into());
+                .map_err(|error| Self::denied(&error.to_string()));
         }
         // First-party validated `loadEntry`: opaque `clay://packages/...`
         // specifiers recorded by `op_clay_packages_load_package_by_specifier`.
@@ -792,7 +1387,7 @@ impl ModuleLoader for ClayModuleLoader {
             .is_some()
         {
             return ModuleSpecifier::parse(specifier)
-                .map_err(|error| Self::denied(&error.to_string()).into());
+                .map_err(|error| Self::denied(&error.to_string()));
         }
         // Transitive relative imports from a validated package loadEntry are
         // confined to the validated package root by the allowlist and recorded
@@ -800,22 +1395,21 @@ impl ModuleLoader for ClayModuleLoader {
         // modules (e.g. `./index.js`) without weakening the config-root
         // boundary for any non-package specifier. ponytail: ceiling is the
         // validated package root; `resolve_relative` denies anything escaping it.
-        if specifier.starts_with("./") || specifier.starts_with("../") {
-            if let Some(new_specifier) = self
+        if (specifier.starts_with("./") || specifier.starts_with("../"))
+            && let Some(new_specifier) = self
                 .first_party_load_entry_allowlist
                 .resolve_relative(referrer, specifier)
-            {
-                return ModuleSpecifier::parse(&new_specifier)
-                    .map_err(|error| Self::denied(&error.to_string()).into());
-            }
+        {
+            return ModuleSpecifier::parse(&new_specifier)
+                .map_err(|error| Self::denied(&error.to_string()));
         }
-        if let Some(configuration) = &self.configuration {
+        if let Some(configuration) = &state.configuration {
             return configuration
                 .resolve_module(specifier, referrer)
-                .map_err(|error| error.to_js_error().into());
+                .map_err(|error| error.to_js_error());
         }
 
-        Err(Self::denied(&format!("{specifier} from {referrer}")).into())
+        Err(Self::denied(&format!("{specifier} from {referrer}")))
     }
 
     fn load(
@@ -824,15 +1418,19 @@ impl ModuleLoader for ClayModuleLoader {
         _maybe_referrer: Option<&ModuleLoadReferrer>,
         _options: ModuleLoadOptions,
     ) -> ModuleLoadResponse {
-        if module_specifier == &self.main_specifier {
-            if let Some(source) = &self.main_source {
-                return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
-                    ModuleType::JavaScript,
-                    ModuleSourceCode::String(source.clone().into()),
-                    module_specifier,
-                    None,
-                )));
-            }
+        let state = self
+            .state
+            .lock()
+            .expect("Clay module loader state mutex poisoned");
+        if module_specifier == &state.main_specifier
+            && let Some(source) = &state.main_source
+        {
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(source.clone().into()),
+                module_specifier,
+                None,
+            )));
         }
 
         if let Some(source) = clay_facade_source(module_specifier.as_str()) {
@@ -868,7 +1466,6 @@ impl ModuleLoader for ClayModuleLoader {
                         Self::denied(&format!(
                             "first-party loadEntry {module_specifier} could not be loaded ({error})"
                         ))
-                        .into()
                     })
                     .map(|source| {
                         ModuleSource::new(
@@ -880,7 +1477,7 @@ impl ModuleLoader for ClayModuleLoader {
                     }),
             );
         }
-        if let Some(configuration) = &self.configuration {
+        if let Some(configuration) = &state.configuration {
             return ModuleLoadResponse::Sync(
                 configuration
                     .load_module_source(module_specifier)
@@ -892,11 +1489,11 @@ impl ModuleLoader for ClayModuleLoader {
                             None,
                         )
                     })
-                    .map_err(|error| error.to_js_error().into()),
+                    .map_err(|error| error.to_js_error()),
             );
         }
 
-        ModuleLoadResponse::Sync(Err(Self::denied(module_specifier.as_str()).into()))
+        ModuleLoadResponse::Sync(Err(Self::denied(module_specifier.as_str())))
     }
 }
 
@@ -938,8 +1535,12 @@ mod tests {
     use super::{
         ClayJsRuntimeService, ClayModuleLoader, ClayRuntimeError, FirstPartyLoadEntryAllowlist,
     };
-    use crate::protocol::DiagnosticSeverity;
+    use crate::protocol::{
+        BehaviorVersion, DiagnosticSeverity, ParseByteRange, ParseEditNotification, ParsePolicy,
+        ParseWindowSnapshot,
+    };
     use crate::server::configuration::ConfigurationRuntime;
+    use crate::server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest};
     use crate::server::workspace::WorkspaceState;
 
     fn config_fixture(name: &str) -> PathBuf {
@@ -973,6 +1574,207 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn persistent_js_runtime_retains_global_state_between_evaluations() {
+        let service = ClayJsRuntimeService::default();
+        service
+            .evaluate_controlled_module(r#"globalThis.__clayPersistentRuntime = 41;"#)
+            .await
+            .unwrap();
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                if (globalThis.__clayPersistentRuntime !== 41) {
+                    throw new Error("persistent runtime state missing");
+                }
+                Deno.core.ops.op_clay_runtime_record("persistent");
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["persistent"]);
+        assert_eq!(service.evaluation_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn js_parse_handler_bridge_runs_registered_markdown_handler() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                await loadPackage("@clay/markdown");
+                "#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(evaluation.js_parse_handlers.len(), 1);
+
+        let coordinator = ParseCoordinator::new();
+        service
+            .register_parse_handlers(&coordinator, 1, &evaluation)
+            .unwrap();
+
+        let text = "# Title\n";
+        let request = ParseScheduleRequest {
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1 as BehaviorVersion,
+            package_prefix: "markdown".to_string(),
+            mode_id: "markdown".to_string(),
+            viewport: ParseByteRange::new(0, text.len() as u64),
+            invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+        };
+        let windows = vec![ParseWindowSnapshot {
+            document_id: 1,
+            document_version: 1,
+            package_prefix: "markdown".to_string(),
+            mode_id: "markdown".to_string(),
+            byte_start: 0,
+            byte_end: text.len() as u64,
+            base_line: 0,
+            text: text.to_string(),
+        }];
+        coordinator
+            .schedule_parse_with_windows(
+                request,
+                windows,
+                Some(ParsePolicy::new(64 * 1024, 4 * 1024, 30 * 1024 * 1024, 50)),
+            )
+            .unwrap();
+
+        let update = tokio::time::timeout(Duration::from_secs(2), coordinator.next_update())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.package_prefix, "markdown");
+        assert!(
+            update
+                .decoration_update
+                .as_ref()
+                .is_some_and(|set| !set.spans.is_empty()),
+            "markdown parser produced syntax decorations"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_registration_rejects_executable_callbacks_and_missing_permissions() {
+        let service = ClayJsRuntimeService::default();
+        for source in [
+            r#"
+            import { serverRegisterParseHandler } from "clay:parse";
+            serverRegisterParseHandler({
+              packageName: "@clay/evil",
+              packageVersion: "0.1.0",
+              packagePrefix: "evil",
+              permissions: ["parse-document"],
+              mode: "evil",
+              handler() {}
+            });
+            "#,
+            r#"
+            import { serverRegisterParseHandler } from "clay:parse";
+            serverRegisterParseHandler({
+              packageName: "@clay/no-parse",
+              packageVersion: "0.1.0",
+              packagePrefix: "noparse",
+              permissions: [],
+              mode: "noparse"
+            });
+            "#,
+        ] {
+            let error = service
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("clay.parse.invalid_handler")
+                    || message.contains("clay.packages.missing_permission"),
+                "unexpected registration error: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn js_parse_handler_timeout_uses_registered_budget() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterParseHandler } from "clay:parse";
+                const parser = { parse() { while (true) {} } };
+                serverRegisterParseHandler({
+                  packageName: "@clay/loop",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "loop",
+                  permissions: ["parse-document"],
+                  mode: "loop",
+                  parseUnit: "line-group",
+                  timeoutMs: 50,
+                  module: parser,
+                  exportName: "parse"
+                });
+                "#,
+            )
+            .await
+            .expect("malicious handler registration itself should be bounded metadata work");
+        let registration = evaluation
+            .js_parse_handlers
+            .first()
+            .expect("handler registered")
+            .clone();
+        let notification = ParseEditNotification {
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            package_prefix: "loop".to_string(),
+            mode_id: "loop".to_string(),
+            viewport: ParseByteRange::new(0, 4),
+            invalidated_ranges: vec![ParseByteRange::new(0, 4)],
+            parse_windows: Vec::new(),
+            memory_budget: None,
+        };
+        let started = std::time::Instant::now();
+        let error = service
+            .invoke_parse_handler(registration, notification)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ClayRuntimeError::Timeout));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "registered handler timeout budget should beat global 5s guard"
+        );
+        assert_eq!(error.diagnostic().code, "clay.runtime.timeout");
+    }
+
+    #[tokio::test]
+    async fn runtime_boundary_does_not_expose_platform_authorities() {
+        let service = ClayJsRuntimeService::default();
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                const exposed = [
+                  ["fetch", typeof fetch],
+                  ["WebSocket", typeof WebSocket],
+                  ["Worker", typeof Worker],
+                  ["process", typeof process],
+                  ["require", typeof require],
+                  ["Deno.readTextFile", typeof Deno.readTextFile],
+                  ["Deno.Command", typeof Deno.Command],
+                ].filter(([, type]) => type !== "undefined");
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify(exposed));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["[]"]);
+    }
+
+    #[tokio::test]
     async fn js_runtime_infinite_loop_is_terminated_with_timeout() {
         let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(150));
         let start = std::time::Instant::now();
@@ -997,6 +1799,92 @@ mod tests {
         );
         // Timed-out evaluations are not counted as successful completions.
         assert_eq!(service.evaluation_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn js_runtime_timeout_recovery_uses_fresh_worker() {
+        let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(150));
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                globalThis.__clayRecoveryMarker = "stale";
+                while (true) {}
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ClayRuntimeError::Timeout));
+
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                Deno.core.ops.op_clay_runtime_record(typeof globalThis.__clayRecoveryMarker);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["undefined"]);
+        assert_eq!(service.evaluation_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn js_runtime_heap_growth_is_terminated_with_heap_limit_diagnostic() {
+        let service = ClayJsRuntimeService::with_timeout_and_heap_limit(
+            Duration::from_secs(3),
+            8 * 1024 * 1024,
+        );
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                const values = [];
+                while (true) {
+                  values.push({ text: "Hello", number: values.length });
+                }
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ClayRuntimeError::HeapLimit),
+            "expected heap limit, got {error:?}"
+        );
+        assert_eq!(error.diagnostic().code, "clay.runtime.heap_limit");
+        assert_eq!(service.evaluation_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn js_runtime_heap_limit_recovery_uses_fresh_worker() {
+        let service = ClayJsRuntimeService::with_timeout_and_heap_limit(
+            Duration::from_secs(3),
+            8 * 1024 * 1024,
+        );
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                globalThis.__clayRecoveryMarker = "stale";
+                const values = [];
+                while (true) {
+                  values.push({ text: "Hello", number: values.length });
+                }
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ClayRuntimeError::HeapLimit));
+
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                Deno.core.ops.op_clay_runtime_record(typeof globalThis.__clayRecoveryMarker);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["undefined"]);
+        assert_eq!(service.evaluation_count(), 1);
     }
 
     #[tokio::test]
@@ -3122,6 +4010,34 @@ mod tests {
             result.behavior_manifest.is_some(),
             "loadPackage must register mode/commands/keymaps into the behavior manifest"
         );
+    }
+
+    #[tokio::test]
+    async fn load_package_is_idempotent_per_persistent_runtime() {
+        let root = config_fixture("loadpackage-idempotent");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/markdown");
+            await loadPackage("@clay/markdown");
+            Deno.core.ops.op_clay_runtime_record("loaded-once");
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("repeated loadPackage calls must reuse the already-loaded package");
+
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|record| record == "loaded-once")
+        );
+        assert_eq!(result.js_parse_handlers.len(), 1);
     }
 
     #[tokio::test]

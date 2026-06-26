@@ -691,12 +691,58 @@ Expected outcome:
 Carried-forward items:
 
 - Non-`@clay/*` package specifier resolution (third-party package registries, `npm install` integration, external package stores) remains out of scope until Phase 23 ecosystem hardening provides trust, integrity, and compatibility guarantees.
-- Hot reload of already-loaded packages (`loadPackage` called more than once for the same specifier, or runtime reload after configuration change) is deferred to Phase 19 hot-reload semantics.
+- Hot reload of already-loaded packages (`loadPackage` called more than once for the same specifier, or runtime reload after configuration change) is deferred to Phase 19 hot-reload semantics, which depends on the Phase 18.7 persistent runtime.
 - Persistent shared package enable/disable state across processes is deferred to Phase 17 completion or Phase 23 ecosystem hardening.
+- The persistent runtime and JS `ParseHandler` bridge needed to remove the hardcoded Markdown open path (Plan 030 P2-3) are deferred to Phase 18.7.
+
+## Phase 18.7: Persistent Server Runtime and JS ParseHandler Bridge for Generic Open-Time Mode Activation
+
+Ship the persistent shared server-side JS runtime and the constrained JS→Rust `ParseHandler` bridge that let open-time mode activation and parse decoration publication route through the generic package/mode/parse-coordinator path, and then remove the hardcoded Markdown open path from `src/server/connection.rs`. This is the direct continuation of the now-complete Phase 18.6 generic `loadPackage("@clay/*")` resolver and is a prerequisite for the existing Phase 19 hot-reload semantics.
+
+Entry gate:
+
+- Do not start until Phase 18.6 is complete (the constrained `@clay/*` resolver, first-party module-loader bridge, and `clay:packages.loadPackage` end-to-end) and its decision log (`decision-logs/2026-06-16-1526-generic-first-party-package-loadentry-module-bridge.md`) is in place.
+- Do not start until Plan 030's security/architecture remediation is complete or explicitly superseded; this phase is the home for the P2-3 cleanup Plan 030 deliberately deferred (`decision-logs/2026-06-23-1823-defer-remove-hardcoded-markdown-open-path-to-phase-18-7-persistent-runtime-and-parse-bridge.md`).
+- This phase is a runtime-lifecycle and authority gate: the persistent runtime and the JS `ParseHandler` bridge must ship as one coherent, security-reviewed unit with their own plan, primitive review, decision log, and dedicated tests, not as incremental patches to Phase 19 hot-reload or daily-hardening phases.
+
+Why this phase exists (evidence):
+
+- `code-reviews/2026-06-21-current-implementation-review.md` P2-3 (Architecture + Performance) flagged that selected Markdown file open in `src/server/connection.rs` creates a temp runtime root, copies `packages/markdown/dist` JS files, writes a generated `init.js`, evaluates a fresh JS runtime, and removes the temp directory on every open.
+- Investigation during Plan 030 found the generic live-parse path this task must route through does **not** exist in production: (1) `ClayJsRuntimeService::evaluate_module_on_runtime` creates and drops a fresh `deno_core::JsRuntime` per call, so no runtime survives across operations; (2) `ParseCoordinator::register_handler` takes a real `impl ParseHandler` trait object but is called only from tests, while `op_clay_parse_register_parse_handler` records metadata only and `reject_executable_handler` rejects executable callbacks; (3) Markdown decorations are produced only by the per-file fresh runtime via `publishMarkdownDecorations`, with no other producer.
+- The deferral precedent is `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md`, which held the Phase 18.6 resolver to the same "own plan, security review, decision log, dedicated tests" bar rather than folding it into a Markdown replan.
+
+Focus areas:
+
+- **Persistent shared server-side JS runtime.** Replace the per-call `evaluate_module_on_runtime` fresh-isolate model with a runtime whose lifecycle outlives a single evaluation, so resolver-validated packages can register handlers that persist across document open/edit operations. Define the lifetime explicitly (per-server, per-configuration-reload, or per-document), keep the deny-by-default `ClayModuleLoader` module boundary, and keep the Plan 030 wall-clock timeout guard (`JS_RUNTIME_EVALUATION_TIMEOUT_MS`, `clay.runtime.timeout`) plus the deferred V8 heap-limit guard and separate-process JS sandbox as tracked hardening within this phase. The persistent runtime must not grant filesystem/network/shell/AI/WASM/raw-op/native-widget/client-JS authority beyond the existing curated `clay:*` facades and the Phase 18.6 first-party `loadEntry` allowlist.
+- **Constrained JS→Rust `ParseHandler` bridge.** Add the bridge that lets a resolver-validated package register a real parse callback into `ParseCoordinator::schedule_parse` so `next_update` produces `IncrementalParseUpdate` in production, not only in tests. The bridge must not accept arbitrary executable `handler`/`callback`/`onParse`/`function` values from user configuration; it must reuse the Phase 18.6 validated-package/`loadEntry` path so only resolver-validated first-party packages can register handlers. Honor the existing parse budgets (`maxWindowBytes`, `guardBytes`, `memoryBudgetBytes` ≤ `SYNTAX_CACHE_BUDGET_BYTES`, `timeoutMs` 1..5000) and the `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` payload cap, and surface handler failures as typed `ParseCoordinatorError::HandlerFailed`.
+- **Generic open-time mode activation.** Route selected-file open through the generic package/mode/parse path so the Markdown-specific `selected_file_open_followup_messages` Markdown branch (and `evaluate_markdown_open`, `create_markdown_open_runtime_root`, `unique_markdown_open_runtime_root`, `markdown_open_init_source`) can be deleted. Open-time activation must reuse the Phase 18.6 `loadPackage("@clay/*")` path and the persistent runtime instead of spawning a fresh runtime and copying `dist` files per open. Behavior, manifest, SDUI, and decoration outputs must be equivalent to the removed special path.
+- **Remove the Markdown-specific `connection.rs` branch.** Delete the hardcoded Markdown open path once the generic path produces equivalent outputs. Keep all Markdown-specific parser logic inside `packages/markdown` (no Markdown branches in Rust). Reuse the centralized `apply_runtime_outputs` primitive so behavior/SDUI state mutation and validation stay in one place.
+- **Edit hot-path safety.** Because the persistent runtime invokes JS on the document edit/open path, prove (via Phase 14/15 instrumentation) that typing/rendering are not blocked by parse work, that parse work obeys its budgets and timeout, and that no half-updated behavior/rendering state is visible to clients.
+- **Security boundary tests.** Add deterministic tests enforcing: deny-by-default for arbitrary executable handler registration from user configuration; only resolver-validated first-party packages can register parse handlers; the persistent runtime cannot load modules outside the curated facades and first-party `loadEntry` allowlist; parse budgets and timeout are enforced; a malicious/huge/looping parse handler is bounded and surfaced as a typed error.
+- **Documentation.** Update `docs/reference/primitives/parse.md` (or successor), `docs/wiki/modules/parse-coordinator.md`, `docs/wiki/modules/embedded-js-runtime.md`, `docs/wiki/modules/server-file-workspace.md`, the generated registry, `docs/index.md`, and the code wiki for the persistent runtime lifecycle, the JS `ParseHandler` bridge contract, and the generic open-time activation path. Record a decision log for the authority expansion (long-lived runtime holding package closures; JS on the edit/open hot path).
+
+Expected outcome:
+
+- Opening a `.md` file no longer spawns a fresh JS runtime or copies `dist` files; mode activation and decoration publication route through the generic package/mode/parse-coordinator path on the persistent runtime.
+- `src/server/connection.rs` has no Markdown-specific branch; Markdown parser logic lives entirely in `packages/markdown`.
+- `ParseCoordinator::schedule_parse`/`next_update` produce `IncrementalParseUpdate` in production from a resolver-validated package handler, not only in tests.
+- A second mode (e.g. a future Python/JSON mode) can be added by writing a package on top of the generic primitives, with no new Rust mode branches.
+- Typing/rendering are not blocked by parse work; parse budgets and timeout are enforced.
+- No new filesystem/network/shell/AI/WASM/raw-op/native-widget/client-JS/package-manager authority is granted beyond the constrained first-party path.
+
+Carried-forward items:
+
+- Hot reload of already-loaded packages and runtime reload after configuration change remain deferred to Phase 19 hot-reload semantics (Phase 18.7 establishes the persistent runtime Phase 19 builds on).
+- V8 heap-limit guard via `v8::CreateParams` heap limits and a separate-process JS sandbox, deferred from Plan 030 task 6, may be folded into this phase or tracked separately; either way they are prerequisites-for-hardening, not blockers for the generic activation path.
+- Non-`@clay/*` package specifier resolution remains out of scope until Phase 23 ecosystem hardening.
 
 ## Phase 19: Hot Reload and Behavior Update Semantics
 
 Make runtime package and mode behavior changes safe and non-janky after the first package/mode path exists.
+
+Entry gate:
+
+- Depends on **Phase 18.7**'s persistent server-side JS runtime; hot reload cannot be safe or non-janky without a runtime whose lifecycle outlives a single evaluation. Do not start Phase 19 until Phase 18.7 is complete.
 
 Focus areas:
 

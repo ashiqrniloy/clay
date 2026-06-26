@@ -456,7 +456,7 @@ mod tests {
         assert_eq!(result.caret, 1);
         assert_eq!(buffer.visible_text(), "a");
 
-        let rejected = buffer.delete_range(3..1);
+        let rejected = buffer.delete_range(std::ops::Range { start: 3, end: 1 });
         assert!(!rejected.changed);
         assert_eq!(buffer.visible_text(), "a");
     }

@@ -1,4 +1,4 @@
-pub mod behavior;
+pub(crate) mod behavior;
 pub mod client;
 pub mod docs;
 pub mod editor;

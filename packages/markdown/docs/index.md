@@ -14,7 +14,7 @@
 - Parser/decorator adapter: `./dist/parser.js`
 - SDUI preview/status adapter: `./dist/sdui.js`
 - Documentation entry: `./docs/index.md`
-- Large-file policy defaults: full highlighting for files up to `1 MiB`; viewport/windowed highlighting above `1 MiB`; large-file behavior above `5 MiB`; `64 KiB` parse windows; `4 KiB` guard ranges; `30 MiB` retained syntax/decor budget; `50 ms` parse timeout; `plain-text-fallback` when the budget is exhausted.
+- Large-file policy defaults: full highlighting for files up to `1 MiB`; viewport/windowed highlighting above `1 MiB`; large-file behavior above `5 MiB`; `64 KiB` parse windows; `4 KiB` guard ranges; `30 MiB` retained syntax/decor budget; `500 ms` parse timeout; `plain-text-fallback` when the budget is exhausted.
 - Configuration status: Phase 18.5 verifies these values as fixed package-owned defaults. `@clay/markdown` declares no `contributions.configuration` entries, does not request `package-configuration`, and does not expose Markdown large-file tuning through `~/.config/clay/init.js` yet. The bounded parse-window values it passes to `clay.parse.serverRegisterParseHandler` are covered by that API's `custom_properties` and server validation; file-size thresholds and status labels remain package constants until a later configuration API is implemented.
 
 ## Permissions
@@ -53,7 +53,7 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/markdown");
 ```
 
-Plan 029 (Phase 18.6) implemented the generic `loadPackage("@clay/*")` resolver with the `op_clay_packages_load_package_by_specifier` gate and the `FirstPartyLoadEntryAllowlist` module-loader bridge. The resolver is constrained to first-party `@clay/*` packages only; non-`@clay/*` registry resolution (third-party, npm, custom registries) is deferred to Phase 23 ecosystem hardening. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the authority rationale and security review.
+Plan 029 (Phase 18.6) implemented the generic `loadPackage("@clay/*")` resolver with the `op_clay_packages_load_package_by_specifier` gate and the `FirstPartyLoadEntryAllowlist` module-loader bridge. Phase 18.7 verifies the default init.js experience: this one line loads Markdown once on the persistent server runtime, and selected-file open reuses the registered mode and parse handler through generic open-time activation. The resolver is constrained to first-party `@clay/*` packages only; non-`@clay/*` registry resolution (third-party, npm, custom registries) is deferred to Phase 23 ecosystem hardening. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the authority rationale and security review.
 
 The Markdown package's `loadEntry` (`markdownLoadMode` in `packages/markdown/dist/load.js`) is the default activation export that `loadPackage` invokes. The package-owned `markdownLoadMode()` entry remains available as a convenience alias for per-load options:
 

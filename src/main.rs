@@ -111,6 +111,10 @@ impl AppDriver for Driver {
     }
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "GUI command results are low-volume and only one variant carries a selected path"
+)]
 enum ClientUiCommandResult {
     None,
     ConnectionEvent(ClientConnectionEvent),

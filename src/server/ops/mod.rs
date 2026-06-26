@@ -48,10 +48,11 @@ use self::{
         op_clay_modes_register_pattern,
     },
     packages::{
-        op_clay_packages_load_package, op_clay_packages_load_package_by_specifier,
-        op_clay_packages_validate_manifest, op_clay_packages_validate_permissions,
+        op_clay_packages_list_first_party_specifiers, op_clay_packages_load_package,
+        op_clay_packages_load_package_by_specifier, op_clay_packages_validate_manifest,
+        op_clay_packages_validate_permissions,
     },
-    parse::op_clay_parse_register_parse_handler,
+    parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
     ui::{
@@ -66,18 +67,24 @@ use self::{
 pub(crate) use self::packages::FirstPartyLoadEntryAllowlist;
 
 /// Server-owned state shared with explicit Clay JavaScript ops.
+struct ClayRuntimeContext {
+    workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
+    runtime_document_id: crate::protocol::DocumentId,
+}
+
 pub(crate) struct ClayOpState {
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
     decoration_cache: Mutex<SyntaxChunkCache>,
     parse_handlers: Mutex<Vec<crate::server::parse_coordinator::ParseHandlerMeta>>,
+    js_parse_handlers: Mutex<Vec<crate::server::parse_coordinator::JsParseHandlerRegistration>>,
+    last_parse_update_json: Mutex<Option<String>>,
     behavior: Mutex<ActiveBehaviorManifest>,
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
     ui: Mutex<crate::server::ui::PackageUiRegistry>,
-    workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
-    runtime_document_id: crate::protocol::DocumentId,
+    runtime_context: Mutex<ClayRuntimeContext>,
     // ponytail: PackageService reuse for the first-party resolver op. The store
     // root and FakeBackend are never used by the resolver (it reads first-party
     // packages from CARGO_MANIFEST_DIR/packages); only the validate/enable path
@@ -118,12 +125,16 @@ impl ClayOpState {
             published_decoration_set: Mutex::new(None),
             decoration_cache: Mutex::new(SyntaxChunkCache::default()),
             parse_handlers: Mutex::new(Vec::new()),
+            js_parse_handlers: Mutex::new(Vec::new()),
+            last_parse_update_json: Mutex::new(None),
             behavior: Mutex::new(ActiveBehaviorManifest::default()),
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
             ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
-            workspace,
-            runtime_document_id,
+            runtime_context: Mutex::new(ClayRuntimeContext {
+                workspace,
+                runtime_document_id,
+            }),
             first_party_packages: Mutex::new(crate::packages::service::PackageService::new(
                 PathBuf::new(),
                 Box::new(crate::packages::manager::FakeBackend::new()),
@@ -135,11 +146,53 @@ impl ClayOpState {
     pub(crate) fn workspace(
         &self,
     ) -> Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>> {
-        Arc::clone(&self.workspace)
+        Arc::clone(
+            &self
+                .runtime_context
+                .lock()
+                .expect("Clay runtime op state mutex poisoned")
+                .workspace,
+        )
     }
 
     pub(super) fn runtime_document_id(&self) -> crate::protocol::DocumentId {
-        self.runtime_document_id
+        self.runtime_context
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .runtime_document_id
+    }
+
+    pub(crate) fn set_runtime_context(
+        &self,
+        workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
+        runtime_document_id: crate::protocol::DocumentId,
+    ) {
+        *self
+            .runtime_context
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = ClayRuntimeContext {
+            workspace,
+            runtime_document_id,
+        };
+    }
+
+    pub(crate) fn begin_evaluation(&self) {
+        self.runtime_records
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clear();
+        *self
+            .last_parse_update_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
+        *self
+            .published_sdui_tree
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
+        *self
+            .published_decoration_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
     }
 
     /// Handle to the shared `PackageService` used by the first-party resolver
@@ -180,6 +233,22 @@ impl ClayOpState {
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .clone()
+    }
+
+    pub(crate) fn js_parse_handlers(
+        &self,
+    ) -> Vec<crate::server::parse_coordinator::JsParseHandlerRegistration> {
+        self.js_parse_handlers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    pub(crate) fn take_parse_update_json(&self) -> Option<String> {
+        self.last_parse_update_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .take()
     }
 
     pub(crate) fn behavior_manifest(&self) -> BehaviorManifest {
@@ -245,7 +314,7 @@ impl ClayOpState {
             .expect("Clay runtime op state mutex poisoned") = Some(set);
     }
 
-    pub(super) fn register_parse_handler(
+    pub(super) fn register_parse_handler_meta(
         &self,
         meta: crate::server::parse_coordinator::ParseHandlerMeta,
     ) {
@@ -253,6 +322,24 @@ impl ClayOpState {
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .push(meta);
+    }
+
+    pub(super) fn register_js_parse_handler(
+        &self,
+        registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
+    ) {
+        self.register_parse_handler_meta(registration.meta.clone());
+        self.js_parse_handlers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .push(registration);
+    }
+
+    pub(super) fn store_parse_update_json(&self, json: String) {
+        *self
+            .last_parse_update_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(json);
     }
 
     pub(super) fn publish_sdui_tree(&self, tree: crate::protocol::SduiTree) {
@@ -532,6 +619,7 @@ extension!(
         op_clay_packages_validate_permissions,
         op_clay_packages_load_package,
         op_clay_packages_load_package_by_specifier,
+        op_clay_packages_list_first_party_specifiers,
         op_clay_modes_register_pattern,
         op_clay_modes_classify_document,
         op_clay_modes_activate_major_mode,
@@ -539,6 +627,7 @@ extension!(
         op_clay_commands_list_commands,
         op_clay_decorations_publish_decorations,
         op_clay_parse_register_parse_handler,
+        op_clay_parse_store_update,
         op_clay_runtime_unavailable,
     ],
 );

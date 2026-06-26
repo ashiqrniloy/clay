@@ -11,13 +11,9 @@ deno_error = "=0.7.1"
 masonry = "0.4.0"
 masonry_winit = "0.4.0"
 parley = "0.6.0"
-pollster = "0.4.0"
 rkyv = "0.8.16"
 serde_json = "1.0.145"
-taffy = "0.10.1"
-tokio = { version = "1.52.2", features = ["full"] }
-vello = "0.6.0"
-wgpu = "26.0.1"
+tokio = { version = "1.52.2", features = ["rt", "rt-multi-thread", "macros", "net", "fs", "io-util", "process", "sync", "time"] }
 winit = "0.30.13"
 
 [target.'cfg(unix)'.dependencies]

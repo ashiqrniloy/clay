@@ -60,12 +60,36 @@ pub struct MajorModeActivation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModeDiagnostic {
-    pub package_name: Option<String>,
-    pub package_version: Option<String>,
-    pub api_prefix: Option<String>,
-    pub mode_id: Option<String>,
+    pub package_name: Option<Box<str>>,
+    pub package_version: Option<Box<str>>,
+    pub api_prefix: Option<Box<str>>,
+    pub mode_id: Option<Box<str>>,
     pub rule: ModeValidationRule,
-    pub message: String,
+    pub message: Box<str>,
+}
+
+impl ModeDiagnostic {
+    /// Build a diagnostic from owned `String` identity fields + any message.
+    /// Centralizes the `String` -> `Box<str>` boxing so inline construction
+    /// sites stay ergonomic while the `Err`-variant stays under clippy's
+    /// `result_large_err` 128-byte threshold.
+    fn new(
+        package_name: Option<String>,
+        package_version: Option<String>,
+        api_prefix: Option<String>,
+        mode_id: Option<String>,
+        rule: ModeValidationRule,
+        message: impl Into<Box<str>>,
+    ) -> Self {
+        Self {
+            package_name: package_name.map(String::into_boxed_str),
+            package_version: package_version.map(String::into_boxed_str),
+            api_prefix: api_prefix.map(String::into_boxed_str),
+            mode_id: mode_id.map(String::into_boxed_str),
+            rule,
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,33 +240,33 @@ impl ModeRegistry {
                 None => best = Some((kind, mode)),
                 Some((best_kind, _)) if kind > best_kind => best = Some((kind, mode)),
                 Some((best_kind, best_mode)) if kind == best_kind => {
-                    return Err(ModeDiagnostic {
-                        package_name: Some(mode.declaration.package_name.clone()),
-                        package_version: Some(mode.declaration.package_version.clone()),
-                        api_prefix: Some(mode.declaration.api_prefix.clone()),
-                        mode_id: Some(mode.declaration.mode_id.clone()),
-                        rule: ModeValidationRule::AmbiguousClassification,
-                        message: format!(
+                    return Err(ModeDiagnostic::new(
+                        Some(mode.declaration.package_name.clone()),
+                        Some(mode.declaration.package_version.clone()),
+                        Some(mode.declaration.api_prefix.clone()),
+                        Some(mode.declaration.mode_id.clone()),
+                        ModeValidationRule::AmbiguousClassification,
+                        format!(
                             "document {} matched both mode `{}` and mode `{}` with equal priority",
                             input.document_id,
                             best_mode.declaration.mode_id,
                             mode.declaration.mode_id
                         ),
-                    });
+                    ));
                 }
                 _ => {}
             }
         }
 
         let Some((matched_by, mode)) = best else {
-            return Err(ModeDiagnostic {
-                package_name: None,
-                package_version: None,
-                api_prefix: None,
-                mode_id: None,
-                rule: ModeValidationRule::NoClassificationMatch,
-                message: format!("no registered mode matched document {}", input.document_id),
-            });
+            return Err(ModeDiagnostic::new(
+                None,
+                None,
+                None,
+                None,
+                ModeValidationRule::NoClassificationMatch,
+                format!("no registered mode matched document {}", input.document_id),
+            ));
         };
 
         Ok(mode.classification(input.document_id, matched_by))
@@ -400,63 +424,61 @@ impl ModeRegistry {
             .permissions
             .contains(&PackagePermission::ModeActivation)
         {
-            return Err(ModeDiagnostic {
-                package_name: Some(package.name.clone()),
-                package_version: Some(package.version.clone()),
-                api_prefix: Some(package.clay.api_prefix.clone()),
-                mode_id: Some(minor_mode_id.to_string()),
-                rule: ModeValidationRule::MissingPermission,
-                message: "package must declare mode-activation before activating a minor mode"
-                    .to_string(),
-            });
+            return Err(ModeDiagnostic::new(
+                Some(package.name.clone()),
+                Some(package.version.clone()),
+                Some(package.clay.api_prefix.clone()),
+                Some(minor_mode_id.to_string()),
+                ModeValidationRule::MissingPermission,
+                "package must declare mode-activation before activating a minor mode",
+            ));
         }
 
-        let registered = self
-            .minor_modes
-            .get(minor_mode_id)
-            .ok_or_else(|| ModeDiagnostic {
-                package_name: Some(package.name.clone()),
-                package_version: Some(package.version.clone()),
-                api_prefix: Some(package.clay.api_prefix.clone()),
-                mode_id: Some(minor_mode_id.to_string()),
-                rule: ModeValidationRule::UndeclaredMode,
-                message: format!("minor mode `{minor_mode_id}` has not been registered"),
-            })?;
+        let registered = self.minor_modes.get(minor_mode_id).ok_or_else(|| {
+            ModeDiagnostic::new(
+                Some(package.name.clone()),
+                Some(package.version.clone()),
+                Some(package.clay.api_prefix.clone()),
+                Some(minor_mode_id.to_string()),
+                ModeValidationRule::UndeclaredMode,
+                format!("minor mode `{minor_mode_id}` has not been registered"),
+            )
+        })?;
 
         // Check that the active major mode is in the compatible list.
         let active_major = self
             .active_major_modes
             .get(&document_id)
-            .ok_or_else(|| ModeDiagnostic {
-                package_name: Some(package.name.clone()),
-                package_version: Some(package.version.clone()),
-                api_prefix: Some(package.clay.api_prefix.clone()),
-                mode_id: Some(minor_mode_id.to_string()),
-                rule: ModeValidationRule::AmbiguousClassification,
-                message: format!(
+            .ok_or_else(|| ModeDiagnostic::new(
+                Some(package.name.clone()),
+                Some(package.version.clone()),
+                Some(package.clay.api_prefix.clone()),
+                Some(minor_mode_id.to_string()),
+                ModeValidationRule::AmbiguousClassification,
+                format!(
                     "document {} has no active major mode; activate a major mode before minor modes",
                     document_id
                 ),
-            })?;
+            ))?;
 
         if !registered
             .declaration
             .compatible_major_modes
             .contains(&active_major.mode_id)
         {
-            return Err(ModeDiagnostic {
-                package_name: Some(package.name.clone()),
-                package_version: Some(package.version.clone()),
-                api_prefix: Some(package.clay.api_prefix.clone()),
-                mode_id: Some(minor_mode_id.to_string()),
-                rule: ModeValidationRule::UndeclaredMode,
-                message: format!(
+            return Err(ModeDiagnostic::new(
+                Some(package.name.clone()),
+                Some(package.version.clone()),
+                Some(package.clay.api_prefix.clone()),
+                Some(minor_mode_id.to_string()),
+                ModeValidationRule::UndeclaredMode,
+                format!(
                     "minor mode `{minor_mode_id}` is not compatible with active major mode `{}`; \
                      compatible modes are: [{}]",
                     active_major.mode_id,
                     registered.declaration.compatible_major_modes.join(", ")
                 ),
-            });
+            ));
         }
 
         let activation = MinorModeActivation {
@@ -495,29 +517,33 @@ impl ModeRegistry {
             .active_major_modes
             .get(&document_id)
             .cloned()
-            .ok_or_else(|| ModeDiagnostic {
-                package_name: None,
-                package_version: None,
-                api_prefix: None,
-                mode_id: None,
-                rule: ModeValidationRule::NoClassificationMatch,
-                message: format!("document {document_id} has no active major mode"),
+            .ok_or_else(|| {
+                ModeDiagnostic::new(
+                    None,
+                    None,
+                    None,
+                    None,
+                    ModeValidationRule::NoClassificationMatch,
+                    format!("document {document_id} has no active major mode"),
+                )
             })?;
 
         // Find the package record for the major mode.
         let major_package = enabled_packages
             .iter()
             .find(|r| r.manifest.name == major_activation.package_name)
-            .ok_or_else(|| ModeDiagnostic {
-                package_name: Some(major_activation.package_name.clone()),
-                package_version: Some(major_activation.package_version.clone()),
-                api_prefix: Some(major_activation.api_prefix.clone()),
-                mode_id: Some(major_activation.mode_id.clone()),
-                rule: ModeValidationRule::UndeclaredMode,
-                message: format!(
-                    "package `{}` for major mode `{}` is not in the enabled package list",
-                    major_activation.package_name, major_activation.mode_id
-                ),
+            .ok_or_else(|| {
+                ModeDiagnostic::new(
+                    Some(major_activation.package_name.clone()),
+                    Some(major_activation.package_version.clone()),
+                    Some(major_activation.api_prefix.clone()),
+                    Some(major_activation.mode_id.clone()),
+                    ModeValidationRule::UndeclaredMode,
+                    format!(
+                        "package `{}` for major mode `{}` is not in the enabled package list",
+                        major_activation.package_name, major_activation.mode_id
+                    ),
+                )
             })?;
 
         // Start from the base manifest for the document scope.
@@ -566,16 +592,18 @@ impl ModeRegistry {
             let minor_package = enabled_packages
                 .iter()
                 .find(|r| r.manifest.name == minor_act.package_name)
-                .ok_or_else(|| ModeDiagnostic {
-                    package_name: Some(minor_act.package_name.clone()),
-                    package_version: Some(minor_act.package_version.clone()),
-                    api_prefix: Some(minor_act.api_prefix.clone()),
-                    mode_id: Some(minor_act.mode_id.clone()),
-                    rule: ModeValidationRule::UndeclaredMode,
-                    message: format!(
-                        "package `{}` for minor mode `{}` is not in the enabled package list",
-                        minor_act.package_name, minor_act.mode_id
-                    ),
+                .ok_or_else(|| {
+                    ModeDiagnostic::new(
+                        Some(minor_act.package_name.clone()),
+                        Some(minor_act.package_version.clone()),
+                        Some(minor_act.api_prefix.clone()),
+                        Some(minor_act.mode_id.clone()),
+                        ModeValidationRule::UndeclaredMode,
+                        format!(
+                            "package `{}` for minor mode `{}` is not in the enabled package list",
+                            minor_act.package_name, minor_act.mode_id
+                        ),
+                    )
                 })?;
 
             // Collect the command contributions this minor mode would add.
@@ -597,17 +625,17 @@ impl ModeRegistry {
             // Reject any minor-mode command that collides with a major-mode entry.
             for cmd in &minor_commands {
                 if major_command_ids.contains(&cmd.command_id) {
-                    return Err(ModeDiagnostic {
-                        package_name: Some(minor_act.package_name.clone()),
-                        package_version: Some(minor_act.package_version.clone()),
-                        api_prefix: Some(minor_act.api_prefix.clone()),
-                        mode_id: Some(minor_act.mode_id.clone()),
-                        rule: ModeValidationRule::DuplicateModeId,
-                        message: format!(
+                    return Err(ModeDiagnostic::new(
+                        Some(minor_act.package_name.clone()),
+                        Some(minor_act.package_version.clone()),
+                        Some(minor_act.api_prefix.clone()),
+                        Some(minor_act.mode_id.clone()),
+                        ModeValidationRule::DuplicateModeId,
+                        format!(
                             "minor mode `{}` cannot override major-mode command `{}`",
                             minor_act.mode_id, cmd.command_id
                         ),
-                    });
+                    ));
                 }
             }
 
@@ -626,17 +654,17 @@ impl ModeRegistry {
                 // we conservatively reject any key_routing contribution that targets
                 // a major-mode command ID.
                 if major_command_ids.contains(&key_contrib.command_id) {
-                    return Err(ModeDiagnostic {
-                        package_name: Some(minor_act.package_name.clone()),
-                        package_version: Some(minor_act.package_version.clone()),
-                        api_prefix: Some(minor_act.api_prefix.clone()),
-                        mode_id: Some(minor_act.mode_id.clone()),
-                        rule: ModeValidationRule::DuplicateModeId,
-                        message: format!(
+                    return Err(ModeDiagnostic::new(
+                        Some(minor_act.package_name.clone()),
+                        Some(minor_act.package_version.clone()),
+                        Some(minor_act.api_prefix.clone()),
+                        Some(minor_act.mode_id.clone()),
+                        ModeValidationRule::DuplicateModeId,
+                        format!(
                             "minor mode `{}` cannot override major-mode key binding for command `{}`",
                             minor_act.mode_id, key_contrib.command_id
                         ),
-                    });
+                    ));
                 }
             }
             // Also check direct key-sequence collisions in the composed manifest.
@@ -651,13 +679,15 @@ impl ModeRegistry {
         }
 
         // Validate the fully composed manifest through the existing validator.
-        validate_manifest(&manifest).map_err(|err| ModeDiagnostic {
-            package_name: Some(major_activation.package_name.clone()),
-            package_version: Some(major_activation.package_version.clone()),
-            api_prefix: Some(major_activation.api_prefix.clone()),
-            mode_id: Some(major_activation.mode_id.clone()),
-            rule: ModeValidationRule::MalformedPattern,
-            message: format!("composed behavior manifest failed validation: {err:?}"),
+        validate_manifest(&manifest).map_err(|err| {
+            ModeDiagnostic::new(
+                Some(major_activation.package_name.clone()),
+                Some(major_activation.package_version.clone()),
+                Some(major_activation.api_prefix.clone()),
+                Some(major_activation.mode_id.clone()),
+                ModeValidationRule::MalformedPattern,
+                format!("composed behavior manifest failed validation: {err:?}"),
+            )
         })?;
 
         let selection = DocumentManifestSelection {
@@ -693,25 +723,23 @@ impl RegisteredMode {
         file_name: Option<&str>,
     ) -> Option<ModePatternKind> {
         let mut best = None;
-        if let Some(mime_type) = mime_type {
-            if self
+        if let Some(mime_type) = mime_type
+            && self
                 .declaration
                 .mime_types
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(mime_type))
-            {
-                best = Some(ModePatternKind::MimeType);
-            }
+        {
+            best = Some(ModePatternKind::MimeType);
         }
-        if let Some(extension) = extension {
-            if self
+        if let Some(extension) = extension
+            && self
                 .declaration
                 .extensions
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-            {
-                best = Some(ModePatternKind::Extension);
-            }
+        {
+            best = Some(ModePatternKind::Extension);
         }
         if let Some(file_name) = file_name {
             if self
@@ -940,12 +968,12 @@ impl ModeDiagnosticContext {
         }
     }
 
-    fn diagnostic(&self, rule: ModeValidationRule, message: impl Into<String>) -> ModeDiagnostic {
+    fn diagnostic(&self, rule: ModeValidationRule, message: impl Into<Box<str>>) -> ModeDiagnostic {
         ModeDiagnostic {
-            package_name: self.package_name.clone(),
-            package_version: self.package_version.clone(),
-            api_prefix: self.api_prefix.clone(),
-            mode_id: self.mode_id.clone(),
+            package_name: self.package_name.clone().map(String::into_boxed_str),
+            package_version: self.package_version.clone().map(String::into_boxed_str),
+            api_prefix: self.api_prefix.clone().map(String::into_boxed_str),
+            mode_id: self.mode_id.clone().map(String::into_boxed_str),
             rule,
             message: message.into(),
         }

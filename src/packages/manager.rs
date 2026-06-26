@@ -254,13 +254,13 @@ impl PackageManagerBackend for PnpmBackend {
                     if let Some(path) = dep.get("path").and_then(Value::as_str) {
                         let package_root = PathBuf::from(path);
                         let package_json_path = package_root.join("package.json");
-                        if let Ok(text) = std::fs::read_to_string(&package_json_path) {
-                            if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                                packages.push(DiscoveredPackage {
-                                    package_json: value,
-                                    package_root,
-                                });
-                            }
+                        if let Ok(text) = std::fs::read_to_string(&package_json_path)
+                            && let Ok(value) = serde_json::from_str::<Value>(&text)
+                        {
+                            packages.push(DiscoveredPackage {
+                                package_json: value,
+                                package_root,
+                            });
                         }
                     }
                 }

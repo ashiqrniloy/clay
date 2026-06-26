@@ -20,22 +20,26 @@ The coordinator never sends parser code to the Rust client and never waits for p
 
 - Register package parse handlers only when the owning package declares `parse-document`.
 - Provide the public `clay:parse` facade and explicit `op_clay_parse_register_parse_handler` wrapper for package registration metadata.
-- Schedule per-document parse work for `(document_id, package_prefix, mode_id)`.
+- Schedule per-document parse work for `(document_id, package_prefix, mode_id)`, including the bounded initial parse used by selected-file open-time activation.
 - Schedule bounded parse-window work with `ParseWindowSnapshot`, `ParsePolicy`, and `SyntaxMemoryBudget` metadata for large-file modes.
 - Abort superseded in-flight tasks when a newer version for the same document/package/mode is scheduled.
+- Replace parse handlers by runtime generation during hot reload and cancel old-generation parse tasks before they can publish.
 - Sort invalidated ranges so viewport-intersecting work is handled first, using only generic byte-range metadata that token-stream adapters for Markdown, Python, or other modes can consume.
 - Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, optional parse-produced decoration metadata, known decoration style tokens, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
+- Instrument scheduled, cancelled, published, stale, and failed parse tasks through `ParseCoordinatorStats`.
 - Expose an internal update receiver for later decoration/folding/diagnostic publication paths.
 
 ## How It Works
 
-`ParseCoordinator::register_handler` accepts a validated `PackageRecord`, mode ID, and `ParseHandler`. The package record must include `PackagePermission::ParseDocument`; otherwise registration returns `ParseCoordinatorError::MissingPermission` with package-prefix provenance. The Phase 18 JavaScript-facing registration path calls `serverRegisterParseHandler`, which routes through `op_clay_parse_register_parse_handler`, validates package identity/permission, parse unit, viewport-priority metadata, timeout bounds, and rejects executable callback fields in the public registration payload.
+`ParseCoordinator::register_handler` accepts a validated `PackageRecord`, mode ID, and `ParseHandler`. The package record must include `PackagePermission::ParseDocument`; otherwise registration returns `ParseCoordinatorError::MissingPermission` with package-prefix provenance. Runtime-backed registrations use `register_handler_for_generation` / `register_handler_meta_for_generation`, so each handler key stores the owning runtime generation ID with the handler. Re-registering the same package/mode for a newer generation replaces the old handler and aborts old-generation active tasks for that handler. The Phase 18 JavaScript-facing registration path calls `serverRegisterParseHandler`, which routes through `op_clay_parse_register_parse_handler`, validates package identity/permission, parse unit, viewport-priority metadata, timeout bounds, records a stable runtime handler token, and rejects executable callback fields in the public op payload.
 
-`ParseCoordinator::schedule_parse` takes a `ParseScheduleRequest` containing document/version metadata, behavior version, package prefix, mode ID, viewport byte range, and invalidated ranges. Scheduling is intentionally cheap: it validates range shape, records the latest document version, aborts any active task for the same document/package/mode, spawns a Tokio background task, and returns immediately.
+The live JS bridge is deliberately split across the facade and the op. Package load code imports its parser module and passes the module object/export name to `serverRegisterParseHandler`; the facade stores that function in `globalThis.__clayParseHandlers[token]` after the op accepts the package metadata. Rust never receives a JS function value. `ClayJsRuntimeService::register_parse_handlers` adapts each accepted `JsParseHandlerRegistration` into the existing `ParseHandler` trait with `ParseCoordinator::register_handler_meta`, so the coordinator still sees only a normal Rust handler.
+
+`ParseCoordinator::schedule_parse` takes a `ParseScheduleRequest` containing document/version metadata, behavior version, package prefix, mode ID, viewport byte range, and invalidated ranges. Scheduling is intentionally cheap: it validates range shape, snapshots the currently registered handler generation into the task key, records the latest document version, aborts any active task for the same document/package/mode/generation, spawns a Tokio background task, and returns immediately.
 
 `ParseCoordinator::schedule_parse_with_windows` is the Phase 18.5 large-file path. The caller prepares bounded server-canonical snapshots from already-open document text, then the coordinator validates each snapshot before any package handler can observe it: document ID and version must match the request, package prefix and mode ID must match handler provenance, `byte_end - byte_start` must equal the UTF-8 byte length of `text`, every window must fit `ParsePolicy::max_window_bytes`, and total retained window text must fit `ParsePolicy::memory_budget_bytes` and `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB). Valid windows are delivered in `ParseEditNotification::parse_windows` with `SyntaxMemoryBudget` metadata.
 
-The spawned task calls the handler with a compact `ParseEditNotification`. For metadata-only requests `parse_windows` is empty; for windowed requests it contains only the bounded snapshots selected for the viewport/invalidated ranges. When the handler resolves, `finish_task` runs validation before sending an `IncrementalParseUpdate` on the coordinator's internal update channel. If the result version no longer matches the latest recorded document version, the coordinator drops it and increments stale-result stats instead of publishing.
+The spawned task calls the handler with a compact `ParseEditNotification`. For metadata-only requests `parse_windows` is empty; for windowed requests it contains only the bounded snapshots selected for the viewport/invalidated ranges. JS-backed handlers are invoked on the persistent runtime worker by token; the runtime calls the registered package function under the smaller of the service timeout and the handler's registered `timeoutMs`, stores the returned update through `op_clay_parse_store_update`, converts it into `IncrementalParseUpdate`, then returns it to the coordinator task. When the handler resolves, `finish_task` first verifies that the task generation still matches the active handler generation for that package/mode; old-generation results are counted as stale and never published. It then runs normal update validation before sending an `IncrementalParseUpdate` on the coordinator's internal update channel. If the result document version no longer matches the latest recorded document version, the coordinator drops it and increments stale-result stats instead of publishing. Handler errors, parse timeouts, invalid updates, and payload-budget failures increment failed-task stats and publish no half-updated result.
 
 `src/protocol/parse.rs` defines the inert parse shapes:
 
@@ -54,10 +58,10 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 
 - Parsing is `Background` work and must not block edit acknowledgement, client shadow updates, Masonry text-event handlers, or paint.
 - Handler registration requires `parse-document`; install/enable alone grants no parser authority.
-- Parser execution stays server-side through the typed handler/runtime boundary.
+- Parser execution stays server-side through the typed handler/runtime boundary; Rust never accepts executable callback fields in the op payload.
 - The client receives only later validated inert render/folding/diagnostic data; it does not receive parser functions or package JavaScript.
-- Stale results are discarded before publication.
-- Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`.
+- Stale results are discarded before publication, including old-runtime-generation task results after hot reload.
+- Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; over-budget updates increment failed-task stats and are not published.
 - Windowed parser input is bounded by `ParsePolicy::max_window_bytes` per snapshot and `SYNTAX_CACHE_BUDGET_BYTES`/`SyntaxMemoryBudget` across retained syntax windows.
 - Optional parse-produced decorations are validated through the shared decoration validation path before client publication, including range/style-token, document-version, viewport, and decoration payload-budget checks.
 - The Markdown parser adapter publishes decoration updates as generic `DecorationSet` values; the coordinator validates them without knowing markdown-it tokens or Markdown syntax.
@@ -82,14 +86,25 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - `src/server/document.rs::tests::parse_window_snapshots_validate_utf8_boundaries_and_memory_budget`
 - `tests/performance_protocol.rs::parse_window_policy_keeps_large_file_snapshot_budget_bounded`
 - `tests/editor_performance_invariants.rs::parse_window_snapshot_primitive_uses_bounded_rope_slicing`
+- `tests/parse_coordinator.rs::generation_replacement_uses_new_handler_for_subsequent_parse`
+- `tests/parse_coordinator.rs::replacing_generation_cancels_old_in_flight_parse_work`
+- `tests/parse_coordinator.rs::handler_failures_are_instrumented_after_generation_replacement`
+- `tests/parse_coordinator.rs::handler_failures_are_instrumented_and_not_published`
 - `tests/parse_coordinator.rs::parsing_does_not_block_edit_acknowledgement`
 - `src/server/js_runtime.rs::phase18_parse_and_decoration_facades_are_runtime_backed`
+- `src/server/js_runtime.rs::js_parse_handler_bridge_runs_registered_markdown_handler`
+- `src/server/js_runtime.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`
+- `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`
+- `src/server/js_runtime.rs::runtime_boundary_does_not_expose_platform_authorities`
+- `src/server/connection.rs::generic_open_parse_uses_bounded_window_for_large_file`
+- `src/server/connection.rs::selected_markdown_file_publishes_manifest_and_decorations`
 
 Run with:
 
 ```bash
 cargo test --test parse_coordinator
 cargo test phase18_parse_and_decoration_facades_are_runtime_backed --lib
+cargo test js_parse_handler_bridge_runs_registered_markdown_handler --lib
 ```
 
 ## Related
@@ -99,3 +114,5 @@ cargo test phase18_parse_and_decoration_facades_are_runtime_backed --lib
 - [Protocol Codec](protocol-codec.md)
 - `docs/reference/primitives/parse-update-strategy.md`
 - `plans/019-Phase17-Package-System-and-Mode-Loading-Foundation.md`
+- `plans/031-Phase18.7-Persistent-Server-Runtime-and-JS-ParseHandler-Bridge.md`
+- `decision-logs/2026-06-26-1338-phase18-7-persistent-runtime-and-js-parsehandler-bridge.md`

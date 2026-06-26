@@ -139,7 +139,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
     // generic protocol types; no mode-specific Rust logic is involved.
     let editor_rules_override: Option<EditorBehaviorRules> = value
         .get("editorRules")
-        .map(|rules_value| parse_editor_rules(rules_value))
+        .map(parse_editor_rules)
         .transpose()
         .map_err(|e: String| JsErrorBox::generic(e))?;
 

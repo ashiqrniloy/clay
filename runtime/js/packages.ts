@@ -5,6 +5,10 @@
 // install packages, execute package handlers, or expose raw Deno ops publicly.
 
 const ops = globalThis.Deno?.core?.ops;
+// Per-runtime-generation cache: repeated calls are idempotent inside one
+// ClayJsRuntimeService, and hot reload invalidates it by swapping to a fresh
+// runtime rather than mutating globals/module cache in place.
+const loadedPackages = ((globalThis as typeof globalThis & { __clayLoadedPackages?: Record<string, unknown> }).__clayLoadedPackages ??= Object.create(null));
 
 function requireOps(): NonNullable<typeof ops> {
   if (!ops) {
@@ -29,6 +33,10 @@ export function serverLoadPackage(packageJson: unknown): unknown {
   return parse(requireOps().op_clay_packages_load_package(JSON.stringify(packageJson ?? null)));
 }
 
+export function serverListFirstPartyPackageSpecifiers(): string[] {
+  return parse<{ specifiers: string[] }>(requireOps().op_clay_packages_list_first_party_specifiers()).specifiers;
+}
+
 /** Load and activate a first-party `@clay/*` package by specifier.
  *
  * This is the one-line default end-user package loader (e.g.
@@ -36,12 +44,17 @@ export function serverLoadPackage(packageJson: unknown): unknown {
  * resolves + validates + enables the package through the authoritative
  * PackageService path, then imports the package's declared `loadEntry` so the
  * package registers its modes, commands, parse handlers, and decorations under
- * Clay's authority. Only first-party `@clay/*` specifiers are accepted; all
+ * Clay's authority. Repeated calls within one runtime generation return the
+ * cached summary; hot reload reruns `init.js` in a fresh generation so the
+ * cache starts empty. Only first-party `@clay/*` specifiers are accepted; all
  * other authority (filesystem/network/shell/package-manager/enable-disable) is
  * denied by the op and the module loader. */
 export async function loadPackage(specifier: string): Promise<unknown> {
   if (typeof specifier !== "string") {
     throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
+  }
+  if (loadedPackages[specifier]) {
+    return loadedPackages[specifier];
   }
   const result = parse<{ loadEntrySpecifier: string }>(
     requireOps().op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })),
@@ -55,5 +68,6 @@ export async function loadPackage(specifier: string): Promise<unknown> {
   if (typeof loadEntry.default === "function") {
     await loadEntry.default();
   }
+  loadedPackages[specifier] = result;
   return result;
 }

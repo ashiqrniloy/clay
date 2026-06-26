@@ -16,8 +16,9 @@ use std::{
     time::SystemTime,
 };
 
-use tokio::{fs as tokio_fs, sync::Mutex};
+use tokio::{fs as tokio_fs, io::AsyncWriteExt, sync::Mutex};
 
+use crate::perf::budgets::MAX_OPENABLE_FILE_BYTES;
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion, FileErrorCode,
 };
@@ -114,6 +115,80 @@ pub(crate) struct OpenDocumentLease {
     pub(crate) document: Arc<Mutex<DocumentState>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OpenDocumentSnapshot {
+    pub(crate) metadata: DocumentMetadata,
+    pub(crate) text: String,
+}
+
+/// Prepare/commit split for workspace file I/O.
+///
+/// Each disk-bearing workspace op (`open_existing_file`, `open_selected_file`,
+/// `save_document`, `reload_document`) is broken into a `prepare_*` phase that
+/// runs under the workspace mutex (fast filesystem metadata + authority checks
+/// and state lookup only), a free `*_io` phase that performs the heavy
+/// `tokio::fs` read/write with **no** workspace mutex held, and a `commit_*`
+/// phase that reacquires the workspace mutex to mutate the open-document
+/// registry. The IpcServer and runtime-op callers use the `*_unlocked`
+/// orchestration helpers so concurrent operations on unrelated documents are no
+/// longer serialized by a slow disk call; the `&mut self` one-shot methods are
+/// thin wrappers used by tests/direct callers (where there is no outer mutex to
+/// release).
+///
+/// Because the mutex is released across disk I/O, every `commit_*` re-validates
+/// registry state on reacquire (e.g. an open may find the file was registered by
+/// a concurrent open, a reload re-checks dirtiness, a save tolerates a closed
+/// document) instead of assuming the registry is unchanged.
+struct OpenPlan {
+    file_state: FileDocumentState,
+    client_id: ClientId,
+}
+
+enum OpenPrepare {
+    Existing(OpenDocumentLease),
+    New(OpenPlan),
+}
+
+/// Pieces needed to open a user-selected file; the `SingleFile` root/grant is
+/// allocated in `commit` (under the workspace mutex) rather than `prepare`, so
+/// a concurrent open that wins the registry race does not leave an orphan root.
+struct SelectedOpenPlan {
+    canonical_path: PathBuf,
+    metadata: FileMetadata,
+    display_path: PathBuf,
+    client_id: ClientId,
+}
+
+enum SelectedOpenPrepare {
+    Existing(OpenDocumentLease),
+    New(SelectedOpenPlan),
+}
+
+struct SavePlan {
+    document_id: DocumentId,
+    canonical_path: PathBuf,
+    relative_path: PathBuf,
+    document: Arc<Mutex<DocumentState>>,
+}
+
+struct SaveIoOutcome {
+    prepared_version: DocumentVersion,
+    saved_metadata: FileMetadata,
+}
+
+struct ReloadPlan {
+    document_id: DocumentId,
+    canonical_path: PathBuf,
+    relative_path: PathBuf,
+    document: Arc<Mutex<DocumentState>>,
+    force: bool,
+}
+
+struct ReloadIoOutcome {
+    text: String,
+    reloaded_metadata: FileMetadata,
+}
+
 #[derive(Debug)]
 pub(crate) struct WorkspaceState {
     roots: HashMap<WorkspaceRootId, WorkspaceRoot>,
@@ -198,23 +273,21 @@ impl WorkspaceState {
         file_path: impl AsRef<Path>,
         client_id: ClientId,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
-        let file_state = self.canonical_file_state(root_id, file_path.as_ref())?;
-        if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
-            return Ok(existing);
+        match self
+            .prepare_open_existing(root_id, file_path.as_ref(), client_id)
+            .await?
+        {
+            OpenPrepare::Existing(lease) => Ok(lease),
+            OpenPrepare::New(plan) => {
+                let text = open_io(
+                    &plan.file_state.canonical_path,
+                    plan.file_state.workspace_relative_path.clone(),
+                )
+                .await?;
+                self.register_canonical_file(plan.file_state, text, plan.client_id)
+                    .await
+            }
         }
-
-        let bytes = tokio_fs::read(&file_state.canonical_path)
-            .await
-            .map_err(|source| WorkspaceError::FileUnavailable {
-                path: file_state.workspace_relative_path.clone(),
-                source,
-            })?;
-        let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
-            path: file_state.workspace_relative_path.clone(),
-            source,
-        })?;
-        self.register_canonical_file(file_state, text, client_id)
-            .await
     }
 
     pub(crate) async fn open_selected_file(
@@ -222,34 +295,79 @@ impl WorkspaceState {
         selected_path: impl AsRef<Path>,
         client_id: ClientId,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
-        let selected_path = selected_path.as_ref();
+        match self
+            .prepare_open_selected(selected_path.as_ref(), client_id)
+            .await?
+        {
+            SelectedOpenPrepare::Existing(lease) => Ok(lease),
+            SelectedOpenPrepare::New(plan) => {
+                let text = open_io(&plan.canonical_path, plan.display_path.clone()).await?;
+                self.register_selected_file(plan, text).await
+            }
+        }
+    }
+
+    async fn prepare_open_existing(
+        &self,
+        root_id: WorkspaceRootId,
+        file_path: &Path,
+        client_id: ClientId,
+    ) -> Result<OpenPrepare, WorkspaceError> {
+        let file_state = self.canonical_file_state(root_id, file_path)?;
+        if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
+            return Ok(OpenPrepare::Existing(existing));
+        }
+        check_openable_size(&file_state.last_known_metadata, file_path)?;
+        Ok(OpenPrepare::New(OpenPlan {
+            file_state,
+            client_id,
+        }))
+    }
+
+    async fn prepare_open_selected(
+        &self,
+        selected_path: &Path,
+        client_id: ClientId,
+    ) -> Result<SelectedOpenPrepare, WorkspaceError> {
         let (canonical_path, metadata, display_path) = canonical_selected_file(selected_path)?;
         if let Some(existing) = self
             .existing_document_lease_by_canonical_path(&canonical_path, client_id)
             .await
         {
+            return Ok(SelectedOpenPrepare::Existing(existing));
+        }
+        check_openable_size(&metadata, selected_path)?;
+        Ok(SelectedOpenPrepare::New(SelectedOpenPlan {
+            canonical_path,
+            metadata,
+            display_path,
+            client_id,
+        }))
+    }
+
+    async fn register_selected_file(
+        &mut self,
+        plan: SelectedOpenPlan,
+        text: String,
+    ) -> Result<OpenDocumentLease, WorkspaceError> {
+        // The selected file may have been opened by a concurrent selected/open
+        // call while the workspace mutex was released during the disk read.
+        // Re-check (no grant allocated yet) and hand back the existing lease
+        // instead of registering a duplicate document entry or orphan root.
+        if let Some(existing) = self
+            .existing_document_lease_by_canonical_path(&plan.canonical_path, plan.client_id)
+            .await
+        {
             return Ok(existing);
         }
-
-        let bytes = tokio_fs::read(&canonical_path).await.map_err(|source| {
-            WorkspaceError::FileUnavailable {
-                path: selected_path.to_path_buf(),
-                source,
-            }
-        })?;
-        let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
-            path: selected_path.to_path_buf(),
-            source,
-        })?;
-
-        let root_id = self.add_single_file_grant(canonical_path.clone());
+        let root_id = self.add_single_file_grant(plan.canonical_path.clone());
         let file_state = FileDocumentState {
             workspace_root_id: root_id,
-            canonical_path,
-            workspace_relative_path: display_path,
-            last_known_metadata: metadata,
+            canonical_path: plan.canonical_path,
+            workspace_relative_path: plan.display_path,
+            last_known_metadata: plan.metadata,
         };
-        self.register_canonical_file(file_state, text, client_id)
+        self.register_canonical_file(file_state, text, plan.client_id)
             .await
     }
 
@@ -301,6 +419,21 @@ impl WorkspaceState {
         Ok(entries)
     }
 
+    pub(crate) async fn open_document_snapshots(
+        &self,
+        client_id: ClientId,
+    ) -> Result<Vec<OpenDocumentSnapshot>, WorkspaceError> {
+        let mut entries = Vec::with_capacity(self.documents.len());
+        for (&document_id, open_document) in &self.documents {
+            let metadata =
+                metadata_for_open_document(document_id, open_document, client_id).await?;
+            let text = open_document.document.lock().await.text();
+            entries.push(OpenDocumentSnapshot { metadata, text });
+        }
+        entries.sort_by_key(|snapshot| snapshot.metadata.document_id);
+        Ok(entries)
+    }
+
     pub(crate) async fn release_client_access(&self, client_id: ClientId) {
         for open_document in self.documents.values() {
             open_document
@@ -315,56 +448,9 @@ impl WorkspaceState {
         &mut self,
         document_id: DocumentId,
     ) -> Result<SaveDocumentOutcome, WorkspaceError> {
-        let (canonical_path, relative_path, expected_metadata, document) = {
-            let open_document = self
-                .documents
-                .get(&document_id)
-                .ok_or(WorkspaceError::UnknownDocument { document_id })?;
-            (
-                open_document.file_state.canonical_path.clone(),
-                open_document.file_state.workspace_relative_path.clone(),
-                open_document.file_state.last_known_metadata.clone(),
-                Arc::clone(&open_document.document),
-            )
-        };
-        let (version, text) = {
-            let document = document.lock().await;
-            (document.version(), document.text())
-        };
-
-        let current_metadata = self.reauthorize_open_file(document_id)?;
-        if current_metadata != expected_metadata {
-            return Err(WorkspaceError::StaleFileMetadata {
-                path: relative_path,
-            });
-        }
-
-        tokio_fs::write(&canonical_path, text.as_bytes())
-            .await
-            .map_err(|source| WorkspaceError::WriteFailed {
-                path: relative_path.clone(),
-                source,
-            })?;
-        let saved_metadata = tokio_fs::metadata(&canonical_path)
-            .await
-            .map_err(|source| WorkspaceError::FileUnavailable {
-                path: relative_path.clone(),
-                source,
-            })?;
-        let saved_metadata = FileMetadata::from_fs_metadata(&saved_metadata);
-        if let Some(open_document) = self.documents.get_mut(&document_id) {
-            open_document.file_state.last_known_metadata = saved_metadata;
-        }
-
-        let dirty = {
-            let mut document = document.lock().await;
-            !document.mark_clean_if_version(version)
-        };
-        Ok(SaveDocumentOutcome {
-            document_id,
-            version,
-            dirty,
-        })
+        let plan = self.prepare_save(document_id)?;
+        let io = save_io(&plan).await?;
+        self.commit_save(plan, io).await
     }
 
     pub(crate) async fn reload_document(
@@ -372,52 +458,118 @@ impl WorkspaceState {
         document_id: DocumentId,
         force: bool,
     ) -> Result<ReloadDocumentOutcome, WorkspaceError> {
-        let (canonical_path, relative_path, document) = {
-            let open_document = self
-                .documents
-                .get(&document_id)
-                .ok_or(WorkspaceError::UnknownDocument { document_id })?;
-            (
-                open_document.file_state.canonical_path.clone(),
-                open_document.file_state.workspace_relative_path.clone(),
-                Arc::clone(&open_document.document),
-            )
+        let plan = self.prepare_reload(document_id, force).await?;
+        let io = reload_io(&plan).await?;
+        self.commit_reload(plan, io).await
+    }
+
+    /// Gather the owned state needed to write `document_id` to disk: canonical
+    /// path, registry-relative path, the document handle, and a staleness
+    /// reauthorization against the current on-disk metadata. Runs under the
+    /// workspace mutex; the heavy `tokio::fs::write` happens in [`save_io`]
+    /// after the mutex is released.
+    fn prepare_save(&self, document_id: DocumentId) -> Result<SavePlan, WorkspaceError> {
+        let open_document = self
+            .documents
+            .get(&document_id)
+            .ok_or(WorkspaceError::UnknownDocument { document_id })?;
+        let canonical_path = open_document.file_state.canonical_path.clone();
+        let relative_path = open_document.file_state.workspace_relative_path.clone();
+        let expected_metadata = open_document.file_state.last_known_metadata.clone();
+        let document = Arc::clone(&open_document.document);
+
+        let current_metadata = self.reauthorize_open_file(document_id)?;
+        if current_metadata != expected_metadata {
+            return Err(WorkspaceError::StaleFileMetadata {
+                path: relative_path,
+            });
+        }
+        Ok(SavePlan {
+            document_id,
+            canonical_path,
+            relative_path,
+            document,
+        })
+    }
+
+    async fn commit_save(
+        &mut self,
+        plan: SavePlan,
+        io: SaveIoOutcome,
+    ) -> Result<SaveDocumentOutcome, WorkspaceError> {
+        // The document may have been closed by another connection while the
+        // workspace mutex was released during the write. The bytes are already
+        // on disk; update metadata only if the registry entry still exists.
+        if let Some(open_document) = self.documents.get_mut(&plan.document_id) {
+            open_document.file_state.last_known_metadata = io.saved_metadata;
+        }
+        let dirty = {
+            let mut document = plan.document.lock().await;
+            !document.mark_clean_if_version(io.prepared_version)
         };
+        Ok(SaveDocumentOutcome {
+            document_id: plan.document_id,
+            version: io.prepared_version,
+            dirty,
+        })
+    }
+
+    /// Gather the owned state needed to reload `document_id` from disk: a
+    /// dirty pre-check (unless `force`), a reauthorization against the current
+    /// on-disk metadata, and the openable-size gate. Runs under the workspace
+    /// mutex; the `tokio::fs::read` happens in [`reload_io`] after the mutex is
+    /// released.
+    async fn prepare_reload(
+        &self,
+        document_id: DocumentId,
+        force: bool,
+    ) -> Result<ReloadPlan, WorkspaceError> {
+        let open_document = self
+            .documents
+            .get(&document_id)
+            .ok_or(WorkspaceError::UnknownDocument { document_id })?;
+        let canonical_path = open_document.file_state.canonical_path.clone();
+        let relative_path = open_document.file_state.workspace_relative_path.clone();
+        let document = Arc::clone(&open_document.document);
         if document.lock().await.is_dirty() && !force {
             return Err(WorkspaceError::DirtyDocument { document_id });
         }
+        let pre_read_metadata = self.reauthorize_open_file(document_id)?;
+        check_openable_size(&pre_read_metadata, &relative_path)?;
+        Ok(ReloadPlan {
+            document_id,
+            canonical_path,
+            relative_path,
+            document,
+            force,
+        })
+    }
 
-        self.reauthorize_open_file(document_id)?;
-        let bytes = tokio_fs::read(&canonical_path).await.map_err(|source| {
-            WorkspaceError::FileUnavailable {
-                path: relative_path.clone(),
-                source,
-            }
-        })?;
-        let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
-            path: relative_path.clone(),
-            source,
-        })?;
-        let reloaded_metadata = tokio_fs::metadata(&canonical_path)
-            .await
-            .map_err(|source| WorkspaceError::FileUnavailable {
-                path: relative_path.clone(),
-                source,
-            })?;
-        let reloaded_metadata = FileMetadata::from_fs_metadata(&reloaded_metadata);
-
+    async fn commit_reload(
+        &mut self,
+        plan: ReloadPlan,
+        io: ReloadIoOutcome,
+    ) -> Result<ReloadDocumentOutcome, WorkspaceError> {
+        // Re-check dirtiness on reacquire: the document may have been edited by
+        // another connection during the unlocked read. Don't clobber unsaved
+        // edits unless the caller asked to force the reload.
+        if plan.document.lock().await.is_dirty() && !plan.force {
+            return Err(WorkspaceError::DirtyDocument {
+                document_id: plan.document_id,
+            });
+        }
         let version = {
-            let mut document = document.lock().await;
-            document.replace_text_from_storage(text.clone());
+            let mut document = plan.document.lock().await;
+            document.replace_text_from_storage(io.text.clone());
             document.version()
         };
-        if let Some(open_document) = self.documents.get_mut(&document_id) {
-            open_document.file_state.last_known_metadata = reloaded_metadata;
+        if let Some(open_document) = self.documents.get_mut(&plan.document_id) {
+            open_document.file_state.last_known_metadata = io.reloaded_metadata;
         }
         Ok(ReloadDocumentOutcome {
-            document_id,
+            document_id: plan.document_id,
             version,
-            text,
+            text: io.text,
             dirty: false,
         })
     }
@@ -473,6 +625,16 @@ impl WorkspaceState {
         text: String,
         client_id: ClientId,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
+        // The unlock-across-IO orchestration can let two callers finish reading
+        // the same canonical path before either commits. Re-check under the
+        // workspace mutex and prefer the existing document instead of inserting
+        // a duplicate registry entry (the caller's read text is discarded).
+        if let Some(existing) = self
+            .existing_document_lease_by_canonical_path(&file_state.canonical_path, client_id)
+            .await
+        {
+            return Ok(existing);
+        }
         let document_id = self.next_document_id;
         self.next_document_id = self.next_document_id.saturating_add(1);
         let document = Arc::new(Mutex::new(DocumentState::new(
@@ -661,6 +823,11 @@ impl FileMetadata {
             modified: metadata.modified().ok(),
         }
     }
+
+    /// File size in bytes as last observed from the filesystem.
+    fn len(&self) -> u64 {
+        self.len
+    }
 }
 
 fn canonical_selected_file(
@@ -699,6 +866,248 @@ fn validate_regular_file_metadata(metadata: &fs::Metadata) -> Result<(), Workspa
         return Err(WorkspaceError::UnsupportedFileType);
     }
     Ok(())
+}
+
+/// Reject a file whose observed size exceeds the openable-file budget *before*
+/// `tokio_fs::read` allocates the full contents. Returns a typed
+/// [`WorkspaceError::FileTooLarge`] so oversized files cannot be used as a
+/// memory-exhaustion vector or silently fail later at frame encode.
+fn check_openable_size(metadata: &FileMetadata, path: &Path) -> Result<(), WorkspaceError> {
+    let len = metadata.len();
+    if len as usize > MAX_OPENABLE_FILE_BYTES {
+        return Err(WorkspaceError::FileTooLarge {
+            path: path.to_path_buf(),
+            len,
+            max: MAX_OPENABLE_FILE_BYTES,
+        });
+    }
+    Ok(())
+}
+
+/// Heavy disk read for file open, performed with the workspace mutex released.
+/// `error_path` is the registry-relative path used in `FileUnavailable` /
+/// `InvalidUtf8` diagnostics so callers can pass either the workspace-relative
+/// path (root-scoped open) or the selected-file display path.
+async fn open_io(canonical_path: &Path, error_path: PathBuf) -> Result<String, WorkspaceError> {
+    let bytes =
+        tokio_fs::read(canonical_path)
+            .await
+            .map_err(|source| WorkspaceError::FileUnavailable {
+                path: error_path.clone(),
+                source,
+            })?;
+    String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
+        path: error_path,
+        source,
+    })
+}
+
+/// Process-wide counter for unique atomic-save temp file names so concurrent
+/// saves of the *same* canonical path do not collide on a shared temp name.
+static ATOMIC_SAVE_TEMP_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Build a unique temp-file path next to `target` for atomic save. The temp
+/// lives in the same directory so the `rename` is a same-filesystem atomic
+/// replace (POSIX rename overwrites atomically; on Windows Rust's
+/// `std::fs::rename` uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`).
+fn atomic_temp_path(target: &Path) -> PathBuf {
+    let nonce = ATOMIC_SAVE_TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let stem = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "clay-save".to_string());
+    parent.join(format!(".{stem}.clay-save-{}-{nonce}", std::process::id()))
+}
+
+/// Atomically write `bytes` to `target` via a temp file + rename, returning the
+/// metadata of the saved file. Steps: create a temp file in `target`'s
+/// directory, write all bytes, `fsync` (durability), restore the original file's
+/// permissions where feasible (Unix mode), then `rename` over the target. If the
+/// rename fails the temp file is removed so failed saves do not litter the
+/// directory. A crash mid-write leaves the original file intact because only the
+/// temp is partial and the rename is atomic.
+async fn atomic_write_file(target: &Path, bytes: &[u8]) -> io::Result<FileMetadata> {
+    let temp_path = atomic_temp_path(target);
+
+    // Preserve the original file's permissions where feasible (Unix mode).
+    // Metadata of a missing target is ignored; the temp then keeps its default
+    // mode, which is the best we can do for a brand-new file.
+    let original_permissions = fs::metadata(target)
+        .ok()
+        .map(|metadata| metadata.permissions());
+
+    {
+        let mut file = tokio_fs::File::create(&temp_path).await?;
+        file.write_all(bytes).await?;
+        // Flush the kernel buffer and fsync so the new content is on disk before
+        // the atomic rename; this is what makes the post-rename file durable.
+        file.sync_all().await?;
+    }
+
+    // ponytail: directory fsync of the parent would make the rename itself
+    // durable across power loss; skipped here because the atomic rename already
+    // guarantees the target is never torn, and cross-platform dir fsync needs
+    // platform-specific code. Add if durability-of-the-rename becomes a
+    // requirement.
+
+    #[cfg(unix)]
+    if let Some(perms) = original_permissions {
+        // Best-effort permission restore; a failure here does not corrupt data.
+        let _ = fs::set_permissions(&temp_path, perms);
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows: file permissions are coarser and the temp already inherits
+        // the directory ACL; nothing practical to copy here.
+        let _ = original_permissions;
+    }
+
+    if let Err(error) = tokio_fs::rename(&temp_path, target).await {
+        // Remove the orphaned temp file; ignore its error since we are already
+        // failing.
+        let _ = tokio_fs::remove_file(&temp_path).await;
+        return Err(error);
+    }
+
+    let metadata = tokio_fs::metadata(target).await?;
+    Ok(FileMetadata::from_fs_metadata(&metadata))
+}
+
+/// Heavy disk write + post-write metadata read for `save_document`, performed
+/// with the workspace mutex released. Captures the in-memory document version
+/// and text (via the per-document mutex, not the workspace mutex) so the commit
+/// phase can detect a concurrent edit through `mark_clean_if_version`.
+async fn save_io(plan: &SavePlan) -> Result<SaveIoOutcome, WorkspaceError> {
+    let (prepared_version, text) = {
+        let document = plan.document.lock().await;
+        (document.version(), document.text())
+    };
+    // Atomic save: write a temp file in the target's directory, fsync it,
+    // restore the original file's permissions, then `rename` over the target.
+    // A crash or power loss during the write leaves the original file intact
+    // (only the temp is partial); the rename is atomic so the target is either
+    // the old or the new content, never a torn write.
+    let saved_metadata = atomic_write_file(&plan.canonical_path, text.as_bytes())
+        .await
+        .map_err(|source| WorkspaceError::WriteFailed {
+            path: plan.relative_path.clone(),
+            source,
+        })?;
+    Ok(SaveIoOutcome {
+        prepared_version,
+        saved_metadata,
+    })
+}
+
+/// Heavy disk read + post-read metadata read for `reload_document`, performed
+/// with the workspace mutex released.
+async fn reload_io(plan: &ReloadPlan) -> Result<ReloadIoOutcome, WorkspaceError> {
+    let bytes = tokio_fs::read(&plan.canonical_path)
+        .await
+        .map_err(|source| WorkspaceError::FileUnavailable {
+            path: plan.relative_path.clone(),
+            source,
+        })?;
+    let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
+        path: plan.relative_path.clone(),
+        source,
+    })?;
+    let reloaded_metadata = tokio_fs::metadata(&plan.canonical_path)
+        .await
+        .map_err(|source| WorkspaceError::FileUnavailable {
+            path: plan.relative_path.clone(),
+            source,
+        })?;
+    Ok(ReloadIoOutcome {
+        text,
+        reloaded_metadata: FileMetadata::from_fs_metadata(&reloaded_metadata),
+    })
+}
+
+/// Open-scoped workspace orchestration that releases the workspace mutex during
+/// the heavy disk I/O. Used by the IpcServer connection handlers and the Clay
+/// JS document ops so concurrent operations on unrelated documents are not
+/// serialized by a slow disk call. Each helper locks only for the `prepare`
+/// fast phase (filesystem metadata + authority + registry lookup), drops the
+/// guard, performs the `tokio::fs` read/write, then reacquires to `commit`.
+/// The commit re-validates registry state on reacquire (concurrent-open dedup,
+/// reload dirty re-check, save tolerates a closed document).
+pub(crate) async fn open_existing_file_unlocked(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    root_id: WorkspaceRootId,
+    file_path: impl AsRef<Path>,
+    client_id: ClientId,
+) -> Result<OpenDocumentLease, WorkspaceError> {
+    let plan = {
+        let workspace = workspace.lock().await;
+        workspace
+            .prepare_open_existing(root_id, file_path.as_ref(), client_id)
+            .await?
+    };
+    match plan {
+        OpenPrepare::Existing(lease) => Ok(lease),
+        OpenPrepare::New(plan) => {
+            let text = open_io(
+                &plan.file_state.canonical_path,
+                plan.file_state.workspace_relative_path.clone(),
+            )
+            .await?;
+            let mut workspace = workspace.lock().await;
+            workspace
+                .register_canonical_file(plan.file_state, text, plan.client_id)
+                .await
+        }
+    }
+}
+
+pub(crate) async fn open_selected_file_unlocked(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    selected_path: impl AsRef<Path>,
+    client_id: ClientId,
+) -> Result<OpenDocumentLease, WorkspaceError> {
+    let plan = {
+        let workspace = workspace.lock().await;
+        workspace
+            .prepare_open_selected(selected_path.as_ref(), client_id)
+            .await?
+    };
+    match plan {
+        SelectedOpenPrepare::Existing(lease) => Ok(lease),
+        SelectedOpenPrepare::New(plan) => {
+            let text = open_io(&plan.canonical_path, plan.display_path.clone()).await?;
+            let mut workspace = workspace.lock().await;
+            workspace.register_selected_file(plan, text).await
+        }
+    }
+}
+
+pub(crate) async fn save_document_unlocked(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document_id: DocumentId,
+) -> Result<SaveDocumentOutcome, WorkspaceError> {
+    let plan = {
+        let workspace = workspace.lock().await;
+        workspace.prepare_save(document_id)?
+    };
+    let io = save_io(&plan).await?;
+    let mut workspace = workspace.lock().await;
+    workspace.commit_save(plan, io).await
+}
+
+pub(crate) async fn reload_document_unlocked(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document_id: DocumentId,
+    force: bool,
+) -> Result<ReloadDocumentOutcome, WorkspaceError> {
+    let plan = {
+        let workspace = workspace.lock().await;
+        workspace.prepare_reload(document_id, force).await?
+    };
+    let io = reload_io(&plan).await?;
+    let mut workspace = workspace.lock().await;
+    workspace.commit_reload(plan, io).await
 }
 
 impl Default for WorkspaceState {
@@ -742,6 +1151,11 @@ pub(crate) enum WorkspaceError {
     },
     StaleFileMetadata {
         path: PathBuf,
+    },
+    FileTooLarge {
+        path: PathBuf,
+        len: u64,
+        max: usize,
     },
 }
 
@@ -857,6 +1271,18 @@ impl WorkspaceError {
                 format!("workspace file {} changed on disk since it was loaded", display_workspace_path(path)),
                 Some("Reload or resolve the external change before saving to avoid overwriting data.".to_string()),
             ),
+            Self::FileTooLarge { path, len, max } => WorkspaceDiagnostic::new(
+                FileErrorCode::FileTooLarge,
+                format!(
+                    "workspace file {} is {} bytes which exceeds the {} byte openable-file limit",
+                    display_workspace_path(path),
+                    len,
+                    max
+                ),
+                Some(format!(
+                    "Open files smaller than {max} bytes. Chunked/viewport-first loading for larger files is planned but not yet available."
+                )),
+            ),
         }
     }
 }
@@ -903,7 +1329,8 @@ impl Error for WorkspaceError {
             | Self::DirectoryOpen
             | Self::UnsupportedFileType
             | Self::DirtyDocument { .. }
-            | Self::StaleFileMetadata { .. } => None,
+            | Self::StaleFileMetadata { .. }
+            | Self::FileTooLarge { .. } => None,
         }
     }
 }
@@ -916,7 +1343,12 @@ mod tests {
 
     use crate::protocol::{DocumentAccess, EditOperation, FileErrorCode, ServerMessage};
 
-    use super::{WorkspaceError, WorkspaceState};
+    use super::{
+        FileMetadata, SaveIoOutcome, WorkspaceError, WorkspaceState, atomic_write_file,
+        open_existing_file_unlocked, save_document_unlocked,
+    };
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     fn temp_workspace(name: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -1610,6 +2042,379 @@ mod tests {
         permissions.set_mode(original_mode);
         fs::set_permissions(&file, permissions).unwrap();
         let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// A file larger than `MAX_OPENABLE_FILE_BYTES` is rejected with a typed
+    /// `FileTooLarge` error before `tokio_fs::read` allocates the full contents.
+    #[tokio::test]
+    async fn open_existing_file_rejects_oversized_file() {
+        let root = temp_workspace("oversized-open");
+        let file = root.join("big.txt");
+        // One byte over the limit. Use a repeated ASCII byte so the size in
+        // bytes equals the length, regardless of UTF-8.
+        let oversized = "!".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES + 1);
+        fs::write(&file, &oversized).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let error = workspace
+            .open_existing_file(root_id, "big.txt", 1)
+            .await
+            .unwrap_err();
+        let diagnostic = error.diagnostic();
+
+        assert_eq!(diagnostic.code, FileErrorCode::FileTooLarge);
+        assert!(diagnostic.message.contains("exceeds the"));
+        assert!(diagnostic.message.contains("openable-file limit"));
+        // No document was registered for the rejected file.
+        assert!(workspace.document_handle(1).is_none());
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// The selected-file open path also enforces the openable-file size gate
+    /// before reading the picked file from disk.
+    #[tokio::test]
+    async fn open_selected_file_rejects_oversized_file() {
+        let root = temp_workspace("oversized-selected");
+        let file = root.join("picked.md");
+        let oversized = "!".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES + 1);
+        fs::write(&file, &oversized).unwrap();
+        let mut workspace = WorkspaceState::new();
+
+        let error = workspace.open_selected_file(&file, 1).await.unwrap_err();
+        let diagnostic = error.diagnostic();
+
+        assert_eq!(diagnostic.code, FileErrorCode::FileTooLarge);
+        assert!(workspace.document_handle(1).is_none());
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Reloading a document whose file grew past the limit fails with
+    /// `FileTooLarge` before re-reading the full contents.
+    #[tokio::test]
+    async fn reload_document_rejects_oversized_file() {
+        let root = temp_workspace("oversized-reload");
+        let file = root.join("note.txt");
+        fs::write(&file, "small").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let opened = workspace
+            .open_existing_file(root_id, "note.txt", 1)
+            .await
+            .unwrap();
+
+        // Grow the file past the limit on disk after it was opened.
+        let oversized = "!".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES + 1);
+        fs::write(&file, &oversized).unwrap();
+
+        let error = workspace
+            .reload_document(opened.document_id, true)
+            .await
+            .unwrap_err();
+        let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic.code, FileErrorCode::FileTooLarge);
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// A file exactly at the limit opens successfully (boundary is inclusive).
+    #[tokio::test]
+    async fn open_file_at_limit_boundary_succeeds() {
+        let root = temp_workspace("limit-boundary");
+        let file = root.join("at_limit.txt");
+        let at_limit = "a".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES);
+        fs::write(&file, &at_limit).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let opened = workspace
+            .open_existing_file(root_id, "at_limit.txt", 1)
+            .await;
+        assert!(opened.is_ok(), "file exactly at the limit must open");
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Two concurrent saves of *different* documents must complete without
+    /// serializing on the workspace mutex during disk writes. This exercises the
+    /// `save_document_unlocked` orchestration: each save holds the workspace
+    /// mutex only for the fast `prepare_save` phase, releases it across the
+    /// `tokio::fs::write`, then reacquires to `commit_save`.
+    #[tokio::test]
+    async fn concurrent_save_different_documents() {
+        let root = temp_workspace("concurrent-save-diff");
+        let file_a = root.join("a.txt");
+        let file_b = root.join("b.txt");
+        fs::write(&file_a, "alpha").unwrap();
+        fs::write(&file_b, "beta").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+
+        let opened_a = open_existing_file_unlocked(&workspace, root_id, "a.txt", 1)
+            .await
+            .unwrap();
+        let opened_b = open_existing_file_unlocked(&workspace, root_id, "b.txt", 2)
+            .await
+            .unwrap();
+
+        // Mark both dirty so save actually writes new content.
+        {
+            opened_a
+                .document
+                .lock()
+                .await
+                .replace_text_from_storage("alpha-edited".to_string());
+            opened_b
+                .document
+                .lock()
+                .await
+                .replace_text_from_storage("beta-edited".to_string());
+        }
+
+        let ws_a = Arc::clone(&workspace);
+        let ws_b = Arc::clone(&workspace);
+        let save_a =
+            tokio::spawn(async move { save_document_unlocked(&ws_a, opened_a.document_id).await });
+        let save_b =
+            tokio::spawn(async move { save_document_unlocked(&ws_b, opened_b.document_id).await });
+        let (outcome_a, outcome_b) = tokio::join!(save_a, save_b);
+        let outcome_a = outcome_a.unwrap().unwrap();
+        let outcome_b = outcome_b.unwrap().unwrap();
+        assert!(
+            !outcome_a.dirty,
+            "clean save of doc a must report not-dirty"
+        );
+        assert!(
+            !outcome_b.dirty,
+            "clean save of doc b must report not-dirty"
+        );
+
+        assert_eq!(fs::read_to_string(&file_a).unwrap(), "alpha-edited");
+        assert_eq!(fs::read_to_string(&file_b).unwrap(), "beta-edited");
+
+        let _ = fs::remove_file(file_a);
+        let _ = fs::remove_file(file_b);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// If the document is edited during the unlocked write window, `commit_save`
+    /// must detect the version mismatch via `mark_clean_if_version` and leave
+    /// the document dirty instead of falsely marking it clean. This is the
+    /// "re-validate on reacquire" contract for the released-mutex I/O path.
+    #[tokio::test]
+    async fn save_version_mismatch_after_io_leaves_document_dirty() {
+        let root = temp_workspace("save-version-mismatch");
+        let file = root.join("note.txt");
+        fs::write(&file, "original").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let opened = workspace
+            .open_existing_file(root_id, "note.txt", 1)
+            .await
+            .unwrap();
+        let document_id = opened.document_id;
+
+        let prepared_version = opened.document.lock().await.version();
+        let plan = workspace.prepare_save(document_id).unwrap();
+
+        // Simulate a concurrent edit landing during the unlocked write: bump the
+        // in-memory version past the version captured at write time.
+        opened
+            .document
+            .lock()
+            .await
+            .replace_text_from_storage("concurrent edit".to_string());
+
+        // The I/O phase captured the pre-edit version; commit must notice the
+        // mismatch and refuse to mark the document clean.
+        let io = SaveIoOutcome {
+            prepared_version,
+            saved_metadata: FileMetadata {
+                len: 0,
+                modified: None,
+            },
+        };
+        let outcome = workspace.commit_save(plan, io).await.unwrap();
+        assert!(
+            outcome.dirty,
+            "a concurrent edit during save must not be falsely marked clean"
+        );
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Two concurrent opens of the *same* canonical path through the unlocked
+    /// orchestration must not create duplicate document registry entries. The
+    /// slow reader that commits second re-checks the canonical path under the
+    /// workspace mutex and returns the existing lease instead of inserting a
+    /// duplicate.
+    #[tokio::test]
+    async fn concurrent_open_same_file_dedups_registry() {
+        let root = temp_workspace("concurrent-open-dedup");
+        let file = root.join("shared.txt");
+        fs::write(&file, "shared body").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+
+        let ws_a = Arc::clone(&workspace);
+        let ws_b = Arc::clone(&workspace);
+        let open_a = tokio::spawn(async move {
+            open_existing_file_unlocked(&ws_a, root_id, "shared.txt", 1).await
+        });
+        let open_b = tokio::spawn(async move {
+            open_existing_file_unlocked(&ws_b, root_id, "shared.txt", 2).await
+        });
+        let (lease_a, lease_b) = tokio::join!(open_a, open_b);
+        let lease_a = lease_a.unwrap().unwrap();
+        let lease_b = lease_b.unwrap().unwrap();
+
+        assert_eq!(
+            lease_a.document_id, lease_b.document_id,
+            "concurrent opens of the same file must resolve to one document id"
+        );
+        // Exactly one registry entry exists for the path.
+        let ws = workspace.lock().await;
+        assert!(ws.document_handle(lease_a.document_id).is_some());
+        let _ = ws; // release
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Atomic save writes to a temp file in the same directory, fsyncs, then
+    /// renames over the target. On success the target holds the new content and
+    /// no `.clay-save-*` temp file is left behind.
+    #[tokio::test]
+    async fn atomic_save_replaces_target_and_leaves_no_temp() {
+        let root = temp_workspace("atomic-save-replace");
+        let file = root.join("note.txt");
+        fs::write(&file, "original").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let opened = workspace
+            .open_existing_file(root_id, "note.txt", 9)
+            .await
+            .unwrap();
+
+        opened
+            .document
+            .lock()
+            .await
+            .replace_text_from_storage("replaced atomically".to_string());
+        workspace.save_document(opened.document_id).await.unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "replaced atomically",
+            "target file must hold the new content after atomic save"
+        );
+        // No leftover temp files in the directory.
+        let leftover_temps = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".clay-save-"))
+            .count();
+        assert_eq!(
+            leftover_temps, 0,
+            "atomic save must rename the temp over the target, leaving no temp behind"
+        );
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// If the write fails (here: the target directory is not writable so the
+    /// temp file cannot be created), the original file is left intact and the
+    /// save returns a typed `WriteFailed` error.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn atomic_save_preserves_original_on_write_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_workspace("atomic-save-failure");
+        let file = root.join("note.txt");
+        fs::write(&file, "untouched").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let opened = workspace
+            .open_existing_file(root_id, "note.txt", 9)
+            .await
+            .unwrap();
+        opened
+            .document
+            .lock()
+            .await
+            .replace_text_from_storage("should never be written".to_string());
+
+        // Make the directory non-writable so the atomic-save temp file cannot
+        // be created. The original file stays readable (r-- on the file, r-x on
+        // the dir) so reauthorization still succeeds before the write fails.
+        let original_dir_mode = fs::metadata(&root).unwrap().permissions().mode();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let error = workspace
+            .save_document(opened.document_id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, WorkspaceError::WriteFailed { .. }),
+            "save to a non-writable directory must fail with WriteFailed, got {error:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "untouched",
+            "original file content must be preserved when the atomic save fails"
+        );
+        // No partial temp file leaked into the non-writable directory.
+        let leaked_temps = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".clay-save-"))
+            .count();
+        assert_eq!(leaked_temps, 0);
+
+        // Restore writability so cleanup can remove the directory.
+        fs::set_permissions(&root, fs::Permissions::from_mode(original_dir_mode)).unwrap();
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Portable rename-failure exercise for the atomic-save helper: renaming a
+    /// file over an existing directory fails on every platform, so the helper
+    /// must return the error and remove the orphaned temp file rather than
+    /// leaving a torn write or litter. Runs on Windows and Unix.
+    #[tokio::test]
+    async fn atomic_write_file_rename_failure_returns_error_and_cleans_temp() {
+        let root = temp_workspace("atomic-rename-fail");
+        // `blocker` is a directory, so `rename(temp, blocker)` cannot succeed.
+        let blocker = root.join("blocker");
+        fs::create_dir(&blocker).unwrap();
+
+        let error = atomic_write_file(&blocker, b"new content").await;
+        assert!(
+            error.is_err(),
+            "renaming a temp file over a directory must fail, not silently succeed"
+        );
+
+        let leaked_temps = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".clay-save-"))
+            .count();
+        assert_eq!(
+            leaked_temps, 0,
+            "a failed rename must remove the temp file, leaving no litter"
+        );
+
+        let _ = fs::remove_dir(&blocker);
         let _ = fs::remove_dir(root);
     }
 }

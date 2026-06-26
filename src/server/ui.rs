@@ -90,6 +90,10 @@ pub(crate) struct PackageUiRegistrySnapshot {
 }
 
 impl PackageUiRegistrySnapshot {
+    #[allow(
+        dead_code,
+        reason = "package UI runtime updates are produced once dynamic package UI publication is wired"
+    )]
     pub(crate) fn runtime_update(&self, base_version: u64) -> PackageUiRuntimeUpdate {
         PackageUiRuntimeUpdate {
             base_version,
@@ -240,12 +244,12 @@ pub(crate) struct RegisteredPackageLayoutOverride {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UiContributionDiagnostic {
-    pub(crate) package_name: Option<String>,
-    pub(crate) package_version: Option<String>,
-    pub(crate) api_prefix: Option<String>,
-    pub(crate) contribution_id: Option<String>,
+    pub(crate) package_name: Option<Box<str>>,
+    pub(crate) package_version: Option<Box<str>>,
+    pub(crate) api_prefix: Option<Box<str>>,
+    pub(crate) contribution_id: Option<Box<str>>,
     pub(crate) rule: UiContributionRule,
-    pub(crate) message: String,
+    pub(crate) message: Box<str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -843,14 +847,14 @@ impl PackageUiRegistry {
                 "pane, component, and transient-overlay state scopes require a package-prefixed targetId",
             ));
         }
-        if let Some(target_id) = &target_id {
-            if !target_id.starts_with(&format!("{}.", package.clay.api_prefix)) {
-                return Err(context.error(
-                    UiContributionRule::InvalidId,
-                    Some(target_id),
-                    "state scope targetId must use the package apiPrefix",
-                ));
-            }
+        if let Some(target_id) = &target_id
+            && !target_id.starts_with(&format!("{}.", package.clay.api_prefix))
+        {
+            return Err(context.error(
+                UiContributionRule::InvalidId,
+                Some(target_id),
+                "state scope targetId must use the package apiPrefix",
+            ));
         }
         if implementation_status == "implemented"
             && matches!(scope, "workspace" | "document" | "user-config")
@@ -1284,15 +1288,15 @@ impl UiDiagnosticContext {
         &self,
         rule: UiContributionRule,
         contribution_id: Option<&str>,
-        message: impl Into<String>,
+        message: impl Into<Box<str>>,
     ) -> UiContributionDiagnostic {
         UiContributionDiagnostic {
-            package_name: self.package_name.clone(),
-            package_version: self.package_version.clone(),
-            api_prefix: self.api_prefix.clone(),
+            package_name: self.package_name.clone().map(String::into_boxed_str),
+            package_version: self.package_version.clone().map(String::into_boxed_str),
+            api_prefix: self.api_prefix.clone().map(String::into_boxed_str),
             contribution_id: contribution_id
-                .map(ToOwned::to_owned)
-                .or_else(|| self.contribution_id.clone()),
+                .map(|id| id.to_string().into_boxed_str())
+                .or_else(|| self.contribution_id.clone().map(String::into_boxed_str)),
             rule,
             message: message.into(),
         }
@@ -1702,6 +1706,10 @@ fn payload_size(value: &Value) -> usize {
         .unwrap_or(usize::MAX)
 }
 
+#[allow(
+    dead_code,
+    reason = "slot parsing helper belongs to package UI validation path and is kept with related code"
+)]
 fn fixed_slot_id(slot: &str) -> FixedSlotId {
     match slot {
         "right" => FixedSlotId::Right,
@@ -2348,5 +2356,14 @@ mod tests {
             raw_component_color.rule,
             UiContributionRule::ProhibitedAuthority
         );
+    }
+
+    /// Compile-time size guard for the boxed UI contribution diagnostic.
+    /// Mirrors the guard in `packages::record`; keeps `UiContributionDiagnostic`
+    /// under clippy's `result_large_err` 128-byte threshold.
+    #[test]
+    fn ui_contribution_diagnostic_size_remains_under_large_err_threshold() {
+        const _: () = assert!(std::mem::size_of::<UiContributionDiagnostic>() <= 128);
+        assert!(std::mem::size_of::<UiContributionDiagnostic>() <= 128);
     }
 }

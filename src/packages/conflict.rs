@@ -11,10 +11,10 @@ use crate::packages::record::PackageRecord;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageConflictDiagnostic {
     pub kind: PackageConflictKind,
-    pub contribution_id: String,
-    pub first: PackageConflictProvenance,
-    pub second: PackageConflictProvenance,
-    pub message: String,
+    pub contribution_id: Box<str>,
+    pub first: Box<PackageConflictProvenance>,
+    pub second: Box<PackageConflictProvenance>,
+    pub message: Box<str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,16 +284,17 @@ fn insert_unique(
     if let Some(first) = index.get(&id) {
         return Err(PackageConflictDiagnostic {
             kind,
-            contribution_id: id.clone(),
-            first: first.clone(),
-            second: provenance.clone(),
+            contribution_id: id.clone().into_boxed_str(),
+            first: Box::new(first.clone()),
+            second: Box::new(provenance.clone()),
             message: format!(
                 "{label} `{id}` between `{}` ({}) and `{}` ({})",
                 first.package_name,
                 first.api_prefix,
                 provenance.package_name,
                 provenance.api_prefix
-            ),
+            )
+            .into_boxed_str(),
         });
     }
     index.insert(id, provenance);

@@ -116,18 +116,18 @@ impl ClientBehaviorState {
 
     fn route_unbound_key(&self, key: &KeyStroke) -> RoutedBehavior {
         let _autocomplete_trigger = self.autocomplete_trigger_for_key(key);
-        if !key.modifiers.control && !key.modifiers.alt && !key.modifiers.super_key {
-            if let KeyCode::Character(text) = &key.key {
-                if self
-                    .active
-                    .allows_client_first_edit(&crate::protocol::EditOperation::Insert {
-                        byte_offset: 0,
-                        text: text.clone(),
-                    })
-                {
-                    return RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text.clone()));
-                }
-            }
+        if !key.modifiers.control
+            && !key.modifiers.alt
+            && !key.modifiers.super_key
+            && let KeyCode::Character(text) = &key.key
+            && self
+                .active
+                .allows_client_first_edit(&crate::protocol::EditOperation::Insert {
+                    byte_offset: 0,
+                    text: text.clone(),
+                })
+        {
+            return RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text.clone()));
         }
 
         RoutedBehavior::Unhandled

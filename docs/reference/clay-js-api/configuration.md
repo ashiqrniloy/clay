@@ -82,6 +82,32 @@ Those values are documented package defaults, not hidden `init.js` keys. The pac
 
 Configuration evaluation remains load-time or explicit setting-change work only. Markdown large-file policy must not be recomputed from user JavaScript during keypress, paint, scroll, layout, text-event handling, or parse-result publication. The existing `setModePreference`, `setDecorationTheme`, and `setParsePolicy` facades remain unavailable stubs; `setPackageOption` is runtime-backed only for the documented Phase 18.4 package option names. None of these APIs grant package enable/disable, filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, raw-op, or client-side JavaScript authority.
 
+## Phase 18.7 persistent runtime and parse bridge configuration review
+
+Phase 18.7 reviewed the persistent server runtime, generic selected-file open activation, and token-backed JS parse handler bridge. It does **not** promote a new user-tunable configuration API.
+
+The default end-user configuration remains the existing one-line package load:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/markdown");
+```
+
+That call runs once per persistent runtime lifetime, registers mode activation metadata through `clay:modes`, and registers the package parser through [`clay.parse.serverRegisterParseHandler`](parse/server-register-parse-handler.md). Selected-file open then reuses those resident declarations through `serverActivateClassifiedMode` and `ParseCoordinator`; it does not create per-open runtime roots, copy package `dist/` files, or require hidden `init.js` keys.
+
+Parse budgets introduced or exercised by the bridge are package-author registration fields, not user configuration knobs: `timeoutMs`, `maxWindowBytes`, `guardBytes`, `memoryBudgetBytes`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES` are documented on the parse API or as compiled server budgets. `clay.runtime.timeout` is a runtime diagnostic emitted when a configuration, package load, or parse-handler evaluation exceeds its validated guard; it is not a callable `clay:configuration` API and cannot be raised, lowered, or disabled from `init.js`. The planned `clay.configuration.setParsePolicy` facade remains unavailable until a future phase defines concrete user-facing validators, persistence, registry docs, and security tests.
+
+Configuration remains startup/package-load/explicit setting-change work only. Ordinary typing, edit acknowledgement, local paint, viewport scrolling, selected-file parse scheduling, parse-result publication, and decoration rendering do not execute user configuration JavaScript. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or parser-authority grant.
+
+## Phase 19 persistent-runtime hot reload configuration review
+
+Phase 19 reviewed persistent runtime hot reload and did **not** promote a new user-facing reload setting, command, key binding, or `clay:configuration` API. Hot reload is an internal/developer-only server lifecycle primitive in this phase, triggered headlessly through `IpcServer::trigger_developer_hot_reload` for tests and developer workflow. That Rust helper and its `RuntimeReloadOutcome`/`ReloadedDocumentRefresh` types are `#[doc(hidden)]` test/developer surfaces around the shared reload primitive; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`.
+
+The only end-user configuration entry point remains normal `~/.config/clay/init.js` JavaScript. Reload rebuilds a fresh runtime generation and re-evaluates that same `init.js`; it does not introduce hidden JSON/TOML/ad hoc keys such as `hotReload`, `hot_reload`, `reloadOnSave`, `autoReload`, `reloadPackages`, or `reloadConfiguration`. If a future user-facing reload command or setting is added, it must be represented as a documented Clay JS API with registry metadata, key binding/custom-property coverage, hot-path policy, examples, diagnostics, and security notes.
+
+Configuration evaluation remains startup or explicit developer-triggered reload work only. Ordinary typing, keypress routing, edit acknowledgement, Masonry paint/layout, pointer handling, scroll, selected-file open, parse scheduling, parse-result publication, and decoration rendering do not execute configuration JavaScript or check reload settings. The reload primitive reuses the existing configuration root, first-party `@clay/*` package loader, deny-by-default module resolution, sanitized diagnostics, and generation swap fallback; it grants no package-manager, arbitrary filesystem, network, shell, extension loading, third-party package, AI mutation, workspace expansion, WASM, raw-op, client-side JavaScript, or native widget authority.
+
 ## Phase 19 Windows open-dialog configuration review
 
 Phase 19 reviewed the Windows Markdown open-dialog smoke path and did **not** promote a new dialog-settings configuration API. The configurable behavior is the key binding itself, expressed through the existing [`bindKey`](keybindings/bind-key.md) Clay JS API:
@@ -156,3 +182,19 @@ await publishTree(
 ## Security Boundary
 
 Configuration can customize documented Clay behavior through Clay JS APIs. It must not implicitly grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority. Modular loading is constrained to local configuration files under the configuration root; it is not a package manager, extension loader, workspace scanner, network fetcher, shell runner, or client-side JavaScript execution hook. Permission-bearing APIs still require explicit documented permissions and server-side validation.
+
+## Plan 030 security budgets are intentionally not Clay JS APIs
+
+Plan 030 (code-review remediation) hardened several server-side limits. These are **security boundaries**, not user configuration, so they are intentionally **not** exposed as `clay:configuration` APIs and cannot be raised, lowered, or disabled from `init.js`. Raising any of them from user JavaScript would undermine the very boundary it enforces (e.g. a malicious `init.js` could lift the JS evaluation timeout to defeat the watchdog, or raise the openable-file ceiling to exhaust memory). They are compiled into the server binary in `src/perf/budgets.rs` and reviewed through code review and decisions rather than tuned at runtime.
+
+- **JS runtime evaluation timeout** — `JS_RUNTIME_EVALUATION_TIMEOUT_MS` (5000 ms, default). A watchdog thread terminates the V8 isolate when the budget elapses; surfaced as `clay.runtime.timeout`. Not configurable from `init.js`.
+- **JS runtime heap limit** — `JS_RUNTIME_HEAP_LIMIT_BYTES` (128 MiB). The persistent runtime is created with `v8::CreateParams::heap_limits`; the near-heap callback terminates execution and surfaces `clay.runtime.heap_limit`. Not configurable from `init.js`.
+- **Openable file size** — `MAX_OPENABLE_FILE_BYTES` (768 KiB). Server-side file-open path rejects files above this before allocating full text, with headroom under the 1 MiB codec frame limit. Not configurable from `init.js`.
+- **Runtime SDUI tree budgets** — `RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES` (16 KiB), `RUNTIME_SDUI_TREE_MAX_NODES` (128), `RUNTIME_SDUI_TREE_MAX_DEPTH` (16), `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS` (4096). Enforced before/during `op_clay_sdui_publish_tree`; rejected with `clay.sdui.invalid_tree`. Not configurable from `init.js`.
+- **Large-file resident memory budget** — `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` (256 MiB). Resident-memory ceiling for editor caches; not a per-open tunable.
+- **Package install lifecycle-script suppression** — `pnpm add` runs with `--ignore-scripts` by default. The opt-in is a **CLI flag / env var**, not a Clay JS API: `clay package add --allow-scripts` or `CLAY_ALLOW_LIFECYCLE_SCRIPTS=1`. This is a process-level supply-chain control, not an `init.js` configuration option, and is documented in `docs/reference/primitives/package-loading.md`.
+- **File-open capability gate** — `OpenSelectedFile` requires a server-minted single-use capability token issued after the `Hello` handshake; not a configuration option. See `docs/wiki/modules/server-ipc-skeleton.md`.
+- **IPC endpoint ownership/permissions** — Unix socket `0o600` + parent-directory ownership and Windows named-pipe current-user-only DACL are OS-level hardening, not Clay JS configuration.
+
+A separate-process JS sandbox remains a deferred follow-up tracked in Plan 034; it too will be a server-side security boundary, not `init.js` configuration when it ships.
+

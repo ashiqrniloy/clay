@@ -60,19 +60,44 @@ pub(super) fn op_clay_parse_register_parse_handler(
     }
     reject_executable_handler(options)?;
 
-    let registration = crate::server::parse_coordinator::ParseHandlerMeta {
+    let token = format!(
+        "{}:{}:{}",
+        package.manifest.clay.api_prefix,
+        mode_id,
+        state.borrow::<Arc<ClayOpState>>().parse_handlers().len()
+    );
+    let meta = crate::server::parse_coordinator::ParseHandlerMeta {
         package_prefix: package.manifest.clay.api_prefix.clone(),
         mode_id: mode_id.clone(),
     };
-    state
-        .borrow::<Arc<ClayOpState>>()
-        .register_parse_handler(registration.clone());
+    if options
+        .get("runtimeBridge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        state
+            .borrow::<Arc<ClayOpState>>()
+            .register_js_parse_handler(
+                crate::server::parse_coordinator::JsParseHandlerRegistration {
+                    package: package.clone(),
+                    meta: meta.clone(),
+                    token: token.clone(),
+                    parse_unit,
+                    timeout_ms,
+                },
+            );
+    } else {
+        state
+            .borrow::<Arc<ClayOpState>>()
+            .register_parse_handler_meta(meta.clone());
+    }
 
     serde_json::to_string(&json!({
         "packageName": package.manifest.name,
         "packageVersion": package.manifest.version,
-        "packagePrefix": registration.package_prefix,
+        "packagePrefix": meta.package_prefix,
         "mode": mode_id,
+        "token": token,
         "parseUnit": parse_unit_name(parse_unit),
         "viewportPriority": viewport_priority,
         "timeoutMs": timeout_ms,
@@ -87,6 +112,23 @@ pub(super) fn op_clay_parse_register_parse_handler(
             "clay.parse.registration_failed: failed to serialize result ({error})"
         ))
     })
+}
+
+#[op2(fast)]
+pub(super) fn op_clay_parse_store_update(
+    state: &mut OpState,
+    #[string] update_json: String,
+) -> Result<(), JsErrorBox> {
+    let value = parse_json(&update_json, "clay.parse.invalid_update")?;
+    if !value.is_object() {
+        return Err(clay_error(
+            "clay.parse.invalid_update: update must be an object",
+        ));
+    }
+    state
+        .borrow::<Arc<ClayOpState>>()
+        .store_parse_update_json(update_json);
+    Ok(())
 }
 
 fn parse_unit(value: &str) -> Result<ParseUnit, JsErrorBox> {

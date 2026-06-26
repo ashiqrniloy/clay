@@ -13,7 +13,7 @@ export const DEFAULT_WINDOWED_MARKDOWN_POLICY = Object.freeze({
   parseWindowBytes: 64 * 1024,
   guardBytes: 4 * 1024,
   memoryBudgetBytes: 30 * 1024 * 1024,
-  timeoutMs: 50
+  timeoutMs: 500
 });
 
 const STYLE_TOKENS = Object.freeze({

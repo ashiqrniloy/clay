@@ -31,12 +31,14 @@ pub(super) async fn op_clay_documents_open_document(
         "clay.documents.invalid_open_options",
     )?;
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
-    let opened = workspace
-        .lock()
-        .await
-        .open_existing_file(workspace_root_id, path, RUNTIME_CLIENT_ID)
-        .await
-        .map_err(workspace_error("clay.documents.open_failed"))?;
+    let opened = crate::server::workspace::open_existing_file_unlocked(
+        &workspace,
+        workspace_root_id,
+        path,
+        RUNTIME_CLIENT_ID,
+    )
+    .await
+    .map_err(workspace_error("clay.documents.open_failed"))?;
     let document = opened.document.lock().await;
     let metadata = DocumentMetadata {
         document_id: opened.document_id,
@@ -69,10 +71,7 @@ pub(super) async fn op_clay_documents_save_document(
         "clay.documents.invalid_save_options",
     )?;
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
-    let outcome = workspace
-        .lock()
-        .await
-        .save_document(document_id)
+    let outcome = crate::server::workspace::save_document_unlocked(&workspace, document_id)
         .await
         .map_err(workspace_error("clay.documents.save_failed"))?;
     serialize_result(
@@ -103,12 +102,13 @@ pub(super) async fn op_clay_documents_reload_document(
         .unwrap_or(false);
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
     let (metadata, text) = {
-        let mut workspace = workspace.lock().await;
-        let outcome = workspace
-            .reload_document(document_id, force)
-            .await
-            .map_err(workspace_error("clay.documents.reload_failed"))?;
+        let outcome =
+            crate::server::workspace::reload_document_unlocked(&workspace, document_id, force)
+                .await
+                .map_err(workspace_error("clay.documents.reload_failed"))?;
         let metadata = workspace
+            .lock()
+            .await
             .document_metadata(document_id, RUNTIME_CLIENT_ID)
             .await
             .map_err(workspace_error("clay.documents.reload_failed"))?;

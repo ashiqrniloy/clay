@@ -1,3 +1,8 @@
+#![allow(
+    dead_code,
+    reason = "static SDUI tree helpers remain as validation fixtures while runtime SDUI publication is opt-in"
+)]
+
 use std::collections::BTreeSet;
 
 use crate::protocol::{
@@ -15,13 +20,6 @@ const REFRESH_BUTTON_ID: SduiNodeId = SduiNodeId(5);
 const DOCUMENT_LIST_ID: SduiNodeId = SduiNodeId(6);
 const EDITOR_ID: SduiNodeId = SduiNodeId(7);
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "some SDUI validation failures are exercised by tests or future dynamic update callers"
-    )
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SduiValidationError {
     EmptyTree,
