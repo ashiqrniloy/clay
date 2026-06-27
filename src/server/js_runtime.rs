@@ -3701,14 +3701,23 @@ mod tests {
         // Non-`@clay/*` specifiers are denied before the package service is
         // touched. Third-party registry specs, bare names, and `npm:` specs.
         for denied in [
+            "left-pad",
             "lodash",
             "npm:foo",
             "markdown",
             "react",
             "@types/node",
+            "@scope/pkg",
+            "https://registry.example.test/pkg.js",
+            "file:///tmp/pkg.js",
+            "./local-package",
+            "../escape",
+            "/absolute/package",
             "@clay/",
             "@clay/../escape",
             "@clay/foo/bar",
+            "@clay/markdown?tag=latest",
+            "@clay/markdown#hash",
         ] {
             let err = resolve_by_specifier(denied).await.unwrap_err();
             assert!(

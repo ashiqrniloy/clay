@@ -17,9 +17,57 @@ Enabling or loading a package is Clay-owned. The server validates identity, `api
 
 Package JavaScript runs only in the controlled server-side runtime for load/configuration/activation work; no package JavaScript runs in Masonry paint/layout/input hot paths. The Rust client receives inert manifests, decorations, parse updates, SDUI data, and validated package UI state; it never receives package JavaScript callbacks.
 
+## Registry and Integrity Verification Policy
+
+Clay delegates registry access, package fetching, dependency resolution, version ranges, lockfile writing, integrity verification, caching, and offline store behavior to the npm-compatible package manager. Clay does not implement a registry client.
+
+Third-party runtime authority needs a Clay-owned provenance record captured from package-manager state before any non-`@clay/*` package can execute:
+
+```toml
+[package_source]
+name = "@vendor/example"
+requested_spec = "@vendor/example@1.2.3"
+resolved_version = "1.2.3"
+registry = "https://registry.npmjs.org/"
+integrity = "sha512-..."
+lockfile = "pnpm-lock.yaml"
+package_root = "/clay/packages/node_modules/@vendor/example"
+tarball = "https://registry.npmjs.org/@vendor/example/-/example-1.2.3.tgz"
+offline_cache_key = "@vendor/example/1.2.3"
+```
+
+Required policy:
+
+1. `pnpm add --ignore-scripts <pkg>@<version>` remains the default install shape; lifecycle scripts stay disabled unless an explicit dangerous opt-in is used.
+2. Install/update records requested spec, resolved version, registry or source URL, lockfile path, lockfile integrity digest, package tarball or source path, package root, and offline/cache key when available.
+3. Enable/load compares the recorded source and integrity evidence to the trusted package identity record before runtime execution.
+4. Package-manager stdout, stderr, exit code, `package.json`, lockfile text, and registry metadata are diagnostic/provenance inputs only; they are not runtime authority and must not bypass Clay-owned manifest, permission, trust, or sandbox validation.
+5. Diagnostics copied from package-manager output must be sanitized: no environment secrets, auth tokens, filesystem roots beyond the Clay package store, shell command expansion, raw registry credentials, or unbounded stderr/stdout blobs.
+6. Offline/cache installs are allowed only when cached metadata still matches the trusted resolved version and integrity digest; cache hits do not widen runtime authority.
+7. Updates are treated as new identities: a changed resolved version, registry, tarball/source path, or integrity digest requires a new matching trust record before execution.
+8. Verification runs only at install, update, enable, load, reload, startup, or background audit time. It never runs from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
+
+Current implementation gap: `PackageManagerBackend`, `PnpmBackend`, `InstallResult`, `DiscoveredPackage`, and `PackageService` already isolate package-manager execution, capture stdout/stderr/exit status, read inert package metadata, and keep install separate from enable/load. They do not yet persist a source/integrity provenance record, parse lockfile integrity evidence, sanitize package-manager diagnostics, model offline/cache keys, or enforce update-as-new-identity checks for third-party packages. Until those generic fields and checks exist, non-`@clay/*` runtime execution remains denied.
+
 ## Conflict Handling
 
 Enabled packages are checked deterministically at enable/reload time. Clay rejects duplicate prefixes, mode IDs, command IDs, ambiguous key bindings, configuration key collisions, SDUI region collisions, decoration primitive collisions, duplicate package UI panel/component/overlay/theme-token IDs, duplicate fixed slot claims, duplicate input contribution IDs, duplicate UI state scope IDs, duplicate layout override target/property pairs, duplicate package option schemas, and behavior manifest entry collisions with package provenance. Conflicts do not silently override existing behavior.
+
+## Third-Party Disable, Update, Rollback, and Incident Policy
+
+Third-party disable is an active withdrawal, not only a future-load block. Disable marks the package generation revoked, removes PackageService-enabled state for that package identity, rebuilds the next runtime generation without the package, cancels parse work for the revoked generation, unregisters handler tokens, withdraws commands, behavior manifests, SDUI/status trees, package UI/input/state/layout/theme declarations, decorations, folding, completion providers, and diagnostics owned by that package, then publishes only parent-validated replacement state.
+
+Updates are new package identities. A changed version, registry/source, tarball/path, integrity digest, `apiPrefix`, publisher, permission set, or Clay compatibility range requires a new trust+permission grant before execution. If the new generation fails install provenance checks, enable validation, conflict checks, sandbox load/evaluation, output validation, or parse registration, Clay keeps the prior validated generation active and reports sanitized diagnostics; it does not partially merge new contributions.
+
+Rollback uses the Phase 19 runtime-generation model: build and validate the candidate generation off to the side, swap only after success, and keep the last validated client state when candidate load/evaluation fails. On failure, stale generation outputs are rejected by runtime generation ID, document version, behavior version, handler token, and package provenance before any client publication.
+
+Incident response for malicious, broken, or withdrawn packages must be fail-closed: revoke the package identity, stop scheduling new package work, kill or replace the sandbox child for that generation, cancel in-flight parse/completion tasks, remove active contributions for the revoked package, preserve unaffected packages and prior validated client state, and require explicit reload/update/re-trust before execution resumes.
+
+Package-manager side effects are not runtime rollback authority. Clay may remove package-store files through the package-manager boundary, but install/remove stdout, stderr, exit code, lockfile changes, and package-store metadata do not keep commands, handlers, behavior manifests, SDUI, decorations, or client state active after disable/rollback.
+
+Rollback/disable work runs at disable, update, reload, startup, incident-response, or background cleanup time. It never blocks keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
+
+Current implementation gap: `PackageService::enable` already rolls back failed conflict candidates, Phase 19 runtime reload keeps the prior generation on failed evaluation, and `ParseCoordinator::cancel_generation` plus stale-result checks reject old-generation parse output. Third-party incident response still needs generic package-generation revocation, contribution ownership indexes, package-scoped withdrawal, sandbox-child replacement wiring, update-as-new-identity enforcement, and sanitized incident diagnostics.
 
 ## Hot-Path Policy
 
@@ -37,7 +85,7 @@ Phase 18.6 shipped the generic one-line loader: `loadPackage` is a runtime-backe
 
 `clay package add <spec>` delegates installation to the configured npm-compatible backend (`PnpmBackend`). Lifecycle scripts are suppressed by default via `--ignore-scripts` so remote package code cannot execute before Clay validates package metadata. The `--allow-scripts` CLI flag (or `CLAY_ALLOW_LIFECYCLE_SCRIPTS=1` environment variable) opts into lifecycle scripts and is documented as dangerous. The package store directory is created before invoking the backend. `FakeBackend` is used in tests and never spawns a process or executes scripts.
 
-The resolver is constrained to first-party `@clay/*` packages only. Non-`@clay/*` registry resolution (e.g. npm, custom registries, third-party packages) remains deferred to a future ecosystem hardening phase (Phase 23). Persistent shared enable state across runtime restarts remains deferred. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the full authority boundary, rationale, and security review. `serverLoadPackage` remains a lower-level validation helper used by fixtures and internally by `loadPackage`; it is not the documented end-user default.
+The resolver is constrained to first-party `@clay/*` packages only. Non-`@clay/*` registry resolution (e.g. `left-pad`, `@scope/pkg`, URL, local path, traversal, npm, custom registries, and third-party packages) remains deferred to a future ecosystem hardening phase (Phase 23). Installed package-manager metadata does not imply runtime execution authority: `pnpm add`/package-store records can be inspected, but `loadPackage` rejects non-`@clay/*` specifiers before module loading until an approved third-party authority decision exists. Persistent shared enable state across runtime restarts remains deferred. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the full authority boundary, rationale, and security review. `serverLoadPackage` remains a lower-level validation helper used by fixtures and internally by `loadPackage`; it is not the documented end-user default.
 
 The supported customization path after the one-line load is unchanged. Optional package customization is expressed through documented Clay JS APIs such as `clay.configuration.setPackageOption` and `clay.ui.serverSetLayoutOverride`; hidden JSON/TOML/ad hoc layout, input, style, or theme keys remain rejected, and these APIs do not provide package enable/disable authority. These APIs evaluate at startup, package-load, configuration-change, or explicit setting-change time and install inert validated state for Masonry hot paths to read later.
 
@@ -74,7 +122,7 @@ import { serverRegisterParseHandler } from "clay:parse";
 
 ## Carried-forward deferrals
 
-- **Non-`@clay/*` registry resolution:** Third-party, npm, and custom registry packages are not resolved by the current first-party resolver. The authority boundary is limited to the shipped `@clay/*` packages under `CARGO_MANIFEST_DIR/packages`. Future ecosystem hardening (Phase 23) will widen the resolver to support registry packages, third-party verification, and package-manager integration.
+- **Non-`@clay/*` registry resolution:** Third-party, npm, custom registry, scoped (`@scope/pkg`), bare (`left-pad`), URL, path, and traversal specifiers are not resolved by the current first-party resolver. The authority boundary is limited to the shipped `@clay/*` packages under `CARGO_MANIFEST_DIR/packages`; package-manager installation/metadata records do not grant runtime execution authority. Future ecosystem hardening (Phase 23) will widen the resolver only after registry packages, third-party verification, package-manager integration, sandboxing, and an approved authority decision are complete.
 - **Hot-reload:** Phase 19 invalidates `loadPackage` state by replacing the runtime generation. The old generation's `FirstPartyLoadEntryAllowlist` and `globalThis.__clayLoadedPackages` are dropped with the old service after a successful swap; failed reloads keep the prior service active.
 - **Persistent shared enable state:** `PackageService` is instantiated per runtime with an empty `FakeBackend` and a `Mutex`. Persistent enable state across server restarts is not implemented; packages are re-installed and re-enabled at each configuration load.
 - **Security review:** The deny-by-default boundary, the constrained `@clay/*` allowlist, and the validation reuse are covered by an executable test suite (see `tests/package_loading_docs.rs` and `src/server/js_runtime.rs`). The decision log records the explicit authority expansion and the authorities NOT granted.

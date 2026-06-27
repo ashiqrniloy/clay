@@ -43,6 +43,79 @@ Required provenance checks at load time:
 4. Package-owned Clay JS API IDs must start with the package prefix; only first-party Clay APIs may use `clay.*` stable IDs.
 5. All accepted primitive records must retain `package_name`, `package_version`, `api_prefix`, and source contribution metadata for diagnostics, conflict handling, generated docs, and AI-agent provenance.
 
+## Third-Party Trust and Identity Policy
+
+Non-`@clay/*` packages are untrusted by default. Clay metadata in `package.json` proves only that a package claims a Clay contract; it does not prove publisher identity, namespace ownership, source provenance, or runtime authority. Third-party runtime execution stays blocked until the package matches an explicit trust record and an approved authority decision grants the requested execution path.
+
+A trusted third-party package identity must be exact and source-bound:
+
+```toml
+[[trusted_package]]
+name = "@vendor/example"
+version = "1.2.3"
+registry = "https://registry.npmjs.org/"
+integrity = "sha512-..."
+clay_prefix = "example"
+source_kind = "npm-registry"
+publisher = "vendor"
+clay_api_compatibility = "^0.1"
+```
+
+Accepted source kinds are `npm-registry` first, with `local-path`, `tarball`, `git`, and `custom-registry` denied until a trust record explicitly names that source kind and a later decision approves the source-specific checks.
+
+Required install/enable/load checks:
+
+1. `name` must exactly match the installed package name. Bare package names, custom scopes, URLs, local paths, tarballs, git sources, and registry aliases remain untrusted unless the trust record names that source kind explicitly.
+2. `version` must match the resolved installed version; version ranges are package-manager input only and are not runtime identity.
+3. `registry` or source location must match the package-manager provenance record; ambiguous local paths and registry redirects fail closed.
+4. `integrity` must match package-manager lockfile or resolved package metadata before the package can be treated as trusted.
+5. `clay_prefix` must equal `clay.apiPrefix`, pass the normal prefix validator, and remain unique among enabled packages.
+6. `publisher` or source owner must match the trusted source record when the package-manager can provide it; unknown publishers fail closed.
+7. `clay_api_compatibility` must match the running Clay API compatibility range before package runtime execution.
+8. Package-owned modes, commands, configuration keys, UI IDs, theme tokens, and API IDs must remain scoped to the trusted `clay_prefix`.
+9. Namespace hijacks, typosquats, unsigned or untrusted sources, conflicting prefixes, conflicting contribution IDs, and missing provenance records are rejected before runtime execution. The fail-closed set includes namespace hijacks, typosquats, unsigned or untrusted sources.
+
+Trust records grant identity only. They do not grant filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, workspace mutation, package installation, or package enable/disable authority. Those authorities require separate explicit permissions, sandbox enforcement, tests, and an approved decision log.
+
+Trust validation happens at install, enable, load, reload, or background verification time using cached package metadata and package-manager provenance. It must not run from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
+
+Current implementation gap: `PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`, contribution provenance, and deterministic conflict diagnostics. They do not yet store trusted third-party source records, publisher identity, registry provenance, integrity evidence, or typosquat/namespace policy. Until those generic fields exist and are tested, non-`@clay/*` runtime execution remains denied.
+
+## Third-Party Permission Model
+
+Third-party permissions are narrow registration/request grants. They are not trust records, sandbox bypasses, raw host capabilities, or package-manager authority. A package must pass trust/integrity checks first, then request known permissions in `clay.permissions`:
+
+```json
+{
+  "clay": {
+    "permissions": ["mode-registration", "parse-document"]
+  }
+}
+```
+
+Initial third-party packages may request only the existing known package permissions:
+
+| Permission | Grants | Enforcement point |
+| --- | --- | --- |
+| `mode-registration` | Declare mode/classification metadata | enable/load manifest validation and mode registration |
+| `mode-activation` | Participate in server-owned mode activation | load/activation selection |
+| `command-registration` | Register inert command metadata | enable/load and command registration |
+| `package-configuration` | Declare or apply package-scoped configuration/layout defaults | enable/load, configuration API calls, and layout override validation |
+| `parse-document` | Run server-side parse work on parent-provided open document content/windows | parse handler registration and each parse request boundary |
+| `render-decorations` | Publish bounded inert decoration ranges | decoration publication validation |
+| `render-folding` | Publish bounded folding ranges | folding/decorations publication validation |
+| `completion-provider` | Provide server-side completion results | provider registration and completion request boundary |
+
+Grant source is an explicit user/admin/decision-approved trust+permission record matched to package name, version, source, integrity, and `apiPrefix`; package manifest declarations are only requests. Runtime enforcement happens in the parent at load, registration, configuration, parse/completion/decorations request, and output-publication boundaries. Diagnostics must include package name, package version, `apiPrefix`, requested permission, grant source, primitive category, contribution ID or handler token when available, and failed rule, without raw source text or secrets.
+
+Broad or catch-all permission names are prohibited. Clay rejects `trusted-third-party`, `all`, `admin`, `system`, `host`, `runtime`, `raw-op`, `raw-deno-ops`, and unknown permission strings instead of treating them as aliases.
+
+Denied authorities stay denied for third-party packages unless a later approved decision grants one narrow capability with docs and tests: filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, workspace mutation, package installation, package enable/disable, raw `Deno.core.ops`, native handles, client-side JavaScript, and direct Masonry/widget mutation.
+
+Permission checks are install/enable/load/reload/registration/request/publication work only. They must not run from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
+
+Current implementation gap: `parse_permission` and manifest validation already accept only the known permission strings and reject prohibited authorities before enable/load succeeds. Third-party execution still needs a generic persisted grant source, trust-record match, parent-side sandbox request enforcement, and diagnostics that connect permission requests to approved grants. Until then, non-`@clay/*` runtime execution remains denied.
+
 ## Permission Requirements by Primitive Category
 
 | Primitive category | Default permission | Validation requirement |

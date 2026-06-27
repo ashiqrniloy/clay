@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clay::server::runtime_sandbox::{RuntimeSandboxError, RuntimeSandboxSupervisor};
 
@@ -8,9 +8,11 @@ fn sandbox_bin() -> &'static str {
 
 #[tokio::test]
 async fn sandbox_child_starts_and_evaluates_controlled_fixture() {
+    let started = Instant::now();
     let mut supervisor = RuntimeSandboxSupervisor::spawn(sandbox_bin(), 16 * 1024)
         .await
         .expect("sandbox starts");
+    let startup_elapsed = started.elapsed();
 
     let evaluation = supervisor
         .evaluate(
@@ -21,6 +23,8 @@ async fn sandbox_child_starts_and_evaluates_controlled_fixture() {
         .expect("fixture evaluates");
 
     assert_eq!(evaluation.value["value"], 4);
+    assert!(startup_elapsed < Duration::from_secs(2));
+    assert!(evaluation.elapsed < Duration::from_secs(2));
 }
 
 #[tokio::test]

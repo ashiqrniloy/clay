@@ -309,11 +309,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
             "loadPackage only resolves first-party `@clay/*` packages; `{specifier}` is denied"
         )));
     };
-    if package_name.is_empty()
-        || package_name.contains('/')
-        || package_name.contains('\\')
-        || package_name.contains("..")
-    {
+    if !is_valid_first_party_package_segment(package_name) {
         return Err(invalid_specifier(format!(
             "invalid first-party package name in `{specifier}`"
         )));
@@ -418,6 +414,13 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
     serde_json::to_string(&summary).map_err(serialize_error("clay.packages.load_failed"))
 }
 
+fn is_valid_first_party_package_segment(package_name: &str) -> bool {
+    !package_name.is_empty()
+        && package_name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
 fn canonical_load_entry_paths(
     package_root: &Path,
     normalized_load_entry: &str,
@@ -444,7 +447,7 @@ fn canonical_load_entry_paths(
 
 #[cfg(test)]
 mod tests {
-    use super::canonical_load_entry_paths;
+    use super::{canonical_load_entry_paths, is_valid_first_party_package_segment};
     use std::{fs, path::PathBuf};
 
     fn temp_root(name: &str) -> PathBuf {
@@ -454,6 +457,28 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         root
+    }
+
+    #[test]
+    fn first_party_package_segment_rejects_paths_urls_and_registry_syntax() {
+        for denied in [
+            "",
+            "../escape",
+            "foo/bar",
+            "foo\\bar",
+            "markdown?tag=latest",
+            "markdown#hash",
+            "npm:markdown",
+            "https://example.test/pkg",
+            ".",
+        ] {
+            assert!(
+                !is_valid_first_party_package_segment(denied),
+                "first-party package segment `{denied}` must be rejected"
+            );
+        }
+        assert!(is_valid_first_party_package_segment("markdown"));
+        assert!(is_valid_first_party_package_segment("markdown-tools2"));
     }
 
     #[test]

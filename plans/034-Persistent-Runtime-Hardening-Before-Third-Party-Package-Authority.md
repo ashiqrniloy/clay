@@ -207,7 +207,7 @@
     - `cargo test --test clay_js_api_inventory phase18_7_persistent_runtime_does_not_add_hidden_configuration_knobs`: Harness adds no hidden Clay JS configuration API.
     - `cargo fmt --check`: Formatting gate passed.
 
-- [ ] Keep non-`@clay/*` package execution blocked until authority approval
+- [x] Keep non-`@clay/*` package execution blocked until authority approval
   - Acceptance Criteria:
     - Functional: Third-party/non-`@clay/*` specifiers still fail before execution, even if package-manager installation exists.
     - Performance: Rejection happens during install/enable/load validation, not during edit hot paths.
@@ -230,14 +230,23 @@
       await loadPackage('some-third-party'); // rejected until approved authority expansion
       ```
     - Files to Create/Edit:
-      - `src/server/ops/packages.rs`: resolver guard changes only if tests expose gaps.
-      - `tests/package_loading_docs.rs`: third-party execution gate tests.
-      - `docs/reference/primitives/package-loading.md`: clarify blocked third-party execution gate.
+      - `src/server/ops/packages.rs`: Tightened the centralized first-party resolver gate with `is_valid_first_party_package_segment`, rejecting malformed `@clay/*`, URL-ish, path-ish, traversal, registry-style, and custom-syntax segments before package root resolution or module loading.
+      - `src/server/js_runtime.rs`: Expanded resolver regression coverage for `left-pad`, `@scope/pkg`, URL, file URL, path, traversal, malformed `@clay/*`, and registry-style specifiers.
+      - `tests/package_loading.rs`: Added `third_party_install_metadata_does_not_imply_runtime_execution_authority` proving package-manager/store metadata can be recorded without enabling or executing third-party package JS.
+      - `tests/package_loading_docs.rs`: Added docs/source guard requiring third-party block language and centralized resolver gate references.
+      - `docs/reference/primitives/package-loading.md`: Clarified blocked third-party execution gate, examples, package-manager metadata boundary, and approved-authority requirement.
+      - `docs/wiki/modules/package-loading.md`: Documented the package-store metadata/runtime-execution split and test coverage.
+      - `docs/wiki/modules/persistent-runtime-hardening.md`: Documented resolver rejection examples and test commands.
     - References:
       - Phase 18.6 authority decision log; Phase 23 roadmap.
   - Test Cases to Write:
-    - `loadPackage('left-pad')`, `loadPackage('@scope/pkg')`, URL, path, and traversal specifiers are rejected before module loading.
-    - `pnpm add` metadata does not imply execution authority.
+    - `cargo test op_clay_packages_load_package_by_specifier_rejects_non_first_party_specifier --lib`: `loadPackage` resolver rejects `left-pad`, `@scope/pkg`, URL, file URL, path, traversal, malformed `@clay/*`, and registry-style specifiers before module loading.
+    - `cargo test --test package_loading third_party_install_metadata_does_not_imply_runtime_execution_authority`: package-manager/store metadata does not imply execution authority.
+    - `cargo test --test package_loading_docs package_loading_docs_keep_third_party_execution_blocked`: docs and source keep the third-party execution gate explicit.
+    - `cargo test --test package_loading`: package loading suite passed.
+    - `cargo test --test package_loading_docs`: docs-as-code package suite passed.
+    - `cargo test js_runtime --lib`: runtime regression suite passed.
+    - `cargo fmt --check`: Formatting gate passed.
 
 - [ ] Create the third-party runtime authority decision log before enabling execution
   - Acceptance Criteria:
@@ -250,23 +259,25 @@
       - `.agents/skills/create-decision-log/SKILL.md`
       - Phase 18.6 and 18.7 authority decision logs.
     - Options Considered:
-      - Write approval now. Rejected; this plan is not implementation approval for third-party execution.
-      - Require a future explicit authority log after hardening evidence exists. Chosen.
+      - Write approval now. Rejected; user explicitly did not approve the authority log on 2026-06-27.
+      - Require a future explicit authority log after trust, permissions, registry/integrity, denied-authority, rollback, and test policy work exists. Chosen and moved to `plans/035-Third-Party-Package-Runtime-Authority-Policy.md`.
     - Chosen Approach:
-      - Add a hard gate task that cannot be marked complete until the user explicitly approves the third-party authority expansion after reviewing heap/sandbox evidence.
+      - Keep this approval gate unchecked until the user explicitly approves the final third-party runtime authority decision log. Create and execute `plans/035-Third-Party-Package-Runtime-Authority-Policy.md` first to produce the policy/evidence required for approval.
     - API Notes and Examples:
       ```text
       No approved decision log -> non-@clay/* runtime execution remains disabled.
       ```
     - Files to Create/Edit:
+      - `plans/035-Third-Party-Package-Runtime-Authority-Policy.md`: New separate plan for trust, permissions, registry/integrity, denied authorities, rollback, tests, and approval-ready decision evidence.
       - `decision-logs/<date>-third-party-package-runtime-authority.md`: only after explicit approval.
       - `.agents/skills/project-patterns/references/package-distribution.md`: update only if the approved decision changes durable package guidance.
     - References:
       - `create-decision-log` skill; prior authority logs.
   - Test Cases to Write:
     - A docs/inventory test fails if third-party execution is enabled without a matching approved decision-log reference.
+    - Plan 035 must pass its policy/test gates before this decision-log gate can be revisited.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Runtime heap limits, sandbox kill timeouts, and denied-authority gates are server-owned security budgets, not undocumented `init.js` keys; any user-visible diagnostic/control is documented as a Clay JS API or explicitly internal.
     - Performance: Configuration review adds no runtime hot-path work.
@@ -287,16 +298,22 @@
       clay.runtime.heap_limit is a diagnostic, not a user configuration API.
       ```
     - Files to Create/Edit:
-      - `docs/reference/clay-js-api/configuration.md`
-      - `tests/clay_js_api_inventory.rs`
+      - `docs/reference/clay-js-api/configuration.md`: Added Plan 034 configuration review stating heap/time budgets, sandbox supervision, denied authorities, and third-party execution gates are server-owned security boundaries, not `init.js` keys or `clay:configuration` APIs.
+      - `tests/clay_js_api_inventory.rs`: Added `plan_034_runtime_hardening_does_not_add_hidden_configuration_knobs` to pin docs and forbidden configuration IDs for heap/timeout/sandbox/third-party authority bypasses.
+      - `docs/wiki/modules/persistent-runtime-hardening.md`: Documented the configuration boundary and focused inventory test.
     - References:
       - Plan 030 security budget policy.
+      - Clay Configuration Task requirements in `.agents/skills/create-plan/references/clay.md`.
   - Test Cases to Write:
-    - Inventory test rejects `clay.configuration.setRuntimeHeapLimit`, `setSandboxDisabled`, `enableThirdPartyPackages`, or similar hidden APIs.
+    - `cargo test --test clay_js_api_inventory plan_034_runtime_hardening_does_not_add_hidden_configuration_knobs`: Passed; rejects `clay.configuration.setRuntimeHeapLimit`, `setSandboxDisabled`, `enableThirdPartyPackages`, sandbox timeout/bypass, denied-authority grant, and package-manager authority APIs.
+    - `cargo test --test clay_js_api_inventory phase18_7_persistent_runtime_does_not_add_hidden_configuration_knobs`: Passed; existing persistent-runtime configuration guard still holds.
+    - `cargo test --test clay_js_api_inventory plan_030_security_budgets_are_intentionally_non_configurable`: Passed; Plan 030 budget guard still holds.
+    - `cargo test --test clay_js_api_inventory`: Passed; all 48 Clay JS API inventory tests pass.
+    - `cargo fmt --check`: Passed.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
-    - Functional: Public diagnostics or developer commands introduced by hardening have Markdown docs, inventory entries, generated registry coverage, user-facing names, key binding metadata, custom properties, examples, errors, permissions, backing Rust paths, ops/facades, and lookup tags; internal helpers remain private or `pub(crate)`.
+    - Functional: Public diagnostics or developer commands introduced by hardening have Markdown docs, inventory entries, generated registry coverage, user-facing names, key binding metadata, custom properties, examples, errors, permissions, backing Rust paths, ops/facades, and lookup tags; no new public API was introduced, so runtime diagnostics remain diagnostic codes and sandbox helpers remain internal `#[doc(hidden)]` harness surfaces.
     - Performance: API docs state hardening work is server-first/background and not a typing/rendering hot path.
     - Code Quality: Raw `Deno.core.ops` names and sandbox protocol messages are not public user APIs.
     - Security: API docs preserve denied-authority language and sanitized diagnostics.
@@ -307,7 +324,7 @@
       - `docs/index.md`
     - Options Considered:
       - Public API for sandbox controls. Rejected unless a user-facing feature is intentionally shipped.
-      - Internal-only hardening plus documented diagnostics. Likely chosen.
+      - Internal-only hardening plus documented diagnostics. Chosen: `clay.runtime.timeout` and `clay.runtime.heap_limit` are diagnostic codes, not facade IDs; sandbox protocol/lifecycle controls are not public APIs.
     - Chosen Approach:
       - Inventory all new Rust visibility and document only real public programmatic behavior.
     - API Notes and Examples:
@@ -317,17 +334,24 @@
       cargo test --test clay_js_doc_registry
       ```
     - Files to Create/Edit:
-      - `docs/reference/clay-js-api/**` as needed.
-      - `docs/reference/clay-js-api/api-inventory.toml`
-      - `docs/generated/clay-js-api-registry.json`
-      - `tests/clay_js_api_inventory.rs`
-      - `tests/clay_js_doc_registry.rs`
+      - `docs/reference/clay-js-api/inventory.md`: Added Plan 034 API review stating runtime diagnostics are not facade IDs and sandbox harness/protocol/lifecycle controls are internal `#[doc(hidden)]` surfaces excluded from docs index, inventory, generated registry, runtime JS facades, and user-facing raw ops.
+      - `tests/clay_js_api_inventory.rs`: Added `plan_034_runtime_hardening_adds_no_public_clay_js_api_surface` to pin internal-only API boundaries and verify forbidden runtime/sandbox/third-party API IDs are absent.
+      - `docs/wiki/modules/persistent-runtime-hardening.md`: Documented the public API boundary and focused tests.
+      - `docs/reference/clay-js-api/api-inventory.toml`: Verified unchanged for Plan 034 hardening; no new public Clay JS API entry needed.
+      - `docs/generated/clay-js-api-registry.json`: Verified unchanged/current; no generated registry update needed.
+      - `tests/clay_js_doc_registry.rs`: Verified existing registry freshness and index coverage tests pass unchanged.
     - References:
       - Clay JS API boundary and naming patterns.
+      - `docs/reference/clay-js-api/inventory.md` internal-only exclusions.
   - Test Cases to Write:
-    - Registry freshness and API inventory tests pass, or internal-only assertion proves no public API was added.
+    - `cargo test --test clay_js_api_inventory plan_034_runtime_hardening_adds_no_public_clay_js_api_surface`: Passed; proves diagnostics/sandbox hardening did not become public API IDs, docs-index links, generated registry entries, or runtime JS facade exports.
+    - `cargo test --test clay_js_api_inventory`: Passed; 49 inventory tests pass.
+    - `cargo test --test clay_js_doc_registry generated_registry_is_current`: Passed; generated registry remains current.
+    - `cargo test --test clay_js_doc_registry generated_registry_contains_all_indexed_public_apis`: Passed; indexed public APIs match generated registry.
+    - `cargo test --test clay_js_doc_registry`: Passed; 26 registry tests pass.
+    - `cargo fmt --check`: Passed.
 
-- [ ] Verify hardening with full security, performance, and repository gates
+- [x] Verify hardening with full security, performance, and repository gates
   - Acceptance Criteria:
     - Functional: Heap-limit, timeout, sandbox kill/restart, third-party rejection, denied platform authority, stale parse rejection, and sanitized diagnostic tests pass.
     - Performance: Startup/evaluation overhead is measured and protocol/edit hot-path tests still pass.
@@ -351,18 +375,28 @@
       cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline
       ```
     - Files to Create/Edit:
-      - `tests/persistent_runtime_hardening.rs`
-      - `tests/runtime_sandbox_harness.rs`
-      - Existing security/docs tests as needed.
+      - `tests/runtime_sandbox_harness.rs`: Added startup/evaluation elapsed assertions to the controlled fixture test, using existing `SandboxEvaluation::elapsed` and an explicit spawn timer.
+      - `tests/rust_visibility_api_mapping.rs`: All-target gate exposed the `#[doc(hidden)]` sandbox harness types as unmapped public Rust items; added them to the non-JS server infrastructure allowlist instead of inventing public Clay JS APIs.
+      - `docs/wiki/modules/persistent-runtime-hardening.md`: Documented sandbox elapsed checks and rust-visibility allowlist coverage.
     - References:
       - Maintenance validation wiki; performance docs.
   - Test Cases to Write:
-    - Heap exhaustion bounded and diagnosed.
-    - Sandbox child kill/restart works.
-    - Third-party execution remains blocked.
-    - Platform authorities remain unavailable.
+    - `cargo test js_runtime_heap_growth_is_terminated_with_heap_limit_diagnostic --lib`: Passed; heap exhaustion is bounded and diagnosed.
+    - `cargo test js_runtime_infinite_loop_is_terminated_with_timeout --lib`: Passed; timeout termination remains bounded and diagnosed.
+    - `cargo test --test runtime_sandbox_harness`: Passed; sandbox child start/evaluate, measured elapsed smoke, timeout kill/restart, oversized output rejection, and denied filesystem/network/shell globals work.
+    - `cargo test op_clay_packages_load_package_by_specifier_rejects_non_first_party_specifier --lib`: Passed; third-party/malformed specifiers remain blocked.
+    - `cargo test --test package_loading third_party_install_metadata_does_not_imply_runtime_execution_authority`: Passed; package-manager metadata does not imply execution authority.
+    - `cargo test --test parse_coordinator`: Passed; stale parse/generation behavior remains covered.
+    - `cargo test --test clay_js_api_inventory plan_034_runtime_hardening_does_not_add_hidden_configuration_knobs`: Passed; no hidden config knob weakens authority.
+    - `cargo test --test clay_js_api_inventory plan_034_runtime_hardening_adds_no_public_clay_js_api_surface`: Passed; hardening internals did not become public Clay JS APIs.
+    - `cargo test --test rust_visibility_api_mapping server_public_items_have_api_inventory_entries_or_are_allowlisted`: Passed after allowlisting sandbox harness types as non-JS infrastructure.
+    - `cargo test --test performance_protocol`: Passed; protocol/edit hot-path hard guards still pass.
+    - `cargo fmt --check`: Passed.
+    - `cargo clippy --all-targets -- -D warnings`: Passed; no warnings.
+    - `cargo test --all-targets`: Passed; 801 tests across 24 suites.
+    - `cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline`: Completed; advisory local Criterion comparison ran. Several small protocol/server groups reported machine-local regressions versus the old Phase 14 baseline, while deterministic `performance_protocol` hard guards passed; no Plan 034 runtime/sandbox production hot-path code is wired into those paths.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
     - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
@@ -382,12 +416,16 @@
       docs/wiki/modules/<module>.md
       ```
     - Files to Create/Edit:
-      - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas.
-      - `docs/wiki/**`: Add or update implementation wiki pages for changed code.
+      - `docs/wiki/index.md`: Updated the Persistent Runtime Hardening entry to reflect installed heap-limit/recovery guards, internal sandbox harness, repository gates, and third-party execution gate.
+      - `docs/wiki/modules/persistent-runtime-hardening.md`: Verified/updated source paths, authority inventory, hardening roadmap, hot-path policy, tests, and added repository gate commands/performance-gate notes.
+      - Existing pages verified as current: `docs/wiki/modules/embedded-js-runtime.md` documents heap-limit and timeout worker poisoning/recovery; `docs/wiki/modules/package-loading.md` documents first-party-only resolver and third-party install-without-execution boundary.
     - References:
       - `.agents/skills/project-wiki/SKILL.md`
   - Test Cases to Write:
-    - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
+    - Manual wiki review: Passed; master index links the hardening page and updated pages explain implementation, invariants, security boundaries, performance constraints, source paths, and test commands.
+    - `cargo test --test package_loading_docs persistent_runtime_hardening_gate_doc_covers_threat_model`: Passed; docs-as-code hardening gate still covers threat model and decision gate.
+    - `cargo test --test package_loading_docs persistent_runtime_sandbox_design_pins_process_boundary`: Passed; sandbox design docs-as-code gate still covers process boundary and denied authorities.
+    - `cargo fmt --check`: Passed.
 
 ## Compromises Made
 

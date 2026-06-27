@@ -196,5 +196,15 @@ Plan 030 (code-review remediation) hardened several server-side limits. These ar
 - **File-open capability gate** — `OpenSelectedFile` requires a server-minted single-use capability token issued after the `Hello` handshake; not a configuration option. See `docs/wiki/modules/server-ipc-skeleton.md`.
 - **IPC endpoint ownership/permissions** — Unix socket `0o600` + parent-directory ownership and Windows named-pipe current-user-only DACL are OS-level hardening, not Clay JS configuration.
 
-A separate-process JS sandbox remains a deferred follow-up tracked in Plan 034; it too will be a server-side security boundary, not `init.js` configuration when it ships.
+## Plan 034 persistent-runtime hardening is intentionally not configurable
+
+Plan 034 added first-party runtime hardening and a minimal separate-process sandbox harness. These controls are server-owned security boundaries, not user customization. They do **not** promote a new `clay:configuration` API, hidden `init.js` key, JSON/TOML setting, command-line user preference, package option, or package-declared permission that can weaken the runtime boundary.
+
+- **Heap guard** — `JS_RUNTIME_HEAP_LIMIT_BYTES` remains a compiled budget. `clay.runtime.heap_limit` is a diagnostic code, not a callable configuration API.
+- **Timeout guard** — `JS_RUNTIME_EVALUATION_TIMEOUT_MS` remains a compiled budget. `clay.runtime.timeout` is a diagnostic code, not a mutable setting.
+- **Sandbox supervision** — sandbox child spawn, handshake, payload budget, timeout kill, and restart policy are internal supervisor behavior. There is no `setSandboxDisabled`, `setSandboxTimeout`, or `enableSandboxBypass` configuration surface.
+- **Denied authorities** — filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget handles, raw-op access, client-side JavaScript, and third-party package execution remain denied by policy. `init.js` cannot grant them.
+- **Third-party execution gate** — non-`@clay/*` package execution still requires a separate approved authority decision after the trust, registry/integrity, permissions, rollback, and tests work in `plans/035-Third-Party-Package-Runtime-Authority-Policy.md`. There is no `enableThirdPartyPackages` or `allowThirdPartyPackages` configuration shortcut.
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work. Ordinary keypress, paint, layout, scroll, edit acknowledgement, text-event handling, parse-result publication, and decoration rendering paths do not execute configuration JavaScript, wait on sandbox round trips, or re-check runtime hardening knobs.
 

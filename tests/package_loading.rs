@@ -387,6 +387,30 @@ fn markdown_package_does_not_execute_on_install() {
 }
 
 #[test]
+fn third_party_install_metadata_does_not_imply_runtime_execution_authority() {
+    let mut package = full_markdown_fixture();
+    package["name"] = json!("left-pad");
+    package["clay"]["apiPrefix"] = json!("leftpad");
+    package["clay"]["modes"] = json!(["leftpad"]);
+    package["clay"]["permissions"] = json!([]);
+    package["clay"]["apiDependencies"] = json!([]);
+    package["clay"]["contributions"] = json!({});
+
+    let mut service = PackageService::new(
+        "target/test-package-store/left-pad",
+        Box::new(FakeBackend::default()),
+    );
+    service
+        .install_from_value(package)
+        .expect("installing third-party metadata only records package");
+
+    let inspection = service
+        .inspect("left-pad")
+        .expect("installed third-party metadata can be inspected");
+    assert!(!inspection.is_enabled);
+}
+
+#[test]
 fn package_manifest_accepts_phase18_3_ui_contribution_metadata() {
     let record = assemble_package_record(&phase18_3_slot_ui_fixture(
         "@clay/markdown",

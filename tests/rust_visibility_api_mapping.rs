@@ -175,6 +175,12 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/parse_coordinator.rs::ParseHandlerFuture",
         "src/server/parse_coordinator.rs::ParseHandlerMeta",
         "src/server/parse_coordinator.rs::ParseScheduleRequest",
+        "src/server/runtime_sandbox.rs::RuntimeSandboxError",
+        "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor",
+        "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor::evaluate",
+        "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor::shutdown",
+        "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor::spawn",
+        "src/server/runtime_sandbox.rs::SandboxEvaluation",
     ]
     .into_iter()
     .collect();

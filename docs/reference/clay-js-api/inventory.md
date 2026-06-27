@@ -51,6 +51,8 @@ The inventory also records implementation details that must not be included in p
 - `internal.editor.layoutPaint`: Masonry/Parley/Vello layout and paint internals.
 - `internal.protocol.dto`: protocol serialization DTOs and local IPC codec contracts.
 
+Plan 034 runtime hardening does not add a public Clay JS API. `clay.runtime.timeout` and `clay.runtime.heap_limit` are diagnostic codes, not facade IDs. `src/server/runtime_sandbox.rs`, `src/bin/clay-runtime-sandbox.rs`, sandbox protocol frames, child-process lifecycle controls, payload budgets, timeout kill/restart policy, and `RuntimeSandboxSupervisor` are internal `#[doc(hidden)]` test/harness surfaces. They must not appear in `docs/index.md`, `docs/reference/clay-js-api/api-inventory.toml`, generated registry data, runtime JS facade modules, or user-facing `Deno.core.ops` calls.
+
 These records exist so validation and future audits can distinguish intentional public API candidates from implementation details.
 
 ## Security summary

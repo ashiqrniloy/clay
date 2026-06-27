@@ -3305,6 +3305,152 @@ fn phase18_7_persistent_runtime_does_not_add_hidden_configuration_knobs() {
     }
 }
 
+/// Plan 034 task "Create or verify Clay configuration APIs": runtime hardening
+/// and the sandbox harness do not add user-tunable `init.js` knobs. Heap/time
+/// budgets, sandbox kill/restart policy, denied authorities, and third-party
+/// execution gates remain server-owned security boundaries.
+#[test]
+fn plan_034_runtime_hardening_does_not_add_hidden_configuration_knobs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let entries = inventory_entries();
+
+    for required in [
+        "Plan 034 persistent-runtime hardening is intentionally not configurable",
+        "do **not** promote a new `clay:configuration` API",
+        "`JS_RUNTIME_HEAP_LIMIT_BYTES` remains a compiled budget",
+        "`clay.runtime.heap_limit` is a diagnostic code",
+        "`JS_RUNTIME_EVALUATION_TIMEOUT_MS` remains a compiled budget",
+        "`clay.runtime.timeout` is a diagnostic code",
+        "sandbox child spawn, handshake, payload budget, timeout kill, and restart policy are internal supervisor behavior",
+        "filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget handles, raw-op access, client-side JavaScript, and third-party package execution remain denied by policy",
+        "non-`@clay/*` package execution still requires a separate approved authority decision",
+        "There is no `enableThirdPartyPackages` or `allowThirdPartyPackages` configuration shortcut",
+        "do not execute configuration JavaScript, wait on sandbox round trips, or re-check runtime hardening knobs",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Plan 034 boundary phrase `{required}`"
+        );
+    }
+
+    let config_api_ids: BTreeSet<&str> = entries
+        .iter()
+        .filter(|entry| entry.get("id").starts_with("clay.configuration."))
+        .map(|entry| entry.get("id"))
+        .collect();
+    for forbidden_id in [
+        "clay.configuration.setRuntimeTimeout",
+        "clay.configuration.setJsRuntimeTimeout",
+        "clay.configuration.setRuntimeHeapLimit",
+        "clay.configuration.setV8HeapLimit",
+        "clay.configuration.disableRuntimeHeapLimit",
+        "clay.configuration.setSandboxTimeout",
+        "clay.configuration.setSandboxKillTimeout",
+        "clay.configuration.setRuntimeSandboxTimeout",
+        "clay.configuration.setSandboxDisabled",
+        "clay.configuration.enableSandboxBypass",
+        "clay.configuration.enableThirdPartyPackages",
+        "clay.configuration.allowThirdPartyPackages",
+        "clay.configuration.setDeniedAuthorities",
+        "clay.configuration.grantFilesystemAuthority",
+        "clay.configuration.enableNetworkAuthority",
+        "clay.configuration.allowPackageManagerExecution",
+    ] {
+        assert!(
+            !config_api_ids.contains(forbidden_id),
+            "Plan 034 hardening must not expose hidden/tunable security API `{forbidden_id}`"
+        );
+    }
+}
+
+/// Plan 034 task "Create or verify Clay JS APIs for public programmatic
+/// surfaces": the heap guard, sandbox harness, diagnostics, and authority gates
+/// are internal hardening surfaces. They must not be promoted into public Clay
+/// JS API docs, generated registry entries, runtime facades, or raw-op-facing
+/// user APIs.
+#[test]
+fn plan_034_runtime_hardening_adds_no_public_clay_js_api_surface() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory_doc = fs::read_to_string(root.join("docs/reference/clay-js-api/inventory.md"))
+        .expect("read Clay JS API inventory doc");
+    let docs_index = fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    let generated_registry =
+        fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+            .expect("read generated registry");
+    let runtime_js_mod =
+        fs::read_to_string(root.join("runtime/js/mod.ts")).expect("read runtime JS module index");
+    let server_mod = fs::read_to_string(root.join("src/server/mod.rs")).expect("read server mod");
+
+    for required in [
+        "Plan 034 runtime hardening does not add a public Clay JS API",
+        "`clay.runtime.timeout` and `clay.runtime.heap_limit` are diagnostic codes, not facade IDs",
+        "`src/server/runtime_sandbox.rs`, `src/bin/clay-runtime-sandbox.rs`, sandbox protocol frames, child-process lifecycle controls, payload budgets, timeout kill/restart policy, and `RuntimeSandboxSupervisor` are internal `#[doc(hidden)]` test/harness surfaces",
+        "They must not appear in `docs/index.md`, `docs/reference/clay-js-api/api-inventory.toml`, generated registry data, runtime JS facade modules, or user-facing `Deno.core.ops` calls",
+    ] {
+        assert!(
+            inventory_doc.contains(required),
+            "Clay JS API inventory doc must record Plan 034 internal-only API boundary `{required}`"
+        );
+    }
+
+    assert!(
+        server_mod.contains("#[doc(hidden)]\npub mod runtime_sandbox;"),
+        "runtime_sandbox may be public for harness tests only when hidden from public Rust docs"
+    );
+
+    let entries = inventory_entries();
+    let api_ids: BTreeSet<&str> = entries.iter().map(|entry| entry.get("id")).collect();
+    for forbidden_id in [
+        "clay.runtime.timeout",
+        "clay.runtime.heap_limit",
+        "clay.runtime.setHeapLimit",
+        "clay.runtime.setTimeout",
+        "clay.runtime.spawnSandbox",
+        "clay.runtime.killSandbox",
+        "clay.runtime.restartSandbox",
+        "clay.runtime.evaluateSandbox",
+        "clay.sandbox.evaluate",
+        "clay.sandbox.spawn",
+        "clay.sandbox.disable",
+        "clay.packages.enableThirdPartyExecution",
+    ] {
+        assert!(
+            !api_ids.contains(forbidden_id),
+            "Plan 034 internal hardening surface `{forbidden_id}` must not be a Clay JS API inventory ID"
+        );
+        assert!(
+            !docs_index.contains(&format!("]({forbidden_id})")),
+            "Plan 034 internal hardening surface `{forbidden_id}` must not be linked from docs/index.md as a public API"
+        );
+    }
+
+    for forbidden_text in [
+        "RuntimeSandboxSupervisor",
+        "runtime_sandbox",
+        "clay-runtime-sandbox",
+        "spawnSandbox",
+        "evaluateSandbox",
+        "killSandbox",
+        "restartSandbox",
+    ] {
+        assert!(
+            !docs_index.contains(forbidden_text),
+            "Plan 034 sandbox harness text `{forbidden_text}` must not be indexed as public docs"
+        );
+        assert!(
+            !generated_registry.contains(forbidden_text),
+            "Plan 034 sandbox harness text `{forbidden_text}` must not enter generated public registry"
+        );
+        assert!(
+            !runtime_js_mod.contains(forbidden_text),
+            "Plan 034 sandbox harness text `{forbidden_text}` must not be exported from runtime/js/mod.ts"
+        );
+    }
+}
+
 /// Plan 030 task "Create or verify Clay JS APIs for public programmatic
 /// surfaces": Plan 030 is security-hardening work, so it must NOT introduce new
 /// deno_core ops or new Clay JS API facades (a new programmatic JS capability

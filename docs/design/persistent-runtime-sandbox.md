@@ -54,6 +54,34 @@ Allowed initial requests are deliberately small:
 
 Non-`@clay/*` package execution is not allowed by this design alone. A later approved authority decision must define package trust, registry/integrity policy, permissions, update/rollback behavior, and tests before enabling it.
 
+## Third-Party Production Enforcement Contract
+
+The current `RuntimeSandboxSupervisor` newline-delimited JSON harness is evidence only, not production API. Production third-party execution requires a bounded typed protocol shaped like the main IPC `Codec`: length-prefixed frames, maximum frame size, typed request/response variants, decode validation, generation IDs, stable error codes, and metrics for frame-too-large/protocol-failure cases.
+
+Required request flow:
+
+```text
+parent validates trust + registry integrity + package metadata + permissions + budgets
+-> child evaluates/load/parse request for one runtime generation
+-> parent validates bounded inert outputs
+-> parent publishes behavior/SDUI/decorations/folding/completion/parse updates
+```
+
+Production third-party request variants must be parent-built and minimal:
+
+- `LoadThirdPartyPackage { generation_id, package_name, package_version, api_prefix, load_entry_source, approved_permissions, budgets }`
+- `EvaluateThirdPartyModule { generation_id, module_specifier, package_name, package_version, api_prefix, approved_permissions, budgets }`
+- `ParseWithThirdPartyHandler { generation_id, handler_token, package_name, package_version, api_prefix, parse_window, document_version, budgets }`
+- `Shutdown { generation_id }`
+
+Parent validation is mandatory before every request: trust record match, registry/source integrity match, manifest validation, permission grant match, entry path confinement, payload budget, timeout/heap budget, runtime generation, handler token, document version, and stale-generation rejection. Parent validation is mandatory after every response: allowed response kind, generation match, package provenance match, payload size, inert JSON shape, behavior/SDUI/decorations/folding/completion/parse validators, no raw op names, no executable callbacks, no client JavaScript, and no path-like authority payloads.
+
+Timeout, heap-limit, malformed response, oversized output, protocol mismatch, unknown variant, stale generation, stale handler token, or invalid output kills the child process and starts a fresh child for a later generation or recovery path. Parent keeps the last validated client state until replacement output validates.
+
+The child must never receive workspace roots, absolute source paths, file descriptors, package-manager handles, raw op names, V8 handles, Rust internals, capability tokens, client connection handles, native widget handles, environment variables, credentials, registry auth tokens, or direct client authority.
+
+Performance evidence is required before production routing: startup plus handshake target under 250 ms on developer machines, first package load overhead recorded against in-process runtime, small parse request round trip target under 10 ms added overhead, timeout kill plus fresh handshake target under 500 ms, and no keypress, paint, layout, scroll, text-event, or edit-ack dependency.
+
 ## Cancellation and Restart
 
 - Parent owns cancellation. Child requests cannot extend their own deadline.
