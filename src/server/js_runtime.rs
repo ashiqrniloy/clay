@@ -28,7 +28,7 @@ use crate::protocol::{
 
 use super::{
     configuration::{ConfigurationError, ConfigurationRuntime},
-    ops::{ClayOpState, FirstPartyLoadEntryAllowlist, init_runtime_extension},
+    ops::{ClayOpState, PackageLoadEntryAllowlist, init_runtime_extension},
     workspace::WorkspaceState,
 };
 
@@ -191,6 +191,13 @@ export function serverLoadPackage(packageJson) {
 export function serverListFirstPartyPackageSpecifiers() {
   return parse(ops.op_clay_packages_list_first_party_specifiers()).specifiers;
 }
+/** Load and activate an installed, user-authorized package by specifier.
+ *
+ * One-line default end-user loader from ~/.config/clay/init.js for both
+ * bundled and user-installed packages:
+ * await loadPackage("@clay/markdown"), await loadPackage("@vendor/foo"),
+ * or await loadPackage("github:user/repo"). init.js grants no capabilities
+ * on its own; every powerful capability is a separate user-approved grant. */
 export async function loadPackage(specifier) {
   if (typeof specifier !== "string") {
     throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
@@ -1295,10 +1302,10 @@ struct LoadedRuntimeEntry {
 #[derive(Debug)]
 struct ClayModuleLoader {
     state: std::sync::Mutex<ClayModuleLoaderState>,
-    // ponytail: shared validated first-party loadEntry gate. Populated by
+    // Shared validated package loadEntry gate. Populated by
     // `op_clay_packages_load_package_by_specifier`, checked in resolve/load.
-    // Ceiling: one entry per loaded first-party package.
-    first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
+    // Ceiling: one entry per loaded package module.
+    package_load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
 }
 
 #[derive(Debug)]
@@ -1313,7 +1320,7 @@ impl ClayModuleLoader {
         main_specifier: ModuleSpecifier,
         main_source: Option<String>,
         configuration: Option<Arc<ConfigurationRuntime>>,
-        first_party_load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
+        package_load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
     ) -> Self {
         Self {
             state: std::sync::Mutex::new(ClayModuleLoaderState {
@@ -1321,7 +1328,7 @@ impl ClayModuleLoader {
                 main_source,
                 configuration,
             }),
-            first_party_load_entry_allowlist,
+            package_load_entry_allowlist,
         }
     }
 
@@ -1370,19 +1377,16 @@ impl ModuleLoader for ClayModuleLoader {
             return ModuleSpecifier::parse(MARKDOWN_IT_MODULE_SPECIFIER)
                 .map_err(|error| Self::denied(&error.to_string()));
         }
-        // First-party validated `loadEntry`: opaque `clay://packages/...`
+        // Validated package `loadEntry`: opaque `clay://packages/...`
         // specifiers recorded by `op_clay_packages_load_package_by_specifier`.
         // This branch sits BEFORE the config-root branch because
         // `reject_non_local_specifier` would otherwise deny `clay://` URLs; the
-        // shared allowlist is the single gate, so only a specifier the resolver
-        // op validated and recorded ever resolves here. Every other
+        // shared allowlist is the single gate, so only a package module the
+        // resolver op validated and recorded ever resolves here. Every other
         // `clay://packages/...` URL falls through to config-root confinement
         // (which rejects non-local specifiers) and the deny fallback.
-        // ponytail: authority ceiling is first-party `@clay/*` loadEntry only.
-        // Upgrade path: non-`@clay/*` registry packages are deferred to Phase 23
-        // ecosystem hardening and would widen the resolver, not this branch.
         if self
-            .first_party_load_entry_allowlist
+            .package_load_entry_allowlist
             .absolute_path(specifier)
             .is_some()
         {
@@ -1397,7 +1401,7 @@ impl ModuleLoader for ClayModuleLoader {
         // validated package root; `resolve_relative` denies anything escaping it.
         if (specifier.starts_with("./") || specifier.starts_with("../"))
             && let Some(new_specifier) = self
-                .first_party_load_entry_allowlist
+                .package_load_entry_allowlist
                 .resolve_relative(referrer, specifier)
         {
             return ModuleSpecifier::parse(&new_specifier)
@@ -1452,19 +1456,18 @@ impl ModuleLoader for ClayModuleLoader {
                 )
             }));
         }
-        // First-party validated `loadEntry`: read the on-disk source the
-        // resolver op recorded for this exact opaque specifier. Single gate,
-        // same allowlist as `resolve`; no path outside the validated loadEntry
-        // is ever read.
+        // Validated package `loadEntry`: read the on-disk source the resolver op
+        // recorded for this exact opaque specifier. Single gate, same allowlist
+        // as `resolve`; no path outside the validated package root is ever read.
         if let Some(absolute_path) = self
-            .first_party_load_entry_allowlist
+            .package_load_entry_allowlist
             .absolute_path(module_specifier.as_str())
         {
             return ModuleLoadResponse::Sync(
                 std::fs::read_to_string(&absolute_path)
                     .map_err(|error| {
                         Self::denied(&format!(
-                            "first-party loadEntry {module_specifier} could not be loaded ({error})"
+                            "package loadEntry {module_specifier} could not be loaded ({error})"
                         ))
                     })
                     .map(|source| {
@@ -1520,7 +1523,9 @@ fn markdown_it_module_source() -> Result<String, ModuleLoaderError> {
 mod tests {
     use std::{
         fs,
+        path::Path,
         path::PathBuf,
+        rc::Rc,
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
@@ -1533,8 +1538,11 @@ mod tests {
     };
 
     use super::{
-        ClayJsRuntimeService, ClayModuleLoader, ClayRuntimeError, FirstPartyLoadEntryAllowlist,
+        CONTROLLED_MAIN_SPECIFIER, ClayJsRuntimeService, ClayModuleLoader, ClayRuntimeError,
+        ClayRuntimeEvaluation, PackageLoadEntryAllowlist, RuntimeEntry, create_js_runtime,
+        evaluate_loaded_module, prepare_runtime_entry,
     };
+    use crate::perf::budgets::{JS_RUNTIME_EVALUATION_TIMEOUT_MS, JS_RUNTIME_HEAP_LIMIT_BYTES};
     use crate::protocol::{
         BehaviorVersion, DiagnosticSeverity, ParseByteRange, ParseEditNotification, ParsePolicy,
         ParseWindowSnapshot,
@@ -3696,23 +3704,246 @@ mod tests {
         }
     }
 
+    fn loadable_package_fixture(name: &str, api_prefix: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "version": "0.1.0",
+            "type": "module",
+            "clay": {
+                "apiPrefix": api_prefix,
+                "entry": "./dist/index.js",
+                "loadEntry": "./dist/load.js",
+                "capabilities": [],
+                "modes": [],
+                "docs": "./docs/index.md",
+                "apiDependencies": [],
+                "performance": {
+                    "estimatedManifestBytes": 256,
+                    "hotPathPolicy": "no hot-path JS on keypress/paint"
+                },
+                "contributions": {}
+            }
+        })
+    }
+
+    fn write_loadable_package(root: &Path, load_source: &str) {
+        fs::create_dir_all(root.join("dist")).expect("create package dist directory");
+        fs::create_dir_all(root.join("docs")).expect("create package docs directory");
+        fs::write(root.join("dist/index.js"), "export {};\n").expect("write package entry");
+        fs::write(root.join("dist/load.js"), load_source).expect("write package loadEntry");
+        fs::write(
+            root.join("dist/helper.js"),
+            "Deno.core.ops.op_clay_runtime_record(\"helper loaded\"); export {};\n",
+        )
+        .expect("write package helper");
+        fs::write(root.join("docs/index.md"), "# Fixture\n").expect("write package docs");
+    }
+
+    async fn evaluate_with_seeded_package(
+        specifier: &str,
+        package_name: &str,
+        api_prefix: &str,
+        package_root: PathBuf,
+        load_source: &str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        write_loadable_package(&package_root, load_source);
+        let op_state = Arc::new(crate::server::ops::ClayOpState::new_for_document(
+            Arc::new(Mutex::new(WorkspaceState::new())),
+            1,
+        ));
+        let package_json = loadable_package_fixture(package_name, api_prefix);
+        {
+            let mut service = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            service
+                .install_from_value_at_root_with_spec(package_json, package_root, specifier)
+                .expect("seed package install succeeds");
+            service
+                .authorize_package(
+                    package_name,
+                    Vec::new(),
+                    crate::packages::authorization::RuntimeProfile::NativeTrust,
+                    "test-user",
+                )
+                .expect("seed package authorization succeeds");
+        }
+        let main_specifier = ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER).unwrap();
+        let loader = Rc::new(ClayModuleLoader::new(
+            main_specifier,
+            None,
+            None,
+            op_state.load_entry_allowlist(),
+        ));
+        let (mut runtime, heap_limit_hit) = create_js_runtime(
+            Arc::clone(&op_state),
+            Rc::clone(&loader),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+        );
+        let source = format!(
+            r#"
+            import {{ loadPackage }} from "clay:packages";
+            await loadPackage({specifier:?});
+            "#
+        );
+        let loaded = prepare_runtime_entry(RuntimeEntry::ControlledSource(source), 1).unwrap();
+        loader.set_entry(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+        );
+        evaluate_loaded_module(
+            &mut runtime,
+            &op_state,
+            loaded,
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            true,
+            &heap_limit_hit,
+        )
+        .await
+    }
+
+    /// Plan 035 task 8: prove the one-line `init.js` default loads an installed,
+    /// authorized, *user-installed* (non-`@clay/*`) package the same way it
+    /// loads `@clay/markdown`. Mirrors [`evaluate_with_seeded_package`] but
+    /// evaluates a real `~/.config/clay/init.js`-shaped config root instead of
+    /// a controlled module source, so the loadEntry import + default-export
+    /// invocation is exercised through the configuration runtime path.
+    async fn evaluate_init_js_with_seeded_package(
+        config_root: PathBuf,
+        specifier: &str,
+        package_name: &str,
+        api_prefix: &str,
+        package_root: PathBuf,
+        load_source: &str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        write_loadable_package(&package_root, load_source);
+        let op_state = Arc::new(crate::server::ops::ClayOpState::new_for_document(
+            Arc::new(Mutex::new(WorkspaceState::new())),
+            1,
+        ));
+        let package_json = loadable_package_fixture(package_name, api_prefix);
+        {
+            let mut service = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            service
+                .install_from_value_at_root_with_spec(package_json, package_root, specifier)
+                .expect("seed package install succeeds");
+            service
+                .authorize_package(
+                    package_name,
+                    Vec::new(),
+                    crate::packages::authorization::RuntimeProfile::NativeTrust,
+                    "test-user",
+                )
+                .expect("seed package authorization succeeds");
+        }
+        let loaded =
+            prepare_runtime_entry(RuntimeEntry::ConfigurationRoot(config_root), 1).unwrap();
+        let loader = Rc::new(ClayModuleLoader::new(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+            op_state.load_entry_allowlist(),
+        ));
+        let (mut runtime, heap_limit_hit) = create_js_runtime(
+            Arc::clone(&op_state),
+            Rc::clone(&loader),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+        );
+        loader.set_entry(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+        );
+        evaluate_loaded_module(
+            &mut runtime,
+            &op_state,
+            loaded,
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            true,
+            &heap_limit_hit,
+        )
+        .await
+    }
+
     #[tokio::test]
-    async fn op_clay_packages_load_package_by_specifier_rejects_non_first_party_specifier() {
-        // Non-`@clay/*` specifiers are denied before the package service is
-        // touched. Third-party registry specs, bare names, and `npm:` specs.
+    async fn load_package_user_installed_default_loads_from_init_js() {
+        // Plan 035 task 8: the one-line end-user default loads an installed,
+        // authorized, user-installed package from a genuine `init.js` config
+        // root. No inline manifest, no per-primitive registration, and no
+        // manual facade plumbing in user config — `loadPackage` owns all of it.
+        let config_root = config_fixture("init-js-user-package");
+        let package_root = config_root
+            .join("node_modules")
+            .join("@vendor")
+            .join("mode");
+        let init_js = r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("github:vendor/mode");
+            "#;
+        fs::write(config_root.join("init.js"), init_js).unwrap();
+
+        // The user config carries no manifest object and no per-primitive
+        // registration calls — loadPackage does all of it.
+        for forbidden in [
+            "contributions",
+            "modePattern",
+            "serverRegisterCommand",
+            "serverRegisterParseHandler",
+            "serverActivateMajorMode",
+            "markdownPackageManifest",
+        ] {
+            assert!(
+                !init_js.contains(forbidden),
+                "default init.js must not carry `{forbidden}` for a user-installed package"
+            );
+        }
+
+        let result = evaluate_init_js_with_seeded_package(
+            config_root.clone(),
+            "github:vendor/mode",
+            "@vendor/mode",
+            "vendormode",
+            package_root.clone(),
+            r#"Deno.core.ops.op_clay_runtime_record("user-installed init.js load"); export default function load() {}"#,
+        )
+        .await
+        .expect("one-line init.js load must succeed for installed user package");
+
+        // The package loadEntry default export ran (it recorded an op), proving
+        // activation went through the shared resolver + enable + authorize +
+        // loadEntry import path from a real init.js file.
+        assert_eq!(result.op_records, vec!["user-installed init.js load"]);
+        let _ = fs::remove_dir_all(config_root);
+    }
+
+    #[tokio::test]
+    async fn op_clay_packages_load_package_by_specifier_rejects_uninstalled_specifier() {
+        // Source-aware loading no longer categorically rejects npm/GitHub/local
+        // shapes. They must still exist in the package service's installed and
+        // authorized registry before runtime loading can proceed.
         for denied in [
             "left-pad",
-            "lodash",
-            "npm:foo",
-            "markdown",
-            "react",
-            "@types/node",
-            "@scope/pkg",
-            "https://registry.example.test/pkg.js",
-            "file:///tmp/pkg.js",
+            "github:user/mode",
             "./local-package",
             "../escape",
             "/absolute/package",
+        ] {
+            let err = resolve_by_specifier(denied).await.unwrap_err();
+            assert!(
+                err.contains("clay.packages.not_installed"),
+                "uninstalled specifier `{denied}` must be not_installed, got: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn op_clay_packages_load_package_by_specifier_rejects_invalid_bundled_specifier() {
+        for denied in [
             "@clay/",
             "@clay/../escape",
             "@clay/foo/bar",
@@ -3722,9 +3953,89 @@ mod tests {
             let err = resolve_by_specifier(denied).await.unwrap_err();
             assert!(
                 err.contains("clay.packages.invalid_specifier"),
-                "specifier `{denied}` must be denied with invalid_specifier, got: {err}"
+                "invalid bundled specifier `{denied}` must be invalid_specifier, got: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn load_package_loads_authorized_npm_style_fixture() {
+        let root = config_fixture("npm-package-load")
+            .join("node_modules")
+            .join("left-pad");
+        let result = evaluate_with_seeded_package(
+            "left-pad",
+            "left-pad",
+            "leftpad",
+            root.clone(),
+            r#"Deno.core.ops.op_clay_runtime_record("npm fixture loaded"); export default function load() {}"#,
+        )
+        .await
+        .expect("authorized npm-style package must load through shared package path");
+
+        assert_eq!(result.op_records, vec!["npm fixture loaded"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn load_package_loads_authorized_github_requested_spec_fixture() {
+        let root = config_fixture("github-package-load")
+            .join("node_modules")
+            .join("@vendor")
+            .join("mode");
+        let result = evaluate_with_seeded_package(
+            "github:vendor/mode",
+            "@vendor/mode",
+            "vendormode",
+            root.clone(),
+            r#"import "./helper.js"; export default function load() {}"#,
+        )
+        .await
+        .expect("authorized scoped package must load through shared package path");
+
+        assert_eq!(result.op_records, vec!["helper loaded"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn load_package_loads_authorized_local_requested_spec_fixture() {
+        let root = config_fixture("local-package-load").join("local-package");
+        let result = evaluate_with_seeded_package(
+            "./local-package",
+            "local-package",
+            "localpackage",
+            root.clone(),
+            r#"Deno.core.ops.op_clay_runtime_record("local fixture loaded"); export default function load() {}"#,
+        )
+        .await
+        .expect("authorized local package spec must load through shared package path");
+
+        assert_eq!(result.op_records, vec!["local fixture loaded"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn load_package_rejects_escaping_relative_import_from_package_root() {
+        let root = config_fixture("escaping-package-load").join("evil-mode");
+        fs::create_dir_all(root.parent().unwrap()).expect("create parent fixture root");
+        fs::write(root.parent().unwrap().join("escape.js"), "export {};\n")
+            .expect("write outside escape module");
+        let err = evaluate_with_seeded_package(
+            "evil-mode",
+            "evil-mode",
+            "evilmode",
+            root.clone(),
+            r#"import "../escape.js"; export default function load() {}"#,
+        )
+        .await
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            message.contains("clay.runtime.invalid_import"),
+            "escaping relative import must fail at module loader boundary, got: {message}"
+        );
+        let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
     #[tokio::test]
@@ -3778,7 +4089,7 @@ mod tests {
         entries: &[(&str, PathBuf, PathBuf)],
         configuration: Option<Arc<ConfigurationRuntime>>,
     ) -> ClayModuleLoader {
-        let allowlist = Arc::new(FirstPartyLoadEntryAllowlist::default());
+        let allowlist = Arc::new(PackageLoadEntryAllowlist::default());
         for (specifier, path, package_root) in entries {
             allowlist.record(specifier, path.clone(), package_root.clone());
         }
@@ -3825,6 +4136,32 @@ mod tests {
     }
 
     #[test]
+    fn package_load_entry_allowlist_revokes_owned_entries() {
+        let root = config_fixture("loader-revoke-package");
+        let loadentry_path = root.join("load.js");
+        let helper_path = root.join("helper.js");
+        fs::write(&loadentry_path, "import './helper.js';\n").unwrap();
+        fs::write(&helper_path, "export const helper = true;\n").unwrap();
+        let allowlist = PackageLoadEntryAllowlist::default();
+        let opaque = "clay://packages/@vendor/example/dist/load.js";
+        let canonical_root = std::fs::canonicalize(&root).unwrap();
+        let canonical_loadentry = std::fs::canonicalize(&loadentry_path).unwrap();
+        allowlist.record_for_package(
+            opaque,
+            canonical_loadentry,
+            canonical_root,
+            Some("@vendor/example"),
+        );
+        let helper = allowlist
+            .resolve_relative(opaque, "./helper.js")
+            .expect("relative helper import is recorded with same owner");
+
+        assert_eq!(allowlist.revoke_package("@vendor/example"), 2);
+        assert!(allowlist.absolute_path(opaque).is_none());
+        assert!(allowlist.absolute_path(&helper).is_none());
+    }
+
+    #[test]
     fn clay_module_loader_denies_unallowlisted_first_party_url() {
         // Empty allowlist: every `clay://packages/...` URL is denied exactly
         // like any other untrusted specifier, even loadEntry-shaped ones.
@@ -3848,7 +4185,7 @@ mod tests {
     fn clay_module_loader_preserves_config_root_confinement_for_non_package_imports() {
         // A real config root exercises the configuration branch. The allowlist
         // addition must NOT relax config-root confinement: escaping imports are
-        // still rejected, while an allowlisted first-party loadEntry still loads.
+        // still rejected, while an allowlisted package loadEntry still loads.
         let parent = config_fixture("loader-configroot-parent");
         let root = parent.join("config");
         fs::create_dir_all(&root).unwrap();
@@ -3921,7 +4258,7 @@ mod tests {
 
     #[test]
     fn clay_module_loader_denies_load_entry_imports_outside_package_root() {
-        // Phase 18.6 task 7 security boundary: a validated first-party loadEntry
+        // Phase 18.6 task 7 security boundary: a validated package loadEntry
         // may import its own sibling modules (e.g. `./index.js`) — those are
         // confined to the validated package root by `resolve_relative`. But an
         // import that ESCAPES the package root (e.g. `../escape.js` landing
@@ -3942,7 +4279,7 @@ mod tests {
         fs::write(&escape, "// secret").unwrap();
 
         let opaque = "clay://packages/@clay/example/dist/load.js";
-        let allowlist = Arc::new(FirstPartyLoadEntryAllowlist::default());
+        let allowlist = Arc::new(PackageLoadEntryAllowlist::default());
         allowlist.record(
             opaque,
             load_entry.canonicalize().unwrap(),

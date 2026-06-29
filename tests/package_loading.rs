@@ -24,7 +24,7 @@ use clay::packages::conflict::{PackageConflictKind, check_enabled_packages};
 ///   - `enable_rejects_duplicate_prefix_and_mode_and_command`
 ///   - `ambiguous_keybinding_across_packages_rejected_without_priority`
 ///   - `package_sdui_contribution_carries_provenance_and_respects_budget`
-use clay::packages::manager::FakeBackend;
+use clay::packages::manager::{FakeBackend, PackageSourceKind};
 use clay::packages::modes::{
     DocumentClassificationInput, MajorModeActivation, MinorModeDeclaration, ModeDeclaration,
     ModeRegistry, ModeValidationRule,
@@ -36,6 +36,18 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 // ── Fixtures (Task 1) ─────────────────────────────────────────────────────────
+
+fn authorize_requested_capabilities(service: &mut PackageService, package_json: &Value) {
+    let record = assemble_package_record(package_json).expect("fixture manifest validates");
+    service
+        .authorize_package(
+            &record.manifest.name,
+            record.manifest.clay.permissions,
+            clay::packages::authorization::RuntimeProfile::NativeTrust,
+            "test-user",
+        )
+        .expect("fixture authorization succeeds");
+}
 
 fn full_markdown_fixture() -> Value {
     json!({
@@ -384,6 +396,162 @@ fn markdown_package_does_not_execute_on_install() {
         .expect("installed package can be inspected without enable/load execution");
     assert!(!inspection.is_enabled);
     assert_eq!(inspection.api_prefix, "markdown");
+}
+
+#[test]
+fn source_aware_install_records_provenance_without_enabling_runtime() {
+    for (spec, expected_kind, expected_name) in [
+        (
+            "@vendor/mode",
+            PackageSourceKind::NpmRegistry,
+            "@vendor/mode",
+        ),
+        ("github:user/mode", PackageSourceKind::GitHub, "github-mode"),
+        (
+            "https://github.com/user/mode.git",
+            PackageSourceKind::GitUrl,
+            "git-mode",
+        ),
+        ("./local-mode", PackageSourceKind::LocalPath, "local-mode"),
+        (
+            "https://example.test/mode.tgz",
+            PackageSourceKind::Tarball,
+            "tarball-mode",
+        ),
+    ] {
+        let mut package = full_markdown_fixture();
+        package["name"] = json!(expected_name);
+        package["version"] = json!("2.3.4");
+        let api_prefix: String = expected_name
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect();
+        package["clay"]["apiPrefix"] = json!(api_prefix);
+
+        let backend = FakeBackend::new().will_install(spec, package);
+        let mut service =
+            PackageService::new("target/test-package-store/provenance", Box::new(backend));
+        service
+            .install(spec, Default::default())
+            .expect("install records package metadata through backend discovery");
+
+        let inspection = service
+            .inspect(expected_name)
+            .expect("installed package can be inspected by resolved name");
+        assert!(!inspection.is_enabled, "install must not enable `{spec}`");
+        assert_eq!(inspection.provenance.requested_spec, spec);
+        assert_eq!(inspection.provenance.source_kind, expected_kind);
+        assert_eq!(inspection.provenance.resolved_name, expected_name);
+        assert_eq!(inspection.provenance.resolved_version, "2.3.4");
+        assert!(
+            inspection
+                .provenance
+                .package_root
+                .display()
+                .to_string()
+                .contains(spec),
+            "package root should come from package-manager discovery"
+        );
+        assert!(
+            inspection.provenance.diagnostics.len() <= 4 * 1024,
+            "package-manager diagnostics must be bounded"
+        );
+    }
+}
+
+#[test]
+fn package_manager_diagnostics_are_bounded_and_redacted_in_provenance() {
+    let mut package = full_markdown_fixture();
+    package["name"] = json!("@vendor/secret-mode");
+    package["clay"]["apiPrefix"] = json!("secretmode");
+
+    let noisy = format!("token=secret\n{}", "x".repeat(8 * 1024));
+    let provenance = clay::packages::manager::PackageProvenance::from_package_json(
+        "@vendor/secret-mode",
+        &package,
+        std::path::PathBuf::from("/fake/store/@vendor/secret-mode"),
+        noisy,
+    );
+
+    assert!(provenance.diagnostics.len() <= 4 * 1024);
+    assert!(!provenance.diagnostics.contains("token=secret"));
+    assert!(
+        provenance
+            .diagnostics
+            .contains("[redacted package-manager diagnostic]")
+    );
+}
+
+#[test]
+fn missing_authorization_grant_fails_enable_for_requested_capability() {
+    let mut package = valid_markdown_package_json();
+    package["clay"]["capabilities"] = json!(["network"]);
+
+    let mut service = PackageService::new(
+        "target/test-package-store/missing-grant",
+        Box::new(FakeBackend::default()),
+    );
+    service
+        .install_from_value(package)
+        .expect("installing metadata records package");
+
+    let err = service.enable("@clay/markdown").unwrap_err();
+    assert!(matches!(
+        err,
+        PackageServiceError::MissingCapabilityGrant { .. }
+    ));
+}
+
+#[test]
+fn granted_powerful_capabilities_parse_and_show_in_inspection() {
+    let mut package = full_markdown_fixture();
+    package["name"] = json!("@vendor/power-mode");
+    package["clay"]["apiPrefix"] = json!("powermode");
+    package["clay"]["capabilities"] = json!(["filesystem", "network", "shell", "package-control"]);
+    package["clay"]["permissions"] = json!([]);
+    package["clay"]["modes"] = json!([]);
+    package["clay"]["apiDependencies"] = json!([]);
+    package["clay"]["contributions"] = json!({});
+
+    let mut service = PackageService::new(
+        "target/test-package-store/power-mode",
+        Box::new(FakeBackend::default()),
+    );
+    service
+        .install_from_value(package)
+        .expect("installing metadata records package");
+    service
+        .authorize_package(
+            "@vendor/power-mode",
+            vec![
+                clay::packages::permissions::PackagePermission::Filesystem,
+                clay::packages::permissions::PackagePermission::Network,
+                clay::packages::permissions::PackagePermission::Shell,
+                clay::packages::permissions::PackagePermission::PackageControl,
+            ],
+            clay::packages::authorization::RuntimeProfile::Sandboxed,
+            "test-user",
+        )
+        .expect("authorization record stores powerful grants");
+    service
+        .enable("@vendor/power-mode")
+        .expect("approved capabilities allow enable");
+
+    let inspection = service.inspect("@vendor/power-mode").unwrap();
+    assert!(inspection.is_enabled);
+    assert_eq!(inspection.runtime_profile.as_deref(), Some("sandboxed"));
+    for capability in ["filesystem", "network", "shell", "package-control"] {
+        assert!(
+            inspection
+                .requested_capabilities
+                .contains(&capability.to_string())
+        );
+        assert!(
+            inspection
+                .approved_capabilities
+                .contains(&capability.to_string())
+        );
+    }
 }
 
 #[test]
@@ -1031,9 +1199,11 @@ fn package_service_disable_removes_active_contributions() {
     let backend = FakeBackend::new();
     let mut service = PackageService::new("/tmp/clay-test-store", Box::new(backend));
 
+    let package_json = valid_markdown_package_json();
     service
-        .install_from_value(valid_markdown_package_json())
+        .install_from_value(package_json.clone())
         .expect("install must succeed");
+    authorize_requested_capabilities(&mut service, &package_json);
     service
         .enable("@clay/markdown")
         .expect("enable must succeed for valid package");
@@ -1055,6 +1225,18 @@ fn package_service_disable_removes_active_contributions() {
     assert_eq!(record.manifest.name, "@clay/markdown");
     assert_eq!(record.manifest.clay.api_prefix, "markdown");
 
+    let revocation = service
+        .revocation_record("@clay/markdown")
+        .expect("disable records package-scoped revocation");
+    assert_eq!(revocation.package_name, "@clay/markdown");
+    assert_eq!(revocation.api_prefix, "markdown");
+    assert_eq!(revocation.reason, "disable");
+    assert_eq!(revocation.withdrawn.commands, 1);
+    assert_eq!(revocation.withdrawn.behavior_manifests, 0);
+    assert_eq!(revocation.withdrawn.sdui, 0);
+    assert_eq!(revocation.withdrawn.layout, 0);
+    assert_eq!(revocation.withdrawn.theme, 0);
+
     // Package is now installed but not enabled.
     {
         let inspection = service
@@ -1072,6 +1254,50 @@ fn package_service_disable_removes_active_contributions() {
         matches!(err, PackageServiceError::NotEnabled { .. }),
         "second disable must return NotEnabled, got {err:?}"
     );
+}
+
+/// Failed enable/replacement attempts keep the previous active package state
+/// and do not publish revocation records for packages that remained active.
+#[test]
+fn failed_replacement_keeps_previous_generation_active() {
+    let mut service = PackageService::new("/tmp/clay-test-store", Box::new(FakeBackend::new()));
+    let active = json!({
+        "name": "@vendor/active",
+        "version": "0.1.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "shared",
+            "entry": "./dist/index.js",
+            "permissions": ["mode-registration", "mode-activation"],
+            "modes": ["shared"],
+            "docs": "./docs/index.md"
+        }
+    });
+    let conflicting = json!({
+        "name": "@vendor/conflicting",
+        "version": "0.1.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "shared",
+            "entry": "./dist/index.js",
+            "permissions": ["mode-registration", "mode-activation"],
+            "modes": ["shared.alt"],
+            "docs": "./docs/index.md"
+        }
+    });
+    service.install_from_value(active.clone()).unwrap();
+    service.install_from_value(conflicting.clone()).unwrap();
+    authorize_requested_capabilities(&mut service, &active);
+    authorize_requested_capabilities(&mut service, &conflicting);
+    service.enable("@vendor/active").unwrap();
+
+    let err = service.enable("@vendor/conflicting").unwrap_err();
+
+    assert!(matches!(err, PackageServiceError::ContributionConflict(_)));
+    assert!(service.inspect("@vendor/active").unwrap().is_enabled);
+    assert!(!service.inspect("@vendor/conflicting").unwrap().is_enabled);
+    assert!(service.revocation_record("@vendor/active").is_none());
+    assert_eq!(service.enabled_records().count(), 1);
 }
 
 /// The pnpm backend suppresses lifecycle scripts by default and only omits
@@ -1111,11 +1337,12 @@ fn package_cli_subcommands_route_through_shared_service() {
 
     // `clay package add @clay/markdown` — install via value path.
     service
-        .install_from_value(package_json)
+        .install_from_value(package_json.clone())
         .expect("install_from_value succeeds");
     assert_eq!(service.list().len(), 1, "list returns 1 after add");
 
     // `clay package enable @clay/markdown`
+    authorize_requested_capabilities(&mut service, &package_json);
     service.enable("@clay/markdown").expect("enable succeeds");
     let after_enable = service
         .inspect("@clay/markdown")
@@ -1177,10 +1404,11 @@ fn package_service_list_persists_across_service_instances() {
     // The package-manager store (simulated by list_results) still contains the
     // package; refresh repopulates `installed` without executing package code.
     let backend = FakeBackend {
-        list_results: vec![clay::packages::manager::DiscoveredPackage {
-            package_json: package_json.clone(),
-            package_root: std::path::PathBuf::from("/tmp/clay-test-store/@clay/markdown"),
-        }],
+        list_results: vec![clay::packages::manager::DiscoveredPackage::new(
+            "@clay/markdown",
+            package_json.clone(),
+            std::path::PathBuf::from("/tmp/clay-test-store/@clay/markdown"),
+        )],
         ..FakeBackend::new()
     };
     second = PackageService::new("/tmp/clay-test-store", Box::new(backend));
@@ -1209,10 +1437,11 @@ fn package_service_enable_after_refresh_does_not_require_reinstall() {
     // Process 2 starts cold; the store (list_results) already contains the
     // package installed by an earlier process.
     let backend = FakeBackend {
-        list_results: vec![clay::packages::manager::DiscoveredPackage {
-            package_json: package_json.clone(),
-            package_root: std::path::PathBuf::from("/tmp/clay-test-store/@clay/markdown"),
-        }],
+        list_results: vec![clay::packages::manager::DiscoveredPackage::new(
+            "@clay/markdown",
+            package_json.clone(),
+            std::path::PathBuf::from("/tmp/clay-test-store/@clay/markdown"),
+        )],
         ..FakeBackend::new()
     };
     let mut service = PackageService::new("/tmp/clay-test-store", Box::new(backend));
@@ -1224,8 +1453,9 @@ fn package_service_enable_after_refresh_does_not_require_reinstall() {
         clay::packages::service::PackageServiceError::NotInstalled { .. }
     ));
 
-    // After refresh, enable succeeds without any install call.
+    // After refresh and authorization, enable succeeds without any install call.
     service.refresh_installed().expect("refresh must succeed");
+    authorize_requested_capabilities(&mut service, &package_json);
     service
         .enable("@clay/markdown")
         .expect("enable must succeed on a previously-installed package after refresh");
@@ -1814,34 +2044,34 @@ fn enable_rejects_duplicate_prefix_and_mode_and_command() {
 
     // The service runs the same conflict pass during enable and rolls back the candidate.
     let mut service = PackageService::new("/tmp/clay-conflict-store", Box::new(FakeBackend::new()));
-    service
-        .install_from_value(json!({
-            "name": "@clay/one",
-            "version": "0.1.0",
-            "type": "module",
-            "clay": {
-                "apiPrefix": "one",
-                "entry": "./dist/index.js",
-                "permissions": ["mode-registration", "mode-activation"],
-                "modes": ["one"],
-                "docs": "./docs/index.md"
-            }
-        }))
-        .unwrap();
-    service
-        .install_from_value(json!({
-            "name": "@clay/one-alt",
-            "version": "0.1.0",
-            "type": "module",
-            "clay": {
-                "apiPrefix": "one",
-                "entry": "./dist/index.js",
-                "permissions": ["mode-registration", "mode-activation"],
-                "modes": ["one.alt"],
-                "docs": "./docs/index.md"
-            }
-        }))
-        .unwrap();
+    let one_package = json!({
+        "name": "@clay/one",
+        "version": "0.1.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "one",
+            "entry": "./dist/index.js",
+            "permissions": ["mode-registration", "mode-activation"],
+            "modes": ["one"],
+            "docs": "./docs/index.md"
+        }
+    });
+    let one_alt_package = json!({
+        "name": "@clay/one-alt",
+        "version": "0.1.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "one",
+            "entry": "./dist/index.js",
+            "permissions": ["mode-registration", "mode-activation"],
+            "modes": ["one.alt"],
+            "docs": "./docs/index.md"
+        }
+    });
+    service.install_from_value(one_package.clone()).unwrap();
+    service.install_from_value(one_alt_package.clone()).unwrap();
+    authorize_requested_capabilities(&mut service, &one_package);
+    authorize_requested_capabilities(&mut service, &one_alt_package);
     service.enable("@clay/one").unwrap();
     let err = service.enable("@clay/one-alt").unwrap_err();
     match err {

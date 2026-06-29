@@ -17,27 +17,28 @@ use super::ClayOpState;
 /// One recorded validated package module: its absolute on-disk path plus the
 /// validated package root that confines transitive imports.
 #[derive(Debug, Clone)]
-pub(crate) struct FirstPartyLoadEntry {
+pub(crate) struct PackageLoadEntry {
     pub(crate) absolute_path: PathBuf,
     pub(crate) package_root: PathBuf,
+    pub(crate) package_name: Option<String>,
 }
 
-/// Validated first-party `loadEntry` allowlist shared between the resolver op
-/// (populates it) and `ClayModuleLoader` (checks it). This is the single gate
-/// that lets a resolver-validated first-party `loadEntry` load from outside the
-/// configuration root; every other specifier stays deny-by-default. Transitive
-/// relative imports from a validated `loadEntry` are confined to the validated
-/// package root and recorded here on first resolution.
+/// Validated package `loadEntry` allowlist shared between the resolver op
+/// (populates it) and `ClayModuleLoader` (checks it). It records load entries
+/// for bundled and user-installed packages after `PackageService` validates,
+/// authorizes, and enables them. Transitive relative imports from a validated
+/// `loadEntry` are confined to the validated package root and recorded here on
+/// first resolution.
 // ponytail: in-memory map, keyed by opaque specifier. Ceiling: grows with the
-// count of modules in loaded first-party packages (bounded by the on-disk
-// first-party package set). Upgrade path: eviction only matters once packages
-// can be unloaded dynamically (Phase 19 hot-reload); not needed before then.
+// count of modules in loaded packages. Upgrade path: eviction only matters once
+// packages can be unloaded dynamically (Phase 19 hot-reload); not needed before
+// then.
 #[derive(Debug, Default)]
-pub(crate) struct FirstPartyLoadEntryAllowlist {
-    entries: Mutex<HashMap<String, FirstPartyLoadEntry>>,
+pub(crate) struct PackageLoadEntryAllowlist {
+    entries: Mutex<HashMap<String, PackageLoadEntry>>,
 }
 
-impl FirstPartyLoadEntryAllowlist {
+impl PackageLoadEntryAllowlist {
     /// Record an opaque validated `loadEntry` specifier with its absolute on-disk
     /// path and validated package root. Called by the resolver op after
     /// `PackageService::enable` succeeds.
@@ -47,16 +48,41 @@ impl FirstPartyLoadEntryAllowlist {
         absolute_path: PathBuf,
         package_root: PathBuf,
     ) {
+        self.record_for_package(opaque_specifier, absolute_path, package_root, None);
+    }
+
+    /// Record an opaque validated package module specifier with package
+    /// ownership, so disable/revoke can withdraw all owned module entries.
+    pub(crate) fn record_for_package(
+        &self,
+        opaque_specifier: &str,
+        absolute_path: PathBuf,
+        package_root: PathBuf,
+        package_name: Option<&str>,
+    ) {
         self.entries
             .lock()
-            .expect("first-party loadEntry allowlist mutex poisoned")
+            .expect("package loadEntry allowlist mutex poisoned")
             .insert(
                 opaque_specifier.to_string(),
-                FirstPartyLoadEntry {
+                PackageLoadEntry {
                     absolute_path,
                     package_root,
+                    package_name: package_name.map(str::to_string),
                 },
             );
+    }
+
+    /// Withdraw all module entries owned by a package. Returns the number of
+    /// removed entries for audit diagnostics.
+    pub(crate) fn revoke_package(&self, package_name: &str) -> usize {
+        let mut entries = self
+            .entries
+            .lock()
+            .expect("package loadEntry allowlist mutex poisoned");
+        let before = entries.len();
+        entries.retain(|_, entry| entry.package_name.as_deref() != Some(package_name));
+        before.saturating_sub(entries.len())
     }
 
     /// Return the validated on-disk module path for an opaque specifier, or
@@ -65,7 +91,7 @@ impl FirstPartyLoadEntryAllowlist {
     pub(crate) fn absolute_path(&self, opaque_specifier: &str) -> Option<PathBuf> {
         self.entries
             .lock()
-            .expect("first-party loadEntry allowlist mutex poisoned")
+            .expect("package loadEntry allowlist mutex poisoned")
             .get(opaque_specifier)
             .map(|entry| entry.absolute_path.clone())
     }
@@ -74,7 +100,7 @@ impl FirstPartyLoadEntryAllowlist {
     /// result to the referrer's validated package root. Records the new opaque
     /// specifier and returns it so `load` can read it. Returns `None` if the
     /// referrer is not a validated package module or the resolved path escapes
-    /// the package root (deny-by-default for the transitive graph too).
+    /// the package root.
     ///
     /// `referrer` is the opaque `clay://packages/...` specifier already in the
     /// allowlist; `relative_specifier` is the `./`/`../` import requested from it.
@@ -89,7 +115,7 @@ impl FirstPartyLoadEntryAllowlist {
             let entries = self
                 .entries
                 .lock()
-                .expect("first-party loadEntry allowlist mutex poisoned");
+                .expect("package loadEntry allowlist mutex poisoned");
             entries.get(referrer).cloned()?
         };
         // Join the relative specifier against the referrer's directory and
@@ -101,23 +127,28 @@ impl FirstPartyLoadEntryAllowlist {
             return None;
         }
         // Derive the opaque specifier from the package root + the relative tail,
-        // keeping the `clay://packages/@clay/<name>/...` shape.
+        // preserving the already-recorded package prefix. Package names may be
+        // scoped (`@vendor/foo`), so do not split on `/` to find the package id.
         let relative_to_root = canonical.strip_prefix(&referrer_entry.package_root).ok()?;
         let relative_tail = relative_to_root.to_string_lossy().replace('\\', "/");
-        let package_segment = referrer
-            .strip_prefix("clay://packages/")?
-            .split('/')
-            .next()?;
-        let new_specifier = format!("clay://packages/{package_segment}/{relative_tail}");
+        let referrer_relative_to_root = referrer_entry
+            .absolute_path
+            .strip_prefix(&referrer_entry.package_root)
+            .ok()?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let package_prefix = referrer.strip_suffix(&referrer_relative_to_root)?;
+        let new_specifier = format!("{package_prefix}{relative_tail}");
         let mut entries = self
             .entries
             .lock()
-            .expect("first-party loadEntry allowlist mutex poisoned");
+            .expect("package loadEntry allowlist mutex poisoned");
         entries.insert(
             new_specifier.clone(),
-            FirstPartyLoadEntry {
+            PackageLoadEntry {
                 absolute_path: canonical,
                 package_root: referrer_entry.package_root.clone(),
+                package_name: referrer_entry.package_name.clone(),
             },
         );
         Some(new_specifier)
@@ -274,15 +305,16 @@ fn invalid_specifier(message: impl std::fmt::Display) -> JsErrorBox {
     JsErrorBox::generic(format!("clay.packages.invalid_specifier: {message}"))
 }
 
-/// Resolve a first-party `@clay/*` package specifier, validate + enable it
+/// Resolve an installed, authorized package specifier, validate + enable it
 /// through the existing `PackageService` path, record the validated on-disk
 /// `loadEntry` in the shared allowlist, and return a typed summary with an
 /// opaque `loadEntrySpecifier` the module loader can later import.
 ///
-/// Deny-by-default: only resolver-validated first-party `@clay/*` packages may
-/// load. No filesystem, network, shell, registry, package-enable/disable, or
-/// package-manager authority is granted beyond reading the single validated
-/// `loadEntry` file (enforced by the loader, not by this op).
+/// Bundled `@clay/*` packages are seeded from Clay's shipped package directory.
+/// User-installed npm/GitHub/git/tarball/local-path packages resolve from the
+/// package service's installed package registry by package name or original
+/// requested specifier. In both cases the same validation, authorization,
+/// package-root confinement, and module-loader allowlist path is used.
 #[op2]
 #[string]
 pub(super) fn op_clay_packages_load_package_by_specifier(
@@ -301,62 +333,77 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
         ));
     }
 
-    // 1. Deny-by-default: reject any non-`@clay/*` specifier before touching the
-    //    package service. External packages, registry specs (`npm:foo`), and
-    //    bare names are all denied.
-    let Some(package_name) = specifier.strip_prefix("@clay/") else {
-        return Err(invalid_specifier(format!(
-            "loadPackage only resolves first-party `@clay/*` packages; `{specifier}` is denied"
-        )));
-    };
-    if !is_valid_first_party_package_segment(package_name) {
-        return Err(invalid_specifier(format!(
-            "invalid first-party package name in `{specifier}`"
-        )));
-    }
-
     let clay_state = state.borrow::<Arc<ClayOpState>>();
 
-    // 2. Resolve the installed first-party package from the on-disk `packages/`
-    //    directory (the same `CARGO_MANIFEST_DIR/packages` root the markdown-it
-    //    bundle is read from). This is the first-party package registry.
-    let package_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("packages")
-        .join(package_name);
-    let package_json_text =
-        std::fs::read_to_string(package_root.join("package.json")).map_err(|_| {
-            JsErrorBox::generic(format!(
-                "clay.packages.not_installed: first-party package `{specifier}` is not installed"
-            ))
-        })?;
-    let package_json: Value = serde_json::from_str(&package_json_text).map_err(|error| {
-        JsErrorBox::generic(format!(
-            "clay.packages.load_failed: invalid package.json for `{specifier}` ({error})"
-        ))
-    })?;
-    let resolved_name = package_json
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or(specifier)
-        .to_string();
-
-    // 3. Reuse the authoritative `PackageService` validation/enable path
-    //    (`assemble_package_record` + `check_enabled_packages`). This is the
-    //    same enable path the CLI/future UI uses; the resolver adds no second
-    //    source of truth for enabled-package state.
     let summary = {
         let mut service = clay_state
-            .first_party_packages()
+            .package_service()
             .lock()
-            .expect("first-party package service mutex poisoned");
-        // Seed the installed record (idempotent overwrite) then enable.
-        let _ = service.install_from_value(package_json.clone());
+            .expect("package service mutex poisoned");
+
+        let (resolved_name, package_root) = match service.installed_package_for_specifier(specifier)
+        {
+            Some((name, installed)) => (name, installed.package_root),
+            None => {
+                let Some(package_name) = specifier.strip_prefix("@clay/") else {
+                    return Err(JsErrorBox::generic(format!(
+                        "clay.packages.not_installed: package `{specifier}` is not installed or authorized"
+                    )));
+                };
+                if !is_valid_first_party_package_segment(package_name) {
+                    return Err(invalid_specifier(format!(
+                        "invalid bundled package name in `{specifier}`"
+                    )));
+                }
+                let package_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("packages")
+                    .join(package_name);
+                let package_json_text =
+                    std::fs::read_to_string(package_root.join("package.json")).map_err(|_| {
+                        JsErrorBox::generic(format!(
+                            "clay.packages.not_installed: bundled package `{specifier}` is not installed"
+                        ))
+                    })?;
+                let package_json: Value = serde_json::from_str(&package_json_text).map_err(|error| {
+                    JsErrorBox::generic(format!(
+                        "clay.packages.load_failed: invalid package.json for `{specifier}` ({error})"
+                    ))
+                })?;
+                let resolved_name = package_json
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(specifier)
+                    .to_string();
+                service
+                    .install_from_value_at_root(package_json.clone(), package_root.clone())
+                    .map_err(|error| {
+                        JsErrorBox::generic(format!("clay.packages.load_failed: {error}"))
+                    })?;
+                if let Ok(manifest) =
+                    crate::packages::manifest::validate_manifest_value(&package_json)
+                {
+                    let _ = service.authorize_package(
+                        &resolved_name,
+                        manifest.clay.permissions,
+                        crate::packages::authorization::RuntimeProfile::NativeTrust,
+                        "clay-bundled-default",
+                    );
+                }
+                (resolved_name, package_root)
+            }
+        };
+
+        // Reuse the authoritative `PackageService` validation/enable path
+        // (`assemble_package_record` + authorization + `check_enabled_packages`).
+        // This is the same enable path the CLI/future UI uses; the resolver adds
+        // no separate package loader for user-installed packages.
         let record = match service.enable(&resolved_name) {
-            Ok(record) => record,
+            Ok(record) => record.clone(),
             Err(crate::packages::service::PackageServiceError::AlreadyEnabled { .. }) => service
                 .enabled_records()
                 .find(|enabled| enabled.manifest.name == resolved_name)
-                .expect("enabled package must be present after AlreadyEnabled"),
+                .expect("enabled package must be present after AlreadyEnabled")
+                .clone(),
             Err(error) => {
                 return Err(JsErrorBox::generic(format!(
                     "clay.packages.load_failed: {error}"
@@ -364,8 +411,10 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
             }
         };
 
-        // 4. Compute the validated on-disk `loadEntry` path and record the
-        //    opaque specifier in the shared allowlist the module loader checks.
+        // Compute the validated on-disk `loadEntry` path and record the opaque
+        // specifier in the shared allowlist the module loader checks. This is
+        // load/reload-time work only; the module hot path remains allowlist
+        // lookup plus file read.
         let load_entry = record.manifest.clay.load_entry.as_deref().ok_or_else(|| {
             JsErrorBox::generic(format!(
                 "clay.packages.load_failed: package `{specifier}` declares no loadEntry"
@@ -378,18 +427,19 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
         let opaque_specifier = format!("clay://packages/{resolved_name}/{normalized_load_entry}");
         let (absolute_load_entry, canonical_package_root) =
             canonical_load_entry_paths(&package_root, &normalized_load_entry, specifier)?;
-        clay_state.load_entry_allowlist().record(
+        clay_state.load_entry_allowlist().record_for_package(
             &opaque_specifier,
             absolute_load_entry,
             canonical_package_root,
+            Some(&record.manifest.name),
         );
 
-        // 5. Build the typed summary.
         json!({
             "name": record.manifest.name,
             "version": record.manifest.version,
             "apiPrefix": record.manifest.clay.api_prefix,
             "loadEntrySpecifier": opaque_specifier,
+            "sourceKind": crate::packages::manager::PackageSourceKind::from_spec(specifier).as_str(),
             "modes": record.manifest.clay.modes,
             "permissions": record.manifest.clay.permissions.iter().map(|permission| permission.as_str()).collect::<Vec<_>>(),
             "contributions": {

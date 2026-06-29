@@ -46,8 +46,8 @@ Non-responsibilities:
 ## Primitive Coverage
 
 - Runtime generation primitive: `RuntimeGenerationStore` in `src/server/mod.rs`.
-- package cache invalidation primitive: per-generation `loadPackage` cache in `runtime/js/packages.ts` plus `FirstPartyLoadEntryAllowlist` in `src/server/js_runtime.rs`.
-- parse-handler generation replacement primitive: `ParseCoordinator::register_handler_for_generation`, `cancel_generation`, and task-generation validation in `src/server/parse_coordinator.rs`.
+- package cache invalidation primitive: per-generation `loadPackage` cache in `runtime/js/packages.ts` plus `PackageLoadEntryAllowlist` in `src/server/js_runtime.rs`.
+- parse-handler generation replacement primitive: `ParseCoordinator::register_handler_for_generation`, `cancel_generation`, `cancel_package`, and task-generation validation in `src/server/parse_coordinator.rs`; package-scoped cancellation reuses the same primitive for revocation.
 - Open-document refresh primitive: `WorkspaceState::open_document_snapshots` plus `refresh_open_documents_after_reload`.
 - Test/developer trigger: `IpcServer::trigger_developer_hot_reload`, marked `#[doc(hidden)]` and not exported through Clay JS facades.
 
@@ -57,7 +57,7 @@ Future packages should reuse `loadPackage`, `clay:modes`, and `clay:parse` regis
 
 - Atomic swap only after successful configuration evaluation.
 - Failed reload keeps previous runtime generation and package state active.
-- Reload preserves deny-by-default module loading and resolver-validated first-party `@clay/*` `loadEntry` imports.
+- Reload preserves module loading through recorded package allowlist entries and resolver-validated package `loadEntry` imports; package disable/revoke can withdraw package-owned allowlist entries with `PackageLoadEntryAllowlist::revoke_package`.
 - Diagnostics are sanitized: no absolute paths, secrets, source snippets, URLs, or raw tokens.
 - Parse results publish only if document version and runtime generation still match active state.
 - Open-document refresh emits no `DocumentOpened` or `DocumentReloaded` full-text snapshots for unchanged documents.

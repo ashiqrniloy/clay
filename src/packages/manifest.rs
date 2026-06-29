@@ -21,6 +21,29 @@ pub struct ClayPackageMetadata {
     pub modes: Vec<String>,
     pub entry: String,
     pub load_entry: Option<String>,
+    pub graph: PackageGraphRelations,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageGraphRelations {
+    pub depends_on: Vec<String>,
+    pub extends: Vec<String>,
+    pub disables: Vec<String>,
+    pub replaces: Vec<String>,
+}
+
+impl PackageGraphRelations {
+    pub fn requires_package_control(&self) -> bool {
+        !self.disables.is_empty() || !self.replaces.is_empty()
+    }
+
+    pub fn all_targets(&self) -> impl Iterator<Item = &String> {
+        self.depends_on
+            .iter()
+            .chain(self.extends.iter())
+            .chain(self.disables.iter())
+            .chain(self.replaces.iter())
+    }
 }
 
 pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, PackageDiagnostic> {
@@ -107,8 +130,9 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
         None => None,
     };
 
-    let permissions = parse_permissions(clay.get("permissions"), &context)?;
+    let permissions = parse_requested_capabilities(clay, &context)?;
     let modes = parse_modes(clay.get("modes"), &api_prefix, &context)?;
+    let graph = parse_graph_relations(clay, &context)?;
 
     Ok(ClayPackageManifest {
         name: package_name,
@@ -119,6 +143,7 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
             modes,
             entry,
             load_entry,
+            graph,
         },
     })
 }
@@ -157,30 +182,55 @@ pub fn is_valid_api_prefix(value: &str) -> bool {
     chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
 }
 
-fn parse_permissions(
-    value: Option<&Value>,
+fn parse_requested_capabilities(
+    clay: &serde_json::Map<String, Value>,
     context: &DiagnosticContext,
 ) -> Result<Vec<PackagePermission>, PackageDiagnostic> {
-    let Some(Value::Array(values)) = value else {
+    let permissions = clay.get("permissions");
+    let capabilities = clay.get("capabilities");
+    if permissions.is_none() && capabilities.is_none() {
         return Err(context.diagnostic(
             PackageValidationRule::MissingField,
-            "clay.permissions must be an array of known permission strings",
+            "clay.permissions or clay.capabilities must be an array of known capability strings",
+        ));
+    }
+
+    let mut seen = HashSet::new();
+    let mut parsed = Vec::new();
+    if let Some(values) = permissions {
+        parse_permission_array(values, "clay.permissions", &mut seen, &mut parsed, context)?;
+    }
+    if let Some(values) = capabilities {
+        parse_permission_array(values, "clay.capabilities", &mut seen, &mut parsed, context)?;
+    }
+    Ok(parsed)
+}
+
+fn parse_permission_array(
+    value: &Value,
+    field_name: &str,
+    seen: &mut HashSet<String>,
+    permissions: &mut Vec<PackagePermission>,
+    context: &DiagnosticContext,
+) -> Result<(), PackageDiagnostic> {
+    let Value::Array(values) = value else {
+        return Err(context.diagnostic(
+            PackageValidationRule::MissingField,
+            format!("{field_name} must be an array of known capability strings"),
         ));
     };
 
-    let mut seen = HashSet::new();
-    let mut permissions = Vec::new();
     for value in values {
         let Some(permission) = value.as_str() else {
             return Err(context.diagnostic(
                 PackageValidationRule::InvalidPermission,
-                "clay.permissions entries must be strings",
+                format!("{field_name} entries must be strings"),
             ));
         };
         if !seen.insert(permission.to_string()) {
             return Err(context.diagnostic(
                 PackageValidationRule::DuplicatePermission,
-                "clay.permissions entries must be unique",
+                "clay.permissions/clay.capabilities entries must be unique",
             ));
         }
         match parse_permission(permission) {
@@ -188,7 +238,7 @@ fn parse_permissions(
             Err(PermissionValidationError::UnknownPermission { .. }) => {
                 return Err(context.diagnostic(
                     PackageValidationRule::UnknownPermission,
-                    format!("unknown Clay package permission `{permission}`"),
+                    format!("unknown Clay package capability `{permission}`"),
                 ));
             }
             Err(PermissionValidationError::ProhibitedAuthority { .. }) => {
@@ -200,7 +250,61 @@ fn parse_permissions(
         }
     }
 
-    Ok(permissions)
+    Ok(())
+}
+
+fn parse_graph_relations(
+    clay: &serde_json::Map<String, Value>,
+    context: &DiagnosticContext,
+) -> Result<PackageGraphRelations, PackageDiagnostic> {
+    Ok(PackageGraphRelations {
+        depends_on: parse_relation_array(clay.get("dependsOn"), "clay.dependsOn", context)?,
+        extends: parse_relation_array(clay.get("extends"), "clay.extends", context)?,
+        disables: parse_relation_array(clay.get("disables"), "clay.disables", context)?,
+        replaces: parse_relation_array(clay.get("replaces"), "clay.replaces", context)?,
+    })
+}
+
+fn parse_relation_array(
+    value: Option<&Value>,
+    field_name: &str,
+    context: &DiagnosticContext,
+) -> Result<Vec<String>, PackageDiagnostic> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(values) = value else {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidPackageGraph,
+            format!("{field_name} must be an array of package specifier strings"),
+        ));
+    };
+
+    let mut seen = HashSet::new();
+    let mut relations = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(relation) = value.as_str() else {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidPackageGraph,
+                format!("{field_name} entries must be strings"),
+            ));
+        };
+        let trimmed = relation.trim();
+        if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidPackageGraph,
+                format!("{field_name} entries must be non-empty package specifiers"),
+            ));
+        }
+        if !seen.insert(trimmed.to_string()) {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidPackageGraph,
+                format!("{field_name} entries must be unique"),
+            ));
+        }
+        relations.push(trimmed.to_string());
+    }
+    Ok(relations)
 }
 
 fn parse_modes(
@@ -379,6 +483,7 @@ pub enum PackageValidationRule {
     InvalidModeId,
     DuplicateModeId,
     InvalidEntry,
+    InvalidPackageGraph,
     RawDenoOpsExposure,
     ClientJavaScriptHook,
 }

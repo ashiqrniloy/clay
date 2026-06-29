@@ -127,10 +127,10 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.3 | Document runtime-backed public APIs for slot-aware `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration` registration, examples, diagnostics, package metadata, package permissions, and generated registry/API coverage. |
 | Phase 18.4 | Document implemented `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, and package option customization APIs. |
 | Phase 18.5 | Document the Phase 18.5 authoring contract: no default fixed panel unless explicitly registered, optional preview as `PanelContribution` with `defaultVisibility: "hidden"`, main editor placement via `PaneSlotLayout.main`, theme token usage, and `setPackageOption`/`serverSetLayoutOverride` customization. Update Markdown package docs to consume generic shell/layout primitives and remove fixture-only UI guidance from user-facing defaults. |
-| Phase 18.6 | Document the shipped one-line `loadPackage("@clay/markdown")` first-party loader and its deny-by-default `FirstPartyLoadEntryAllowlist` boundary. |
+| Phase 18.6/Plan 035 | Document the shipped one-line `loadPackage("@clay/markdown")` loader, source-aware package loading, and `PackageLoadEntryAllowlist` package-root boundary. |
 | Phase 18.7 | Document persistent-runtime parse-handler registration, generic open-time mode activation, no-client-JS/no-hot-path-JS invariants, parse budgets, and forbidden per-mode/per-open shortcuts. |
 
-Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.4 `serverRegisterInputContribution`, `serverRegisterUiStateScope`, `serverSetLayoutOverride`, and `setPackageOption` examples are also runtime-backed public APIs. Phase 18.6/18.7 promote the first-party `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, non-`@clay/*` registry loading, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
+Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
 ## Package Manifest
 
@@ -268,8 +268,8 @@ A permission declaration does not grant broad authority. Packages still cannot a
 
 Package loading status:
 
-- **Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js` with `await loadPackage("@clay/markdown")`. The resolver validates the specifier, runs the package metadata through `PackageService`, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the deny-by-default boundary, runtime-generation hot reload behavior, and carried-forward deferrals (non-`@clay/*` registry and persistent enable state).
-- **Implemented/runtime-backed today:** `loadPackage("@clay/*")` is the one-line end-user default. `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and controlled configuration tests.
+- **Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js` with `await loadPackage("@clay/markdown")` or another installed, authorized package specifier. The resolver validates the specifier, runs the package metadata through `PackageService`, checks capability grants, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the package-root boundary, runtime-generation hot reload behavior, and carried-forward durable state work.
+- **Implemented/runtime-backed today:** `loadPackage(specifier)` is the one-line end-user default for bundled and installed source-aware packages. `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and controlled configuration tests.
 - **Phase 18.4 customization status:** optional customization after the future one-line load uses documented `setPackageOption` and `serverSetLayoutOverride` APIs. These are startup/configuration-change/package-load/update-time validators, not hidden JSON/TOML/ad hoc keys and not package enable/disable authority.
 
 **Implemented default loader shape**:
@@ -288,7 +288,7 @@ import { serverLoadPackage } from "clay:packages";
 const loaded = serverLoadPackage(packageJson);
 ```
 
-Do not present `serverLoadPackage` as ordinary end-user setup. It is useful for controlled package/configuration fixtures and load-contract validation, not for package installation or enablement; the end-user default is the runtime-backed `loadPackage("@clay/*")` facade.
+Do not present `serverLoadPackage` as ordinary end-user setup. It is useful for controlled package/configuration fixtures and load-contract validation, not for package installation or enablement; the end-user default is the runtime-backed `loadPackage(specifier)` facade.
 
 Optional user configuration should be separate and explicit after the one-line package load helper exists:
 
@@ -300,7 +300,7 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, imports its declared `loadEntry`, registers mode metadata and parse handlers, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. The current deny-by-default runtime (`src/server/js_runtime.rs::ClayModuleLoader`) accepts resolver-validated first-party `@clay/*` `loadEntry` modules through a shared `FirstPartyLoadEntryAllowlist` gate. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the first-party `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a constrained first-party allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority. See `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the original deferral rationale and the carried-forward deferrals (non-`@clay/*` registry resolution and persistent shared enable state). The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
+Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, imports its declared `loadEntry`, registers mode metadata and parse handlers, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. Plan 035 generalizes the resolver so `src/server/js_runtime.rs::ClayModuleLoader` accepts resolver-validated package `loadEntry` modules through a shared `PackageLoadEntryAllowlist` gate for bundled and installed source-aware packages. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the package `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a package-root allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority without separate user-approved capabilities. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model. The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
 
 If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
 
@@ -441,8 +441,15 @@ The end-user default stays one line in `~/.config/clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";
+
 await loadPackage("@clay/markdown");
+// Bundled and user-installed packages use the same one-line path after install
+// and user authorization:
+await loadPackage("@vendor/foo");
+await loadPackage("github:user/repo");
 ```
+
+`@clay/*` only means a package was shipped with Clay — it is not a more capable package. After a user installs and authorizes an npm, GitHub, git-URL, tarball, or local-path package, that package loads through the identical `loadPackage` one-line path, the identical resolver + `PackageService` validation, and the identical runtime authority model. `init.js` itself grants no capabilities: it only requests one-line package loads and (optionally) separate documented Clay APIs. Every powerful capability (filesystem, network, shell, AI, WASM, raw-ops, native-ui, client-runtime, package-control) must be a separately implemented, user-approved authorization grant recorded against the package identity/source/provenance — `init.js` cannot silently grant them.
 
 `loadPackage` executes the package `loadEntry` once per runtime generation. The registered mode patterns, activation metadata, command declarations, and parse-handler token remain resident in that generation. Phase 19 hot reload replaces the runtime generation, reruns `~/.config/clay/init.js`, rebuilds package state, and reruns the same package `loadEntry` with an empty `globalThis.__clayLoadedPackages` cache. Package authors should rebuild all runtime state from `loadEntry`; they should not rely on mutable JavaScript globals surviving reload. Failed reloads keep the previous generation active and report sanitized diagnostics.
 
@@ -462,8 +469,8 @@ Security and authority contract:
 
 - Handler registration requires `PackagePermission::ParseDocument` / `"parse-document"` in package metadata.
 - Only validated packages register live handlers; install/enable metadata alone does not grant parser execution.
-- `ClayModuleLoader` is deny-by-default. It loads curated `clay:*` facades, controlled config modules, the vendored first-party parser shim, and resolver-validated first-party `@clay/*` `loadEntry` modules through `FirstPartyLoadEntryAllowlist`; hot reload preserves the first-party-only boundary and rebuilds the allowlist in the fresh generation.
-- Packages do not gain arbitrary filesystem, network, shell, AI, WASM, raw-op, native-widget, package-manager, package-enable/disable, or client-JS authority through loading, activation, UI contribution registration, or parsing.
+- `ClayModuleLoader` loads curated `clay:*` facades, controlled config modules, the vendored parser shim, and resolver-validated package `loadEntry` modules through the shared `PackageLoadEntryAllowlist`; hot reload preserves validated package-root confinement and rebuilds the allowlist in the fresh generation. Bundled and installed source-aware packages (npm, GitHub/git, tarball, local path) resolve through the same `PackageService` path after install and user authorization.
+- Packages do not gain filesystem, network, shell, AI, WASM, raw-op, native-widget, package-manager, package-control, or client-JS authority merely through loading, activation, UI contribution registration, or parsing; those capabilities require separate implementation and user approval.
 
 Forbidden anti-patterns:
 
@@ -477,6 +484,15 @@ Forbidden anti-patterns:
 ## UI and Layout Model
 
 Clay owns a consistent shell layout for all packages and modes. See the [Clay Shell and Package UI/Layout Strategy](../primitives/shell-layout-strategy.md) for the canonical Phase 18.1/18.2 vocabulary/runtime status and for the rule that Masonry is Clay's internal widget/layout/rendering substrate, not a package author API.
+
+### Unified UI/layout authoring contract across package sources
+
+The UI/layout authoring contract is identical for `@clay/*` packages and user-installed packages (npm, GitHub, git URL, tarball, local path). `@clay/*` only means a package was shipped by Clay — it is not a more capable package. After a user installs and authorizes a package from any source, it contributes UI/layout through the same `clay:ui` facades, the same `PackageService` validation, the same shell/slot/precedence rules, and the same conflict-resolution policy as a bundled Clay package.
+
+- User-installed packages may request the same UI/layout/native/client capabilities as Clay packages — `render-decorations`, `render-folding`, `completion-provider`, `package-configuration`, `package-control`, `native-ui`, and `client-runtime` — through the unified capability vocabulary, subject to the explicit user authorization grants described in [Unified Package Capability Model](../primitives/package-security.md#unified-package-capability-model). A package source never confers a capability implicitly; every powerful capability must be a separately implemented, user-approved grant recorded against the package identity, source, and provenance.
+- Native UI and client runtime are explicit capability/API work. A package does not get native widget handles, Masonry mutation, raw CSS, client-side JavaScript, or renderer callbacks merely because it was installed from npm or GitHub — those surfaces appear only when a documented `native-ui` / `client-runtime` capability is granted and a matching Clay API exists, is validated, and is revocable.
+- UI/layout declarations remain validated load/reload/configuration work. Panel, component, overlay, input, state-scope, layout-override, theme-token, and option contributions are validated at package load/enable time and applied through documented Clay JS APIs at configuration/package-update time; no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, text-event, or edit-ack handlers.
+- UI/layout primitives stay generic and reusable. No UI/layout primitive branches on package source (no `if github_package` / `if npm_package` / `if third_party` Rust paths). Every package consumes the same shell/slot/component/theme primitives; Markdown and future modes consume these generic primitives rather than adding mode-specific Rust layout branches.
 
 ```text
 WorkingArea
@@ -1120,7 +1136,7 @@ Recommended test categories:
 
 1. **Manifest validation** — required fields, prefix, permissions, docs, performance metadata.
 2. **Conflict tests** — duplicate modes, commands, keybindings, slots, config keys, theme tokens.
-3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage("@clay/*")` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the deny-by-default module loader only accepts resolver-validated first-party load entries.
+3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage(specifier)` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the module loader only accepts resolver-validated package load entries.
 4. **Mode tests** — classification, activation, behavior manifest composition.
 5. **Input tests** — key routing, command routing, mouse/component actions.
 6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy.

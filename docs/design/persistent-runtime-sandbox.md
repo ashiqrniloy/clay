@@ -2,23 +2,23 @@
 
 ## Purpose
 
-This document defines the separate-process JavaScript runtime sandbox gate required before Clay can execute any non-`@clay/*` package JavaScript. It is a design gate, not authority approval: third-party package execution remains blocked until an approved decision log grants that authority.
+This document defines the separate-process JavaScript runtime sandbox as a hardening primitive and optional runtime profile. It is not a first-party/third-party dividing line: any Clay-shipped or user-installed package may use a sandboxed, restricted, or native-trust profile when the user grants that profile.
 
 ## Boundary
 
 Clay splits runtime authority into a parent supervisor and a child JavaScript process.
 
-- Parent process owns canonical documents, workspace/file authority, package metadata validation, permissions, runtime generation IDs, behavior publication, SDUI state, parse scheduling, diagnostics, package-manager execution, and restart policy.
+- Parent process owns canonical documents, workspace/file authority, package metadata validation, capabilities, runtime generation IDs, behavior publication, SDUI state, parse scheduling, diagnostics, package-manager execution, and restart policy.
 - Child process owns only V8/`deno_core` evaluation for one runtime generation and receives bounded, validated requests.
-- Protocol messages carry inert request/result data only. They never carry Rust internals, raw `Deno.core.ops` names, V8 handles, package JavaScript function references, native widget handles, open file descriptors, workspace roots, package-manager handles, or capability tokens.
-- Client code never talks to the sandbox. Clients continue to receive validated behavior manifests, SDUI snapshots/updates, decorations, and protocol messages from the parent.
+- Protocol messages carry inert request/result data only. They never carry Rust internals, raw `Deno.core.ops` names unless an explicit raw-ops profile is granted, V8 handles, native widget handles, open file descriptors, workspace roots, package-manager handles, or capability tokens.
+- Client code never talks to the sandbox. Clients continue to receive validated behavior manifests, SDUI snapshots/updates, decorations, and protocol messages from the parent unless a future `client-runtime` capability explicitly changes that path.
 
 ## Supervisor Lifecycle
 
-1. Parent starts one sandbox child for the active runtime generation.
-2. Parent sends a handshake containing protocol version, generation ID, compiled budgets, allowed request kinds, and denied authority markers.
+1. Parent starts one sandbox child for the active runtime generation/profile.
+2. Parent sends a handshake containing protocol version, generation ID, compiled budgets, allowed request kinds, and granted capability profile.
 3. Child replies with its protocol version and readiness; any mismatch kills the child and records a sanitized diagnostic.
-4. Parent sends configuration/package-load/parse/evaluate requests only after package metadata, permissions, and budgets pass parent-side validation.
+4. Parent sends configuration/package-load/parse/evaluate requests only after package metadata, capabilities, user authorization, and budgets pass parent-side validation.
 5. Parent enforces per-request timeout, payload budgets, and output validation. Timeout or protocol violation kills the child.
 6. Parent restarts a fresh child for the next generation or explicit recovery path; old generation parse work is cancelled/ignored through `ParseCoordinator` generation checks.
 7. Failed child startup, timeout, heap-limit, crash, or malformed response emits a stable sanitized diagnostic and keeps prior validated client state until replacement succeeds.
@@ -28,9 +28,9 @@ Clay splits runtime authority into a parent supervisor and a child JavaScript pr
 Initial protocol shape:
 
 ```text
-RuntimeRequest::Handshake { protocol_version, generation_id, budgets }
-RuntimeRequest::EvaluateModule { generation_id, module_specifier, source, package, permissions, document_context }
-RuntimeRequest::LoadFirstPartyPackage { generation_id, specifier, load_entry_source, package_metadata }
+RuntimeRequest::Handshake { protocol_version, generation_id, budgets, runtime_profile }
+RuntimeRequest::EvaluateModule { generation_id, module_specifier, source, package, capabilities, document_context }
+RuntimeRequest::LoadPackage { generation_id, specifier, load_entry_source, package_metadata, capabilities }
 RuntimeRequest::Parse { generation_id, handler_token, notification, windows, budgets }
 RuntimeRequest::Shutdown { generation_id }
 
@@ -45,40 +45,31 @@ All frames are length-prefixed and bounded like the existing IPC codec direction
 
 ## Allowed Requests
 
-Allowed initial requests are deliberately small:
+Allowed requests are profile-dependent and parent-built:
 
 - Evaluate a parent-provided controlled module for the current generation.
-- Load resolver-validated first-party `@clay/*` package `loadEntry` code.
+- Load resolver-validated package `loadEntry` code from any enabled user-authorized package source.
 - Invoke a registered parse handler token with bounded `ParseEditNotification` and parse-window data.
 - Shut down the child.
 
-Non-`@clay/*` package execution is not allowed by this design alone. A later approved authority decision must define package trust, registry/integrity policy, permissions, update/rollback behavior, and tests before enabling it.
+## Production Enforcement Contract
 
-## Third-Party Production Enforcement Contract
-
-The current `RuntimeSandboxSupervisor` newline-delimited JSON harness is evidence only, not production API. Production third-party execution requires a bounded typed protocol shaped like the main IPC `Codec`: length-prefixed frames, maximum frame size, typed request/response variants, decode validation, generation IDs, stable error codes, and metrics for frame-too-large/protocol-failure cases.
+The current `RuntimeSandboxSupervisor` newline-delimited JSON harness is evidence only, not production API. Production sandbox routing requires a bounded typed protocol shaped like the main IPC `Codec`: length-prefixed frames, maximum frame size, typed request/response variants, decode validation, generation IDs, stable error codes, and metrics for frame-too-large/protocol-failure cases.
 
 Required request flow:
 
 ```text
-parent validates trust + registry integrity + package metadata + permissions + budgets
+parent validates package metadata + user-authorized capabilities + runtime profile + budgets
 -> child evaluates/load/parse request for one runtime generation
 -> parent validates bounded inert outputs
 -> parent publishes behavior/SDUI/decorations/folding/completion/parse updates
 ```
 
-Production third-party request variants must be parent-built and minimal:
-
-- `LoadThirdPartyPackage { generation_id, package_name, package_version, api_prefix, load_entry_source, approved_permissions, budgets }`
-- `EvaluateThirdPartyModule { generation_id, module_specifier, package_name, package_version, api_prefix, approved_permissions, budgets }`
-- `ParseWithThirdPartyHandler { generation_id, handler_token, package_name, package_version, api_prefix, parse_window, document_version, budgets }`
-- `Shutdown { generation_id }`
-
-Parent validation is mandatory before every request: trust record match, registry/source integrity match, manifest validation, permission grant match, entry path confinement, payload budget, timeout/heap budget, runtime generation, handler token, document version, and stale-generation rejection. Parent validation is mandatory after every response: allowed response kind, generation match, package provenance match, payload size, inert JSON shape, behavior/SDUI/decorations/folding/completion/parse validators, no raw op names, no executable callbacks, no client JavaScript, and no path-like authority payloads.
+Parent validation is mandatory before every request: source record, manifest validation, user grant match, entry path confinement, payload budget, timeout/heap budget, runtime generation, handler token, document version, and stale-generation rejection. Parent validation is mandatory after every response: allowed response kind, generation match, package provenance match, payload size, inert JSON shape, behavior/SDUI/decorations/folding/completion/parse validators, no executable callbacks unless explicitly supported by the granted API, no ungranted raw op names, no ungranted client JavaScript, and no path-like authority payloads outside granted scopes.
 
 Timeout, heap-limit, malformed response, oversized output, protocol mismatch, unknown variant, stale generation, stale handler token, or invalid output kills the child process and starts a fresh child for a later generation or recovery path. Parent keeps the last validated client state until replacement output validates.
 
-The child must never receive workspace roots, absolute source paths, file descriptors, package-manager handles, raw op names, V8 handles, Rust internals, capability tokens, client connection handles, native widget handles, environment variables, credentials, registry auth tokens, or direct client authority.
+The child receives no workspace roots, absolute source paths, file descriptors, package-manager handles, V8 handles, Rust internals, capability tokens, client handles, native widget handles, environment variables, credentials, registry auth tokens, or direct client authority unless a future explicit capability/API deliberately passes a bounded substitute.
 
 Performance evidence is required before production routing: startup plus handshake target under 250 ms on developer machines, first package load overhead recorded against in-process runtime, small parse request round trip target under 10 ms added overhead, timeout kill plus fresh handshake target under 500 ms, and no keypress, paint, layout, scroll, text-event, or edit-ack dependency.
 
@@ -98,27 +89,17 @@ Diagnostics crossing the process boundary are sanitized:
 - severity
 - generic safe message
 - generation ID
-- optional package prefix/name/version only after parent validation
+- package prefix/name/version/source when parent validated
 
-Diagnostics must not include source text, absolute paths, environment variables, tokens, V8 stack internals, raw package-manager output, raw `Deno.core.ops`, hostnames, credentials, or workspace roots.
+Diagnostics must not include source text, environment variables, tokens, V8 stack internals, raw package-manager output, raw `Deno.core.ops`, hostnames, credentials, or workspace roots unless the user explicitly enabled a development/debug profile that documents the leak.
 
-## Denied Authorities
+## Runtime Profiles
 
-Sandboxed JavaScript has no default authority for:
+```text
+native-trust | sandboxed | restricted
+```
 
-- filesystem outside parent-provided open document data
-- network
-- shell
-- WASM
-- AI mutation or tool orchestration
-- package-manager execution or lifecycle scripts
-- native-widget handles or direct Masonry mutation
-- client-side JavaScript
-- raw-op / raw `Deno.core.ops` public authority
-- remote listeners
-- workspace mutation outside declared parent-owned APIs
-
-Any exception requires a later approved decision log, explicit permission, parent-side validation, docs, and tests.
+Profiles are user/config choices for any package source. `sandboxed` removes ambient host authority and routes requests through the parent. `restricted` is stricter and may allow only inert outputs. `native-trust` uses the in-process server runtime and relies on user-approved capabilities plus Clay API boundaries. WASM, network, shell, filesystem, client JavaScript, native widget handles, and package-manager handles remain unavailable in sandboxed/restricted profiles unless a documented capability/API passes a bounded substitute.
 
 ## Performance Targets
 
@@ -127,21 +108,19 @@ Sandbox work is startup/package-load/parse/reload/background work only. It must 
 Initial measurable targets for the harness:
 
 - child startup + handshake: recorded in tests/bench notes, target under 250 ms on developer machines
-- first-party package load request overhead over in-process runtime: record median; target under 2x before production migration
+- package load request overhead over in-process runtime: record median; target under 2x before production migration
 - parse request round trip with small windows: record median; target under 10 ms added overhead for small visible-window parses
 - timeout kill + restart: record elapsed; target under 500 ms for kill acknowledgement and fresh handshake
 - reload: no full-document IPC and no client hot-path dependency
 
-These are design targets, not CI thresholds until stable runners exist.
-
 ## Migration Path
 
-1. Keep current in-process runtime for first-party packages.
-2. Add an internal sandbox supervisor harness that can start, handshake, evaluate a harmless fixture, kill on timeout, restart, and reject oversized output.
-3. Route selected first-party smoke requests through the harness behind an internal test feature or test-only entrypoint.
-4. Measure startup, package-load, parse, timeout, heap, and reload overhead.
-5. Write and approve a third-party runtime authority decision log.
-6. Only after approval, add non-`@clay/*` resolver/trust policy and execution path.
+1. Keep current in-process runtime for bundled packages while source-aware package loading is implemented.
+2. Keep internal sandbox supervisor harness that can start, handshake, evaluate a harmless fixture, kill on timeout, restart, and reject oversized output.
+3. Add runtime profile selection to package authorization records.
+4. Route selected smoke requests through the harness behind tests.
+5. Measure startup, package-load, parse, timeout, heap, and reload overhead.
+6. Generalize production routing for any package source once Plan 035 implements user authorization and package graph support.
 
 ## Minimal Harness Status
 
@@ -149,6 +128,5 @@ These are design targets, not CI thresholds until stable runners exist.
 
 ## Tests Required Before Implementation Completion
 
-- Design doc guard requires process boundary, bounded protocol, restart policy, parent-side validation, hot-path exclusion, denied authorities, and decision-log gate language.
-- `tests/runtime_sandbox_harness.rs` proves child start/evaluate, timeout kill/restart, oversized output rejection, and no filesystem/network/shell authority through the protocol.
-- Package-loading tests must continue proving non-`@clay/*` execution is blocked without an approved authority decision.
+- Design doc guard requires process boundary, bounded protocol, restart policy, parent-side validation, hot-path exclusion, runtime profiles, and user-authorized package source language.
+- `tests/runtime_sandbox_harness.rs` proves child start/evaluate, timeout kill/restart, oversized output rejection, and no filesystem/network/shell authority through the protocol by default.

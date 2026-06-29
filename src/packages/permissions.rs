@@ -8,6 +8,17 @@ pub enum PackagePermission {
     RenderDecorations,
     RenderFolding,
     CompletionProvider,
+    PackageControl,
+    PackageImport,
+    Filesystem,
+    Network,
+    Shell,
+    Wasm,
+    AiTools,
+    WorkspaceMutation,
+    NativeUi,
+    ClientRuntime,
+    RawOps,
 }
 
 impl PackagePermission {
@@ -21,6 +32,17 @@ impl PackagePermission {
             Self::RenderDecorations => "render-decorations",
             Self::RenderFolding => "render-folding",
             Self::CompletionProvider => "completion-provider",
+            Self::PackageControl => "package-control",
+            Self::PackageImport => "package-import",
+            Self::Filesystem => "filesystem",
+            Self::Network => "network",
+            Self::Shell => "shell",
+            Self::Wasm => "wasm",
+            Self::AiTools => "ai-tools",
+            Self::WorkspaceMutation => "workspace-mutation",
+            Self::NativeUi => "native-ui",
+            Self::ClientRuntime => "client-runtime",
+            Self::RawOps => "raw-ops",
         }
     }
 }
@@ -35,33 +57,25 @@ pub fn parse_permission(value: &str) -> Result<PackagePermission, PermissionVali
         "render-decorations" => Ok(PackagePermission::RenderDecorations),
         "render-folding" => Ok(PackagePermission::RenderFolding),
         "completion-provider" => Ok(PackagePermission::CompletionProvider),
-        prohibited if is_prohibited_authority(prohibited) => {
-            Err(PermissionValidationError::ProhibitedAuthority {
-                permission: prohibited.to_string(),
-            })
-        }
+        "package-control" => Ok(PackagePermission::PackageControl),
+        "package-import" => Ok(PackagePermission::PackageImport),
+        "filesystem" => Ok(PackagePermission::Filesystem),
+        "network" => Ok(PackagePermission::Network),
+        "shell" => Ok(PackagePermission::Shell),
+        "wasm" => Ok(PackagePermission::Wasm),
+        "ai-tools" => Ok(PackagePermission::AiTools),
+        "workspace-mutation" => Ok(PackagePermission::WorkspaceMutation),
+        "native-ui" => Ok(PackagePermission::NativeUi),
+        "client-runtime" => Ok(PackagePermission::ClientRuntime),
+        "raw-ops" => Ok(PackagePermission::RawOps),
         unknown => Err(PermissionValidationError::UnknownPermission {
             permission: unknown.to_string(),
         }),
     }
 }
 
-pub fn is_prohibited_authority(value: &str) -> bool {
-    matches!(
-        value,
-        "filesystem"
-            | "network"
-            | "shell"
-            | "ai-mutation"
-            | "remote-listener"
-            | "wasm-execution"
-            | "raw-deno-ops"
-            | "native-widget"
-            | "client-javascript"
-            | "package-installation"
-            | "package-enable-disable"
-            | "workspace-mutation"
-    )
+pub fn is_prohibited_authority(_value: &str) -> bool {
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

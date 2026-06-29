@@ -474,14 +474,17 @@ fn package_security_doc_covers_validation_conflicts_and_prohibitions() {
         "Duplicate mode name",
         "Same key binding",
         "Decoration range overlap",
-        "filesystem outside document content already open in Clay",
+        "Unified Package Trust and Authorization Policy",
+        "Package source (`@clay/*`, npm, GitHub, git URL, tarball, or local path)",
+        "source does not create a permanent first-party/third-party capability ceiling",
+        "Capability grants are explicit, visible, revocable",
+        "filesystem",
         "network",
         "shell",
-        "AI mutation",
-        "remote listeners",
-        "WASM execution",
-        "direct Masonry/widget mutation",
-        "Any future exception requires a new approved decision log",
+        "ai-tools",
+        "workspace-mutation",
+        "Powerful capabilities are allowed by user choice",
+        "direct Masonry mutation",
     ] {
         assert!(
             security.contains(required),
@@ -1409,7 +1412,8 @@ fn phase20_markdown_plan_assumes_generic_load_package_is_available() {
 
     // Plan 029 closed the former `loadPackage` gap. The review must record the
     // gap as closed, reject any Markdown-specific loader, and preserve the
-    // deny-by-default security rationale for the resolver.
+    // package-root confinement rationale while noting that Plan 035 supersedes
+    // the first-party-only implementation limit.
     for required in [
         "Generic Phase 18.5 Primitive Gaps — `loadPackage` (closed by Plan 029)",
         "Status (2026-06-16): CLOSED.",
@@ -1418,16 +1422,16 @@ fn phase20_markdown_plan_assumes_generic_load_package_is_available() {
         "Candidate public API target: `clay.packages.loadPackage` / `loadPackage(\"@clay/markdown\")`",
         "`runtime/js/packages.ts`",
         "`op_clay_packages_load_package_by_specifier` in `src/server/ops/packages.rs`",
-        "The resolver must remain deny-by-default for arbitrary external specifiers",
-        "Acceptable scope for a safe Phase 18.5 implementation is a constrained first-party resolver for `@clay/*` specifiers",
-        "External package resolution, package-manager execution, registry fetching, and arbitrary specifier expansion remain prohibited",
+        "first-party-only scope is superseded by the unified package authority decision",
+        "Plan 029 deliberately implemented a constrained `@clay/*` resolver for Phase 18.6",
+        "Plan 035 replaces it with source-aware loading for user-authorized packages",
         "No Markdown-specific loader primitive is proposed",
         "the Markdown package does not require a `MarkdownLoader`, `LoadMarkdown`, or any `if package == \"@clay/markdown\"` Rust branch",
         "Do not add `MarkdownLoader`, `MarkdownLoadEntry`, `MarkdownSidebar`, `MarkdownPreviewPanel`, `MarkdownModeDefault`, `MarkdownPanelVisibility`, `MarkdownPaneSelector`, or any `if mode == \"markdown\"` / `if package == \"@clay/markdown\"` Rust editor/parser/render/shell branch",
         "Do not implement the one-line loader as a Markdown-specific resolver",
         "Do not keep the inline package manifest object (`const markdownPackage = { ... }`), the manual per-facade registration imports",
         "Do not present `serverLoadPackage(packageJson)` as the ordinary end-user one-line setup",
-        "None of these primitives grant filesystem (outside already-open document content and the config root), network, shell, extension loading, AI mutation, workspace mutation, package installation/enable/disable, package-manager execution, WASM",
+        "None of these primitives grant filesystem (outside already-open document content and the config root), network, shell, extension loading, AI mutation, workspace mutation, package-control, package-manager execution, WASM",
     ] {
         assert!(
             review.contains(required),
@@ -1869,7 +1873,7 @@ fn creating_packages_docs_mark_examples_by_status() {
     let guide = creating_packages_guide();
 
     for required in [
-        "**Implemented/runtime-backed today:** `loadPackage(\"@clay/*\")` is the one-line end-user default.",
+        "**Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js`",
         "Current implemented package API status",
         "serverLoadPackage(packageJson)",
         "Implemented package-record validation helper",

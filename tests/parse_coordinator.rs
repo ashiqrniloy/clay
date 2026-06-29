@@ -611,6 +611,38 @@ async fn replacing_generation_cancels_old_in_flight_parse_work() {
 }
 
 #[tokio::test]
+async fn package_cancel_withdraws_handlers_and_in_flight_parse_work() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler_for_generation(
+            &package,
+            7,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                Ok(update(notification.document_version))
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(15)).unwrap();
+    coordinator.cancel_package("markdown");
+
+    assert_eq!(coordinator.stats().cancelled_superseded_tasks, 1);
+    assert!(matches!(
+        coordinator.schedule_parse(request(16)).unwrap_err(),
+        ParseCoordinatorError::HandlerNotRegistered { .. }
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), coordinator.next_update())
+            .await
+            .is_err(),
+        "package-scoped cancellation must not publish stale parse work"
+    );
+}
+
+#[tokio::test]
 async fn handler_failures_are_instrumented_after_generation_replacement() {
     let coordinator = ParseCoordinator::new();
     let package = package_with_permissions(&["parse-document"]);

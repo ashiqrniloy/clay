@@ -43,78 +43,79 @@ Required provenance checks at load time:
 4. Package-owned Clay JS API IDs must start with the package prefix; only first-party Clay APIs may use `clay.*` stable IDs.
 5. All accepted primitive records must retain `package_name`, `package_version`, `api_prefix`, and source contribution metadata for diagnostics, conflict handling, generated docs, and AI-agent provenance.
 
-## Third-Party Trust and Identity Policy
+## Unified Package Trust and Authorization Policy
 
-Non-`@clay/*` packages are untrusted by default. Clay metadata in `package.json` proves only that a package claims a Clay contract; it does not prove publisher identity, namespace ownership, source provenance, or runtime authority. Third-party runtime execution stays blocked until the package matches an explicit trust record and an approved authority decision grants the requested execution path.
+Clay uses one package authority model for Clay-shipped and user-installed packages. Package source (`@clay/*`, npm, GitHub, git URL, tarball, or local path) affects default trust prompts and provenance display, but not the capabilities a user can grant. Clay metadata in `package.json` declares the package contract and requested capabilities; user/admin authorization is the grant.
 
-A trusted third-party package identity must be exact and source-bound:
+Package identity and provenance should record enough source information to explain what the user approved:
 
 ```toml
-[[trusted_package]]
-name = "@vendor/example"
-version = "1.2.3"
-registry = "https://registry.npmjs.org/"
-integrity = "sha512-..."
-clay_prefix = "example"
-source_kind = "npm-registry"
-publisher = "vendor"
-clay_api_compatibility = "^0.1"
+[package_authority."@vendor/example"]
+source = "npm:@vendor/example@1.2.3"
+resolved_version = "1.2.3"
+package_root = "/clay/packages/node_modules/@vendor/example"
+api_prefix = "example"
+runtime_profile = "native-trust"
+capabilities = ["mode-registration", "package-control", "network"]
+approved_by = "user"
 ```
 
-Accepted source kinds are `npm-registry` first, with `local-path`, `tarball`, `git`, and `custom-registry` denied until a trust record explicitly names that source kind and a later decision approves the source-specific checks.
+Required install/enable/load behavior:
 
-Required install/enable/load checks:
+1. Install may accept npm, GitHub, git URL, tarball, and local path specs through the shared npm-compatible package-manager boundary.
+2. Install remains separate from enable/load: package-manager metadata and files do not automatically activate package behavior.
+3. Enable/load validates Clay metadata, `apiPrefix`, entry/loadEntry confinement, package graph declarations, requested capabilities, and conflicts before contributions become active.
+4. Source provenance is shown in diagnostics and approval prompts, but source does not create a permanent first-party/third-party capability ceiling.
+5. Capability grants are explicit, visible, revocable, and tied to package identity/source enough for users to understand what they approved.
+6. Package graph authority (`dependsOn`, `extends`, `disables`, `replaces`) requires matching package-control/import capabilities and deterministic conflict handling.
 
-1. `name` must exactly match the installed package name. Bare package names, custom scopes, URLs, local paths, tarballs, git sources, and registry aliases remain untrusted unless the trust record names that source kind explicitly.
-2. `version` must match the resolved installed version; version ranges are package-manager input only and are not runtime identity.
-3. `registry` or source location must match the package-manager provenance record; ambiguous local paths and registry redirects fail closed.
-4. `integrity` must match package-manager lockfile or resolved package metadata before the package can be treated as trusted.
-5. `clay_prefix` must equal `clay.apiPrefix`, pass the normal prefix validator, and remain unique among enabled packages.
-6. `publisher` or source owner must match the trusted source record when the package-manager can provide it; unknown publishers fail closed.
-7. `clay_api_compatibility` must match the running Clay API compatibility range before package runtime execution.
-8. Package-owned modes, commands, configuration keys, UI IDs, theme tokens, and API IDs must remain scoped to the trusted `clay_prefix`.
-9. Namespace hijacks, typosquats, unsigned or untrusted sources, conflicting prefixes, conflicting contribution IDs, and missing provenance records are rejected before runtime execution. The fail-closed set includes namespace hijacks, typosquats, unsigned or untrusted sources.
+Authorization work happens at install, enable, load, reload, startup, explicit user command, or background verification time. It must not run from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
 
-Trust records grant identity only. They do not grant filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, workspace mutation, package installation, or package enable/disable authority. Those authorities require separate explicit permissions, sandbox enforcement, tests, and an approved decision log.
+Current implementation: `PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`, contribution provenance, and deterministic conflict diagnostics. `PackageAuthorizationRecord` stores package identity/source, approved capability list, runtime profile, and approver. `PackageService::authorize_package` records user/admin grants, `enable` fails closed on requested capabilities without matching grants, and `PackageInspection` shows requested capabilities, approved capabilities, runtime profile, and source provenance. `validate_manifest_value` parses package graph declarations (`dependsOn`, `extends`, `disables`, `replaces`) into `PackageGraphRelations`; `src/packages/graph.rs` builds the enable-time graph plan; `PackageService::enable` loads dependency/extension targets, reports missing targets/cycles deterministically, and requires an explicit `package-control` authorization grant before `disables` or `replaces` can withdraw another enabled package. Remaining gaps are durable on-disk authorization persistence, package-scoped revocation indexes, package-import boundary enforcement, and conflict override/extend/replace resolution.
 
-Trust validation happens at install, enable, load, reload, or background verification time using cached package metadata and package-manager provenance. It must not run from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
+## Unified Package Capability Model
 
-Current implementation gap: `PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`, contribution provenance, and deterministic conflict diagnostics. They do not yet store trusted third-party source records, publisher identity, registry provenance, integrity evidence, or typosquat/namespace policy. Until those generic fields exist and are tested, non-`@clay/*` runtime execution remains denied.
-
-## Third-Party Permission Model
-
-Third-party permissions are narrow registration/request grants. They are not trust records, sandbox bypasses, raw host capabilities, or package-manager authority. A package must pass trust/integrity checks first, then request known permissions in `clay.permissions`:
+Packages request capabilities in Clay metadata; users/admins grant them. The manifest parser accepts `clay.capabilities` while preserving the older `clay.permissions` compatibility path; both feed the same `PackagePermission` vocabulary. Source may influence default prompts or pre-approval, but not the maximum authority available after approval.
 
 ```json
 {
   "clay": {
-    "permissions": ["mode-registration", "parse-document"]
+    "capabilities": ["mode-registration", "package-control", "network"],
+    "dependsOn": ["@clay/markdown"],
+    "extends": ["@clay/markdown"],
+    "disables": ["@clay/markdown"],
+    "replaces": []
   }
 }
 ```
 
-Initial third-party packages may request only the existing known package permissions:
+Initial target capability vocabulary:
 
-| Permission | Grants | Enforcement point |
+| Capability | Grants | Enforcement point |
 | --- | --- | --- |
 | `mode-registration` | Declare mode/classification metadata | enable/load manifest validation and mode registration |
 | `mode-activation` | Participate in server-owned mode activation | load/activation selection |
-| `command-registration` | Register inert command metadata | enable/load and command registration |
-| `package-configuration` | Declare or apply package-scoped configuration/layout defaults | enable/load, configuration API calls, and layout override validation |
-| `parse-document` | Run server-side parse work on parent-provided open document content/windows | parse handler registration and each parse request boundary |
-| `render-decorations` | Publish bounded inert decoration ranges | decoration publication validation |
+| `command-registration` | Register command metadata and handlers through Clay APIs | enable/load and command registration |
+| `package-configuration` | Declare or apply package-scoped configuration/layout defaults | enable/load, configuration API calls, layout validation |
+| `parse-document` | Run server-side parse work on Clay-provided document content/windows | parse handler registration and request boundary |
+| `render-decorations` | Publish bounded decoration ranges | decoration publication validation |
 | `render-folding` | Publish bounded folding ranges | folding/decorations publication validation |
 | `completion-provider` | Provide server-side completion results | provider registration and completion request boundary |
+| `package-control` | Disable, replace, extend, or configure other packages through package graph APIs | package graph evaluation, conflict resolution, enable/disable/reload |
+| `package-import` | Import/use another enabled package API/load surface | module resolution and package dependency validation |
+| `filesystem` | Access user-approved filesystem scopes through Clay APIs | filesystem API boundary and scope validator |
+| `network` | Make user-approved network requests through Clay APIs | network API boundary and policy validator |
+| `shell` | Run user-approved commands | shell API boundary, prompt, and audit log |
+| `wasm` | Load/run WASM modules | runtime profile, fuel/time/memory limits |
+| `ai-tools` | Invoke AI/tool orchestration or mutation APIs | AI API boundary and document/workspace locks |
+| `workspace-mutation` | Mutate workspace files/projects through Clay APIs | workspace API boundary and transaction validation |
+| `native-ui` | Use approved native UI/widget extension APIs | native UI API boundary |
+| `client-runtime` | Run approved client-side package code when implemented | client runtime boundary and UI safety validation |
+| `raw-ops` | Use explicitly exposed low-level ops for development/debugging | dev-mode/admin-only raw op boundary |
 
-Grant source is an explicit user/admin/decision-approved trust+permission record matched to package name, version, source, integrity, and `apiPrefix`; package manifest declarations are only requests. Runtime enforcement happens in the parent at load, registration, configuration, parse/completion/decorations request, and output-publication boundaries. Diagnostics must include package name, package version, `apiPrefix`, requested permission, grant source, primitive category, contribution ID or handler token when available, and failed rule, without raw source text or secrets.
-
-Broad or catch-all permission names are prohibited. Clay rejects `trusted-third-party`, `all`, `admin`, `system`, `host`, `runtime`, `raw-op`, `raw-deno-ops`, and unknown permission strings instead of treating them as aliases.
-
-Denied authorities stay denied for third-party packages unless a later approved decision grants one narrow capability with docs and tests: filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, workspace mutation, package installation, package enable/disable, raw `Deno.core.ops`, native handles, client-side JavaScript, and direct Masonry/widget mutation.
+Powerful capabilities are allowed by user choice, not categorically banned for non-`@clay/*` packages. They must have documented APIs, diagnostics, revocation behavior, and tests before implementation.
 
 Permission checks are install/enable/load/reload/registration/request/publication work only. They must not run from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
-
-Current implementation gap: `parse_permission` and manifest validation already accept only the known permission strings and reject prohibited authorities before enable/load succeeds. Third-party execution still needs a generic persisted grant source, trust-record match, parent-side sandbox request enforcement, and diagnostics that connect permission requests to approved grants. Until then, non-`@clay/*` runtime execution remains denied.
 
 ## Permission Requirements by Primitive Category
 
@@ -160,22 +161,29 @@ Clay must reject a package primitive contribution before it becomes active when 
 
 ## Conflict Handling
 
-Conflict handling must be deterministic and provenance-preserving. Conflicts produce load-time errors or documented resolution diagnostics; they must not silently override behavior.
+Conflict handling is deterministic, provenance-preserving, and policy-driven. `check_enabled_packages` still builds the canonical conflict index and reports duplicate/overlapping contributions with both package provenances. `PackageConflictResolutionPolicy` can then resolve a conflict only through explicit inputs:
+
+1. **User override:** documented user configuration selects the winning package for a contribution ID.
+2. **Package graph replacement/disable:** a package with a user-approved `package-control` grant may declare `replaces` or `disables`; `PackageService::enable` withdraws the target and records a `PackageConflictResolutionDiagnostic`.
+3. **Explicit priority/routing metadata:** key bindings with distinct priority/routing entries are non-conflicting; identical priority/routing falls back to the deterministic diagnostic.
+4. **Diagnostic fallback:** unresolved conflicts remain load-time errors. Clay never resolves by load order alone.
+
+Security rule: a package cannot override, replace, or disable another package without either explicit user conflict configuration or a user-approved `package-control` grant. Resolution runs only at enable/load/reload/package-control time; editor hot paths read already-resolved state.
 
 | Conflict | Required behavior |
 | --- | --- |
-| Duplicate package prefix | Reject enabling the second package with an actionable error. |
-| Duplicate mode name | Reject unless first-party metadata or a future decision log defines an override/alias policy. |
-| Duplicate command ID | Reject if the command ID has the same package prefix; reject cross-package duplicate IDs unless the ID is explicitly namespaced. |
-| Same key binding | Resolve only by declared priority and routing policy when both packages opt in; otherwise reject or disable the lower-priority binding with a visible diagnostic. |
-| Same text transform trigger | Preserve deterministic package/load order only when priorities are explicit; ambiguous transforms are rejected. |
+| Duplicate package prefix | Reject unless explicit user configuration selects a winner or a package-control `replaces`/`disables` relation withdraws the target. |
+| Duplicate mode name | Reject unless a documented user override or package-control replacement relation resolves the active owner. |
+| Duplicate command ID | Reject unless explicitly resolved; command IDs should normally remain package-prefixed. |
+| Same key binding | Distinct declared priority/routing entries are allowed; identical priority/routing is rejected unless user configuration selects a winner. |
+| Same text transform trigger | Reject unless future explicit priority metadata is schema-validated and tested. |
 | Decoration range overlap | Allow overlap only because decorations carry priority, package prefix, and style token; equal priority falls back to deterministic package order. |
-| SDUI region collision | Reject or require explicit region/slot priority; clients never merge arbitrary package widget code. |
-| Duplicate shell slot claim | Reject or require explicit slot priority/precedence metadata; packages never win by load order alone. |
-| Duplicate component or overlay ID | Reject unless the duplicate is the same package version replacing its own contribution through a documented update path. |
+| SDUI region collision | Reject unless explicit user configuration or future region/slot priority selects a winner. |
+| Duplicate shell slot claim | Reject unless explicit slot priority/precedence metadata is documented, schema-validated, bounded, and tested. |
+| Duplicate component or overlay ID | Reject unless package-control replacement/update withdraws the previous owner. |
 | Unknown style/theme token | Reject with package/token/source diagnostics; raw CSS/style strings are never treated as fallback tokens. |
 | Unsupported UI state scope | Reject hidden globals, ad hoc keys, or undeclared scopes before package UI state affects the shell. |
-| Configuration key collision | Reject unless keys are package-prefixed and scoped to the owning package. |
+| Configuration key collision | Reject unless explicit user configuration or package-control replacement selects the active owner. |
 
 ## Shell/Layout Precedence and Diagnostics
 
@@ -196,27 +204,34 @@ Required rejection categories for shell/layout declarations include duplicate sl
 
 No package wins a shell/layout conflict by load order alone. A later implementation may define explicit slot priority, stacking, z-order, or pane-selector rules, but those rules must be documented, schema-validated, bounded, and tested before use.
 
-## Prohibited Authorities by Default
+## Powerful Capabilities Require Explicit Grants
 
-No package primitive may claim these authorities by default:
+Powerful package capabilities require explicit user/admin grants and documented Clay APIs before use:
 
-- filesystem outside document content already open in Clay
-- network
-- shell
-- AI mutation
+- filesystem scopes
+- network access
+- shell commands
+- AI/tool orchestration or mutation
 - remote listeners
 - WASM execution
-- raw `Deno.core.ops`
-- direct Masonry/widget mutation
-- direct Masonry widget constructors
-- arbitrary GPU draw calls
+- raw `Deno.core.ops` or low-level debug ops
+- direct Masonry/widget/native UI extension APIs
 - native widget IDs or native widget handles
 - raw CSS, raw style strings, or HTML/script injection
-- client-side JavaScript
+- client-side package runtime
 - extension/package installation or enable/disable mutation
 - workspace mutation outside declared workspace APIs
 
-Any future exception requires a new approved decision log before a plan can implement it, plus explicit permissions, documentation-as-code coverage, tests, and load-time validation.
+These capabilities are not categorically unavailable to user-installed packages. They must be visible, revocable, provenance-preserving, documented, and tested before implementation.
+
+## Native UI and Client Runtime Are Explicit Capability/API Work
+
+Native UI and client-side package runtime are explicit capability and API work, never implicit through package source. A package does not receive native widget handles, direct Masonry mutation, raw CSS, client-side JavaScript, renderer callbacks, or native widget IDs merely because it was installed from npm, GitHub, git URL, tarball, or a local path.
+
+- The UI/layout authoring contract is identical for `@clay/*` packages and user-installed packages. `@clay/*` means shipped by Clay, not more capable; both package kinds contribute UI/layout through the same `clay:ui` facades, `PackageService` validation, shell/slot/precedence rules, and conflict-resolution policy. See [Creating Clay Packages — Unified UI/layout authoring contract](../packages/creating-packages.md#unified-uilayout-authoring-contract-across-package-sources).
+- `native-ui` (approved native UI/widget extension APIs) and `client-runtime` (approved client-side package code when implemented) are grantable capabilities in the unified vocabulary, but they are granted only through an explicit user/admin authorization record tied to package identity/source/provenance — never inferred from the package source kind.
+- A granted `native-ui` or `client-runtime` capability still requires a matching, documented, validated, revocable Clay API before the surface exists. A capability grant authorizes a package to use a surface; it does not materialize the surface or bypass Masonry/client safety validation. Native widget handles, client JavaScript, raw CSS/style strings, and renderer callbacks remain rejected until the corresponding API, validator, and tests ship.
+- No UI/layout/security primitive branches on package source. The capability, validation, conflict, revocation, and diagnostic paths are the same code regardless of whether a package was bundled by Clay or installed by a user.
 
 ## Hot-Path and Failure Policy
 

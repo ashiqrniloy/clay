@@ -16,7 +16,136 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
+const PACKAGE_MANAGER_DIAGNOSTIC_LIMIT: usize = 4 * 1024;
+
 // ── Backend trait ────────────────────────────────────────────────────────────
+
+/// Source family for a package spec delegated to the package manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageSourceKind {
+    ClayShipped,
+    NpmRegistry,
+    GitHub,
+    GitUrl,
+    Tarball,
+    LocalPath,
+}
+
+impl PackageSourceKind {
+    pub fn from_spec(spec: &str) -> Self {
+        let lower = spec.to_ascii_lowercase();
+        if spec.starts_with("@clay/") {
+            Self::ClayShipped
+        } else if lower.starts_with("github:") {
+            Self::GitHub
+        } else if lower.ends_with(".tgz") || lower.ends_with(".tar.gz") {
+            Self::Tarball
+        } else if lower.starts_with("git+")
+            || lower.ends_with(".git")
+            || lower.contains("github.com/")
+        {
+            Self::GitUrl
+        } else if lower.starts_with("file:")
+            || spec.starts_with("./")
+            || spec.starts_with("../")
+            || spec.starts_with('/')
+            || spec.starts_with('~')
+        {
+            Self::LocalPath
+        } else {
+            Self::NpmRegistry
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClayShipped => "clay-shipped",
+            Self::NpmRegistry => "npm",
+            Self::GitHub => "github",
+            Self::GitUrl => "git",
+            Self::Tarball => "tarball",
+            Self::LocalPath => "local-path",
+        }
+    }
+}
+
+/// Source/provenance captured at install or refresh time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageProvenance {
+    pub requested_spec: String,
+    pub source_kind: PackageSourceKind,
+    pub resolved_name: String,
+    pub resolved_version: String,
+    pub package_root: PathBuf,
+    pub lockfile_path: Option<PathBuf>,
+    pub integrity: Option<String>,
+    pub diagnostics: String,
+}
+
+impl PackageProvenance {
+    pub fn from_package_json(
+        requested_spec: &str,
+        package_json: &Value,
+        package_root: PathBuf,
+        diagnostics: impl AsRef<str>,
+    ) -> Self {
+        Self {
+            requested_spec: requested_spec.to_string(),
+            source_kind: PackageSourceKind::from_spec(requested_spec),
+            resolved_name: package_json
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(requested_spec)
+                .to_string(),
+            resolved_version: package_json
+                .get("version")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            package_root,
+            lockfile_path: None,
+            integrity: None,
+            diagnostics: sanitize_package_manager_diagnostics(diagnostics.as_ref()),
+        }
+    }
+}
+
+pub fn sanitize_package_manager_diagnostics(input: &str) -> String {
+    let mut output = String::new();
+    for line in input.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("token")
+            || lower.contains("password")
+            || lower.contains("authorization")
+            || lower.contains("auth=")
+            || lower.contains("_auth")
+        {
+            if output.len() + "[redacted package-manager diagnostic]\n".len()
+                > PACKAGE_MANAGER_DIAGNOSTIC_LIMIT
+            {
+                break;
+            }
+            output.push_str("[redacted package-manager diagnostic]\n");
+            continue;
+        }
+        let remaining = PACKAGE_MANAGER_DIAGNOSTIC_LIMIT.saturating_sub(output.len());
+        if remaining == 0 {
+            break;
+        }
+        if line.len() + 1 > remaining {
+            for ch in line.chars() {
+                if output.len() + ch.len_utf8() > remaining {
+                    break;
+                }
+                output.push(ch);
+            }
+            break;
+        }
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.trim_end().to_string()
+}
 
 /// Result of delegating a `pnpm add` / `npm install`-equivalent operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +170,24 @@ pub struct DiscoveredPackage {
     pub package_json: Value,
     /// Resolved path to the package root on disk.
     pub package_root: PathBuf,
+    /// Source/provenance captured during install or refresh discovery.
+    pub provenance: PackageProvenance,
+}
+
+impl DiscoveredPackage {
+    pub fn new(requested_spec: &str, package_json: Value, package_root: PathBuf) -> Self {
+        let provenance = PackageProvenance::from_package_json(
+            requested_spec,
+            &package_json,
+            package_root.clone(),
+            "package discovery",
+        );
+        Self {
+            package_json,
+            package_root,
+            provenance,
+        }
+    }
 }
 
 /// Typed error from a backend operation.
@@ -257,9 +404,27 @@ impl PackageManagerBackend for PnpmBackend {
                         if let Ok(text) = std::fs::read_to_string(&package_json_path)
                             && let Ok(value) = serde_json::from_str::<Value>(&text)
                         {
+                            let requested_spec = dep
+                                .get("from")
+                                .or_else(|| dep.get("resolved"))
+                                .or_else(|| dep.get("name"))
+                                .and_then(Value::as_str)
+                                .or_else(|| value.get("name").and_then(Value::as_str))
+                                .unwrap_or(path);
+                            let diagnostics = dep
+                                .get("resolved")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            let provenance = PackageProvenance::from_package_json(
+                                requested_spec,
+                                &value,
+                                package_root.clone(),
+                                diagnostics,
+                            );
                             packages.push(DiscoveredPackage {
                                 package_json: value,
                                 package_root,
+                                provenance,
                             });
                         }
                     }
@@ -294,9 +459,17 @@ impl FakeBackend {
 
     /// Configure a successful install for a package spec with a given `package.json` value.
     pub fn will_install(mut self, package_spec: &str, package_json: Value) -> Self {
+        let package_root = PathBuf::from(format!("/fake/store/{package_spec}"));
+        let provenance = PackageProvenance::from_package_json(
+            package_spec,
+            &package_json,
+            package_root.clone(),
+            format!("Packages: +1\n{package_spec}\n"),
+        );
         self.list_results.push(DiscoveredPackage {
             package_json: package_json.clone(),
-            package_root: PathBuf::from(format!("/fake/store/{package_spec}")),
+            package_root,
+            provenance,
         });
         self.install_results.insert(
             package_spec.to_string(),

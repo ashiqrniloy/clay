@@ -4,7 +4,7 @@
 //! sorted contribution indices from the enabled package set and returns the
 //! first deterministic, provenance-preserving diagnostic; it never silently
 //! overrides package behavior.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::packages::record::PackageRecord;
 
@@ -46,7 +46,7 @@ pub struct PackageConflictProvenance {
 }
 
 impl PackageConflictProvenance {
-    fn from_record(record: &PackageRecord) -> Self {
+    pub(crate) fn from_record(record: &PackageRecord) -> Self {
         Self {
             package_name: record.manifest.name.clone(),
             package_version: record.manifest.version.clone(),
@@ -62,6 +62,109 @@ impl std::fmt::Display for PackageConflictDiagnostic {
 }
 
 impl std::error::Error for PackageConflictDiagnostic {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageConflictResolutionDiagnostic {
+    pub contribution_id: Box<str>,
+    pub winner: PackageConflictProvenance,
+    pub loser: PackageConflictProvenance,
+    pub reason: PackageConflictResolutionReason,
+    pub message: Box<str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageConflictResolutionReason {
+    UserOverride,
+    PackageReplaces,
+    PackageDisables,
+}
+
+impl PackageConflictResolutionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UserOverride => "user-override",
+            Self::PackageReplaces => "package-replaces",
+            Self::PackageDisables => "package-disables",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageConflictResolutionPolicy {
+    user_overrides: BTreeMap<String, String>,
+}
+
+impl PackageConflictResolutionPolicy {
+    pub fn set_user_override(
+        &mut self,
+        contribution_id: impl Into<String>,
+        winner: impl Into<String>,
+    ) {
+        self.user_overrides
+            .insert(contribution_id.into(), winner.into());
+    }
+
+    pub fn user_override_winner(&self, contribution_id: &str) -> Option<&str> {
+        self.user_overrides.get(contribution_id).map(String::as_str)
+    }
+}
+
+pub fn check_enabled_packages_with_policy<'a>(
+    enabled: impl IntoIterator<Item = &'a PackageRecord>,
+    policy: &PackageConflictResolutionPolicy,
+) -> Result<Vec<PackageConflictResolutionDiagnostic>, PackageConflictDiagnostic> {
+    let mut records: Vec<&PackageRecord> = enabled.into_iter().collect();
+    let mut resolutions = Vec::new();
+
+    loop {
+        match check_enabled_packages(records.iter().copied()) {
+            Ok(()) => return Ok(resolutions),
+            Err(conflict) => {
+                let Some(winner) = policy.user_override_winner(&conflict.contribution_id) else {
+                    return Err(conflict);
+                };
+                let loser = if conflict.first.package_name == winner {
+                    conflict.second.package_name.clone()
+                } else if conflict.second.package_name == winner {
+                    conflict.first.package_name.clone()
+                } else {
+                    return Err(conflict);
+                };
+                records.retain(|record| record.manifest.name != loser);
+                resolutions.push(PackageConflictResolutionDiagnostic {
+                    contribution_id: conflict.contribution_id.clone(),
+                    winner: if conflict.first.package_name == winner {
+                        (*conflict.first).clone()
+                    } else {
+                        (*conflict.second).clone()
+                    },
+                    loser: if conflict.first.package_name == loser {
+                        (*conflict.first).clone()
+                    } else {
+                        (*conflict.second).clone()
+                    },
+                    reason: PackageConflictResolutionReason::UserOverride,
+                    message: format!(
+                        "user conflict override selected `{winner}` for `{}` and disabled `{loser}`",
+                        conflict.contribution_id
+                    )
+                    .into_boxed_str(),
+                });
+            }
+        }
+    }
+}
+
+pub fn unresolved_conflict_after_removing_records<'a>(
+    enabled: impl IntoIterator<Item = &'a PackageRecord>,
+    removed: &BTreeSet<String>,
+) -> Result<(), PackageConflictDiagnostic> {
+    check_enabled_packages(
+        enabled
+            .into_iter()
+            .filter(|record| !removed.contains(&record.manifest.name)),
+    )
+}
 
 /// Check all enabled package records for deterministic conflicts.
 pub fn check_enabled_packages<'a>(
@@ -133,14 +236,14 @@ pub fn check_enabled_packages<'a>(
                 );
                 insert_unique(
                     &mut key_bindings,
-                    key_id,
+                    key_id.clone(),
                     prov.clone(),
                     PackageConflictKind::AmbiguousKeyBinding,
                     "ambiguous key binding across packages without a distinct priority/routing policy",
                 )?;
                 insert_unique(
                     &mut behavior_entries,
-                    format!("key:{}", binding),
+                    format!("key:{key_id}"),
                     prov.clone(),
                     PackageConflictKind::BehaviorManifestEntryCollision,
                     "duplicate behavior manifest key binding entry",

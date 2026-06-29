@@ -106,7 +106,7 @@ Phase 19 reviewed persistent runtime hot reload and did **not** promote a new us
 
 The only end-user configuration entry point remains normal `~/.config/clay/init.js` JavaScript. Reload rebuilds a fresh runtime generation and re-evaluates that same `init.js`; it does not introduce hidden JSON/TOML/ad hoc keys such as `hotReload`, `hot_reload`, `reloadOnSave`, `autoReload`, `reloadPackages`, or `reloadConfiguration`. If a future user-facing reload command or setting is added, it must be represented as a documented Clay JS API with registry metadata, key binding/custom-property coverage, hot-path policy, examples, diagnostics, and security notes.
 
-Configuration evaluation remains startup or explicit developer-triggered reload work only. Ordinary typing, keypress routing, edit acknowledgement, Masonry paint/layout, pointer handling, scroll, selected-file open, parse scheduling, parse-result publication, and decoration rendering do not execute configuration JavaScript or check reload settings. The reload primitive reuses the existing configuration root, first-party `@clay/*` package loader, deny-by-default module resolution, sanitized diagnostics, and generation swap fallback; it grants no package-manager, arbitrary filesystem, network, shell, extension loading, third-party package, AI mutation, workspace expansion, WASM, raw-op, client-side JavaScript, or native widget authority.
+Configuration evaluation remains startup or explicit developer-triggered reload work only. Ordinary typing, keypress routing, edit acknowledgement, Masonry paint/layout, pointer handling, scroll, selected-file open, parse scheduling, parse-result publication, and decoration rendering do not execute configuration JavaScript or check reload settings. The reload primitive reuses the existing configuration root, current `@clay/*` package loader implementation, module loading through recorded package allowlist entries, sanitized diagnostics, and generation swap fallback; it grants no package-manager, arbitrary filesystem, network, shell, extension loading, package-control, AI mutation, workspace expansion, WASM, raw-op, client-side JavaScript, or native widget authority beyond user-approved package capabilities.
 
 ## Phase 19 Windows open-dialog configuration review
 
@@ -142,7 +142,7 @@ Markdown need → Clay JS API mapping:
 | Markdown mode activation preference | `clay.configuration.setModePreference` | planned (unavailable) | n/a |
 | Markdown decoration theme preference | `clay.configuration.setDecorationTheme` | planned (unavailable) | n/a |
 | Markdown parse policy (timeout, windows, memory budget) | `clay.configuration.setParsePolicy` | planned (unavailable); parse-handler policy fields are validated through [`clay.parse.serverRegisterParseHandler`](parse/server-register-parse-handler.md) | n/a |
-| One-line package loading | `clay.packages.loadPackage` | implemented (Plan 029, Phase 18.6); constrained to first-party `@clay/*` packages only; see `decision-logs/2026-06-15-1015-defer-generic-loadpackage-first-party-resolver.md` for the authority rationale | n/a |
+| One-line package loading | `clay.packages.loadPackage` | implemented (Plan 029, Phase 18.6; Plan 035 generalizes to source-aware loading of bundled and installed user-authorized packages); see `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model | n/a |
 
 Markdown-specific hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through one of the documented APIs above with the package-owned prefix and a supported option/property name:
 
@@ -183,6 +183,41 @@ await publishTree(
 
 Configuration can customize documented Clay behavior through Clay JS APIs. It must not implicitly grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority. Modular loading is constrained to local configuration files under the configuration root; it is not a package manager, extension loader, workspace scanner, network fetcher, shell runner, or client-side JavaScript execution hook. Permission-bearing APIs still require explicit documented permissions and server-side validation.
 
+## Plan 035 unified package authority configuration review
+
+Plan 035 unified first-party and third-party package authority. The configuration-relevant surfaces are user authorization/capability grants, runtime profile choices, package graph relations, package-control overrides, and conflict resolution overrides. Each must be a documented Clay JS/config API or explicitly documented CLI/UI state — never a hidden JSON/TOML/ad hoc key.
+
+Unified package authority configuration surfaces:
+
+| Surface | Current status | Surface / API | Custom properties |
+|---|---|---|---|
+| User authorization / capability grants | Rust primitive implemented (`PackageService::authorize_package`); no callable end-user JS/CLI surface yet — planned | `clay.packages.authorize` (planned inventory entry, `registry_public = false`) | `package`, `capabilities`, `runtimeProfile`, `source`, `approvedBy` |
+| Runtime profile selection | Rust primitive implemented (`RuntimeProfile` enum); bound to the authorization grant | `clay.packages.authorize` `runtimeProfile` parameter | `runtimeProfile:enum=native-trust\|sandboxed\|restricted` |
+| User conflict override | Rust primitive implemented (`PackageService::set_conflict_override`); no callable end-user JS/CLI surface yet — planned | `clay.packages.setConflictOverride` (planned inventory entry, `registry_public = false`) | `contributionId`, `winnerPackage` |
+| Package graph relations (`dependsOn`/`extends`/`disables`/`replaces`) | Manifest-declared by package authors; validated and evaluated at enable/load/reload time | `package.json` `clay.dependsOn`/`clay.extends`/`clay.disables`/`clay.replaces` arrays | manifest metadata, not `init.js` configuration |
+| Package-control (`disables`/`replaces`) authority | Requires explicit `package-control` capability grant; fails closed with `MissingPackageControlGrant` | `clay.capabilities`/`clay.permissions` manifest array | capability string `package-control` |
+| Bundled package auto-authorization | Implemented: the `loadPackage` resolver auto-authorizes bundled `@clay/*` packages with `native-trust` and `approvedBy = "clay-bundled-default"` | internal to resolver; not an `init.js` key | n/a |
+| Authorization inspection | Implemented: `inspect` reports `requestedCapabilities`, `approvedCapabilities`, and `runtimeProfile` | `clay package inspect <name>` CLI | CLI state, not `init.js` configuration |
+
+The intended end-user authorization shape is:
+
+```javascript
+import { authorize } from "clay:packages"; // planned, not yet callable
+
+await authorize({
+  package: "@vendor/foo",
+  capabilities: ["network"],
+  runtimeProfile: "sandboxed",
+  approvedBy: "user",
+});
+```
+
+Until the `clay.packages.authorize` and `clay.packages.setConflictOverride` facades/CLI commands ship, the only current grant path is the bundled-package auto-authorization inside the resolver, plus the Rust primitives exercised by tests. A user-installed package that requests a powerful capability (filesystem, network, shell, wasm, ai-tools, workspace-mutation, native-ui, client-runtime, raw-ops, package-control) cannot currently be granted through an end-user surface — enable fails closed with `MissingCapabilityGrant`. This is a documented implementation gap, not a hidden configuration shortcut; there is no `allowThirdPartyPackages`, `trusted`, `grant`, or capability-grant JSON/TOML key in `init.js`.
+
+`@clay/*` means shipped by Clay, not more capable. The configuration surfaces above apply identically to bundled and user-installed packages; no config primitive branches on package source. Capability grants can grant powerful capabilities only through the explicit authorization flow above, with provenance (package identity/source/version/integrity), visibility (inspectable grants), and revocation (`disable`/`revoke` withdraws the grant and its contributions through `PackageRevocationRecord`).
+
+Configuration evaluation for unified package authority is startup/install/enable/load/reload/explicit-user-command work only. Grant lookup at the enable/load/registration/request boundary is a cheap check against already-loaded authorization state. No source resolution, package-manager call, authorization prompt, grant recording, graph traversal, conflict resolution, or capability evaluation runs from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the authority model.
+
 ## Plan 030 security budgets are intentionally not Clay JS APIs
 
 Plan 030 (code-review remediation) hardened several server-side limits. These are **security boundaries**, not user configuration, so they are intentionally **not** exposed as `clay:configuration` APIs and cannot be raised, lowered, or disabled from `init.js`. Raising any of them from user JavaScript would undermine the very boundary it enforces (e.g. a malicious `init.js` could lift the JS evaluation timeout to defeat the watchdog, or raise the openable-file ceiling to exhaust memory). They are compiled into the server binary in `src/perf/budgets.rs` and reviewed through code review and decisions rather than tuned at runtime.
@@ -203,8 +238,8 @@ Plan 034 added first-party runtime hardening and a minimal separate-process sand
 - **Heap guard** — `JS_RUNTIME_HEAP_LIMIT_BYTES` remains a compiled budget. `clay.runtime.heap_limit` is a diagnostic code, not a callable configuration API.
 - **Timeout guard** — `JS_RUNTIME_EVALUATION_TIMEOUT_MS` remains a compiled budget. `clay.runtime.timeout` is a diagnostic code, not a mutable setting.
 - **Sandbox supervision** — sandbox child spawn, handshake, payload budget, timeout kill, and restart policy are internal supervisor behavior. There is no `setSandboxDisabled`, `setSandboxTimeout`, or `enableSandboxBypass` configuration surface.
-- **Denied authorities** — filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget handles, raw-op access, client-side JavaScript, and third-party package execution remain denied by policy. `init.js` cannot grant them.
-- **Third-party execution gate** — non-`@clay/*` package execution still requires a separate approved authority decision after the trust, registry/integrity, permissions, rollback, and tests work in `plans/035-Third-Party-Package-Runtime-Authority-Policy.md`. There is no `enableThirdPartyPackages` or `allowThirdPartyPackages` configuration shortcut.
+- **Denied authorities** — filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget handles, raw-op access, and client-side JavaScript remain powerful capabilities that require explicit user-authorized grants under the unified package authority model. They are not categorically denied for non-`@clay/*` packages, but they are never granted implicitly from `init.js`; they flow only through the documented [`clay.packages.authorize`](#plan-035-unified-package-authority-configuration-review) surface with provenance and revocation.
+- **Third-party execution gate** — non-`@clay/*` packages now load through the same source-aware `loadPackage` resolver as bundled packages after install and user authorization (see Plan 035). There is no `enableThirdPartyPackages` or `allowThirdPartyPackages` configuration shortcut; capability grants are explicit, visible, and revocable per-package.
 
 Configuration evaluation remains startup, package-load, reload, or explicit setting-change work. Ordinary keypress, paint, layout, scroll, edit acknowledgement, text-event handling, parse-result publication, and decoration rendering paths do not execute configuration JavaScript, wait on sandbox round trips, or re-check runtime hardening knobs.
 

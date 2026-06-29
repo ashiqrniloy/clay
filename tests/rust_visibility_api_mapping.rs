@@ -161,6 +161,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/decorations.rs::validate_decoration_publication",
         "src/server/decorations.rs::validate_decoration_set",
         "src/server/parse_coordinator.rs::ParseCoordinator::cancel_generation",
+        "src/server/parse_coordinator.rs::ParseCoordinator::cancel_package",
         "src/server/parse_coordinator.rs::ParseCoordinator::new",
         "src/server/parse_coordinator.rs::ParseCoordinator::next_update",
         "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
@@ -622,4 +623,54 @@ fn file_dialog_unsafe_blocks_have_safety_comments() {
          `// SAFETY:` comment stating its invariant (Plan 030 P3-2); missing at
          lines: {missing:?}"
     );
+}
+
+#[test]
+fn plan_035_unified_package_authority_public_surfaces_are_mapped_or_internal() {
+    // Plan 035 introduces package-source provenance, user authorization,
+    // package graph relations, conflict resolution, and package-scoped
+    // revocation. Public server/package Rust primitives that are intended as
+    // future Clay JS APIs must be mapped in the inventory; internal primitives
+    // must be explicitly allowlisted.
+    let inventory_text = inventory_rust_mapping_text();
+
+    // Public package-management capabilities planned as Clay JS APIs.
+    for mapped in [
+        "op_clay_packages_install",
+        "op_clay_packages_enable",
+        "op_clay_packages_disable",
+        "op_clay_packages_inspect",
+        "op_clay_packages_list",
+        "op_clay_packages_authorize",
+        "op_clay_packages_set_conflict_override",
+        "runtime/js/packages.ts::install",
+        "runtime/js/packages.ts::enable",
+        "runtime/js/packages.ts::disable",
+        "runtime/js/packages.ts::inspect",
+        "runtime/js/packages.ts::list",
+        "runtime/js/packages.ts::authorize",
+        "runtime/js/packages.ts::setConflictOverride",
+        "src/packages/conflict.rs::PackageConflictResolutionPolicy",
+        "src/packages/conflict.rs::PackageConflictResolutionDiagnostic",
+        "src/packages/conflict.rs::PackageConflictResolutionReason",
+    ] {
+        assert!(
+            inventory_text.contains(mapped),
+            "Plan 035 intended public programmatic surface {mapped} must be mapped in api-inventory.toml"
+        );
+    }
+
+    // Internal revocation/primitive helpers that are not user-facing APIs.
+    let internal_primitives: std::collections::BTreeSet<&str> = [
+        "src/server/parse_coordinator.rs::ParseCoordinator::cancel_package",
+        "src/server/js_runtime.rs::PackageLoadEntryAllowlist::revoke_package",
+    ]
+    .into_iter()
+    .collect();
+    for internal in internal_primitives {
+        assert!(
+            !inventory_text.contains(internal),
+            "{internal} is an internal primitive helper and must not be mapped as a user-facing Clay JS API"
+        );
+    }
 }

@@ -1483,7 +1483,7 @@ status = "runtime-backed"
 js_module = "clay:packages"
 js_export = "loadPackage"
 user_facing_name = "Load Package by Specifier"
-authority = "constrained-first-party-load-runtime"
+authority = "source-aware-user-authorized-package-load-runtime"
 runtime_path = "server-side-package-validation-and-load-entry-execution"
 hot_path_policy = "Package loading, enabling, and load-entry execution are startup/load/configuration-time work only; no package JavaScript runs in keypress, paint, layout, IPC, or text-event handlers."
 facade_path = "runtime/js/packages.ts::loadPackage"
@@ -1494,6 +1494,167 @@ documentation_path = "docs/reference/clay-js-api/packages/load-package.md"
 key_bindings = []
 custom_properties = ["specifier:string=required"]
 permissions = []
-security_notes = "Constrained first-party load authority only. Deny-by-default for non-@clay/* specifiers, unallowlisted clay://packages/... URLs, and any external import. The resolver reuses the package-service enable path (assemble_package_record + check_enabled_packages) so invalid metadata and conflicting packages are rejected before activation. The module loader is deny-by-default and only accepts a validated loadEntry recorded by the resolver in a shared allowlist. The loadEntry is confined to the validated package root for its own imports. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or package enable/disable authority. Non-@clay/* registry resolution and package-manager authority are deferred to Phase 23 ecosystem hardening."
+security_notes = "Resolves bundled and installed user-authorized package specifiers through the same PackageService path. The resolver reuses package-service enable validation (assemble_package_record + authorization checks + check_enabled_packages) so invalid metadata, missing grants, and unresolved conflicts are rejected before activation. The module loader only accepts validated loadEntry modules recorded by the resolver in PackageLoadEntryAllowlist, and loadEntry/transitive imports stay confined to the validated package root. Loading a package does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or package-control authority unless those capabilities are separately implemented and user-approved."
 current_rust_owner = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load"
 registry_public = true
+
+[[api]]
+id = "clay.packages.authorize"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "authorize"
+user_facing_name = "Authorize Package Capabilities and Runtime Profile"
+authority = "user-authorized-package-capability-grant"
+runtime_path = "server-side-package-authorization-grant-planned"
+hot_path_policy = "Capability authorization grants are install/enable/load/reload/explicit-user-command work only; grant lookup at enable/load/registration/request boundaries is a cheap check against already-loaded authorization state and never runs from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::authorize"
+backing_rust = "src/packages/authorization.rs::PackageAuthorizationRecord; src/packages/authorization.rs::RuntimeProfile; src/packages/service.rs::PackageService::authorize_package"
+deno_op = "op_clay_packages_authorize"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_authorize"
+documentation_path = "docs/reference/clay-js-api/packages/authorize.md"
+key_bindings = []
+custom_properties = ["package:string=required", "capabilities:string[]=requested capabilities", "runtimeProfile:enum=native-trust|sandboxed|restricted=native-trust", "source:string=optional provenance match", "approvedBy:string=user|admin|decision"]
+permissions = []
+security_notes = "Records an explicit user/admin capability grant and runtime profile against a package identity/source/provenance. Bundled @clay/* packages are auto-authorized with native-trust by the loadPackage resolver; user-installed packages requesting powerful capabilities (filesystem, network, shell, wasm, ai-tools, workspace-mutation, native-ui, client-runtime, raw-ops, package-control) require this explicit grant before enable succeeds (MissingCapabilityGrant otherwise). Grants are visible, revocable, provenance-preserving, and fail-closed when absent. This is the documented surface for capability grants; hidden JSON/TOML/ad hoc keys cannot grant capabilities. The grant authorizes a package to use separately-implemented documented APIs; it does not materialize surfaces or bypass Masonry/client validation."
+current_rust_owner = "planned: src/packages/authorization.rs; src/packages/service.rs::PackageService::authorize_package"
+registry_public = false
+
+[[api]]
+id = "clay.packages.setConflictOverride"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "setConflictOverride"
+user_facing_name = "Set User Conflict Override"
+authority = "user-authorized-conflict-resolution"
+runtime_path = "server-side-conflict-resolution-override-planned"
+hot_path_policy = "Conflict override resolution is enable/load/reload/explicit-user-command work only; the request/publication boundary performs cheap checks against already-loaded resolution state and never runs from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::setConflictOverride"
+backing_rust = "src/packages/conflict.rs::PackageConflictResolutionPolicy; src/packages/conflict.rs::PackageConflictResolutionDiagnostic; src/packages/conflict.rs::PackageConflictResolutionReason; src/packages/service.rs::PackageService::set_conflict_override"
+deno_op = "op_clay_packages_set_conflict_override"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_set_conflict_override"
+documentation_path = "docs/reference/clay-js-api/packages/set-conflict-override.md"
+key_bindings = []
+custom_properties = ["contributionId:string=required", "winnerPackage:string=required"]
+permissions = []
+security_notes = "Records an explicit user-selected winner for a package contribution conflict by contribution ID. Resolves duplicate-prefix/duplicate-mode/duplicate-command/ambiguous-keybinding/collision conflicts through the documented PackageConflictResolutionPolicy instead of load order; losers are withdrawn through the package-scoped revocation path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, package-control, or package enable/disable authority; it only selects which already-authorized contribution wins a conflict."
+current_rust_owner = "planned: src/packages/conflict.rs; src/packages/service.rs::PackageService::set_conflict_override"
+registry_public = false
+
+[[api]]
+id = "clay.packages.install"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "install"
+user_facing_name = "Install Package"
+authority = "user-authorized-package-install"
+runtime_path = "server-side-package-install-planned"
+hot_path_policy = "Install and source discovery are install/enable/load/reload/explicit-user-command work only; no package-manager call or source resolution runs from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::install"
+backing_rust = "planned: src/server/ops/packages.rs::op_clay_packages_install"
+deno_op = "op_clay_packages_install"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_install"
+documentation_path = "docs/reference/clay-js-api/packages/install.md"
+key_bindings = []
+custom_properties = ["specifier:string=required", "options:object=optional install options"]
+permissions = []
+security_notes = "Delegates fetching/resolution/lockfiles/integrity to the npm-compatible package manager and records PackageSource provenance. Does not run package load-entry or activate capabilities. Installation source metadata is diagnostic-only and never becomes runtime authority. Requires explicit user authorization before installed packages can be enabled/loaded. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, or package-control authority beyond the package-manager delegation itself."
+current_rust_owner = "planned: src/packages/service.rs"
+registry_public = false
+
+[[api]]
+id = "clay.packages.enable"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "enable"
+user_facing_name = "Enable Package"
+authority = "user-authorized-package-enable"
+runtime_path = "server-side-package-enable-planned"
+hot_path_policy = "Enable, graph evaluation, authorization checks, and conflict resolution are enable/load/reload/explicit-user-command work only; they never run from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::enable"
+backing_rust = "planned: src/server/ops/packages.rs::op_clay_packages_enable"
+deno_op = "op_clay_packages_enable"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_enable"
+documentation_path = "docs/reference/clay-js-api/packages/enable.md"
+key_bindings = []
+custom_properties = ["packageName:string=required"]
+permissions = []
+security_notes = "Enables an installed package after validating its manifest, source-aware provenance, user authorization grants, and package graph relations (dependsOn/extends/disables/replaces). Fails closed with MissingCapabilityGrant if the package requests capabilities the user has not authorized. Replaces/disables actions require an explicit package-control capability grant. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or package-control authority unless those capabilities are separately implemented and user-approved."
+current_rust_owner = "planned: src/packages/service.rs"
+registry_public = false
+
+[[api]]
+id = "clay.packages.disable"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "disable"
+user_facing_name = "Disable Package"
+authority = "user-authorized-package-disable"
+runtime_path = "server-side-package-disable-revoke-planned"
+hot_path_policy = "Disable/revoke and contribution withdrawal are enable/load/reload/explicit-user-command work only; they never run from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::disable"
+backing_rust = "planned: src/server/ops/packages.rs::op_clay_packages_disable"
+deno_op = "op_clay_packages_disable"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_disable"
+documentation_path = "docs/reference/clay-js-api/packages/disable.md"
+key_bindings = []
+custom_properties = ["packageName:string=required"]
+permissions = []
+security_notes = "Disables an enabled package, increments its package generation, records a PackageRevocationRecord with withdrawn contribution counts, cancels parse handlers by package prefix, and revokes module load entries owned by the package. Withdraws all contributions registered by the package through the package-scoped revocation path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, package-control, or package enable/disable authority beyond the single named disable operation."
+current_rust_owner = "planned: src/packages/service.rs"
+registry_public = false
+
+[[api]]
+id = "clay.packages.inspect"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "inspect"
+user_facing_name = "Inspect Package"
+authority = "package-inspection"
+runtime_path = "server-side-package-inspection-planned"
+hot_path_policy = "Inspection is a cheap read against already-loaded package state and runs at user-command/background-audit time; it never blocks keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::inspect"
+backing_rust = "planned: src/server/ops/packages.rs::op_clay_packages_inspect"
+deno_op = "op_clay_packages_inspect"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_inspect"
+documentation_path = "docs/reference/clay-js-api/packages/inspect.md"
+key_bindings = []
+custom_properties = ["packageName:string=required"]
+permissions = []
+security_notes = "Returns package metadata, provenance, requested capabilities, approved capabilities, runtime profile, enabled status, and graph relations for an installed or bundled package. Read-only; does not mutate package state or grant any authority. Exposes authorization state so users can audit and revoke grants."
+current_rust_owner = "planned: src/packages/service.rs"
+registry_public = false
+
+[[api]]
+id = "clay.packages.list"
+category = "package-loading"
+visibility = "public"
+status = "planned"
+js_module = "clay:packages"
+js_export = "list"
+user_facing_name = "List Packages"
+authority = "package-listing"
+runtime_path = "server-side-package-list-planned"
+hot_path_policy = "Listing is a cheap read against already-loaded package state and runs at user-command/background-audit time; it never blocks keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths."
+facade_path = "planned: runtime/js/packages.ts::list"
+backing_rust = "planned: src/server/ops/packages.rs::op_clay_packages_list"
+deno_op = "op_clay_packages_list"
+deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_list"
+documentation_path = "docs/reference/clay-js-api/packages/list.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Returns the list of installed/bundled packages with their provenance, authorization, and enabled status. Read-only; does not mutate package state or grant any authority."
+current_rust_owner = "planned: src/packages/service.rs"
+registry_public = false

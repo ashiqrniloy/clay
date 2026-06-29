@@ -64,7 +64,7 @@ use self::{
     workspace::op_clay_workspace_list_roots,
 };
 
-pub(crate) use self::packages::FirstPartyLoadEntryAllowlist;
+pub(crate) use self::packages::PackageLoadEntryAllowlist;
 
 /// Server-owned state shared with explicit Clay JavaScript ops.
 struct ClayRuntimeContext {
@@ -85,13 +85,12 @@ pub(crate) struct ClayOpState {
     commands: Mutex<crate::packages::commands::CommandRegistry>,
     ui: Mutex<crate::server::ui::PackageUiRegistry>,
     runtime_context: Mutex<ClayRuntimeContext>,
-    // ponytail: PackageService reuse for the first-party resolver op. The store
-    // root and FakeBackend are never used by the resolver (it reads first-party
-    // packages from CARGO_MANIFEST_DIR/packages); only the validate/enable path
-    // (assemble_package_record + check_enabled_packages) is exercised. Upgrade
-    // path: a real on-disk registry/installer when non-`@clay/*` packages land.
-    first_party_packages: Mutex<crate::packages::service::PackageService>,
-    load_entry_allowlist: Arc<FirstPartyLoadEntryAllowlist>,
+    // Shared PackageService for loadPackage resolution. Bundled packages are
+    // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
+    // resolved from this service's installed/source registry. The resolver uses
+    // the same validate/authorize/enable path as CLI and package UI code.
+    package_service: Mutex<crate::packages::service::PackageService>,
+    load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
 }
 
 impl std::fmt::Debug for ClayOpState {
@@ -135,11 +134,11 @@ impl ClayOpState {
                 workspace,
                 runtime_document_id,
             }),
-            first_party_packages: Mutex::new(crate::packages::service::PackageService::new(
+            package_service: Mutex::new(crate::packages::service::PackageService::new(
                 PathBuf::new(),
                 Box::new(crate::packages::manager::FakeBackend::new()),
             )),
-            load_entry_allowlist: Arc::new(FirstPartyLoadEntryAllowlist::default()),
+            load_entry_allowlist: Arc::new(PackageLoadEntryAllowlist::default()),
         }
     }
 
@@ -195,15 +194,15 @@ impl ClayOpState {
             .expect("Clay runtime op state mutex poisoned") = None;
     }
 
-    /// Handle to the shared `PackageService` used by the first-party resolver
-    /// op for validation/enable/conflict checks.
-    pub(super) fn first_party_packages(&self) -> &Mutex<crate::packages::service::PackageService> {
-        &self.first_party_packages
+    /// Handle to the shared `PackageService` used by the resolver op for
+    /// validation/authorization/enable/conflict checks.
+    pub(super) fn package_service(&self) -> &Mutex<crate::packages::service::PackageService> {
+        &self.package_service
     }
 
-    /// Handle to the validated first-party `loadEntry` allowlist shared with
+    /// Handle to the validated package `loadEntry` allowlist shared with
     /// `ClayModuleLoader`.
-    pub(crate) fn load_entry_allowlist(&self) -> Arc<FirstPartyLoadEntryAllowlist> {
+    pub(crate) fn load_entry_allowlist(&self) -> Arc<PackageLoadEntryAllowlist> {
         Arc::clone(&self.load_entry_allowlist)
     }
 

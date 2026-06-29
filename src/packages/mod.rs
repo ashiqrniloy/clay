@@ -1,5 +1,7 @@
+pub mod authorization;
 pub mod commands;
 pub mod conflict;
+pub mod graph;
 pub mod manager;
 pub mod manifest;
 pub mod modes;

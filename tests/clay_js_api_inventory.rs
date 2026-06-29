@@ -1260,7 +1260,7 @@ fn phase19_hot_reload_configuration_review_rejects_hidden_reload_keys() {
         "not callable from `~/.config/clay/init.js`",
         "hidden JSON/TOML/ad hoc keys",
         "startup or explicit developer-triggered reload work only",
-        "deny-by-default module resolution",
+        "module loading through recorded package allowlist entries",
         "sanitized diagnostics",
     ] {
         assert!(
@@ -2983,7 +2983,7 @@ fn phase20_markdown_configuration_audit_documents_end_user_contract() {
     assert!(
         configuration_doc.contains("One-line package loading")
             && configuration_doc.contains("clay.packages.loadPackage")
-            && configuration_doc.contains("implemented (Plan 029, Phase 18.6)"),
+            && configuration_doc.contains("Plan 029, Phase 18.6"),
         "Phase 18.5 audit must document loadPackage as implemented by Plan 029"
     );
 
@@ -3064,8 +3064,10 @@ fn phase20_loadpackage_api_documentation_is_complete() {
 
     // Verify security notes are present
     assert!(
-        load_package_doc.contains("does not grant") && load_package_doc.contains("deny-by-default"),
-        "loadPackage docs must include security constraints"
+        load_package_doc.contains("Loading a package does not grant")
+            && load_package_doc.contains("user-approved")
+            && load_package_doc.contains("validated package root"),
+        "loadPackage docs must include unified authority security constraints"
     );
 
     // Verify package docs reference the API correctly
@@ -3325,8 +3327,7 @@ fn plan_034_runtime_hardening_does_not_add_hidden_configuration_knobs() {
         "`JS_RUNTIME_EVALUATION_TIMEOUT_MS` remains a compiled budget",
         "`clay.runtime.timeout` is a diagnostic code",
         "sandbox child spawn, handshake, payload budget, timeout kill, and restart policy are internal supervisor behavior",
-        "filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget handles, raw-op access, client-side JavaScript, and third-party package execution remain denied by policy",
-        "non-`@clay/*` package execution still requires a separate approved authority decision",
+        "filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget handles, raw-op access, and client-side JavaScript remain powerful capabilities that require explicit user-authorized grants under the unified package authority model",
         "There is no `enableThirdPartyPackages` or `allowThirdPartyPackages` configuration shortcut",
         "do not execute configuration JavaScript, wait on sandbox round trips, or re-check runtime hardening knobs",
     ] {
@@ -3559,6 +3560,106 @@ fn plan_030_introduces_no_new_js_api_or_public_programmatic_surface() {
                 .iter()
                 .all(|entry| entry.get("id") != forbidden_id),
             "Plan 030 budget must not be exposed as Clay JS API `{forbidden_id}`"
+        );
+    }
+}
+
+#[test]
+fn plan_035_unified_package_authority_configuration_surfaces_are_documented() {
+    // Plan 035 task 10: user authorization, capability grants, runtime profile
+    // choices, package-control/conflict overrides must be documented Clay JS
+    // APIs or explicitly documented CLI/UI state — never hidden keys. The Rust
+    // primitives exist (authorize_package, set_conflict_override, RuntimeProfile)
+    // but have no callable end-user surface yet, so they are documented as
+    // planned inventory entries with a configuration review.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+
+    // The planned authorization and conflict-override surfaces must have
+    // inventory entries with status = "planned" and registry_public = false
+    // (they are not callable end-user APIs yet, so they must not masquerade as
+    // public registry surfaces).
+    for id in [
+        "clay.packages.authorize",
+        "clay.packages.setConflictOverride",
+    ] {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("id") == id)
+            .unwrap_or_else(|| panic!("missing planned inventory entry {id}"));
+        assert_eq!(
+            entry.get("status"),
+            "planned",
+            "{id} must be status = planned (no callable surface yet)"
+        );
+        assert_eq!(
+            entry.get("registry_public"),
+            "false",
+            "{id} must be registry_public = false until the facade/CLI ships"
+        );
+        // Custom properties must list the behavior-changing inputs.
+        let custom = entry.get("custom_properties");
+        assert!(!custom.is_empty(), "{id} must declare custom_properties");
+    }
+    // The authorize entry must carry the grant/provenance/revocation security
+    // notes and the runtime-profile custom property.
+    let authorize = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.packages.authorize")
+        .expect("clay.packages.authorize entry");
+    for phrase in [
+        "explicit user/admin capability grant",
+        "revocable",
+        "provenance",
+        "fail-closed",
+        "MissingCapabilityGrant",
+        "auto-authorized",
+    ] {
+        assert!(
+            authorize.get("security_notes").contains(phrase),
+            "clay.packages.authorize security_notes must mention `{phrase}`"
+        );
+    }
+    assert!(
+        authorize
+            .get("custom_properties")
+            .contains("runtimeProfile:enum=native-trust|sandboxed|restricted"),
+        "clay.packages.authorize must declare the runtimeProfile custom property"
+    );
+
+    // The configuration review must document each unified-authority surface,
+    // its status, the intended API shape, and the implementation gap.
+    for phrase in [
+        "Plan 035 unified package authority configuration review",
+        "User authorization / capability grants",
+        "Runtime profile selection",
+        "User conflict override",
+        "Package graph relations",
+        "Package-control",
+        "Bundled package auto-authorization",
+        "Authorization inspection",
+        "clay.packages.authorize",
+        "clay.packages.setConflictOverride",
+        "documented implementation gap",
+        "no config primitive branches on package source",
+        "provenance",
+        "revocation",
+        "startup/install/enable/load/reload/explicit-user-command work only",
+    ] {
+        assert!(
+            configuration_doc.contains(phrase),
+            "configuration.md must document unified package authority surface: {phrase}"
+        );
+    }
+    // No hidden-key shortcuts may be advertised as a grant path.
+    for forbidden in ["allowThirdPartyPackages", "enableThirdPartyPackages"] {
+        // The doc may mention these only as explicitly-rejected shortcuts.
+        assert!(
+            !configuration_doc.contains(&format!("await {forbidden}")),
+            "configuration.md must not present `{forbidden}` as a callable grant surface"
         );
     }
 }

@@ -1044,9 +1044,19 @@ fn markdown_disabled_falls_back_to_plain_text_after_rewrite() {
         "target/test-package-store/markdown-disabled",
         Box::new(FakeBackend::default()),
     );
+    let package_json = markdown_package_json();
     service
-        .install_from_value(markdown_package_json())
+        .install_from_value(package_json.clone())
         .expect("installing Markdown package metadata must succeed");
+    let record = assemble_package_record(&package_json).expect("Markdown package validates");
+    service
+        .authorize_package(
+            "@clay/markdown",
+            record.manifest.clay.permissions,
+            clay::packages::authorization::RuntimeProfile::NativeTrust,
+            "test-user",
+        )
+        .expect("Markdown package authorization must succeed");
     service
         .enable("@clay/markdown")
         .expect("Markdown package must enable before fallback test");

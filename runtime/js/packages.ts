@@ -37,18 +37,69 @@ export function serverListFirstPartyPackageSpecifiers(): string[] {
   return parse<{ specifiers: string[] }>(requireOps().op_clay_packages_list_first_party_specifiers()).specifiers;
 }
 
-/** Load and activate a first-party `@clay/*` package by specifier.
+function plannedPackageApi(name: string): never {
+  const unavailable = Deno?.core?.ops?.op_clay_runtime_unavailable;
+  if (typeof unavailable === "function") {
+    unavailable(name);
+  }
+  throw new Error(`${name} is planned; Clay package management op wiring is not implemented yet`);
+}
+
+/** Install a package from an npm-compatible specifier and record provenance.
+ * Planned: not callable until the op wiring and authorization flow ship. */
+export function install(_options: { specifier: string } & Record<string, unknown>): never {
+  return plannedPackageApi("clay.packages.install");
+}
+
+/** Enable an installed, authorized package and evaluate its package graph.
+ * Planned: not callable until the op wiring ships. */
+export function enable(_options: { packageName: string } & Record<string, unknown>): never {
+  return plannedPackageApi("clay.packages.enable");
+}
+
+/** Disable an enabled package and withdraw its contributions.
+ * Planned: not callable until the op wiring ships. */
+export function disable(_options: { packageName: string } & Record<string, unknown>): never {
+  return plannedPackageApi("clay.packages.disable");
+}
+
+/** Inspect package metadata, provenance, capabilities, and authorization state.
+ * Planned: not callable until the op wiring ships. */
+export function inspect(_options: { packageName: string } & Record<string, unknown>): never {
+  return plannedPackageApi("clay.packages.inspect");
+}
+
+/** List installed/bundled packages with provenance and authorization status.
+ * Planned: not callable until the op wiring ships. */
+export function list(): never {
+  return plannedPackageApi("clay.packages.list");
+}
+
+/** Authorize capabilities and a runtime profile for a package.
+ * Planned: not callable until the op wiring ships. */
+export function authorize(_options: Record<string, unknown>): never {
+  return plannedPackageApi("clay.packages.authorize");
+}
+
+/** Set an explicit user-selected winner for a package contribution conflict.
+ * Planned: not callable until the op wiring ships. */
+export function setConflictOverride(_options: { contributionId: string; winnerPackage: string } & Record<string, unknown>): never {
+  return plannedPackageApi("clay.packages.setConflictOverride");
+}
+
+/** Load and activate an installed, user-authorized package by specifier.
  *
  * This is the one-line default end-user package loader (e.g.
- * `await loadPackage("@clay/markdown")` from `~/.config/clay/init.js`). It
- * resolves + validates + enables the package through the authoritative
- * PackageService path, then imports the package's declared `loadEntry` so the
- * package registers its modes, commands, parse handlers, and decorations under
- * Clay's authority. Repeated calls within one runtime generation return the
- * cached summary; hot reload reruns `init.js` in a fresh generation so the
- * cache starts empty. Only first-party `@clay/*` specifiers are accepted; all
- * other authority (filesystem/network/shell/package-manager/enable-disable) is
- * denied by the op and the module loader. */
+ * `await loadPackage("@clay/markdown")`, `await loadPackage("@vendor/foo")`,
+ * or `await loadPackage("github:user/repo")` from `~/.config/clay/init.js`). It
+ * resolves + validates + authorizes + enables the package through the
+ * authoritative PackageService path, then imports the package's declared
+ * `loadEntry` so the package registers modes, commands, parse handlers, and
+ * decorations under Clay's authority. Repeated calls within one runtime
+ * generation return the cached summary; hot reload reruns `init.js` in a fresh
+ * generation so the cache starts empty. The module loader imports only
+ * canonical loadEntry paths recorded in the validated package allowlist, and
+ * relative imports remain confined to the package root. */
 export async function loadPackage(specifier: string): Promise<unknown> {
   if (typeof specifier !== "string") {
     throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");

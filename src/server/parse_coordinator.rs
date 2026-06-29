@@ -305,12 +305,24 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.generation_id == generation_id)
             .cloned()
             .collect();
-        for task_key in task_keys {
-            if let Some(task) = inner.active_tasks.remove(&task_key) {
-                task.abort();
-                inner.stats.cancelled_superseded_tasks += 1;
-            }
-        }
+        abort_tasks(&mut inner, task_keys);
+    }
+
+    /// Cancel parse handlers and active work owned by one package prefix. This
+    /// is the package-scoped disable/revoke hook; it reuses the same abort path
+    /// as runtime generation replacement and never waits for handler completion.
+    pub fn cancel_package(&self, package_prefix: &str) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner
+            .handlers
+            .retain(|key, _| key.package_prefix != package_prefix);
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|task_key| task_key.package_prefix == package_prefix)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
     }
 
     /// Schedule parse work after an edit/viewport change has already been
@@ -522,6 +534,15 @@ impl ParseCoordinator {
             .expect("parse coordinator lock poisoned")
             .stats
             .clone()
+    }
+}
+
+fn abort_tasks(inner: &mut ParseCoordinatorInner, task_keys: Vec<TaskKey>) {
+    for task_key in task_keys {
+        if let Some(task) = inner.active_tasks.remove(&task_key) {
+            task.abort();
+            inner.stats.cancelled_superseded_tasks += 1;
+        }
     }
 }
 

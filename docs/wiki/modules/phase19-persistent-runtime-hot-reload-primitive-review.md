@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | Persistent runtime service | `ClayJsRuntimeService` owns one worker-thread `JsRuntime`; evaluations preserve globals, module cache, loaded packages, mode activations, and parse-handler tokens. | Add explicit runtime generation ownership so hot reload builds a fresh service, validates config/package loads, then atomically swaps active generation. |
 | Configuration/package loading | `load_configuration_from_root*` evaluates `~/.config/clay/init.js`; `loadPackage("@clay/markdown")` validates resolver-approved first-party packages and is idempotent in one runtime. | Treat reload as a fresh generation where `globalThis.__clayLoadedPackages` starts empty and default `init.js` reruns; do not add public `force` mutation semantics yet. |
-| Module authority | `ClayModuleLoader` is deny-by-default, accepting curated `clay:*` facades, config-root relative `.js`, vendored `markdown-it`, and `FirstPartyLoadEntryAllowlist` entries only. | Preserve the same allowlist rules per generation; failed next-generation loads must leave the previous generation active. |
+| Module authority | `ClayModuleLoader` accepts curated `clay:*` facades, config-root relative `.js`, vendored `markdown-it`, and recorded package load-entry allowlist entries only. | Preserve the same allowlist rules per generation; failed next-generation loads must leave the previous generation active. |
 | Mode registration/classification | `clay:modes` stores mode patterns and runtime-local activation metadata; selected-file open classifies paths generically and can lazy-load first-party packages. | After successful reload, reclassify/reactivate open documents through the same generic mode path; no Markdown-specific branch. |
 | Runtime output application | `apply_runtime_outputs` applies behavior manifests, SDUI trees, and decoration pass-through from one evaluation. | Reuse this as generation-output application, but publish refresh messages to connected/open documents after the swap. |
 | Parse handler bridge | `clay:parse.serverRegisterParseHandler` rejects executable callback payloads, stores JS functions in runtime-local token maps, and adapts registrations into `ParseCoordinator`. | Add generation metadata to handler registrations and parse tasks so old tokens are unregistered/ignored and stale parse results cannot publish after swap. |
@@ -65,7 +65,7 @@ Reload is explicit background/server-first work. No JavaScript should be added t
 
 ## Security Boundary
 
-Phase 19 does not expand package authority. Keep resolver-validated first-party `@clay/*` loading only, deny-by-default module resolution, package permission checks, executable callback rejection, server-held parse tokens, selected-file capability boundaries, workspace validation, and sanitized diagnostics. Reload must not grant filesystem, network, shell, WASM, AI, raw-op, native-widget, client-JS, package-manager, third-party package, or broader workspace authority.
+Phase 19 does not expand package authority. Keep current resolver-validated `@clay/*` loading as an implementation limit, module loading through recorded package allowlist entries, package capability checks, executable callback rejection, server-held parse tokens, selected-file capability boundaries, workspace validation, and sanitized diagnostics. Reload must not grant new filesystem, network, shell, WASM, AI, raw-op, native-widget, client-JS, package-manager, package-control, or broader workspace authority beyond user-approved package capabilities.
 
 ## Minimal Model
 

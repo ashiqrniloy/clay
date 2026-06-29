@@ -64,6 +64,408 @@ fn package_loading_keeps_validation_and_parsing_out_of_typing_hot_path() {
 }
 
 #[test]
+fn unified_package_authority_model_is_documented() {
+    let authority = read("docs/wiki/modules/third-party-runtime-authority.md");
+    let security = read("docs/reference/primitives/package-security.md");
+    let loading = read("docs/reference/primitives/package-loading.md");
+    let permissions = read("src/packages/permissions.rs");
+    let decision =
+        read("decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md");
+    let package_ops = read("src/server/ops/packages.rs");
+
+    for phrase in [
+        "one package authority model",
+        "Package source (`@clay/*`, npm, GitHub, git URL, tarball, or local path) affects default trust prompts",
+        "install != enable != load != runtime execution != package-manager execution != client behavior delivery",
+        "Plan 035 replaces this limitation with a source-aware resolver",
+        "package-control",
+        "package-import",
+        "filesystem",
+        "network",
+        "shell",
+        "workspace-mutation",
+        "dependsOn",
+        "extends",
+        "disables",
+        "replaces",
+        "native-trust | sandboxed | restricted",
+    ] {
+        assert!(
+            authority.contains(phrase),
+            "unified authority wiki must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "Unified Package Trust and Authorization Policy",
+        "user/admin authorization is the grant",
+        "package_authority",
+        "runtime_profile = \"native-trust\"",
+        "capabilities = [\"mode-registration\", \"package-control\", \"network\"]",
+        "Unified Package Capability Model",
+        "PackageAuthorizationRecord",
+        "PackageService::authorize_package",
+        "enable` fails closed",
+        "clay.capabilities",
+        "clay.permissions` compatibility path",
+        "These capabilities are not categorically unavailable to user-installed packages",
+        "Powerful Capabilities Require Explicit Grants",
+        "not categorically unavailable to user-installed packages",
+    ] {
+        assert!(
+            security.contains(phrase),
+            "package security docs must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "Package Sources and Provenance",
+        "clay package add github:user/repo",
+        "clay package add ./local-package",
+        "PackageSourceKind",
+        "PackageProvenance",
+        "bounded sanitized diagnostics",
+        "Unified Disable, Update, Rollback, and Incident Policy",
+        "Package control is user-authorized",
+        "decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md",
+    ] {
+        assert!(
+            loading.contains(phrase),
+            "package loading docs must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "PackageControl",
+        "PackageImport",
+        "Filesystem",
+        "Network",
+        "Shell",
+        "WorkspaceMutation",
+        "NativeUi",
+        "ClientRuntime",
+        "RawOps",
+        "\"filesystem\" => Ok(PackagePermission::Filesystem)",
+    ] {
+        assert!(
+            permissions.contains(phrase),
+            "permissions parser must accept target capability `{phrase}`"
+        );
+    }
+
+    assert!(
+        decision.contains("status: approved")
+            && decision.contains("explicitly_approved_by_user: true")
+            && decision.contains("Clay will use one package authority model"),
+        "approved decision log must record unified package authority"
+    );
+    assert!(
+        package_ops.contains("installed, authorized package specifier")
+            && package_ops.contains("PackageService")
+            && package_ops.contains("PackageLoadEntryAllowlist"),
+        "resolver source comments must describe source-aware package loading through PackageService"
+    );
+}
+
+#[test]
+fn package_scoped_disable_rollback_and_revocation_are_documented() {
+    let loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let hot_reload = read("docs/wiki/modules/persistent-runtime-hot-reload.md");
+    let parse_lifecycle = read("docs/wiki/modules/parse-task-lifecycle.md");
+    let review = read("docs/wiki/modules/unified-package-authority-primitive-review.md");
+    let service = read("src/packages/service.rs");
+    let parse = read("src/server/parse_coordinator.rs");
+    let packages_op = read("src/server/ops/packages.rs");
+    let js_runtime = read("src/server/js_runtime.rs");
+    let package_tests = read("tests/package_loading.rs");
+    let parse_tests = read("tests/parse_coordinator.rs");
+
+    for phrase in [
+        "PackageRevocationRecord",
+        "PackageContributionWithdrawalCounts",
+        "commands, behavior manifests, SDUI, parse handlers, decorations, completions, layout, input, state, theme, and diagnostics",
+        "rollback keeps the previous valid generation active",
+        "ParseCoordinator::cancel_package",
+        "PackageLoadEntryAllowlist::revoke_package",
+        "never from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths",
+    ] {
+        assert!(
+            loading.contains(phrase)
+                || wiki.contains(phrase)
+                || hot_reload.contains(phrase)
+                || parse_lifecycle.contains(phrase)
+                || review.contains(phrase),
+            "revocation docs must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "PackageRevocationRecord",
+        "PackageContributionWithdrawalCounts",
+        "revocation_record",
+        "revocation_records",
+        "revoke_enabled_package",
+        "record_revocation_for_record",
+        "previous_revocations",
+        "previous_package_generation",
+    ] {
+        assert!(
+            service.contains(phrase),
+            "service must implement `{phrase}`"
+        );
+    }
+
+    for phrase in ["cancel_package", "abort_tasks"] {
+        assert!(
+            parse.contains(phrase),
+            "parse coordinator must implement `{phrase}`"
+        );
+    }
+    for phrase in [
+        "package_name: Option<String>",
+        "record_for_package",
+        "revoke_package",
+    ] {
+        assert!(
+            packages_op.contains(phrase),
+            "package loadEntry allowlist must implement `{phrase}`"
+        );
+    }
+    assert!(
+        js_runtime.contains("package_load_entry_allowlist_revokes_owned_entries"),
+        "runtime tests must cover package-owned allowlist revocation"
+    );
+
+    for phrase in [
+        "package_service_disable_removes_active_contributions",
+        "failed_replacement_keeps_previous_generation_active",
+    ] {
+        assert!(
+            package_tests.contains(phrase),
+            "package loading test `{phrase}` must exist"
+        );
+    }
+    assert!(
+        parse_tests.contains("package_cancel_withdraws_handlers_and_in_flight_parse_work"),
+        "parse coordinator must test package-scoped cancellation"
+    );
+}
+
+#[test]
+fn explicit_conflict_resolution_policy_is_documented() {
+    let security = read("docs/reference/primitives/package-security.md");
+    let loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let review = read("docs/wiki/modules/unified-package-authority-primitive-review.md");
+    let conflict = read("src/packages/conflict.rs");
+    let service = read("src/packages/service.rs");
+    let tests = read("tests/package_conflicts.rs");
+
+    for phrase in [
+        "PackageConflictResolutionPolicy",
+        "PackageConflictResolutionDiagnostic",
+        "UserOverride",
+        "PackageReplaces",
+        "PackageDisables",
+        "deterministic diagnostic fallback",
+        "no package wins by load order alone",
+    ] {
+        assert!(
+            security.contains(phrase)
+                || loading.contains(phrase)
+                || wiki.contains(phrase)
+                || review.contains(phrase),
+            "conflict docs must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "check_enabled_packages_with_policy",
+        "PackageConflictResolutionPolicy",
+        "PackageConflictResolutionDiagnostic",
+        "PackageConflictResolutionReason",
+        "user_override_winner",
+    ] {
+        assert!(
+            conflict.contains(phrase),
+            "conflict module must implement `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "set_conflict_override",
+        "conflict_resolution_diagnostics",
+        "reconcile_enabled_conflicts",
+        "record_package_control_resolution",
+    ] {
+        assert!(
+            service.contains(phrase),
+            "package service must apply conflict resolution phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "duplicate_mode_is_rejected_without_resolution_policy",
+        "replacement_wins_with_package_control_grant_and_records_resolution",
+        "user_conflict_override_selects_winner_without_package_control",
+        "explicit_keybinding_priority_prevents_ambiguous_conflict",
+        "same_keybinding_priority_falls_back_to_deterministic_diagnostic",
+        "package_cannot_replace_without_package_control_grant",
+    ] {
+        assert!(
+            tests.contains(phrase),
+            "conflict behavior test `{phrase}` must exist"
+        );
+    }
+}
+
+#[test]
+fn package_graph_relations_and_package_control_are_documented() {
+    let security = read("docs/reference/primitives/package-security.md");
+    let loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let manifest = read("src/packages/manifest.rs");
+    let graph = read("src/packages/graph.rs");
+    let service = read("src/packages/service.rs");
+    let tests = read("tests/package_graph.rs");
+
+    for phrase in [
+        "dependsOn",
+        "extends",
+        "disables",
+        "replaces",
+        "PackageGraphRelations",
+        "PackageGraphPlan",
+        "package-control",
+        "MissingGraphTarget",
+        "PackageGraphCycle",
+        "MissingPackageControlGrant",
+    ] {
+        assert!(
+            security.contains(phrase) || loading.contains(phrase) || wiki.contains(phrase),
+            "package graph docs must document `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "parse_graph_relations",
+        "parse_relation_array",
+        "PackageGraphRelations",
+        "InvalidPackageGraph",
+    ] {
+        assert!(
+            manifest.contains(phrase),
+            "manifest parser must implement graph relation phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "PackageGraphPlan",
+        "requires_package_control",
+        "activation_targets",
+        "controlled_targets",
+        "cycle_from_stack",
+    ] {
+        assert!(
+            graph.contains(phrase),
+            "graph helper must expose `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "enable_graph",
+        "resolve_graph_targets",
+        "ensure_package_control_grant",
+        "previous_enabled",
+        "PackagePermission::PackageControl",
+    ] {
+        assert!(
+            service.contains(phrase),
+            "package service must evaluate graph relation phrase `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "package_with_package_control_disables_first_party_package",
+        "package_extends_target_and_both_remain_active",
+        "package_graph_reports_missing_target_deterministically",
+        "package_graph_reports_dependency_cycles_deterministically",
+        "disables_requires_explicit_package_control_grant",
+    ] {
+        assert!(
+            tests.contains(phrase),
+            "package graph behavior test `{phrase}` must exist"
+        );
+    }
+}
+
+#[test]
+fn unified_package_authority_primitive_review_is_documented() {
+    let review = read("docs/wiki/modules/unified-package-authority-primitive-review.md");
+    let wiki_index = read("docs/wiki/index.md");
+
+    assert!(
+        wiki_index.contains("modules/unified-package-authority-primitive-review.md"),
+        "wiki index must link the unified package authority primitive review"
+    );
+
+    for phrase in [
+        "PackageSource -> PackageAuthorization -> PackageGraph -> RuntimeGeneration",
+        "install != enable != load != runtime execution != package-manager execution != client behavior delivery",
+        "PackageManagerBackend",
+        "PackageService",
+        "validate_manifest_value",
+        "assemble_package_record",
+        "parse_permission",
+        "check_enabled_packages",
+        "op_clay_packages_load_package_by_specifier",
+        "PackageLoadEntryAllowlist",
+        "ClayModuleLoader",
+        "ParseCoordinator",
+        "src/server/ui.rs",
+        "src/shell/layout.rs",
+        "Client delivery",
+        "native-trust | sandboxed | restricted",
+    ] {
+        assert!(
+            review.contains(phrase),
+            "primitive review must inventory existing primitive `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "PackageSource provenance primitive",
+        "PackageAuthorization primitive",
+        "PackageGraph primitive",
+        "ConflictResolution primitive",
+        "PackageLoadEntryRegistry primitive",
+        "PackageGenerationRevocation primitive",
+        "RuntimeProfile primitive",
+        "PackageInspection/Diagnostics primitive",
+    ] {
+        assert!(
+            review.contains(phrase),
+            "primitive review must document generic gap `{phrase}`"
+        );
+    }
+
+    for phrase in [
+        "startup, install, enable, load, reload, explicit user command, or background audit work",
+        "No package source resolution, package-manager call, authorization prompt, graph traversal, JavaScript evaluation, or configuration evaluation may run from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or Masonry hot paths",
+        "Keep package-root confinement",
+        "explicit user grants visible, revocable",
+        "package-manager metadata diagnostic-only",
+        "Do not add source-specific Rust branches",
+    ] {
+        assert!(
+            review.contains(phrase),
+            "primitive review must document hot-path/security boundary `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn persistent_runtime_hardening_gate_doc_covers_threat_model() {
     let hardening = read("docs/wiki/modules/persistent-runtime-hardening.md");
     let sandbox_design = read("docs/design/persistent-runtime-sandbox.md");
@@ -79,18 +481,17 @@ fn persistent_runtime_hardening_gate_doc_covers_threat_model() {
         "hardening wiki must link the sandbox design gate"
     );
     assert!(
-        sandbox_design
-            .contains("This document defines the separate-process JavaScript runtime sandbox gate"),
+        sandbox_design.contains("separate-process JavaScript runtime sandbox as a hardening primitive and optional runtime profile"),
         "sandbox design must exist and state its scope"
     );
 
     for phrase in [
-        "first-party `@clay/*`",
-        "Non-`@clay/*` package execution is blocked by default",
-        "separate-process JavaScript runtime sandbox",
+        "unified package authority model",
+        "same user-approved capabilities",
+        "separate-process sandbox",
         "V8 heap limits",
-        "approved decision log",
-        "No approved decision log means no non-`@clay/*` runtime execution",
+        "User authorization records",
+        "package-control",
         "filesystem",
         "network",
         "shell",
@@ -100,6 +501,7 @@ fn persistent_runtime_hardening_gate_doc_covers_threat_model() {
         "native-widget",
         "client-side JavaScript",
         "package-manager execution",
+        "These capabilities are grantable to any package source after user authorization",
         "keypress, paint, layout, scroll, edit acknowledgement, or text-event handlers",
         "sanitized `clay.runtime.heap_limit` diagnostics",
     ] {
@@ -124,18 +526,17 @@ fn persistent_runtime_sandbox_design_pins_process_boundary() {
         "Per-request timeout kills the child process",
         "Restart creates a fresh child",
         "stable Clay error code",
-        "filesystem outside parent-provided open document data",
+        "native-trust | sandboxed | restricted",
+        "Load resolver-validated package `loadEntry` code from any enabled user-authorized package source",
+        "filesystem",
         "network",
         "shell",
         "WASM",
-        "AI mutation",
-        "package-manager execution",
-        "native-widget handles",
-        "client-side JavaScript",
-        "raw-op / raw `Deno.core.ops` public authority",
+        "package-manager handles",
+        "native widget handles",
+        "client JavaScript",
+        "raw op names",
         "keypress, paint, layout, scroll, text-event, or edit-ack handlers",
-        "approved decision log",
-        "Non-`@clay/*` package execution is not allowed by this design alone",
     ] {
         assert!(
             design.contains(phrase),
@@ -147,395 +548,6 @@ fn persistent_runtime_sandbox_design_pins_process_boundary() {
         hardening.contains("docs/design/persistent-runtime-sandbox.md"),
         "hardening wiki must link the sandbox design"
     );
-}
-
-#[test]
-fn third_party_runtime_authority_policy_is_documented() {
-    let policy = read("docs/wiki/modules/third-party-runtime-authority.md");
-    let wiki_index = read("docs/wiki/index.md");
-
-    assert!(
-        wiki_index.contains("modules/third-party-runtime-authority.md"),
-        "wiki index must link the third-party runtime authority page"
-    );
-
-    for phrase in [
-        "install != enable != load != runtime execution != package-manager execution != client behavior delivery",
-        "PackageService::install",
-        "PackageService::enable",
-        "op_clay_packages_load_package_by_specifier",
-        "FirstPartyLoadEntryAllowlist",
-        "RuntimeSandboxSupervisor",
-        "Non-`@clay/*` package execution stays deny-by-default",
-        "package-manager installation/metadata records do not grant runtime-execution authority",
-        "left-pad",
-        "@scope/pkg",
-        "URLs, local path, traversal",
-        "Trust and identity",
-        "Registry and integrity",
-        "Permission model",
-        "Production sandbox",
-        "Rollback and incident response",
-        "Executable gates",
-        "keypress, paint, layout, scroll, text-event",
-        "No approved decision log means no non-`@clay/*` runtime execution",
-        "filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, and workspace mutation remain denied",
-    ] {
-        assert!(
-            policy.contains(phrase),
-            "third-party runtime authority policy must document `{phrase}`"
-        );
-    }
-}
-
-#[test]
-fn third_party_trust_identity_policy_is_documented() {
-    let security = read("docs/reference/primitives/package-security.md");
-    let authority = read("docs/wiki/modules/third-party-runtime-authority.md");
-
-    for phrase in [
-        "Third-Party Trust and Identity Policy",
-        "Non-`@clay/*` packages are untrusted by default",
-        "Clay metadata in `package.json` proves only that a package claims a Clay contract",
-        "trusted_package",
-        "name = \"@vendor/example\"",
-        "version = \"1.2.3\"",
-        "registry = \"https://registry.npmjs.org/\"",
-        "integrity = \"sha512-...\"",
-        "clay_prefix = \"example\"",
-        "source_kind = \"npm-registry\"",
-        "publisher = \"vendor\"",
-        "clay_api_compatibility = \"^0.1\"",
-        "Accepted source kinds are `npm-registry` first",
-        "namespace hijacks, typosquats, unsigned or untrusted sources",
-        "Trust records grant identity only",
-        "PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`",
-        "do not yet store trusted third-party source records, publisher identity, registry provenance, integrity evidence",
-        "keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths",
-    ] {
-        assert!(
-            security.contains(phrase),
-            "package security docs must document trust identity phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Trust and Identity Policy",
-        "Non-`@clay/*` packages require an explicit trust record",
-        "Package `name`, resolved `version`, `registry` or source location, package-manager `integrity`, `clay_prefix`, `source_kind`, `publisher`/owner, and `clay_api_compatibility` are the identity tuple",
-        "Accepted source kinds start at `npm-registry`",
-        "Bare names, custom scopes, URLs, local paths, tarballs, git sources, aliases, registry redirects, ambiguous local paths, unknown publishers, namespace hijacks, typosquats, incompatible Clay API ranges, missing signatures/provenance, conflicting prefixes, and conflicting contribution IDs fail closed",
-        "Existing `PackageRecord`, `PackageService`, and conflict primitives carry package name/version/prefix/contribution provenance",
-        "Trust records grant identity only",
-        "approved decision log",
-    ] {
-        assert!(
-            authority.contains(phrase),
-            "authority wiki must document trust identity phrase `{phrase}`"
-        );
-    }
-}
-
-#[test]
-fn third_party_registry_integrity_policy_is_documented() {
-    let reference = read("docs/reference/primitives/package-loading.md");
-    let wiki = read("docs/wiki/modules/package-loading.md");
-    let manager = read("src/packages/manager.rs");
-
-    for phrase in [
-        "Registry and Integrity Verification Policy",
-        "Clay delegates registry access, package fetching, dependency resolution, version ranges, lockfile writing, integrity verification, caching, and offline store behavior to the npm-compatible package manager",
-        "Clay does not implement a registry client",
-        "requested_spec = \"@vendor/example@1.2.3\"",
-        "resolved_version = \"1.2.3\"",
-        "integrity = \"sha512-...\"",
-        "lockfile = \"pnpm-lock.yaml\"",
-        "tarball = \"https://registry.npmjs.org/@vendor/example/-/example-1.2.3.tgz\"",
-        "offline_cache_key = \"@vendor/example/1.2.3\"",
-        "pnpm add --ignore-scripts <pkg>@<version>",
-        "Package-manager stdout, stderr, exit code, `package.json`, lockfile text, and registry metadata are diagnostic/provenance inputs only",
-        "Diagnostics copied from package-manager output must be sanitized",
-        "Offline/cache installs are allowed only when cached metadata still matches the trusted resolved version and integrity digest",
-        "Updates are treated as new identities",
-        "never runs from keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths",
-        "do not yet persist a source/integrity provenance record, parse lockfile integrity evidence, sanitize package-manager diagnostics, model offline/cache keys, or enforce update-as-new-identity checks",
-    ] {
-        assert!(
-            reference.contains(phrase),
-            "package loading reference must document registry/integrity phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Clay delegates registry access, resolution, lockfile writing, integrity verification, caching, and offline store behavior to pnpm/npm-compatible tooling instead of implementing a registry client",
-        "requested spec, resolved version, registry/source URL, lockfile path, integrity digest, tarball or source path, package root, and offline/cache key",
-        "Package-manager stdout, stderr, exit code, `package.json`, lockfile text, and registry metadata are diagnostic/provenance inputs only",
-        "Diagnostics copied from package-manager output must be sanitized",
-        "Offline/cache hits and updates do not widen authority",
-        "generic provenance storage, lockfile integrity parsing, diagnostic sanitization, offline/cache key modeling, and update-as-new-identity enforcement",
-    ] {
-        assert!(
-            wiki.contains(phrase),
-            "package loading wiki must document registry/integrity phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "--ignore-scripts",
-        "captured stdout/stderr",
-        "exit code",
-        "lockfile management",
-        "integrity verification",
-    ] {
-        assert!(
-            manager.contains(phrase),
-            "package manager boundary must keep documented primitive `{phrase}`"
-        );
-    }
-}
-
-#[test]
-fn third_party_permission_model_and_denied_authorities_are_documented() {
-    let security = read("docs/reference/primitives/package-security.md");
-    let authority = read("docs/wiki/modules/third-party-runtime-authority.md");
-    let permissions = read("src/packages/permissions.rs");
-
-    for phrase in [
-        "Third-Party Permission Model",
-        "\"permissions\": [\"mode-registration\", \"parse-document\"]",
-        "mode-registration",
-        "mode-activation",
-        "command-registration",
-        "package-configuration",
-        "parse-document",
-        "render-decorations",
-        "render-folding",
-        "completion-provider",
-        "Grant source is an explicit user/admin/decision-approved trust+permission record matched to package name, version, source, integrity, and `apiPrefix`",
-        "Runtime enforcement happens in the parent at load, registration, configuration, parse/completion/decorations request, and output-publication boundaries",
-        "Broad or catch-all permission names are prohibited",
-        "trusted-third-party",
-        "all",
-        "admin",
-        "Denied authorities stay denied for third-party packages unless a later approved decision grants one narrow capability with docs and tests: filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, workspace mutation",
-        "Permission checks are install/enable/load/reload/registration/request/publication work only",
-        "generic persisted grant source, trust-record match, parent-side sandbox request enforcement",
-    ] {
-        assert!(
-            security.contains(phrase),
-            "package security docs must document permission phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Third-Party Permission Model and Denied Authorities",
-        "Allowed initial permission strings reuse the existing package permission primitive",
-        "enable/load validates requested permissions and rejects unknown/prohibited strings",
-        "parent revalidates bounded inert outputs before publishing behavior manifests, SDUI, decorations, folding, completion, or parse updates",
-        "Broad/catch-all permissions are rejected",
-        "trusted-third-party",
-        "raw-deno-ops",
-        "Denied authorities remain denied unless a later approved decision grants one narrow capability with tests: filesystem, network, shell, WASM, AI mutation, package-manager execution, native-widget, client-JS, raw-op, remote listener, workspace mutation",
-        "`src/packages/permissions.rs::parse_permission` accepts only known permission strings and returns `ProhibitedAuthority` for blocked host capabilities",
-        "approved decision log grants exact authority",
-        "never keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot-path work",
-    ] {
-        assert!(
-            authority.contains(phrase),
-            "authority wiki must document permission phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "trusted-third-party",
-        "all",
-        "admin",
-        "system",
-        "host",
-        "runtime",
-    ] {
-        assert!(
-            !permissions.contains(&format!("\"{phrase}\" => Ok")),
-            "broad permission `{phrase}` must not become an accepted package permission"
-        );
-    }
-
-    for phrase in [
-        "filesystem",
-        "network",
-        "shell",
-        "ai-mutation",
-        "remote-listener",
-        "wasm-execution",
-        "raw-deno-ops",
-        "native-widget",
-        "client-javascript",
-        "package-installation",
-        "package-enable-disable",
-        "workspace-mutation",
-    ] {
-        assert!(
-            permissions.contains(phrase),
-            "prohibited authority `{phrase}` must stay rejected in permissions parser"
-        );
-    }
-}
-
-#[test]
-fn third_party_sandbox_enforcement_policy_is_documented() {
-    let design = read("docs/design/persistent-runtime-sandbox.md");
-    let authority = read("docs/wiki/modules/third-party-runtime-authority.md");
-    let harness = read("src/server/runtime_sandbox.rs");
-    let codec = read("src/protocol/codec.rs");
-
-    for phrase in [
-        "Third-Party Production Enforcement Contract",
-        "newline-delimited JSON harness is evidence only, not production API",
-        "length-prefixed frames, maximum frame size, typed request/response variants, decode validation, generation IDs, stable error codes",
-        "parent validates trust + registry integrity + package metadata + permissions + budgets",
-        "child evaluates/load/parse request for one runtime generation",
-        "parent validates bounded inert outputs",
-        "LoadThirdPartyPackage",
-        "EvaluateThirdPartyModule",
-        "ParseWithThirdPartyHandler",
-        "trust record match, registry/source integrity match, manifest validation, permission grant match, entry path confinement, payload budget, timeout/heap budget, runtime generation, handler token, document version, and stale-generation rejection",
-        "behavior/SDUI/decorations/folding/completion/parse validators",
-        "Timeout, heap-limit, malformed response, oversized output, protocol mismatch, unknown variant, stale generation, stale handler token, or invalid output kills the child process",
-        "last validated client state",
-        "workspace roots, absolute source paths, file descriptors, package-manager handles, raw op names, V8 handles, Rust internals, capability tokens, client connection handles",
-        "startup plus handshake target under 250 ms",
-        "small parse request round trip target under 10 ms added overhead",
-        "timeout kill plus fresh handshake target under 500 ms",
-        "no keypress, paint, layout, scroll, text-event, or edit-ack dependency",
-    ] {
-        assert!(
-            design.contains(phrase),
-            "sandbox design must document enforcement phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Sandbox Enforcement and Parent Validation",
-        "It is not production API and does not grant third-party authority",
-        "bounded typed protocol like the main IPC `Codec`",
-        "parent validates package metadata + permissions -> child evaluates -> parent validates inert outputs -> publish",
-        "Parent pre-validates every load/evaluate/parse request",
-        "Parent post-validates every response",
-        "Timeout, heap-limit, malformed response, oversized output, protocol mismatch, unknown variant, stale generation, stale handler token, or invalid output kills the child",
-        "The child receives no workspace roots, absolute source paths, file descriptors, package-manager handles, raw op names, V8 handles, Rust internals, capability tokens",
-        "Production routing needs measured evidence first",
-    ] {
-        assert!(
-            authority.contains(phrase),
-            "authority wiki must document sandbox enforcement phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "RuntimeSandboxSupervisor",
-        "max_payload_bytes",
-        "Timeout",
-        "kill",
-        "handshake",
-    ] {
-        assert!(
-            harness.contains(phrase),
-            "sandbox harness must keep evidence primitive `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "LENGTH_PREFIX_BYTES",
-        "DEFAULT_MAX_FRAME_SIZE",
-        "FrameTooLarge",
-        "decode_frame",
-    ] {
-        assert!(
-            codec.contains(phrase),
-            "main codec must keep bounded typed protocol primitive `{phrase}`"
-        );
-    }
-}
-
-#[test]
-fn third_party_rollback_disable_update_incident_policy_is_documented() {
-    let reference = read("docs/reference/primitives/package-loading.md");
-    let authority = read("docs/wiki/modules/third-party-runtime-authority.md");
-    let hot_reload = read("docs/wiki/modules/persistent-runtime-hot-reload.md");
-    let parse_lifecycle = read("docs/wiki/modules/parse-task-lifecycle.md");
-    let parse_coordinator = read("src/server/parse_coordinator.rs");
-
-    for phrase in [
-        "Third-Party Disable, Update, Rollback, and Incident Policy",
-        "Third-party disable is an active withdrawal, not only a future-load block",
-        "marks the package generation revoked",
-        "removes PackageService-enabled state for that package identity",
-        "cancels parse work for the revoked generation",
-        "withdraws commands, behavior manifests, SDUI/status trees, package UI/input/state/layout/theme declarations, decorations, folding, completion providers, and diagnostics owned by that package",
-        "Updates are new package identities",
-        "changed version, registry/source, tarball/path, integrity digest, `apiPrefix`, publisher, permission set, or Clay compatibility range requires a new trust+permission grant",
-        "keeps the prior validated generation active and reports sanitized diagnostics; it does not partially merge new contributions",
-        "build and validate the candidate generation off to the side, swap only after success",
-        "stale generation outputs are rejected by runtime generation ID, document version, behavior version, handler token, and package provenance",
-        "revoke the package identity, stop scheduling new package work, kill or replace the sandbox child for that generation",
-        "Package-manager side effects are not runtime rollback authority",
-        "never blocks keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths",
-        "generic package-generation revocation, contribution ownership indexes, package-scoped withdrawal, sandbox-child replacement wiring, update-as-new-identity enforcement, and sanitized incident diagnostics",
-    ] {
-        assert!(
-            reference.contains(phrase),
-            "package loading reference must document rollback phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Rollback, Disable, Update, and Incident Response",
-        "Disable is active withdrawal",
-        "Updates are new identities",
-        "Failed third-party generation -> keep prior validated manifest/UI -> cancel generation parse -> require explicit reload/update",
-        "Stale output rejection is mandatory",
-        "runtime generation ID, document version, behavior version, handler token, package identity, or provenance no longer matches active state",
-        "Incident response is fail-closed",
-        "Package-manager side effects do not imply active runtime state",
-        "Current reusable primitives: `PackageService::enable` removes conflict candidates, Phase 19 reload keeps the previous runtime on failed evaluation, `RuntimeGenerationStore` makes swaps generation-based, `ParseCoordinator::cancel_generation` cancels old work",
-        "never block keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths",
-    ] {
-        assert!(
-            authority.contains(phrase),
-            "authority wiki must document rollback phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Failed reloads keep the previous generation active",
-        "Parse results publish only if document version and runtime generation still match active state",
-    ] {
-        assert!(
-            hot_reload.contains(phrase),
-            "hot reload wiki must keep rollback primitive phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "Newer runtime generations replace handler tokens and cancel old-generation in-flight tasks",
-        "Stale parse results are discarded before client publication",
-    ] {
-        assert!(
-            parse_lifecycle.contains(phrase),
-            "parse lifecycle wiki must keep stale-generation phrase `{phrase}`"
-        );
-    }
-
-    for phrase in [
-        "cancel_generation",
-        "StaleRuntimeGeneration",
-        "stale_results_rejected",
-    ] {
-        assert!(
-            parse_coordinator.contains(phrase),
-            "parse coordinator must keep rollback primitive `{phrase}`"
-        );
-    }
 }
 
 #[test]
@@ -569,8 +581,8 @@ fn phase19_hot_reload_primitive_review_is_linked_and_pins_generic_gaps() {
         "stale handler invalidation",
         "generation swap",
         "No JavaScript should be added to keypress, paint, layout, scroll",
-        "deny-by-default module resolution",
-        "resolver-validated first-party `@clay/*` loading only",
+        "module loading through recorded package allowlist entries",
+        "current resolver-validated `@clay/*` loading as an implementation limit",
         "no Markdown-specific branch",
     ] {
         assert!(
@@ -670,7 +682,7 @@ fn phase19_load_package_cache_docs_pin_generation_invalidation() {
             "runtime generation",
             "`init.js`",
             "globalThis.__clayLoadedPackages",
-            "first-party `loadEntry` allowlist",
+            "loadEntry",
             "persistent",
         ] {
             assert!(
@@ -706,8 +718,8 @@ fn phase19_package_author_docs_cover_reload_runtime_lifecycle() {
         "sanitized diagnostics",
         "generation-scoped",
         "old-runtime-generation parse results",
-        "deny-by-default",
-        "resolver-validated first-party `@clay/*`",
+        "source-aware",
+        "user-authorized package",
         "executable callback payload rejection",
         "never in keypress, paint, layout, scroll, edit acknowledgement, or text-event handlers",
     ] {
@@ -757,31 +769,34 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
     );
 
     // The loader is implemented (Phase 18.6). The docs must describe the
-    // implemented resolver, the deny-by-default boundary, and the carried-
-    // forward deferrals (non-@clay/*, hot reload, persistent enable state).
+    // implemented resolver and carried-forward source-aware package work.
     // The old gap phrases are no longer present.
     if one_line_loader_is_implemented {
         // Authoritative reference docs must describe the resolver mechanics.
-        for source in [&package_guide, &package_loading] {
-            for phrase in [
-                "Phase 18.6 shipped",
-                "deny-by-default",
-                "FirstPartyLoadEntryAllowlist",
-                "PackageService",
-                "loadEntry",
-                "runtime-backed",
-            ] {
-                assert!(
-                    source.contains(phrase),
-                    "package docs must describe the implemented resolver with phrase `{phrase}`"
-                );
-            }
+        for phrase in [
+            "Phase 18.6 shipped",
+            "PackageService",
+            "loadEntry",
+            "runtime-backed",
+        ] {
+            assert!(
+                [&package_guide, &package_loading]
+                    .iter()
+                    .any(|source| source.contains(phrase)),
+                "package docs must describe the implemented resolver with phrase `{phrase}`"
+            );
+        }
+        for phrase in ["source-aware", "load-entry allowlist"] {
+            assert!(
+                package_loading.contains(phrase),
+                "package loading reference must describe unified resolver direction `{phrase}`"
+            );
         }
         // The implementation wiki summarizes the resolver at a higher level.
         assert!(
             wiki.contains("Phase 18.6 implemented")
                 && wiki.contains("loadPackage")
-                && wiki.contains("deny-by-default"),
+                && wiki.contains("source-aware"),
             "package loading wiki must summarize the Phase 18.6 implementation"
         );
 
@@ -841,15 +856,11 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
             }
         }
         assert!(
-            package_loading.contains("constrained first-party")
-                && (package_loading.contains("Non-`@clay/*`")
-                    || package_loading.contains("non-`@clay/*`")
-                    || package_loading.contains("non-@clay/*"))
+            package_loading.contains("source-aware")
+                && package_loading.contains("Durable package state")
                 && (package_loading.contains("Hot-reload")
-                    || package_loading.contains("hot reload"))
-                && (package_loading.contains("Persistent shared enable state")
-                    || package_loading.contains("persistent shared enable state")),
-            "package loading reference must document the carried-forward deferrals"
+                    || package_loading.contains("hot reload")),
+            "package loading reference must document implemented source-aware loading and carried-forward durable state work"
         );
         assert!(
             package_loading.contains("serverLoadPackage")
@@ -857,6 +868,50 @@ fn package_default_init_js_loading_documents_one_line_path_or_current_gap() {
             "package loading reference must reframe serverLoadPackage as a helper, not a gap"
         );
     }
+}
+
+#[test]
+fn package_default_init_js_user_installed_one_line_path_is_documented_and_verified() {
+    // Plan 035 task 8: the one-line init.js default must work for user-installed
+    // (non-@clay/*) packages, and init.js itself must grant no capabilities.
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let facade = read("runtime/js/packages.ts");
+    let embedded_facade = read("src/server/js_runtime.rs");
+
+    // The one-line path must explicitly cover user-installed source specifiers,
+    // not just @clay/markdown.
+    for source in [&package_guide, &package_loading, &wiki] {
+        assert!(
+            source.contains("@vendor/foo") || source.contains("github:user/repo"),
+            "default init.js docs must cover a user-installed package one-line example"
+        );
+    }
+    // The facade docstring must explain the one-line init.js path covers
+    // bundled and user-installed packages.
+    assert!(
+        facade.contains("@vendor/foo")
+            && facade.contains("github:user/repo")
+            && embedded_facade.contains("@vendor/foo"),
+        "loadPackage facade must document the one-line path for user-installed packages"
+    );
+    // init.js grants no capabilities: every powerful capability is a separate
+    // user-approved authorization grant, not something init.js can silently
+    // confer through loadPackage or other Clay APIs.
+    for source in [&package_guide, &package_loading, &wiki] {
+        assert!(
+            source.contains("grants no capabilities")
+                || source.contains("init.js cannot silently grant"),
+            "docs must state init.js grants no capabilities on its own"
+        );
+    }
+    // Runtime test must prove the user-installed one-line path through a real
+    // init.js config root, not only a controlled module source.
+    assert!(
+        embedded_facade.contains("load_package_user_installed_default_loads_from_init_js"),
+        "runtime tests must cover the user-installed package one-line init.js load"
+    );
 }
 
 #[test]
@@ -874,13 +929,12 @@ fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback()
     let load_entry = read("packages/markdown/dist/load.js");
     let package_index = read("packages/markdown/dist/index.js");
 
-    // The deferral is decision-log-backed.
-    for source in [&package_loading, &wiki, &package_guide, &markdown_docs] {
-        assert!(
-            source.contains("2026-06-15-1015-defer-generic-loadpackage-first-party-resolver"),
-            "docs must reference the loadPackage deferral decision log"
-        );
-    }
+    // The former first-party resolver deferral is superseded by unified package authority.
+    assert!(
+        package_loading.contains("2026-06-27-2014-unified-user-authorized-package-authority")
+            || wiki.contains("source-aware"),
+        "docs must reference the unified package authority direction"
+    );
     for phrase in [
         "Defer the generic",
         "loadPackage(\"@clay/*\")",
@@ -962,8 +1016,6 @@ fn package_author_guide_documents_persistent_parse_and_open_time_contract() {
         "INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES",
         "DECORATION_PAYLOAD_BUDGET_BYTES",
         "SYNTAX_CACHE_BUDGET_BYTES",
-        "FirstPartyLoadEntryAllowlist",
-        "deny-by-default",
         "Generic future-mode shape",
     ] {
         assert!(
@@ -1035,7 +1087,7 @@ fn package_customization_uses_documented_configuration_apis() {
 /// experience": pins that the one-line default (`loadPackage("@clay/markdown")`)
 /// and the hardened lifecycle-script suppression are two distinct paths that do
 /// not interfere. First-party `loadPackage` resolves through the registry/
-/// `FirstPartyLoadEntryAllowlist` and never invokes the pnpm backend or its
+/// `PackageLoadEntryAllowlist` and never invokes the pnpm backend or its
 /// lifecycle scripts; `--ignore-scripts` applies only to `clay package add`.
 /// This guards against a future regression where the two paths get conflated
 /// and the default-load experience breaks because of install-time hardening.
@@ -1078,9 +1130,8 @@ fn default_load_path_is_separate_from_lifecycle_script_suppression() {
         "package loading reference must document the `clay package add` backend path separately"
     );
     assert!(
-        package_loading.contains("@clay/*")
-            && package_loading.contains("FirstPartyLoadEntryAllowlist"),
-        "package loading reference must document the first-party resolver path as distinct from install"
+        package_loading.contains("@clay/*") && package_loading.contains("load-entry allowlist"),
+        "package loading reference must document the package resolver path as distinct from install"
     );
 }
 
@@ -1203,25 +1254,22 @@ fn package_loading_docs_describe_implemented_resolver_and_carried_forward_deferr
             "docs must describe the Phase 18.6 implementation"
         );
         assert!(
-            source.contains("deny-by-default"),
-            "docs must document the deny-by-default boundary"
-        );
-        assert!(
             source.contains("loadPackage"),
             "docs must mention the loadPackage facade"
         );
     }
-    // Carried-forward deferrals are explicitly stated as future work, not
-    // current gaps.
-    let has_non_clay_deferral = package_loading.contains("Non-`@clay/*`")
-        || package_loading.contains("non-`@clay/*`")
-        || package_loading.contains("non-@clay/*");
     assert!(
-        has_non_clay_deferral
-            && (package_loading.contains("Hot-reload") || package_loading.contains("hot reload"))
-            && (package_loading.contains("Persistent shared enable state")
-                || package_loading.contains("persistent shared enable state")),
-        "package loading reference must document the carried-forward deferrals"
+        [&package_loading, &package_guide, &wiki]
+            .iter()
+            .any(|source| source.contains("source-aware")),
+        "docs must document the source-aware package direction"
+    );
+    // Source-aware resolution is implemented; durable state remains explicitly carried forward.
+    assert!(
+        package_loading.contains("source-aware")
+            && package_loading.contains("Durable package state")
+            && (package_loading.contains("Hot-reload") || package_loading.contains("hot reload")),
+        "package loading reference must document implemented source-aware loading and carried-forward durable state work"
     );
     // Old gap language must not appear.
     assert!(
@@ -1239,38 +1287,34 @@ fn package_loading_docs_describe_implemented_resolver_and_carried_forward_deferr
 }
 
 #[test]
-fn package_loading_docs_keep_third_party_execution_blocked() {
+fn package_loading_docs_describe_source_aware_package_authority_target() {
     let package_loading = read("docs/reference/primitives/package-loading.md");
     let package_wiki = read("docs/wiki/modules/package-loading.md");
     let hardening = read("docs/wiki/modules/persistent-runtime-hardening.md");
     let resolver_op = read("src/server/ops/packages.rs");
 
     for phrase in [
-        "left-pad",
-        "@scope/pkg",
-        "URL",
+        "npm",
+        "GitHub/git",
         "local path",
-        "traversal",
-        "package-manager installation/metadata records do not grant runtime execution authority",
-        "approved third-party authority decision",
+        "source-aware",
+        "user authorization",
+        "package-manager metadata does not automatically activate runtime behavior",
     ] {
         assert!(
-            package_loading.contains(phrase),
-            "package loading reference must document third-party block phrase `{phrase}`"
+            package_loading.contains(phrase)
+                || package_wiki.contains(phrase)
+                || hardening.contains(phrase),
+            "docs must document source-aware package authority phrase `{phrase}`"
         );
     }
     assert!(
-        package_wiki.contains("runtime-execution authority")
-            && hardening.contains("before module loading"),
-        "wiki pages must preserve the third-party execution gate"
-    );
-    assert!(
-        resolver_op.contains("only resolves first-party `@clay/*` packages")
-            && resolver_op.contains("is_valid_first_party_package_segment"),
-        "resolver must keep the centralized first-party-only execution gate"
+        resolver_op.contains("installed, authorized package specifier")
+            && resolver_op.contains("PackageService")
+            && resolver_op.contains("PackageLoadEntryAllowlist"),
+        "resolver must describe source-aware package loading through the shared package service path"
     );
 }
-
 #[test]
 fn clay_packages_load_package_registry_entry_is_runtime_backed() {
     // Phase 18.6 task 8: the inventory entry must be promoted from planned to
@@ -1340,5 +1384,74 @@ fn load_package_introduces_no_hidden_configuration_key() {
         package_loading.contains("setPackageOption")
             || package_loading.contains("clay.configuration.setPackageOption"),
         "package-loading.md must reference setPackageOption for customization"
+    );
+}
+
+#[test]
+fn package_ui_layout_authoring_contract_is_unified_across_package_sources() {
+    // Plan 035 task 9: the package UI/layout authoring contract must apply
+    // identically to @clay/* packages and user-installed packages, with native
+    // UI / client runtime as explicit capability/API work, not implicit through
+    // package source.
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_security = read("docs/reference/primitives/package-security.md");
+
+    // Functional: the guide states user-installed packages may request the same
+    // UI/layout/native/client capabilities as Clay packages, with grants and
+    // validation.
+    for phrase in [
+        "Unified UI/layout authoring contract across package sources",
+        "identical for `@clay/*` packages and user-installed packages",
+        "`@clay/*` only means a package was shipped by Clay",
+        "same `clay:ui` facades",
+        "same `PackageService` validation",
+        "same conflict-resolution policy",
+        "User-installed packages may request the same UI/layout/native/client capabilities",
+        "explicit user authorization grants",
+        "Unified Package Capability Model",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "package guide must document the unified UI/layout authoring contract: {phrase}"
+        );
+    }
+
+    // Security: native UI / client runtime is explicit capability/API work,
+    // not implicit through package source.
+    for phrase in [
+        "Native UI and Client Runtime Are Explicit Capability/API Work",
+        "never implicit through package source",
+        "explicit capability and API work",
+        "native-ui",
+        "client-runtime",
+        "granted only through an explicit user/admin authorization record",
+        "never inferred from the package source kind",
+        "A capability grant authorizes a package to use a surface",
+        "does not materialize the surface",
+        "No UI/layout/security primitive branches on package source",
+    ] {
+        assert!(
+            package_security.contains(phrase),
+            "package-security.md must document native-ui/client-runtime as explicit capability/API work: {phrase}"
+        );
+    }
+    // The guide must echo the native-ui/client-runtime explicit-capability rule.
+    assert!(
+        package_guide.contains("Native UI and client runtime are explicit capability/API work"),
+        "package guide must state native UI/client runtime is explicit capability/API work"
+    );
+
+    // Performance: UI/layout declarations remain validated load/reload/config
+    // work, not paint/layout hot-path JS.
+    assert!(
+        package_guide.contains("validated load/reload/configuration work")
+            && package_guide.contains("no package JavaScript runs in Masonry paint"),
+        "package guide must keep UI/layout declarations off paint/layout hot paths"
+    );
+
+    // Code quality: no UI/layout primitive branches on package source.
+    assert!(
+        package_guide.contains("no `if github_package` / `if npm_package`"),
+        "package guide must forbid source-specific UI/layout primitive branches"
     );
 }

@@ -37,10 +37,10 @@ This review inventories existing primitives, what they already cover, and the sm
 
 ## Existing Generic Primitives to Reuse
 
-### Package loading and first-party module authority
+### Package loading and package module authority
 
 - Phase 18.6 implemented `clay:packages.loadPackage` for explicit one-line loading from `~/.config/clay/init.js`.
-- The resolver accepts constrained `@clay/*` specifiers, validates package metadata through `PackageService`, records resolver-validated `loadEntry` modules in `FirstPartyLoadEntryAllowlist`, and keeps `ClayModuleLoader` deny-by-default for arbitrary imports.
+- The resolver currently accepts constrained `@clay/*` specifiers as an implementation limit, validates package metadata through `PackageService`, records resolver-validated `loadEntry` modules in the package load-entry allowlist, and keeps imports confined to recorded package/configuration/facade entries. Plan 035 generalizes this path to source-aware user-authorized packages.
 - `PackageService` owns package metadata validation, enable/load checks, prefix/provenance, mode declarations, permissions, and conflict diagnostics.
 - `serverLoadPackage` remains a lower-level validation helper; `loadPackage("@clay/markdown")` is the end-user default.
 
@@ -65,7 +65,7 @@ Reuse: generic open-time activation should classify the document, activate the o
 - `ParseWindowSnapshot`, `ParsePolicy`, and `SyntaxMemoryBudget` provide bounded server-canonical text windows; `SYNTAX_CACHE_BUDGET_BYTES` caps retained parser input.
 - `op_clay_parse_register_parse_handler` validates package identity, mode, parse unit, viewport-priority flag, timeout bounds, max-window/guard/memory budgets, and rejects executable public fields (`handler`, `callback`, `onParse`, `function`).
 
-Reuse: do not redesign scheduling, range validation, budget checks, stale-result rejection, viewport priority, or payload validation. The missing piece is only a JS-backed adapter that implements existing `ParseHandler` for a resolver-validated package.
+Reuse: do not redesign scheduling, range validation, budget checks, stale-result rejection, viewport priority, or payload validation. The missing piece is only a JS-backed adapter that implements existing `ParseHandler` for a resolver-validated package; Plan 035 later broadens which package sources can become resolver-validated.
 
 ### Decoration/render output primitives
 
@@ -86,7 +86,7 @@ Reuse: open-time activation can read only already-open canonical document text/w
 ### Runtime boundary primitives
 
 - `ClayJsRuntimeService` owns constrained `deno_core` execution, curated `clay:*` facades, timeout diagnostics, raw-op hiding, and sanitized runtime errors.
-- `ClayModuleLoader` is deny-by-default except curated facades, configuration-root relative modules, and resolver-validated first-party load entries.
+- `ClayModuleLoader` accepts curated facades, configuration-root relative modules, and resolver-validated package load entries recorded in the allowlist.
 - `JS_RUNTIME_EVALUATION_TIMEOUT_MS` and `clay.runtime.timeout` already bound runaway evaluation.
 - Current runtime evaluations run on `spawn_blocking`, keeping V8 work away from async protocol tasks and UI paths.
 
@@ -163,11 +163,11 @@ Rejected alternatives:
 
 Phase 18.7 must preserve these boundaries:
 
-- Only resolver-validated first-party packages can register live parse handlers.
+- Only resolver-validated packages can register live parse handlers; current `@clay/*` package resolution is an implementation limit superseded by Plan 035 source-aware loading.
 - `serverRegisterParseHandler` remains a Clay JS facade, not raw `Deno.core.ops` user API.
 - User config cannot register arbitrary executable callbacks.
-- Packages cannot access filesystem outside already-open document content, network, shell, AI, WASM, raw ops, native widgets, client-side JavaScript, package-manager execution, or package enable/disable authority.
-- Persistent runtime module loading remains deny-by-default.
+- Packages cannot access filesystem outside already-open document content, network, shell, AI, WASM, raw ops, native widgets, client-side JavaScript, package-manager execution, or package-control authority merely by loading; those capabilities require explicit user approval when implemented.
+- Persistent runtime module loading remains confined to curated facades, configuration-root modules, and resolver-recorded package entries.
 - Parse windows expose only validated slices of already-open server-canonical document text.
 - Runtime diagnostics remain sanitized.
 
@@ -183,7 +183,7 @@ Phase 18.7 must preserve these boundaries:
 ## Planned Generic Implementation Direction
 
 1. Introduce a persistent runtime owner for the server/configuration generation.
-2. Keep `ClayModuleLoader` deny-by-default and reuse the first-party `loadEntry` allowlist.
+2. Keep `ClayModuleLoader` confined to recorded package entries and reuse the package `loadEntry` allowlist.
 3. Add a JS-backed `ParseHandler` adapter that stores server-owned handler tokens tied to package prefix/mode and invokes package JS on the persistent runtime.
 4. Keep public `serverRegisterParseHandler` callback-free for user config; bridge registration only succeeds under validated package load authority.
 5. Add generic open-time activation orchestration and route Markdown through it.
