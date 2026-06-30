@@ -182,6 +182,21 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor::shutdown",
         "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor::spawn",
         "src/server/runtime_sandbox.rs::SandboxEvaluation",
+        "src/server/command_execution.rs::CommandExecutionDiagnostic",
+        "src/server/command_execution.rs::CommandExecutionProvenance",
+        "src/server/command_execution.rs::CommandExecutionRequest",
+        "src/server/command_execution.rs::CommandExecutionResult",
+        "src/server/command_execution.rs::CommandExecutionRule",
+        "src/server/command_execution.rs::CommandExecutionStatus",
+        "src/server/command_execution.rs::CommandExecutionTarget",
+        "src/server/command_execution.rs::DiscoveryResult",
+        "src/server/command_execution.rs::CommandExecutor::execute",
+        "src/server/command_execution.rs::CommandExecutor::execute_discovery",
+        "src/server/command_execution.rs::CommandExecutor::execute_registered",
+        "src/server/command_execution.rs::CommandExecutor::new",
+        "src/server/command_execution.rs::CommandExecutor;",
+        "src/server/command_execution.rs::builtin_server_command",
+        "src/server/command_execution.rs::builtin_server_command_ids",
     ]
     .into_iter()
     .collect();
@@ -673,4 +688,150 @@ fn plan_035_unified_package_authority_public_surfaces_are_mapped_or_internal() {
             "{internal} is an internal primitive helper and must not be mapped as a user-facing Clay JS API"
         );
     }
+}
+
+#[test]
+fn phase18_8_command_execution_and_transient_menu_surfaces_are_internal() {
+    // Phase 18.8 added CommandExecutor, TransientMenuSession, and ControlCenter.
+    // Phase 18.9 added mode-discovery resolution (CommandExecutor::execute_discovery,
+    // DiscoveryResult, and the builtin_server_command(_ids) lookup that surfaces
+    // clay.modes.listActiveModes / clay.modes.explainActiveMode as ServerFirst
+    // commands). Command execution, transient menu sessions, the Control Center,
+    // and mode discovery are NOT public Clay JS APIs: packages register/list
+    // commands through existing clay:commands facades, reach the Control Center
+    // via bindKey to the built-in clay.controlCenter.open command, and reach
+    // mode discovery through the Control Center. The internal Rust surfaces must
+    // either be explicitly allowlisted as non-JS server infrastructure or kept
+    // pub(crate); no Clay JS facade/op/inventory entry may claim a public
+    // execute-command, open-transient-menu, or mode-discovery API.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let entries = inventory_entries();
+    let server_public_items = public_items_in_dir("src/server");
+    let inventory_text = inventory_rust_mapping_text();
+
+    // CommandExecutor and its public-to-crate Rust types back no Clay JS API;
+    // they are allowlisted as non-JS server infrastructure.
+    let command_execution_infrastructure: BTreeSet<&str> = [
+        "src/server/command_execution.rs::CommandExecutionDiagnostic",
+        "src/server/command_execution.rs::CommandExecutionProvenance",
+        "src/server/command_execution.rs::CommandExecutionRequest",
+        "src/server/command_execution.rs::CommandExecutionResult",
+        "src/server/command_execution.rs::CommandExecutionRule",
+        "src/server/command_execution.rs::CommandExecutionStatus",
+        "src/server/command_execution.rs::CommandExecutionTarget",
+        "src/server/command_execution.rs::DiscoveryResult",
+        "src/server/command_execution.rs::CommandExecutor::execute",
+        "src/server/command_execution.rs::CommandExecutor::execute_discovery",
+        "src/server/command_execution.rs::CommandExecutor::execute_registered",
+        "src/server/command_execution.rs::CommandExecutor::new",
+        "src/server/command_execution.rs::CommandExecutor;",
+        "src/server/command_execution.rs::builtin_server_command",
+        "src/server/command_execution.rs::builtin_server_command_ids",
+    ]
+    .into_iter()
+    .collect();
+    for item in command_execution_infrastructure {
+        assert!(
+            server_public_items.iter().any(|s| s == item),
+            "CommandExecutor surface {item} must remain public to the crate (integration tests rely on it)"
+        );
+        assert!(
+            !inventory_text.contains(item),
+            "CommandExecutor surface {item} must not be mapped as a user-facing Clay JS API"
+        );
+    }
+
+    // Transient menu session state is crate-private (pub(crate)); it must not
+    // appear as a public Rust surface and must not be mapped as a Clay JS API.
+    let transient_menu_source = std::fs::read_to_string(root.join("src/shell/transient_menu.rs"))
+        .expect("read transient menu source");
+    let shell_mod_source =
+        std::fs::read_to_string(root.join("src/shell/mod.rs")).expect("read shell module");
+    for internal_surface in [
+        "pub(crate) struct TransientMenuSessionId",
+        "pub(crate) struct TransientMenuSession",
+        "pub(crate) struct TransientMenuItem",
+        "pub(crate) struct TransientMenuAction",
+        "pub(crate) enum TransientMenuItemProvenance",
+        "pub(crate) enum TransientMenuFocusPolicy",
+        "pub(crate) enum TransientMenuStatus",
+    ] {
+        assert!(
+            transient_menu_source.contains(internal_surface),
+            "Phase 18.8 transient menu surface {internal_surface} must stay pub(crate)"
+        );
+    }
+    for forbidden_public in [
+        "pub struct TransientMenuSession",
+        "pub struct TransientMenuItem",
+        "pub struct TransientMenuAction",
+        "pub enum TransientMenuStatus",
+    ] {
+        assert!(
+            !transient_menu_source.contains(forbidden_public),
+            "{forbidden_public} must not bypass the pub(crate) boundary and become a user-facing Rust API"
+        );
+    }
+    assert!(
+        shell_mod_source.contains("pub(crate) mod transient_menu")
+            && shell_mod_source.contains("pub(crate) use transient_menu::TransientMenuSession"),
+        "shell module must re-export TransientMenuSession as pub(crate)"
+    );
+
+    // ControlCenter is pub(crate) and backs no Clay JS API.
+    let control_center_source = std::fs::read_to_string(root.join("src/server/control_center.rs"))
+        .expect("read control center source");
+    assert!(
+        control_center_source.contains("pub(crate) struct ControlCenter"),
+        "ControlCenter must stay pub(crate)"
+    );
+    assert!(
+        !control_center_source.contains("pub struct ControlCenter"),
+        "ControlCenter must not become a public user-facing Rust API"
+    );
+
+    // No inventory entry, facade, or op may claim a public execute-command or
+    // open-transient-menu Clay JS API.
+    let mut forbidden_ids = Vec::new();
+    for entry in &entries {
+        let id = entry.get("id");
+        for forbidden in [
+            "clay.commands.serverExecuteCommand",
+            "clay.ui.serverOpenTransientMenu",
+            "clay.controlCenter.open",
+        ] {
+            if id == forbidden {
+                forbidden_ids.push(id.to_string());
+            }
+        }
+    }
+    assert!(
+        forbidden_ids.is_empty(),
+        "Phase 18.8 must not ship public Clay JS API inventory entries for {forbidden_ids:?}; \
+         command execution/transient menu/Control Center are server-internal"
+    );
+    for forbidden_facade_or_op in [
+        "runtime/js/commands.ts::serverExecuteCommand",
+        "runtime/js/ui.ts::serverOpenTransientMenu",
+        "op_clay_commands_execute",
+        "op_clay_ui_open_transient_menu",
+    ] {
+        assert!(
+            !inventory_text.contains(forbidden_facade_or_op),
+            "Phase 18.8 must not wire a public facade/op for {forbidden_facade_or_op}; \
+             packages reach command execution only through server-owned CommandExecutor"
+        );
+    }
+    assert!(
+        !std::fs::read_to_string(root.join("runtime/js/commands.ts"))
+            .expect("read commands facade")
+            .contains("serverExecuteCommand"),
+        "commands facade must not export a public serverExecuteCommand function"
+    );
+    assert!(
+        !std::fs::read_to_string(root.join("runtime/js/ui.ts"))
+            .expect("read ui facade")
+            .contains("serverOpenTransientMenu"),
+        "ui facade must not export a public serverOpenTransientMenu function"
+    );
 }

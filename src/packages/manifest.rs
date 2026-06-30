@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use crate::packages::permissions::{
-    PackagePermission, PermissionValidationError, parse_permission,
+    PackagePermission, PermissionValidationError, is_prohibited_authority, parse_permission,
 };
 use crate::perf::budgets::BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES;
 
@@ -231,6 +231,12 @@ fn parse_permission_array(
             return Err(context.diagnostic(
                 PackageValidationRule::DuplicatePermission,
                 "clay.permissions/clay.capabilities entries must be unique",
+            ));
+        }
+        if field_name == "clay.permissions" && is_prohibited_authority(permission) {
+            return Err(context.diagnostic(
+                PackageValidationRule::ProhibitedAuthority,
+                format!("prohibited authority `{permission}` cannot be requested by default"),
             ));
         }
         match parse_permission(permission) {

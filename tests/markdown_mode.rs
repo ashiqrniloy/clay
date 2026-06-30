@@ -27,7 +27,8 @@ use clay::editor::{EditorCommand, EditorSurface};
 use clay::masonry_sdui::SduiNativeState;
 use clay::packages::manager::FakeBackend;
 use clay::packages::modes::{
-    DocumentClassificationInput, MajorModeActivation, ModeDeclaration, ModeRegistry,
+    DocumentClassificationInput, MajorModeActivation, ModeDeclaration, ModePatternKind,
+    ModeRegistry,
 };
 use clay::packages::record::assemble_package_record;
 use clay::packages::service::{PackageService, PackageServiceError};
@@ -84,6 +85,8 @@ fn markdown_registry_with_mode() -> (ModeRegistry, clay::packages::record::Packa
         mime_types: vec!["text/markdown".to_string()],
         file_names: vec![],
         file_name_patterns: vec![],
+        shebang_patterns: Vec::new(),
+        content_probes: Vec::new(),
     };
     registry
         .register_mode(&record.manifest, decl)
@@ -101,6 +104,8 @@ fn activate_markdown_for_document(
         document_id,
         path: Some(path.to_string()),
         mime_type: None,
+        shebang: None,
+        leading_content: None,
     };
     let classification = registry
         .classify(&input)
@@ -140,6 +145,7 @@ fn markdown_editor_rules() -> EditorBehaviorRules {
             PairRule::new("`", "`"),
         ],
         comments: vec![],
+        electric_characters: vec![],
         autocomplete_triggers: vec![],
     }
 }
@@ -540,6 +546,8 @@ fn markdown_fixture_activates_with_markdown_it_adapter() {
             document_id: 1,
             path: Some(fixture_path.to_string_lossy().replace('\\', "/")),
             mime_type: None,
+            shebang: None,
+            leading_content: None,
         })
         .expect("fixture path must classify as markdown");
     assert_eq!(classification.mode_id, "markdown");
@@ -1118,6 +1126,8 @@ fn markdown_classifies_supported_extensions_and_mime() {
             document_id: 1,
             path: Some("README.md".to_string()),
             mime_type: None,
+            shebang: None,
+            leading_content: None,
         })
         .expect(".md must classify as markdown");
     assert_eq!(md.mode_id, "markdown");
@@ -1127,6 +1137,8 @@ fn markdown_classifies_supported_extensions_and_mime() {
             document_id: 2,
             path: Some("notes.markdown".to_string()),
             mime_type: None,
+            shebang: None,
+            leading_content: None,
         })
         .expect(".markdown must classify as markdown");
     assert_eq!(markdown.mode_id, "markdown");
@@ -1136,6 +1148,8 @@ fn markdown_classifies_supported_extensions_and_mime() {
             document_id: 3,
             path: Some("doc.mdown".to_string()),
             mime_type: None,
+            shebang: None,
+            leading_content: None,
         })
         .expect(".mdown must classify as markdown");
     assert_eq!(mdown.mode_id, "markdown");
@@ -1156,6 +1170,8 @@ fn markdown_classifies_supported_extensions_and_mime() {
                 mime_types: vec!["text/markdown".to_string()],
                 file_names: vec![],
                 file_name_patterns: vec![],
+                shebang_patterns: Vec::new(),
+                content_probes: Vec::new(),
             },
         )
         .unwrap();
@@ -1167,22 +1183,25 @@ fn markdown_classifies_supported_extensions_and_mime() {
             document_id: 4,
             path: None,
             mime_type: Some("text/markdown".to_string()),
+            shebang: None,
+            leading_content: None,
         })
         .expect("text/markdown MIME must classify");
     assert_eq!(mime.mode_id, "markdown");
 
-    // Unknown extension → NoClassificationMatch.
-    let err = registry
+    // Unknown extension with no matching package falls back to the built-in
+    // `core.text` universal fallback mode (Phase 18.9), not NoClassificationMatch.
+    let fallback = registry
         .classify(&DocumentClassificationInput {
             document_id: 99,
             path: Some("file.txt".to_string()),
             mime_type: None,
+            shebang: None,
+            leading_content: None,
         })
-        .unwrap_err();
-    assert!(
-        err.message.contains("no registered mode matched"),
-        "must produce NoClassificationMatch: {err:?}"
-    );
+        .expect("unknown extension falls back to core.text");
+    assert_eq!(fallback.mode_id, "core.text");
+    assert_eq!(fallback.matched_by, ModePatternKind::Fallback);
 }
 
 // ── Mode activation and manifest tests ─────────────────────────────────────
@@ -1340,6 +1359,7 @@ fn markdown_editor_rules_parse_preserve_fence_body_indent() {
         },
         pairs: vec![],
         comments: vec![],
+        electric_characters: vec![],
         autocomplete_triggers: vec![],
     };
     let EnterRule::PreserveFenceBodyIndent { fence_markers } = &rules.enter else {

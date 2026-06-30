@@ -165,6 +165,10 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x29, 0x28, 0x35)),
         },
+        "surface.selected" => CoreThemeValue {
+            token_type: ColorRole,
+            value: ColorValue(Color::from_rgb8(0x3d, 0x38, 0x5c)),
+        },
         "text.primary" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0xee, 0xea, 0xff)),
@@ -239,6 +243,7 @@ pub(crate) struct SduiThemeStyle {
     pub(crate) panel_background: Color,
     pub(crate) button_background: Color,
     pub(crate) list_background: Color,
+    pub(crate) selected_background: Color,
     pub(crate) text_color: Color,
     pub(crate) muted_text_color: Color,
 }
@@ -253,6 +258,7 @@ impl SduiThemeStyle {
             panel_background: resolve_color(resolver, "surface.panel"),
             button_background: resolve_color(resolver, "surface.control"),
             list_background: resolve_color(resolver, "surface.list"),
+            selected_background: resolve_color(resolver, "surface.selected"),
             text_color: resolve_color(resolver, "text.primary"),
             muted_text_color: resolve_color(resolver, "text.muted"),
         }

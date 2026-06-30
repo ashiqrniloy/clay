@@ -130,6 +130,7 @@ Permission checks are install/enable/load/reload/registration/request/publicatio
 | `FoldingRange` | `render-folding` | Ranges must be valid for the target document version and bounded payload. |
 | `CompletionTriggerAndResult` | `completion-provider` | Trigger metadata is inert; provider execution is server-side, cancellable, and permission checked. |
 | `CommandDeclaration` | `command-registration` | Registration does not grant command handler authority; handler permissions are declared separately. |
+| `CommandExecution` | command-specific permissions validated at execution | Server validates command ID, routing policy, package provenance, declared permissions, target context, argument budget, and session/action freshness before side effects; activation through SDUI, package UI, keybinding, or transient-menu intent must normalize to this one server-owned boundary. |
 | `SduiPanelStatusContribution` | none for inert UI | Actions embedded in SDUI must target declared commands with their own permissions. |
 | `WorkingAreaLayout` / `PaneSplitTree` / `PaneSlotLayout` | none for inert layout declarations; `package-configuration` for behavior-changing defaults | Clay owns shell/pane/slot state; package/user defaults must be server-validated, bounded, package-provenance-aware layout state and must not expose Masonry widgets or native handles. |
 | `PanelContribution` / `ComponentContribution` / `TransientOverlayContribution` | none for inert UI declarations | Phase 18.3 slot-aware package UI is inert component state; action targets inherit command permissions and Clay rejects invalid prefixes, unsupported slots/anchors/focus/dismissal policies, unknown/deferred component kinds, unsupported typed style variables, raw CSS, client-side JavaScript, renderer callbacks, native widget handles, direct Masonry mutation, duplicate IDs, duplicate fixed slot claims, and oversize component payloads. |
@@ -158,6 +159,7 @@ Clay must reject a package primitive contribution before it becomes active when 
 8. The primitive does not contain client-side JavaScript references, draw callbacks, widget callbacks, CSS/HTML/script injection, raw style strings, direct Masonry widget constructors, native widget IDs, or native handles.
 9. Runtime handlers are registered through Clay JS facade APIs, not direct Rust public functions.
 10. Version, document, viewport, behavior, mode, and package provenance fields are present where the category requires them.
+11. Command execution requests normalize SDUI actions, package UI action intents, keybinding intents, and transient-menu selections through one server-owned boundary that re-checks command ID, routing policy, provenance, permissions, target context, argument budget, and session freshness before any side effect.
 
 ## Conflict Handling
 
@@ -184,6 +186,7 @@ Security rule: a package cannot override, replace, or disable another package wi
 | Unknown style/theme token | Reject with package/token/source diagnostics; raw CSS/style strings are never treated as fallback tokens. |
 | Unsupported UI state scope | Reject hidden globals, ad hoc keys, or undeclared scopes before package UI state affects the shell. |
 | Configuration key collision | Reject unless explicit user configuration or package-control replacement selects the active owner. |
+| Unregistered or unauthorized command execution | Reject command intents whose command ID, routing policy, provenance, permissions, target context, argument budget, or session freshness fail validation; client-first and client-ui routing policies must not be executed from server-owned menus or action intents. |
 
 ## Shell/Layout Precedence and Diagnostics
 

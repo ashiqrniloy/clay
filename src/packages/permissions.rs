@@ -74,8 +74,21 @@ pub fn parse_permission(value: &str) -> Result<PackagePermission, PermissionVali
     }
 }
 
-pub fn is_prohibited_authority(_value: &str) -> bool {
-    false
+pub fn is_prohibited_authority(value: &str) -> bool {
+    matches!(
+        value,
+        "filesystem"
+            | "network"
+            | "shell"
+            | "wasm"
+            | "ai-tools"
+            | "workspace-mutation"
+            | "native-ui"
+            | "client-runtime"
+            | "raw-ops"
+            | "package-control"
+            | "package-import"
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

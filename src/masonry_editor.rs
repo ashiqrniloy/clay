@@ -395,13 +395,71 @@ impl EditorWidget {
     }
 
     fn local_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
+        if self.route_menu_key(ctx, &key) {
+            return;
+        }
         let outcome = self.editor.route_key_with_event(&key);
         self.finish_local_outcome(ctx, outcome.command_outcome);
         if let Some(command) = outcome.client_ui_command {
             ctx.submit_action::<EditorAction>(EditorAction::ClientUiCommand(command));
             ctx.set_handled();
-        } else if outcome.server_intent.is_some() {
+        } else if let Some(intent) = outcome.server_intent {
+            if let Some(edit_queue) = &self.edit_queue {
+                let document = self.editor.document_state();
+                let _ = edit_queue.enqueue_command_intent(
+                    document.document_id,
+                    document.behavior_version,
+                    intent.command_id,
+                );
+            }
             ctx.set_handled();
+        }
+    }
+
+    /// Routes keys to the active transient menu when one exists. Returns `true`
+    /// if the key was consumed by the menu, keeping editor hot paths free of
+    /// command execution or IPC work.
+    fn route_menu_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
+        if self.sdui.active_menu().is_none() {
+            return false;
+        }
+        match key.key {
+            KeyCode::ArrowUp => {
+                self.sdui.menu_select_previous();
+                ctx.request_render();
+                ctx.set_handled();
+                true
+            }
+            KeyCode::ArrowDown => {
+                self.sdui.menu_select_next();
+                ctx.request_render();
+                ctx.set_handled();
+                true
+            }
+            KeyCode::Enter => {
+                if let Some(intent) = self.sdui.menu_activate_selected() {
+                    if let Some(edit_queue) = &self.edit_queue {
+                        let document = self.editor.document_state();
+                        let _ = edit_queue.enqueue_command_intent(
+                            document.document_id,
+                            document.behavior_version,
+                            intent.command_id,
+                        );
+                    }
+                }
+                self.sdui.clear_active_menu();
+                ctx.request_render();
+                ctx.set_handled();
+                true
+            }
+            KeyCode::Escape => {
+                self.sdui.menu_cancel();
+                self.sdui.clear_active_menu();
+                ctx.request_render();
+                ctx.set_handled();
+                true
+            }
+            _ => false,
         }
     }
 

@@ -13,8 +13,8 @@ use crate::perf::{
 };
 use crate::protocol::{
     BehaviorManifest, BehaviorVersion, DecorationChunkKey, DecorationKind, DecorationSet,
-    DecorationSpan, DocumentAccess, DocumentId, DocumentVersion, EditOperation, EnterRule,
-    KeyStroke, PairRule,
+    DecorationSpan, DocumentAccess, DocumentId, DocumentVersion, EditOperation,
+    ElectricCharacterRule, ElectricEffect, EnterRule, KeyStroke, PairRule,
 };
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
@@ -363,6 +363,9 @@ impl EditorSurface {
             RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text)) => {
                 let outcome = if let Some(pair) = self.pair_rule_for_inserted_text(&text).cloned() {
                     self.insert_pair_with_event(&pair)
+                } else if let Some(electric) = self.electric_rule_for_inserted_text(&text).cloned()
+                {
+                    self.insert_electric_with_event(&electric)
                 } else {
                     self.insert_text_with_event(&text)
                 };
@@ -921,6 +924,15 @@ impl EditorSurface {
             .find(|pair| pair.open == text)
     }
 
+    fn electric_rule_for_inserted_text(&self, text: &str) -> Option<&ElectricCharacterRule> {
+        let manifest = self.document.behavior_manifest.as_ref()?;
+        manifest
+            .editor_rules
+            .electric_characters
+            .iter()
+            .find(|rule| rule.trigger == text)
+    }
+
     fn newline_text_at(&self, byte_offset: usize) -> String {
         let Some(manifest) = &self.document.behavior_manifest else {
             return "\n".to_string();
@@ -983,6 +995,62 @@ impl EditorSurface {
         };
 
         self.finish_edit_with_operation_and_caret(result, operation, final_caret)
+    }
+
+    /// Apply an electric-character rule locally from manifest data. For
+    /// [`ElectricEffect::OutdentOneLevel`], when the trigger is typed as the
+    /// first non-whitespace character on an over-indented line, the leading
+    /// whitespace is shed by one indentation unit before the trigger is
+    /// inserted, so a closing bracket aligns with its opener. Otherwise the
+    /// trigger is inserted as ordinary text. No IPC, JavaScript, or server
+    /// round trip is involved; the effect is entirely Rust-known and driven by
+    /// declarative manifest parameters.
+    fn insert_electric_with_event(&mut self, rule: &ElectricCharacterRule) -> EditorCommandOutcome {
+        if !self.is_editable() || !matches!(rule.effect, ElectricEffect::OutdentOneLevel) {
+            return EditorCommandOutcome::unchanged();
+        }
+
+        let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let line_start = self.buffer.line_start_byte(byte_offset);
+        let leading = self.buffer.text_range(line_start..byte_offset);
+
+        // Only reflow when the typed trigger is the first non-whitespace on the
+        // line and the line has at least one indentation unit to shed.
+        let Some(dedented) = dedent_leading_one_level(
+            &leading,
+            self.electric_tab_kind(),
+            self.electric_indent_width(),
+        ) else {
+            return self.insert_text_with_event(&rule.trigger);
+        };
+
+        let replacement = format!("{dedented}{}", rule.trigger);
+        let operation = EditOperation::Replace {
+            start: line_start as u64,
+            end: byte_offset as u64,
+            text: replacement.clone(),
+        };
+        let result = self
+            .buffer
+            .replace_range(line_start..byte_offset, &replacement);
+        let final_caret = line_start + dedented.len() + rule.trigger.len();
+        self.finish_edit_with_operation_and_caret(result, operation, final_caret)
+    }
+
+    fn electric_tab_kind(&self) -> crate::protocol::TabMode {
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .map(|m| m.editor_rules.tab.mode.clone())
+            .unwrap_or(crate::protocol::TabMode::InsertSpaces)
+    }
+
+    fn electric_indent_width(&self) -> usize {
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .map(|m| m.editor_rules.tab.spaces_per_tab as usize)
+            .unwrap_or(4)
     }
 
     fn replace_selection_or_insert_with_event(&mut self, text: &str) -> EditorCommandOutcome {
@@ -1190,6 +1258,43 @@ impl EditorSurface {
     }
 }
 
+/// Shed one indentation unit from a line of all-whitespace `leading` text.
+/// Returns the dedented leading string when the line is over-indented enough
+/// to lose a full unit, otherwise `None` (no electric reflow applies).
+///
+/// This is the generic Rust-known transform engine behind
+/// [`ElectricEffect::OutdentOneLevel`]; it consults only the declarative tab
+/// kind/width from the manifest and contains no language-specific branch.
+fn dedent_leading_one_level(
+    leading: &str,
+    tab_kind: crate::protocol::TabMode,
+    width: usize,
+) -> Option<String> {
+    if leading.is_empty() || !leading.chars().all(|c| c == ' ' || c == '\t') {
+        return None;
+    }
+    match tab_kind {
+        crate::protocol::TabMode::InsertSpaces => {
+            if width == 0 {
+                return None;
+            }
+            let spaces = leading.chars().take_while(|&c| c == ' ').count();
+            if spaces >= width {
+                Some(leading[width..].to_string())
+            } else {
+                None
+            }
+        }
+        crate::protocol::TabMode::InsertTabCharacter => {
+            if leading.as_bytes().first() == Some(&b'\t') {
+                Some(leading[1..].to_string())
+            } else {
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
@@ -1198,8 +1303,9 @@ mod tests {
     use crate::editor::layout::LayoutCacheKey;
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
-        BehaviorManifest, CommandDeclaration, DocumentAccess, EditOperation, KeyBindingContext,
-        KeyBindingRule, KeyCode, KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
+        BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration, DocumentAccess,
+        EditOperation, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, KeyStroke,
+        RoutingPolicy, TabMode,
     };
 
     fn generated_lines(line_count: usize) -> String {
@@ -2013,5 +2119,193 @@ mod tests {
             LayoutCacheKey::new(editor.buffer.revision(), editor.viewport.revision(), 300.0);
 
         assert_eq!(key_after, key_before);
+    }
+
+    #[test]
+    fn client_first_typing_updates_local_text_without_waiting_for_server_command() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.scope = BehaviorScope::GlobalDefault;
+        manifest.manifest_id = "test".to_string();
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "markdown.togglePreview".to_string(),
+            sequence: vec![KeyStroke::new(KeyCode::Character("p".to_string()))],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        manifest.commands.push(CommandDeclaration {
+            command_id: "markdown.togglePreview".to_string(),
+            display_name: "Toggle Preview".to_string(),
+            routing_policy: RoutingPolicy::ServerFirst,
+            authority: CommandAuthority::ServerIntent,
+        });
+
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "hello".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(manifest);
+
+        let before = editor.visible_text();
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("x".to_string())));
+        let after_insert = editor.visible_text();
+
+        assert_eq!(before, "hello");
+        assert_eq!(after_insert, "xhello");
+        assert!(outcome.command_outcome.changed);
+
+        // A server-first keybinding produces a server intent but the editor
+        // does not apply a local text edit for that key, keeping typing hot
+        // paths independent of command execution.
+        let server_outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("p".to_string())));
+        assert!(
+            server_outcome.server_intent.is_some(),
+            "server-first keybinding produces an intent"
+        );
+        assert!(
+            server_outcome.command_outcome.edit_event.is_none(),
+            "server-first keybinding does not apply a local text edit"
+        );
+        assert_eq!(editor.visible_text(), "xhello");
+    }
+
+    // ── Phase 18.9 Task 5: generic key behavior through behavior manifests ──
+
+    #[test]
+    fn core_code_enter_auto_indents_and_electric_outdent_without_ipc() {
+        let mut editor = EditorSurface::default();
+        // Caret rests on an over-indented line inside a block.
+        editor.load_snapshot(
+            1,
+            2,
+            "fn a() {\n        ".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::core_code_editing(3));
+        editor.set_caret_for_test("fn a() {\n        ".len());
+
+        // Enter first: auto-indents by preserving leading whitespace. This is
+        // a ClientFirstPredictable local edit — the edit event is emitted with
+        // no server/JavaScript round trip.
+        let enter_outcome = editor.route_key_with_event(&KeyStroke::new(KeyCode::Enter));
+        assert!(enter_outcome.command_outcome.changed);
+        assert!(enter_outcome.command_outcome.edit_event.is_some());
+        assert_eq!(editor.visible_text(), "fn a() {\n        \n        ");
+
+        // Reset to the over-indented line and type `}`: the electric-character
+        // rule sheds one indentation unit before inserting the trigger, so the
+        // closing brace aligns with the block opener. Still fully local.
+        editor.load_snapshot(
+            1,
+            2,
+            "fn a() {\n        ".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::core_code_editing(3));
+        editor.set_caret_for_test("fn a() {\n        ".len());
+        let electric_outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("}".to_string())));
+        assert!(electric_outcome.command_outcome.changed);
+        assert!(electric_outcome.command_outcome.edit_event.is_some());
+        assert_eq!(editor.visible_text(), "fn a() {\n    }");
+
+        // The electric edit is a Replace (shed indent + insert trigger), not a
+        // bare Insert, proving the Rust-known engine reflowed from manifest data.
+        assert!(matches!(
+            electric_outcome
+                .command_outcome
+                .edit_event
+                .unwrap()
+                .operation,
+            EditOperation::Replace { .. }
+        ));
+    }
+
+    #[test]
+    fn core_code_comment_continuation_hook_applies_on_enter_inside_comment() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "  // note".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::core_code_editing(3));
+        editor.set_caret_for_test("  // note".len());
+
+        let outcome = editor.route_key_with_event(&KeyStroke::new(KeyCode::Enter));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "  // note\n  // ");
+        // Local ClientFirstPredictable edit, no IPC wait.
+        assert_eq!(
+            outcome.command_outcome.edit_event.unwrap().operation,
+            EditOperation::Insert {
+                byte_offset: "  // note".len() as u64,
+                text: "\n  // ".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn core_code_pair_insertion_runs_client_side_from_manifest() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::core_code_editing(3));
+        editor.set_caret_for_test(1);
+
+        // Every opener declared by the core.code manifest inserts both sides
+        // and leaves the caret between them, locally from manifest data.
+        for opener in ["(", "[", "{", "\"", "'"] {
+            editor.load_snapshot(
+                1,
+                2,
+                "ab".to_string(),
+                DocumentAccess::Editable { lease_id: 1 },
+            );
+            editor.install_behavior_manifest(BehaviorManifest::core_code_editing(3));
+            editor.set_caret_for_test(1);
+            let outcome = editor
+                .route_key_with_event(&KeyStroke::new(KeyCode::Character(opener.to_string())));
+            assert!(
+                outcome.command_outcome.changed,
+                "opener {opener:?} should insert a pair"
+            );
+            assert!(outcome.command_outcome.edit_event.is_some());
+            assert_eq!(
+                editor.caret_for_test(),
+                2,
+                "caret sits between pair sides for {opener:?}"
+            );
+        }
+
+        // Spot-check `(` explicitly: full text and emitted operation.
+        editor.load_snapshot(
+            1,
+            2,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::core_code_editing(3));
+        editor.set_caret_for_test(1);
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("(".to_string())));
+        assert_eq!(editor.visible_text(), "a()b");
+        assert_eq!(
+            outcome.command_outcome.edit_event.unwrap().operation,
+            EditOperation::Insert {
+                byte_offset: 1,
+                text: "()".to_string(),
+            }
+        );
     }
 }

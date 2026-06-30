@@ -21,6 +21,15 @@ pub struct ModeDeclaration {
     pub mime_types: Vec<String>,
     pub file_names: Vec<String>,
     pub file_name_patterns: Vec<String>,
+    /// Declarative shebang patterns matched against the interpreter token of an
+    /// open document's shebang line (e.g. `python*`, `node`, or `*` for any
+    /// interpreter). Validated like other mode patterns; no language-specific
+    /// Rust branches.
+    pub shebang_patterns: Vec<String>,
+    /// Declarative literal markers matched at the start of an open document's
+    /// bounded leading-content slice (e.g. `<?xml`, `<!DOCTYPE html`). The
+    /// weakest package-declared classification signal.
+    pub content_probes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +37,24 @@ pub struct DocumentClassificationInput {
     pub document_id: DocumentId,
     pub path: Option<String>,
     pub mime_type: Option<String>,
+    /// Optional shebang line (the first line of an already-open document when it
+    /// begins with `#!`), supplied only by the open path.  `None` disables
+    /// shebang probing.  Packages cannot supply shebang slices through this
+    /// field; the open path is the sole authority.
+    pub shebang: Option<String>,
+    /// Optional bounded leading-content slice of an already-open document,
+    /// supplied only by the open path.  Slices exceeding
+    /// [`MAX_LEADING_CONTENT_BYTES`] are rejected (treated as absent) so
+    /// content probes never read unbounded content.  No filesystem scan,
+    /// directory walk, or arbitrary package predicate is performed.
+    pub leading_content: Option<String>,
 }
+
+/// Maximum number of bytes of leading document content that classification
+/// probes may inspect.  Enforced by [`ModeRegistry::classify`]: oversize
+/// slices are rejected (treated as absent) and the document classifies via the
+/// remaining precedence ladder, so probes can never read unbounded content.
+pub const MAX_LEADING_CONTENT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModeClassification {
@@ -41,7 +67,29 @@ pub struct ModeClassification {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// The signal that matched a document to a mode, in ascending precedence.
+/// The full Phase 18.9 classification ladder is:
+///
+/// `user override > exact filename > wildcard filename > extension > MIME >
+/// shebang > bounded leading-content probe > core.code > core.text`
+///
+/// Package-declared signals are always consulted before built-in fallback
+/// modes, so any package match (even the weakest content probe) wins over
+/// `core.code`/`core.text`; the variants below only order package-declared
+/// signals against each other (and `core.code`'s own extension/shebang match
+/// against the `core.text` universal fallback).
 pub enum ModePatternKind {
+    /// Built-in universal fallback (e.g. `core.text`) selected when no
+    /// package-declared or built-in pattern matched a document. Lowest
+    /// precedence, so any real pattern wins over it.
+    Fallback,
+    /// Bounded leading-content probe: a package-declared literal marker matched
+    /// at the start of the open document's bounded leading-content slice.
+    /// Weakest package-declared signal.
+    ContentProbe,
+    /// Shebang line: a package-declared shebang pattern matched the document's
+    /// interpreter token (e.g. `#!/usr/bin/env python3`).
+    Shebang,
     MimeType,
     Extension,
     FileNamePattern,
@@ -56,6 +104,84 @@ pub struct MajorModeActivation {
     pub api_prefix: String,
     pub mode_id: String,
     pub behavior_version: BehaviorVersion,
+    /// The classification signal that selected this mode, recorded so the Phase
+    /// 18.9 discovery commands can report the classification source and the
+    /// fallback rationale without recomputing classification or scanning any
+    /// filesystem. Read-only provenance; carries no authority.
+    pub matched_by: ModePatternKind,
+}
+
+/// Phase 18.9 discovery provenance label for an active mode. Built-in
+/// `core.text`/`core.code` fallback modes are Clay-owned; any other mode is
+/// owned by the package that declared it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeProvenance {
+    /// Clay-owned built-in fallback mode (`core.text`/`core.code`), always-on
+    /// and requiring no package.
+    CoreBuiltIn,
+    /// Owned by an enabled package that declared the mode.
+    Package,
+}
+
+/// Phase 18.9 discovery summary for one active major mode, as returned by
+/// [`ModeRegistry::list_active_modes`]. Reads installed registry state only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveModeSummary {
+    pub document_id: DocumentId,
+    pub mode_id: String,
+    pub package_name: String,
+    pub api_prefix: String,
+    pub provenance: ModeProvenance,
+    pub classification_source: ModePatternKind,
+}
+
+/// Phase 18.9 discovery explanation for a document's active major mode, as
+/// returned by [`ModeRegistry::explain_active_mode`]. Carries no execution,
+/// document, or workspace authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModeExplanation {
+    pub document_id: DocumentId,
+    pub active_mode: String,
+    pub display_name: Option<String>,
+    pub package_name: String,
+    pub package_version: String,
+    pub api_prefix: String,
+    pub provenance: ModeProvenance,
+    pub classification_source: ModePatternKind,
+    pub fallback_used: bool,
+    /// Human-readable rationale describing why this mode is active (e.g. which
+    /// signal matched, whether a built-in fallback was used because no language
+    /// package claimed the document).
+    pub why: String,
+}
+
+/// Human-readable rationale for an active mode selected by `matched_by`, used
+/// by the discovery commands. Generic over the classification signal and the
+/// built-in/package provenance; performs no language-specific branching and no
+/// authority work.
+fn mode_rationale(matched_by: ModePatternKind, is_builtin: bool) -> String {
+    let source = match matched_by {
+        ModePatternKind::FileName => "exact filename",
+        ModePatternKind::FileNamePattern => "wildcard filename",
+        ModePatternKind::Extension => "extension",
+        ModePatternKind::MimeType => "MIME type",
+        ModePatternKind::Shebang => "shebang line",
+        ModePatternKind::ContentProbe => "bounded leading-content probe",
+        ModePatternKind::Fallback => "universal fallback",
+    };
+    if is_builtin && matches!(matched_by, ModePatternKind::Fallback) {
+        format!(
+            "no language package or built-in pattern matched; built-in core.text \
+             universal fallback claimed the document via {source}"
+        )
+    } else if is_builtin {
+        format!(
+            "no language package matched; built-in core.code claimed the document \
+             via {source}"
+        )
+    } else {
+        format!("package-declared mode matched the document via {source}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,13 +282,148 @@ pub struct ModeRegistry {
     selected_manifests: HashMap<DocumentId, DocumentManifestSelection>,
 }
 
+/// Reserved API prefix for Clay-owned built-in modes.
+pub const CORE_API_PREFIX: &str = "core";
+/// Reserved mode ID for the built-in universal plain-text fallback mode.
+pub const CORE_TEXT_MODE_ID: &str = "core.text";
+/// Reserved mode ID for the built-in code-oriented fallback mode.
+pub const CORE_CODE_MODE_ID: &str = "core.code";
+
+/// Built-in universal plain-text fallback mode.  Carries no static patterns;
+/// it is selected by [`ModeRegistry::classify`] only when no package-declared
+/// or built-in pattern matched, so any real match wins over it.  Always-on;
+/// requires no package, no `init.js` line, and no `loadPackage` step.
+pub fn core_text_mode() -> ModeDeclaration {
+    ModeDeclaration {
+        package_name: "clay".to_string(),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
+        api_prefix: CORE_API_PREFIX.to_string(),
+        mode_id: CORE_TEXT_MODE_ID.to_string(),
+        display_name: "Plain Text".to_string(),
+        extensions: Vec::new(),
+        mime_types: Vec::new(),
+        file_names: Vec::new(),
+        file_name_patterns: Vec::new(),
+        shebang_patterns: Vec::new(),
+        content_probes: Vec::new(),
+    }
+}
+
+/// Built-in code-oriented fallback mode.  Claims a curated, declarative set of
+/// common programming-language extensions so a disabled or absent language
+/// package still leaves the file editable as generic code.  Language packages
+/// declare the same extensions and win classification on ties because built-in
+/// modes have lowest precedence.  No language-specific Rust branches: the
+/// extension list is declarative metadata validated like any mode pattern.
+pub fn core_code_mode() -> ModeDeclaration {
+    ModeDeclaration {
+        package_name: "clay".to_string(),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
+        api_prefix: CORE_API_PREFIX.to_string(),
+        mode_id: CORE_CODE_MODE_ID.to_string(),
+        display_name: "Code".to_string(),
+        extensions: vec![
+            "rs".to_string(),
+            "py".to_string(),
+            "js".to_string(),
+            "ts".to_string(),
+            "jsx".to_string(),
+            "tsx".to_string(),
+            "c".to_string(),
+            "h".to_string(),
+            "cpp".to_string(),
+            "hpp".to_string(),
+            "cc".to_string(),
+            "cxx".to_string(),
+            "java".to_string(),
+            "go".to_string(),
+            "rb".to_string(),
+            "php".to_string(),
+            "sh".to_string(),
+            "bash".to_string(),
+            "zsh".to_string(),
+            "fish".to_string(),
+            "lua".to_string(),
+            "swift".to_string(),
+            "kt".to_string(),
+            "dart".to_string(),
+            "r".to_string(),
+            "pl".to_string(),
+            "scala".to_string(),
+            "clj".to_string(),
+            "sql".to_string(),
+            "css".to_string(),
+            "scss".to_string(),
+            "less".to_string(),
+            "xml".to_string(),
+            "html".to_string(),
+            "toml".to_string(),
+            "yaml".to_string(),
+            "yml".to_string(),
+            "json".to_string(),
+            "ini".to_string(),
+            "conf".to_string(),
+            "vim".to_string(),
+            "el".to_string(),
+            "ex".to_string(),
+            "exs".to_string(),
+            "zig".to_string(),
+            "nim".to_string(),
+            "cs".to_string(),
+            "fs".to_string(),
+        ],
+        mime_types: Vec::new(),
+        file_names: Vec::new(),
+        file_name_patterns: Vec::new(),
+        // Any shebang line marks a document as a script (code-like), so an
+        // extensionless script with no owning language package still resolves
+        // to `core.code` rather than the plain-text fallback. `*` matches any
+        // interpreter token and is plain declarative metadata: no
+        // language-specific Rust branch is involved.
+        shebang_patterns: vec!["*".to_string()],
+        content_probes: Vec::new(),
+    }
+}
+
 impl ModeRegistry {
     pub fn new() -> Self {
-        Self::default()
+        let mut registry = Self::default();
+        registry
+            .register_builtin_mode(core_text_mode())
+            .expect("core.text built-in mode must register at startup");
+        registry
+            .register_builtin_mode(core_code_mode())
+            .expect("core.code built-in mode must register at startup");
+        registry
     }
 
     pub fn activation_budget_ms(&self) -> u64 {
         MODE_ACTIVATION_P95_BUDGET_MS
+    }
+
+    /// Remove a registered mode declaration (e.g. when its owning package is
+    /// disabled mid-session). Returns `true` if the mode was present and
+    /// removed. Built-in `core.*` modes are Clay-owned and cannot be removed
+    /// (returns `false`) so the always-available fallback guarantee holds.
+    ///
+    /// This drops the declaration from the candidate set only; it does not by
+    /// itself reclassify open documents. The centralized activation path
+    /// (`classify` + `activate_major_mode`/`activate_builtin_major_mode`) must
+    /// be re-run for each affected document so it reclassifies deterministically
+    /// and gets a strictly greater behavior version (the prior activation must
+    /// remain so re-activation bumps the recorded version). A previously-active
+    /// activation for the removed mode is therefore left in place until
+    /// reclassification replaces it: it cannot bypass validation because
+    /// `select_behavior_manifest_for_document` errors for an unregistered mode
+    /// (its owning package is no longer enabled), forcing reclassification.
+    /// Grants no new authority (in-process registry mutation only); it is
+    /// symmetric with `register_mode`/`register_builtin_mode` and introduces no
+    /// new primitive category.
+    pub fn unregister_mode(&mut self, mode_id: &str) -> bool {
+        if mode_id.starts_with(CORE_API_PREFIX) {
+            return false;
+        }
+        self.modes.remove(mode_id).is_some()
     }
 
     pub fn register_mode(
@@ -197,11 +458,13 @@ impl ModeRegistry {
             ));
         }
         if declaration.mode_id.starts_with("clay.")
+            || declaration.mode_id.starts_with("core.")
             || !is_package_owned_id(&declaration.mode_id, &declaration.api_prefix)
         {
             return Err(context.diagnostic(
                 ModeValidationRule::InvalidModeId,
-                "mode ID must use the package apiPrefix or apiPrefix.* namespace",
+                "mode ID must use the package apiPrefix or apiPrefix.* namespace; \
+                 `clay.*` and `core.*` are reserved for Clay-owned built-in modes",
             ));
         }
         if !package.clay.modes.contains(&declaration.mode_id) {
@@ -218,8 +481,73 @@ impl ModeRegistry {
         }
         validate_patterns(&declaration, &context)?;
 
-        self.modes
-            .insert(declaration.mode_id.clone(), RegisteredMode { declaration });
+        self.modes.insert(
+            declaration.mode_id.clone(),
+            RegisteredMode {
+                declaration,
+                is_builtin: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// Register a Clay-owned built-in major mode (e.g. `core.text` or
+    /// `core.code`) at server startup. Built-in modes are always-on, carry
+    /// built-in provenance, have lowest classification precedence, and require
+    /// no package, no `init.js` line, and no `loadPackage` step.  Packages may
+    /// not register `core.*` IDs; [`Self::register_mode`] rejects them.
+    ///
+    /// Built-in fallback modes may declare zero static patterns (universal
+    /// fallback, e.g. `core.text`); when patterns are present they are
+    /// validated like package patterns so built-in metadata stays well-formed.
+    pub fn register_builtin_mode(
+        &mut self,
+        declaration: ModeDeclaration,
+    ) -> Result<(), ModeDiagnostic> {
+        let context = ModeDiagnosticContext::from_declaration(&declaration);
+        if !declaration.mode_id.starts_with("core.") {
+            return Err(context.diagnostic(
+                ModeValidationRule::InvalidModeId,
+                "built-in mode IDs must use the reserved `core.*` namespace",
+            ));
+        }
+        if declaration.api_prefix != CORE_API_PREFIX {
+            return Err(context.diagnostic(
+                ModeValidationRule::InvalidPrefix,
+                "built-in mode api_prefix must be `core`",
+            ));
+        }
+        if self.modes.contains_key(&declaration.mode_id) {
+            return Err(context.diagnostic(
+                ModeValidationRule::DuplicateModeId,
+                "mode IDs must be unique among enabled package modes",
+            ));
+        }
+        if declaration.display_name.trim().is_empty() {
+            return Err(context.diagnostic(
+                ModeValidationRule::MalformedPattern,
+                "mode display_name must be non-empty",
+            ));
+        }
+        // Built-in fallback modes may declare zero patterns (universal
+        // fallback).  When patterns are present, reuse the package-pattern
+        // validator so built-in metadata stays well-formed.
+        if !declaration.extensions.is_empty()
+            || !declaration.mime_types.is_empty()
+            || !declaration.file_names.is_empty()
+            || !declaration.file_name_patterns.is_empty()
+            || !declaration.shebang_patterns.is_empty()
+            || !declaration.content_probes.is_empty()
+        {
+            validate_patterns(&declaration, &context)?;
+        }
+        self.modes.insert(
+            declaration.mode_id.clone(),
+            RegisteredMode {
+                declaration,
+                is_builtin: true,
+            },
+        );
         Ok(())
     }
 
@@ -227,18 +555,38 @@ impl ModeRegistry {
         &self,
         input: &DocumentClassificationInput,
     ) -> Result<ModeClassification, ModeDiagnostic> {
-        let mut best: Option<(ModePatternKind, &RegisteredMode)> = None;
         let file_name = input.path.as_deref().and_then(file_name_from_path);
         let extension = input.path.as_deref().and_then(extension_from_path);
+        let shebang = input.shebang.as_deref();
+        // Reject oversize leading-content slices: probes never read unbounded
+        // content. An oversize slice is treated as absent so classification
+        // still succeeds via the remaining precedence ladder.
+        let leading_content = input
+            .leading_content
+            .as_deref()
+            .filter(|slice| slice.len() <= MAX_LEADING_CONTENT_BYTES);
 
+        // Phase 1: best package-declared match across all signal kinds. Any
+        // package match (even the weakest content probe) beats the built-in
+        // fallbacks, so package modes are consulted before built-ins. Equal-
+        // kind ties between two package modes are genuinely ambiguous.
+        let mut best_package: Option<(ModePatternKind, &RegisteredMode)> = None;
         for mode in self.modes.values() {
-            let Some(kind) = mode.best_match(input.mime_type.as_deref(), extension, file_name)
-            else {
+            if mode.is_builtin {
+                continue;
+            }
+            let Some(kind) = mode.best_match(
+                input.mime_type.as_deref(),
+                extension,
+                file_name,
+                shebang,
+                leading_content,
+            ) else {
                 continue;
             };
-            match best {
-                None => best = Some((kind, mode)),
-                Some((best_kind, _)) if kind > best_kind => best = Some((kind, mode)),
+            match best_package {
+                None => best_package = Some((kind, mode)),
+                Some((best_kind, _)) if kind > best_kind => best_package = Some((kind, mode)),
                 Some((best_kind, best_mode)) if kind == best_kind => {
                     return Err(ModeDiagnostic::new(
                         Some(mode.declaration.package_name.clone()),
@@ -257,19 +605,31 @@ impl ModeRegistry {
                 _ => {}
             }
         }
+        if let Some((matched_by, mode)) = best_package {
+            return Ok(mode.classification(input.document_id, matched_by));
+        }
 
-        let Some((matched_by, mode)) = best else {
-            return Err(ModeDiagnostic::new(
-                None,
-                None,
-                None,
-                None,
-                ModeValidationRule::NoClassificationMatch,
-                format!("no registered mode matched document {}", input.document_id),
-            ));
-        };
-
-        Ok(mode.classification(input.document_id, matched_by))
+        // Phase 2: built-in fallback modes. `core.code` claims code-like
+        // extensions and any shebang line; otherwise `core.text` is the
+        // universal plain-text fallback. If neither built-in is registered the
+        // legacy NoClassificationMatch error is preserved.
+        if let Some(core_code) = self.modes.get(CORE_CODE_MODE_ID)
+            && let Some(kind) =
+                core_code.best_match(None, extension, file_name, shebang, leading_content)
+        {
+            return Ok(core_code.classification(input.document_id, kind));
+        }
+        if let Some(core_text) = self.modes.get(CORE_TEXT_MODE_ID) {
+            return Ok(core_text.classification(input.document_id, ModePatternKind::Fallback));
+        }
+        Err(ModeDiagnostic::new(
+            None,
+            None,
+            None,
+            None,
+            ModeValidationRule::NoClassificationMatch,
+            format!("no registered mode matched document {}", input.document_id),
+        ))
     }
 
     pub fn activate_major_mode(
@@ -319,6 +679,56 @@ impl ModeRegistry {
             api_prefix: classification.api_prefix,
             mode_id: classification.mode_id,
             behavior_version,
+            matched_by: classification.matched_by,
+        };
+        self.active_major_modes
+            .insert(activation.document_id, activation.clone());
+        Ok(activation)
+    }
+
+    /// Activate a built-in Clay-owned major mode (e.g. `core.text` or
+    /// `core.code`) for a document. Built-in modes have no owning package, so
+    /// this path skips package permission/provenance checks and relies on the
+    /// built-in provenance recorded at registration. Used by the open path
+    /// when classification resolves to a built-in fallback mode; package-
+    /// declared modes must still go through [`Self::activate_major_mode`].
+    pub fn activate_builtin_major_mode(
+        &mut self,
+        classification: ModeClassification,
+    ) -> Result<MajorModeActivation, ModeDiagnostic> {
+        let Some(registered) = self.modes.get(&classification.mode_id) else {
+            return Err(ModeDiagnostic::new(
+                Some(classification.package_name.clone()),
+                Some(classification.package_version.clone()),
+                Some(classification.api_prefix.clone()),
+                Some(classification.mode_id.clone()),
+                ModeValidationRule::UndeclaredMode,
+                "major mode activation requires a registered mode declaration",
+            ));
+        };
+        if !registered.is_builtin {
+            return Err(ModeDiagnostic::new(
+                Some(classification.package_name.clone()),
+                Some(classification.package_version.clone()),
+                Some(classification.api_prefix.clone()),
+                Some(classification.mode_id.clone()),
+                ModeValidationRule::InvalidPrefix,
+                "activate_builtin_major_mode may only activate Clay-owned built-in modes; \
+                 use activate_major_mode for package-declared modes",
+            ));
+        }
+        let behavior_version = self
+            .active_major_modes
+            .get(&classification.document_id)
+            .map_or(1, |active| active.behavior_version.saturating_add(1));
+        let activation = MajorModeActivation {
+            document_id: classification.document_id,
+            package_name: classification.package_name.clone(),
+            package_version: classification.package_version.clone(),
+            api_prefix: classification.api_prefix.clone(),
+            mode_id: classification.mode_id.clone(),
+            behavior_version,
+            matched_by: classification.matched_by,
         };
         self.active_major_modes
             .insert(activation.document_id, activation.clone());
@@ -327,6 +737,78 @@ impl ModeRegistry {
 
     pub fn active_major_mode(&self, document_id: DocumentId) -> Option<&MajorModeActivation> {
         self.active_major_modes.get(&document_id)
+    }
+
+    /// Phase 18.9 discovery: lists every currently-active major mode (one per
+    /// open document) with its provenance and the classification signal that
+    /// selected it. Reads installed registry state only: no filesystem scan,
+    /// network call, shell, AI, WASM, package evaluation, or any other
+    /// authority. Bounded by the number of open documents. Crate-internal: the
+    /// user-facing surface is the built-in `clay.modes.listActiveModes` command
+    /// (resolved via [`CommandExecutor::execute_discovery`]), not this method.
+    pub(crate) fn list_active_modes(&self) -> Vec<ActiveModeSummary> {
+        self.active_major_modes
+            .values()
+            .map(|activation| ActiveModeSummary {
+                document_id: activation.document_id,
+                mode_id: activation.mode_id.clone(),
+                package_name: activation.package_name.clone(),
+                api_prefix: activation.api_prefix.clone(),
+                provenance: self.provenance_of(&activation.mode_id, activation),
+                classification_source: activation.matched_by,
+            })
+            .collect()
+    }
+
+    /// Phase 18.9 discovery: explains the active major mode for a document,
+    /// including owning package or `core` built-in provenance, the
+    /// classification source, whether a built-in fallback was used, and a
+    /// human-readable rationale describing why this mode is active. Reads
+    /// installed registry state only; carries no execution, document, or
+    /// workspace authority and triggers no filesystem scans or package
+    /// evaluation. Crate-internal: the user-facing surface is the built-in
+    /// `clay.modes.explainActiveMode` command (resolved via
+    /// [`CommandExecutor::execute_discovery`]), not this method.
+    pub(crate) fn explain_active_mode(&self, document_id: DocumentId) -> Option<ModeExplanation> {
+        let activation = self.active_major_modes.get(&document_id)?;
+        let registered = self.modes.get(&activation.mode_id);
+        let is_builtin = registered
+            .map(|mode| mode.is_builtin)
+            .unwrap_or_else(|| activation.mode_id.starts_with("core."));
+        let display_name = registered.map(|mode| mode.declaration.display_name.clone());
+        let provenance = self.provenance_of(&activation.mode_id, activation);
+        let fallback_used = matches!(activation.matched_by, ModePatternKind::Fallback);
+        Some(ModeExplanation {
+            document_id: activation.document_id,
+            active_mode: activation.mode_id.clone(),
+            display_name,
+            package_name: activation.package_name.clone(),
+            package_version: activation.package_version.clone(),
+            api_prefix: activation.api_prefix.clone(),
+            provenance,
+            classification_source: activation.matched_by,
+            fallback_used,
+            why: mode_rationale(activation.matched_by, is_builtin),
+        })
+    }
+
+    /// Derive the provenance label for an active mode. A mode is a Clay-owned
+    /// built-in (`core.text`/`core.code`) when it is registered as built-in or
+    /// its ID carries the reserved `core.` prefix; otherwise it is owned by the
+    /// package that declared it.
+    fn provenance_of(&self, mode_id: &str, activation: &MajorModeActivation) -> ModeProvenance {
+        let is_builtin = self
+            .modes
+            .get(mode_id)
+            .map(|mode| mode.is_builtin)
+            .unwrap_or_else(|| {
+                activation.api_prefix == CORE_API_PREFIX || mode_id.starts_with("core.")
+            });
+        if is_builtin {
+            ModeProvenance::CoreBuiltIn
+        } else {
+            ModeProvenance::Package
+        }
     }
 
     /// Register a minor-mode declaration.
@@ -372,11 +854,13 @@ impl ModeRegistry {
             ));
         }
         if declaration.mode_id.starts_with("clay.")
+            || declaration.mode_id.starts_with("core.")
             || !is_package_owned_id(&declaration.mode_id, &declaration.api_prefix)
         {
             return Err(context.diagnostic(
                 ModeValidationRule::InvalidModeId,
-                "minor mode ID must use the package apiPrefix or apiPrefix.* namespace",
+                "minor mode ID must use the package apiPrefix or apiPrefix.* namespace; \
+                 `clay.*` and `core.*` are reserved for Clay-owned built-in modes",
             ));
         }
         if self.modes.contains_key(&declaration.mode_id)
@@ -528,27 +1012,18 @@ impl ModeRegistry {
                 )
             })?;
 
-        // Find the package record for the major mode.
-        let major_package = enabled_packages
-            .iter()
-            .find(|r| r.manifest.name == major_activation.package_name)
-            .ok_or_else(|| {
-                ModeDiagnostic::new(
-                    Some(major_activation.package_name.clone()),
-                    Some(major_activation.package_version.clone()),
-                    Some(major_activation.api_prefix.clone()),
-                    Some(major_activation.mode_id.clone()),
-                    ModeValidationRule::UndeclaredMode,
-                    format!(
-                        "package `{}` for major mode `{}` is not in the enabled package list",
-                        major_activation.package_name, major_activation.mode_id
-                    ),
-                )
-            })?;
-
-        // Start from the base manifest for the document scope.
-        let mut manifest =
-            BehaviorManifest::minimal_text_editing(major_activation.behavior_version);
+        // Built-in Clay-owned `core.*` modes ship their own default rule sets
+        // and have no owning package, so they neither need nor require an
+        // enabled package record. `core.code` starts from the code-oriented
+        // manifest (electric-character reflow, code pairs/comment
+        // continuation); every other mode starts from the text default and
+        // layers its declared package commands on top.
+        let is_builtin = major_activation.mode_id.starts_with("core.");
+        let mut manifest = if major_activation.mode_id == CORE_CODE_MODE_ID {
+            BehaviorManifest::core_code_editing(major_activation.behavior_version)
+        } else {
+            BehaviorManifest::minimal_text_editing(major_activation.behavior_version)
+        };
         manifest.manifest_id = format!(
             "{}.{}",
             major_activation.api_prefix, major_activation.mode_id
@@ -568,15 +1043,35 @@ impl ModeRegistry {
             .map(|k| format!("{:?}:{:?}", k.context, k.sequence))
             .collect();
 
-        // Append package command contributions for the major mode.
-        append_package_commands(
-            &mut manifest,
-            major_package,
-            &major_activation.mode_id,
-            &major_activation.package_name,
-            &major_activation.package_version,
-            &major_activation.api_prefix,
-        );
+        if !is_builtin {
+            // Find the package record for the major mode.
+            let major_package = enabled_packages
+                .iter()
+                .find(|r| r.manifest.name == major_activation.package_name)
+                .ok_or_else(|| {
+                    ModeDiagnostic::new(
+                        Some(major_activation.package_name.clone()),
+                        Some(major_activation.package_version.clone()),
+                        Some(major_activation.api_prefix.clone()),
+                        Some(major_activation.mode_id.clone()),
+                        ModeValidationRule::UndeclaredMode,
+                        format!(
+                            "package `{}` for major mode `{}` is not in the enabled package list",
+                            major_activation.package_name, major_activation.mode_id
+                        ),
+                    )
+                })?;
+
+            // Append package command contributions for the major mode.
+            append_package_commands(
+                &mut manifest,
+                major_package,
+                &major_activation.mode_id,
+                &major_activation.package_name,
+                &major_activation.package_version,
+                &major_activation.api_prefix,
+            );
+        }
 
         // Apply minor-mode overlays for this document in activation order.
         let minor_activations = self
@@ -708,6 +1203,11 @@ impl ModeRegistry {
 #[derive(Debug, Clone)]
 struct RegisteredMode {
     declaration: ModeDeclaration,
+    /// `true` for Clay-owned built-in modes registered through
+    /// [`ModeRegistry::register_builtin_mode`] (e.g. `core.text`, `core.code`).
+    /// Built-in modes always-on, carry built-in provenance, and have lowest
+    /// classification precedence so package-declared patterns win on ties.
+    is_builtin: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -721,8 +1221,33 @@ impl RegisteredMode {
         mime_type: Option<&str>,
         extension: Option<&str>,
         file_name: Option<&str>,
+        shebang: Option<&str>,
+        leading_content: Option<&str>,
     ) -> Option<ModePatternKind> {
         let mut best = None;
+        // Weakest package-declared signals first; later matches overwrite up
+        // to the strongest kind so the mode is represented by its best signal.
+        if let Some(leading_content) = leading_content
+            && self
+                .declaration
+                .content_probes
+                .iter()
+                .any(|marker| leading_content.starts_with(marker.as_str()))
+        {
+            best = Some(ModePatternKind::ContentProbe);
+        }
+        if let Some(shebang) = shebang
+            && let Some(interpreter) = shebang_interpreter(shebang)
+            && self.declaration.shebang_patterns.iter().any(|pattern| {
+                if pattern.contains('*') {
+                    wildcard_match(pattern, interpreter)
+                } else {
+                    pattern.eq_ignore_ascii_case(interpreter)
+                }
+            })
+        {
+            best = Some(ModePatternKind::Shebang);
+        }
         if let Some(mime_type) = mime_type
             && self
                 .declaration
@@ -843,10 +1368,12 @@ fn validate_patterns(
         && declaration.mime_types.is_empty()
         && declaration.file_names.is_empty()
         && declaration.file_name_patterns.is_empty()
+        && declaration.shebang_patterns.is_empty()
+        && declaration.content_probes.is_empty()
     {
         return Err(context.diagnostic(
             ModeValidationRule::MalformedPattern,
-            "mode declaration must include at least one static extension, MIME, filename, or filename pattern",
+            "mode declaration must include at least one static extension, MIME, filename, filename pattern, shebang pattern, or content probe",
         ));
     }
 
@@ -880,6 +1407,22 @@ fn validate_patterns(
             return Err(context.diagnostic(
                 ModeValidationRule::MalformedPattern,
                 "filename patterns must be unique basename patterns containing exactly one wildcard",
+            ));
+        }
+    }
+    for shebang in &declaration.shebang_patterns {
+        if !seen.insert(format!("shebang:{shebang}")) || !valid_shebang_pattern(shebang) {
+            return Err(context.diagnostic(
+                ModeValidationRule::MalformedPattern,
+                "shebang patterns must be unique interpreter globs containing at least one `*` (e.g. `python*`, `node`, `*`)",
+            ));
+        }
+    }
+    for probe in &declaration.content_probes {
+        if !seen.insert(format!("probe:{probe}")) || !valid_content_probe(probe) {
+            return Err(context.diagnostic(
+                ModeValidationRule::MalformedPattern,
+                "content probes must be unique non-empty literal markers without wildcards or path separators",
             ));
         }
     }
@@ -918,6 +1461,36 @@ fn valid_file_name_pattern(value: &str) -> bool {
         && !value.contains("**")
 }
 
+/// A shebang pattern is an interpreter glob matched against the interpreter
+/// token of an open document's shebang line. A pattern without `*` matches the
+/// interpreter exactly (e.g. `bash`); a pattern with exactly one `*` matches
+/// via glob (e.g. `python*` matches `python3`); `*` alone matches any
+/// interpreter so a built-in mode may claim any shebang line as generic code.
+/// At most one `*` is allowed so matching stays a single deterministic glob.
+fn valid_shebang_pattern(value: &str) -> bool {
+    !value.is_empty()
+        && value.matches('*').count() <= 1
+        && !value.contains("**")
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '+' | '/' | '*'))
+        && !value.contains("Deno.core.ops")
+}
+
+/// A content probe is a literal marker matched at the very start of an open
+/// document's bounded leading-content slice (e.g. `<?xml`, `<!DOCTYPE html`).
+/// Wildcards and path separators are rejected so probes stay deterministic
+/// literal prefixes. The marker must fit within the bounded leading slice.
+fn valid_content_probe(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_LEADING_CONTENT_BYTES
+        && !value.contains('*')
+        && !value.contains('/')
+        && !value.contains('\\')
+        && !value.chars().any(char::is_whitespace)
+        && !value.contains("Deno.core.ops")
+}
+
 fn wildcard_match(pattern: &str, value: &str) -> bool {
     let Some((prefix, suffix)) = pattern.split_once('*') else {
         return false;
@@ -933,6 +1506,30 @@ fn file_name_from_path(path: &str) -> Option<&str> {
 
 fn extension_from_path(path: &str) -> Option<&str> {
     Path::new(path).extension()?.to_str()
+}
+
+/// Extract the interpreter token from a shebang line for declarative pattern
+/// matching. `#!/usr/bin/env python3` -> `python3`, `#!/bin/bash` -> `bash`,
+/// `#!/usr/local/bin/node` -> `node`. Returns `None` for a line that is not a
+/// shebang. Handles the common `/usr/bin/env <program> [args]` form by taking
+/// the program name; otherwise takes the basename of the interpreter path.
+/// Generic and language-agnostic: no interpreter-specific Rust branches.
+fn shebang_interpreter(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("#!")?.trim_start();
+    let mut tokens = rest.split_whitespace();
+    let interpreter = tokens.next()?;
+    // `/usr/bin/env <program>` form: the program name follows `env`.
+    let program = if interpreter.ends_with("/env") || interpreter == "env" {
+        tokens.next().unwrap_or(interpreter)
+    } else {
+        interpreter
+    };
+    // Strip any leading path components to get the interpreter basename
+    // (e.g. `/usr/local/bin/node` -> `node`).
+    program
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
 }
 
 fn is_package_owned_id(value: &str, api_prefix: &str) -> bool {

@@ -1538,6 +1538,8 @@ fn register_and_activate_major(
         mime_types: vec![],
         file_names: vec![],
         file_name_patterns: vec![],
+        shebang_patterns: Vec::new(),
+        content_probes: Vec::new(),
     };
     registry
         .register_mode(&record.manifest, decl)
@@ -1547,6 +1549,8 @@ fn register_and_activate_major(
         document_id,
         path: Some(format!("file.{extension}")),
         mime_type: None,
+        shebang: None,
+        leading_content: None,
     };
     let classification = registry.classify(&input).expect("classify must succeed");
     registry
@@ -2190,4 +2194,31 @@ fn package_sdui_contribution_carries_provenance_and_respects_budget() {
     let err = assemble_package_record(&oversized).unwrap_err();
     assert_eq!(err.rule, PackageRecordRule::PayloadBudgetExceeded);
     assert!(err.message.contains("SDUI_UPDATE_PAYLOAD_BUDGET_BYTES"));
+}
+
+#[test]
+fn oversize_manifest_rule_set_is_rejected_at_payload_budget() {
+    use clay::perf::budgets::BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES;
+
+    let mut oversize = full_markdown_fixture();
+    // Declare a static manifest payload estimate above the budget; the package
+    // record layer must reject the rule set before it can be installed.
+    oversize["clay"]["performance"] = json!({
+        "estimatedManifestBytes": BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES + 1
+    });
+    let err = assemble_package_record(&oversize).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::PayloadBudgetExceeded);
+    assert!(
+        err.message
+            .contains("BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES"),
+        "expected budget name in message: {}",
+        err.message
+    );
+
+    // At or under the budget the estimate is accepted.
+    let mut within = full_markdown_fixture();
+    within["clay"]["performance"] = json!({
+        "estimatedManifestBytes": BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES
+    });
+    assemble_package_record(&within).expect("manifest at budget is accepted");
 }

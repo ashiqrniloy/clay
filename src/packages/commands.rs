@@ -193,6 +193,14 @@ impl CommandRegistry {
     pub fn list(&self) -> impl Iterator<Item = &RegisteredCommand> {
         self.commands.values()
     }
+
+    /// Test-only helper to insert a command directly without package manifest
+    /// validation. Used by integration tests that need to exercise routing or
+    /// permission combinations that package registration intentionally rejects.
+    #[doc(hidden)]
+    pub fn insert_test_command(&mut self, command: RegisteredCommand) {
+        self.commands.insert(command.command_id.clone(), command);
+    }
 }
 
 fn validate_package_command(

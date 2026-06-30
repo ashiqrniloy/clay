@@ -9,3 +9,10 @@
 - Plans that add or change primitives must include documentation/test work so every primitive is recorded in reference docs, wiki pages, the master wiki index, and deterministic coverage tests such as `tests/primitives_docs.rs` or a successor primitive-documentation test.
 - When an AI agent works on a JS package, it should consult the primitive wiki before designing package code so the package reuses existing primitives rather than rediscovering or duplicating Rust capabilities.
 - Decision log source: `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`.
+
+## Built-in Fallback Modes (Phase 18.9)
+
+- Always-on Clay-owned built-in fallback modes `core.text` (universal) and `core.code` (code-like extensions / any shebang) are registered at server startup via `register_builtin_mode` with no `init.js` and no `loadPackage`. Language packages extend them through the same generic primitives; any package-declared pattern at equal or higher precedence beats a built-in (precedence, not load order). `core.*`/`clay.*` mode IDs are reserved and package-unregisterable.
+- Classification precedence ladder: user override > package-declared pattern (exact filename > wildcard > extension > MIME) > shebang > bounded leading-content probe (`MAX_LEADING_CONTENT_BYTES = 512`, open-path-supplied, no filesystem scan) > `core.code` > `core.text`. Equal-precedence ties: package beats built-in; same-provenance ties raise `AmbiguousClassification`.
+- Electric characters are the only new manifest *kind* (extension of `EnterRule`/`PairRule`, not a new primitive category); Rust-known engines execute, packages declare parameters only. Discovery commands `clay.modes.listActiveModes`/`explainActiveMode` are read-only `ServerFirst` built-ins with empty permissions.
+- Reports or tests asserting `NoClassificationMatch` for unrecognized files must instead assert `core.text`/`core.code` fallback. Decision log source: `decision-logs/2026-07-01-0350-phase18-9-generic-text-code-fallback-modes-and-key-behavior.md`.

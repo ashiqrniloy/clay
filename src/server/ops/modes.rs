@@ -11,7 +11,8 @@ use crate::{
     },
     protocol::{
         AutocompleteTrigger, BehaviorScope, CommentContinuationRule, EditorBehaviorRules,
-        EnterRule, PairRule, PairRuleContext, RoutingPolicy, TabMode, TabRule, TextEditCapability,
+        ElectricCharacterRule, ElectricEffect, EnterRule, PairRule, PairRuleContext, RoutingPolicy,
+        TabMode, TabRule, TextEditCapability,
     },
 };
 
@@ -57,6 +58,18 @@ pub(super) fn op_clay_modes_classify_document(
             .map(ToOwned::to_owned),
         mime_type: value
             .get("mimeType")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        // Shebang and bounded leading-content probes are supplied by the open
+        // path only. Oversize leading content is rejected by
+        // `ModeRegistry::classify` (treated as absent), so probes can never
+        // read unbounded content regardless of caller.
+        shebang: value
+            .get("shebang")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        leading_content: value
+            .get("leadingContent")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
     };
@@ -131,6 +144,14 @@ pub(super) fn op_clay_modes_activate_major_mode(
             .map(ToOwned::to_owned),
         mime_type: value
             .get("mimeType")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        shebang: value
+            .get("shebang")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        leading_content: value
+            .get("leadingContent")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
     };
@@ -271,6 +292,27 @@ fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
         _ => Vec::new(),
     };
 
+    // Electric characters are declarative manifest data: a package names the
+    // trigger character and a known effect. Only Rust-known effects are
+    // accepted; unknown effects are dropped so packages can never introduce a
+    // client-executed transform kind the engine does not recognise.
+    let electric_characters: Vec<ElectricCharacterRule> = match value.get("electricCharacters") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|entry| {
+                let trigger = entry.get("trigger").and_then(Value::as_str)?.to_string();
+                let effect = entry.get("effect").and_then(Value::as_str)?;
+                let effect = match effect {
+                    "outdent-one-level" => ElectricEffect::OutdentOneLevel,
+                    _ => return None,
+                };
+                Some(ElectricCharacterRule { trigger, effect })
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
     Ok(EditorBehaviorRules {
         text_edits: vec![
             TextEditCapability::Insert,
@@ -284,6 +326,7 @@ fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
         },
         pairs,
         comments,
+        electric_characters,
         autocomplete_triggers,
     })
 }
@@ -465,6 +508,16 @@ fn parse_declaration(
         file_name_patterns: string_array(
             value.get("fileNamePatterns"),
             "fileNamePatterns",
+            "clay.modes.invalid_declaration",
+        )?,
+        shebang_patterns: string_array(
+            value.get("shebangPatterns"),
+            "shebangPatterns",
+            "clay.modes.invalid_declaration",
+        )?,
+        content_probes: string_array(
+            value.get("contentProbes"),
+            "contentProbes",
             "clay.modes.invalid_declaration",
         )?,
     })

@@ -10,16 +10,20 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::protocol::{
-    ClientId, ClientMessage, DocumentId, DocumentMetadata, PROTOCOL_VERSION, ParseByteRange,
-    ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, ServerMessage,
-    WorkspaceRootId,
-    codec::{Codec, CodecError},
+use crate::{
+    packages::commands::CommandRegistry,
+    protocol::{
+        ClientId, ClientMessage, DocumentId, DocumentMetadata, PROTOCOL_VERSION, ParseByteRange,
+        ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
+        SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
+        codec::{Codec, CodecError},
+    },
 };
 
 use super::{
     RuntimeGenerationStore,
     behavior::ActiveBehaviorManifest,
+    command_execution::{CommandExecutionRequest, CommandExecutionTarget, CommandExecutor},
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
     parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
@@ -312,11 +316,41 @@ where
                 ui_version: _,
                 intent,
             } => {
-                let response = {
+                let validation_response = {
                     let state = sdui.lock().await;
                     sdui_action_response(&state, &intent)
                 };
+                let response =
+                    command_intent_response(sdui_command_request(&intent)).or(validation_response);
                 if let Some(response) = response {
+                    codec.write_server_message(&mut stream, &response).await?;
+                }
+            }
+            ClientMessage::CommandIntent {
+                client_id: _,
+                document_id,
+                behavior_version,
+                command_id,
+            } => {
+                if behavior.lock().await.version() != behavior_version {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message: "command intent behavior version is stale".to_string(),
+                            },
+                        )
+                        .await?;
+                    continue;
+                }
+                if let Some(response) = command_intent_response(CommandExecutionRequest {
+                    command_id,
+                    arguments: serde_json::Value::Null,
+                    target: CommandExecutionTarget::ActiveDocument { document_id },
+                    provenance: None,
+                    expected_permissions: Vec::new(),
+                }) {
                     codec.write_server_message(&mut stream, &response).await?;
                 }
             }
@@ -332,6 +366,49 @@ where
                     .await?;
             }
         }
+    }
+}
+
+fn command_intent_response(request: CommandExecutionRequest) -> Option<ServerMessage> {
+    CommandExecutor::new()
+        .execute(&CommandRegistry::new(), request)
+        .err()
+        .map(|error| ServerMessage::Error {
+            code: ProtocolErrorCode::InvalidMessage,
+            message: format!(
+                "command execution rejected: {:?}: {}",
+                error.rule, error.message
+            ),
+        })
+}
+
+fn sdui_command_request(intent: &SduiActionIntent) -> CommandExecutionRequest {
+    CommandExecutionRequest {
+        command_id: intent.command_id.clone(),
+        arguments: sdui_action_arguments_json(&intent.arguments),
+        target: CommandExecutionTarget::Global,
+        provenance: None,
+        expected_permissions: Vec::new(),
+    }
+}
+
+fn sdui_action_arguments_json(arguments: &[SduiActionArgument]) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    for argument in arguments {
+        object.insert(
+            argument.name.clone(),
+            sdui_action_value_json(&argument.value),
+        );
+    }
+    serde_json::Value::Object(object)
+}
+
+fn sdui_action_value_json(value: &SduiActionValue) -> serde_json::Value {
+    match value {
+        SduiActionValue::String(value) => serde_json::Value::String(value.clone()),
+        SduiActionValue::Bool(value) => serde_json::Value::Bool(*value),
+        SduiActionValue::I64(value) => serde_json::Value::Number((*value).into()),
+        SduiActionValue::U64(value) => serde_json::Value::Number((*value).into()),
     }
 }
 
@@ -612,6 +689,7 @@ pub(crate) async fn selected_file_open_followup_messages(
         js_runtime,
         parse_coordinator,
         metadata,
+        text,
         behavior,
         sdui,
     )
@@ -641,24 +719,53 @@ async fn classify_open_document(
     js_runtime: &ClayJsRuntimeService,
     parse_coordinator: &ParseCoordinator,
     metadata: &DocumentMetadata,
+    text: &str,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
 ) -> Option<OpenModeActivation> {
+    // Supply the open path's bounded leading-content slice and shebang line so
+    // server-owned classification probes can route scripts (shebang) and
+    // magic-prefixed files (content probes). The slice is bounded to
+    // MAX_LEADING_CONTENT_BYTES; `ModeRegistry::classify` rejects anything
+    // larger, so probes never read unbounded content and no new filesystem
+    // authority is introduced beyond the already-open document text.
+    let shebang = text
+        .lines()
+        .next()
+        .filter(|line| line.starts_with("#!"))
+        .map(str::to_string);
+    let leading_content =
+        bounded_utf8_prefix(text, crate::packages::modes::MAX_LEADING_CONTENT_BYTES)
+            .0
+            .to_string();
+    let shebang_json = serde_json::to_string(&shebang).unwrap_or_else(|_| "null".to_string());
+    let leading_json =
+        serde_json::to_string(&leading_content).unwrap_or_else(|_| "null".to_string());
     let source = format!(
         r#"
 import {{ serverActivateClassifiedMode, serverClassifyDocument }} from "clay:modes";
 import {{ loadPackage, serverListFirstPartyPackageSpecifiers }} from "clay:packages";
-const input = {{ documentId: {}, path: {} }};
+const input = {{ documentId: {}, path: {}, shebang: {}, leadingContent: {} }};
 let classification = null;
 try {{ classification = serverClassifyDocument(input); }} catch {{}}
+// Built-in fallback modes (apiPrefix "core", e.g. core.text/core.code) are a
+// last resort. Discard a built-in-only match so first-party packages still
+// load and win precedence over the fallback, then only activate a real
+// (non-built-in) classification below.
+if (classification && classification.apiPrefix === "core") {{
+  classification = null;
+}}
 if (!classification) {{
   for (const specifier of serverListFirstPartyPackageSpecifiers()) {{
     try {{
       await loadPackage(specifier);
       classification = serverClassifyDocument(input);
-      if (classification) break;
+      if (classification && classification.apiPrefix !== "core") break;
     }} catch {{}}
   }}
+}}
+if (classification && classification.apiPrefix === "core") {{
+  classification = null;
 }}
 if (classification) {{
   serverActivateClassifiedMode(classification, input);
@@ -666,7 +773,9 @@ if (classification) {{
 Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
 "#,
         metadata.document_id,
-        serde_json::to_string(&metadata.path).ok()?
+        serde_json::to_string(&metadata.path).ok()?,
+        shebang_json,
+        leading_json,
     );
     let evaluation = js_runtime.evaluate_controlled_module(source).await.ok()?;
     let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
@@ -766,7 +875,8 @@ mod tests {
         time::{Duration, timeout},
     };
 
-    use super::handle_connection;
+    use super::{command_intent_response, handle_connection, sdui_command_request};
+    use crate::server::command_execution::{CommandExecutionRequest, CommandExecutionTarget};
 
     fn workspace_state() -> Arc<Mutex<WorkspaceState>> {
         Arc::new(Mutex::new(WorkspaceState::new()))
@@ -841,7 +951,8 @@ await loadPackage("@clay/markdown");"#,
         protocol::{
             BehaviorManifest, BehaviorScope, ClientMessage, DecorationKind, DocumentAccess,
             DocumentMetadata, EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION,
-            RuntimeDiagnostic, SduiNodeKind, ServerMessage, codec::Codec,
+            RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiNodeId, SduiNodeKind,
+            ServerMessage, codec::Codec,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState,
@@ -849,6 +960,42 @@ await loadPackage("@clay/markdown");"#,
             sdui::StaticSduiState, workspace::WorkspaceState,
         },
     };
+
+    #[test]
+    fn sdui_actions_and_keybinding_intents_share_command_execution_path() {
+        let sdui_request = sdui_command_request(&SduiActionIntent::command(
+            "clay.controlCenter.open",
+            SduiActionSource::Button {
+                node_id: SduiNodeId(5),
+            },
+        ));
+        let keybinding_request = CommandExecutionRequest {
+            command_id: "clay.controlCenter.open".to_string(),
+            arguments: serde_json::Value::Null,
+            target: CommandExecutionTarget::ActiveDocument { document_id: 1 },
+            provenance: None,
+            expected_permissions: Vec::new(),
+        };
+
+        assert_eq!(command_intent_response(sdui_request), None);
+        assert_eq!(command_intent_response(keybinding_request), None);
+    }
+
+    #[test]
+    fn package_ui_unregistered_action_is_rejected_by_command_execution() {
+        let response = command_intent_response(sdui_command_request(&SduiActionIntent::command(
+            "markdown.missingCommand",
+            SduiActionSource::Button {
+                node_id: SduiNodeId(5),
+            },
+        )))
+        .expect("unknown package UI action returns protocol error");
+
+        assert!(matches!(response, ServerMessage::Error { .. }));
+        if let ServerMessage::Error { message, .. } = response {
+            assert!(message.contains("UnknownCommand"));
+        }
+    }
 
     #[tokio::test]
     async fn server_accepts_hello_and_sends_snapshot() {
@@ -1761,10 +1908,17 @@ await loadPackage("@clay/markdown");"#,
         let runtime = js_runtime();
         let coordinator = parse_coordinator();
         load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
-        let activation =
-            super::classify_open_document(1, &runtime, &coordinator, &metadata, &behavior, &sdui)
-                .await
-                .expect("loaded package should classify markdown path");
+        let activation = super::classify_open_document(
+            1,
+            &runtime,
+            &coordinator,
+            &metadata,
+            &text,
+            &behavior,
+            &sdui,
+        )
+        .await
+        .expect("loaded package should classify markdown path");
 
         let set =
             super::schedule_open_parse(&coordinator, &metadata, &text, &behavior, &activation)

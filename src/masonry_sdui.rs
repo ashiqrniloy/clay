@@ -27,7 +27,8 @@ use crate::protocol::{
 use crate::shell::{
     FixedSlotId, FixedSlotState, PackageUiComponentTree, PackageUiOverlayObservation,
     PackageUiPanelObservation, PackageUiRuntimeError, PackageUiRuntimeState,
-    PackageUiRuntimeUpdate, PaneSlotLayout, layout::PaneSlotId, theme::SduiThemeStyle,
+    PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession, layout::PaneSlotId,
+    theme::SduiThemeStyle,
 };
 
 #[cfg(test)]
@@ -74,6 +75,7 @@ pub struct SduiNativeState {
     editor_binding: Option<SduiEditorBinding>,
     actions: Vec<SduiVisibleAction>,
     package_ui: PackageUiRuntimeState,
+    active_menu: Option<TransientMenuSession>,
 }
 
 impl SduiNativeState {
@@ -85,6 +87,49 @@ impl SduiNativeState {
             editor_binding: None,
             actions: Vec::new(),
             package_ui: PackageUiRuntimeState::new(),
+            active_menu: None,
+        }
+    }
+
+    pub(crate) fn active_menu(&self) -> Option<&TransientMenuSession> {
+        self.active_menu.as_ref()
+    }
+
+    pub(crate) fn set_active_menu(&mut self, menu: TransientMenuSession) {
+        self.active_menu = Some(menu);
+    }
+
+    pub(crate) fn clear_active_menu(&mut self) {
+        self.active_menu = None;
+    }
+
+    pub(crate) fn menu_select_next(&mut self) {
+        if let Some(menu) = &mut self.active_menu {
+            menu.select_next();
+        }
+    }
+
+    pub(crate) fn menu_select_previous(&mut self) {
+        if let Some(menu) = &mut self.active_menu {
+            menu.select_previous();
+        }
+    }
+
+    pub(crate) fn menu_activate_selected(&mut self) -> Option<crate::protocol::SduiActionIntent> {
+        let menu = self.active_menu.as_ref()?;
+        let action = menu.activate_selected()?;
+        Some(crate::protocol::SduiActionIntent::command(
+            action.command_id.clone(),
+            crate::protocol::SduiActionSource::ListItem {
+                node_id: crate::protocol::SduiNodeId(menu.session_id().0),
+                item_id: menu.selected_index().to_string(),
+            },
+        ))
+    }
+
+    pub(crate) fn menu_cancel(&mut self) {
+        if let Some(menu) = &mut self.active_menu {
+            menu.cancel();
         }
     }
 
@@ -203,7 +248,8 @@ impl SduiNativeState {
     fn package_overlay_observations(&self, widget_size: Size) -> Vec<PackageUiOverlayObservation> {
         let slot_geometry =
             combined_slot_layout(widget_size, self).compute_geometry(widget_size.to_rect());
-        self.package_ui
+        let mut overlays: Vec<PackageUiOverlayObservation> = self
+            .package_ui
             .overlays()
             .map(|overlay| PackageUiOverlayObservation {
                 id: overlay.id.clone(),
@@ -216,7 +262,24 @@ impl SduiNativeState {
                 focus_policy: overlay.focus_policy.clone(),
                 dismissal_policy: overlay.dismissal_policy.clone(),
             })
-            .collect()
+            .collect();
+        if let Some(menu) = &self.active_menu {
+            if menu.is_active() {
+                let overlay = crate::shell::TransientPackageOverlay::from_menu_session(menu);
+                overlays.push(PackageUiOverlayObservation {
+                    id: overlay.id,
+                    anchor: overlay.anchor,
+                    rect: overlay
+                        .anchor
+                        .rect(widget_size.to_rect(), slot_geometry.main_rect),
+                    component_id: overlay.component.id,
+                    component_kind: overlay.component.kind,
+                    focus_policy: overlay.focus_policy,
+                    dismissal_policy: overlay.dismissal_policy,
+                });
+            }
+        }
+        overlays
     }
 
     pub(crate) fn accessibility_nodes(&self) -> Vec<SduiAccessibleNode> {
@@ -807,7 +870,15 @@ impl SduiNativeState {
     fn paint_package_overlays(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
         let size = ctx.size();
         let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
-        let overlays: Vec<_> = self.package_ui.overlays().cloned().collect();
+        let mut overlays: Vec<crate::shell::TransientPackageOverlay> =
+            self.package_ui.overlays().cloned().collect();
+        if let Some(menu) = &self.active_menu {
+            if menu.is_active() {
+                overlays.push(crate::shell::TransientPackageOverlay::from_menu_session(
+                    menu,
+                ));
+            }
+        }
         for overlay in overlays {
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
             scene.fill(
@@ -916,13 +987,12 @@ impl SduiNativeState {
             "list" => {
                 for item in &component.items {
                     let rect = row_rect(depth, *cursor_y, width, origin_x);
-                    scene.fill(
-                        Fill::NonZero,
-                        Affine::IDENTITY,
-                        sdui_theme_style().list_background,
-                        None,
-                        &rect,
-                    );
+                    let background = if item.selected {
+                        sdui_theme_style().selected_background
+                    } else {
+                        sdui_theme_style().list_background
+                    };
+                    scene.fill(Fill::NonZero, Affine::IDENTITY, background, None, &rect);
                     if let Some(command_id) = &item.action_command_id {
                         self.actions.push(SduiVisibleAction {
                             rect,
@@ -1218,6 +1288,9 @@ mod tests {
     use crate::protocol::{
         SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNodeKind,
         representative_panel_update, representative_sdui_tree,
+    };
+    use crate::shell::transient_menu::{
+        TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
     };
     use serde_json::json;
 
@@ -1869,5 +1942,108 @@ mod tests {
         second.apply_snapshot(sample_tree());
 
         assert_eq!(first.accessibility_nodes(), second.accessibility_nodes());
+    }
+
+    #[test]
+    fn active_menu_appears_in_overlay_observation() {
+        use crate::shell::transient_menu::{TransientMenuAction, TransientMenuItem};
+
+        let mut state = SduiNativeState::empty();
+        let menu = TransientMenuSession::new(TransientMenuSessionId(3), "Control Center")
+            .with_items(vec![
+                TransientMenuItem::new("a", "Alpha", TransientMenuAction::new("clay.alpha")),
+                TransientMenuItem::new("b", "Beta", TransientMenuAction::new("clay.beta")),
+            ]);
+        state.set_active_menu(menu);
+
+        let overlays = state
+            .observable_snapshot(Size::new(900.0, 600.0))
+            .package_transient_overlays;
+        assert_eq!(overlays.len(), 1);
+        assert_eq!(overlays[0].id, "clay.menu.3");
+        assert_eq!(overlays[0].anchor, PackageOverlayAnchor::Bottom);
+        assert_eq!(overlays[0].component_kind, "stack");
+    }
+
+    #[test]
+    fn cancelled_menu_does_not_appear_in_overlay_observation() {
+        use crate::shell::transient_menu::{TransientMenuAction, TransientMenuItem};
+
+        let mut state = SduiNativeState::empty();
+        let mut menu = TransientMenuSession::new(TransientMenuSessionId(4), "Control Center")
+            .with_items(vec![TransientMenuItem::new(
+                "a",
+                "Alpha",
+                TransientMenuAction::new("clay.alpha"),
+            )]);
+        menu.cancel();
+        state.set_active_menu(menu);
+
+        let overlays = state
+            .observable_snapshot(Size::new(900.0, 600.0))
+            .package_transient_overlays;
+        assert!(overlays.is_empty());
+    }
+
+    #[test]
+    fn menu_overlay_does_not_change_editor_region() {
+        use crate::shell::transient_menu::{TransientMenuAction, TransientMenuItem};
+
+        let mut state = SduiNativeState::empty();
+        let menu = TransientMenuSession::new(TransientMenuSessionId(5), "Control Center")
+            .with_items(vec![TransientMenuItem::new(
+                "a",
+                "Alpha",
+                TransientMenuAction::new("clay.alpha"),
+            )]);
+        state.set_active_menu(menu);
+
+        let region_with_menu = editor_region(Size::new(900.0, 600.0), &state);
+        let region_without_menu = editor_region(Size::new(900.0, 600.0), &SduiNativeState::empty());
+        assert_eq!(region_with_menu, region_without_menu);
+        assert_eq!(region_with_menu, Rect::new(0.0, 0.0, 900.0, 600.0));
+    }
+
+    #[test]
+    fn menu_navigation_updates_selection() {
+        use crate::shell::transient_menu::TransientMenuAction;
+
+        let mut state = SduiNativeState::empty();
+        let menu =
+            TransientMenuSession::new(TransientMenuSessionId(6), "Commands").with_items(vec![
+                TransientMenuItem::new("a", "Alpha", TransientMenuAction::new("clay.alpha")),
+                TransientMenuItem::new("b", "Beta", TransientMenuAction::new("clay.beta")),
+                TransientMenuItem::new("c", "Gamma", TransientMenuAction::new("clay.gamma")),
+            ]);
+        state.set_active_menu(menu);
+        assert_eq!(state.active_menu().unwrap().selected_index(), 0);
+
+        state.menu_select_next();
+        assert_eq!(state.active_menu().unwrap().selected_index(), 1);
+
+        state.menu_select_previous();
+        assert_eq!(state.active_menu().unwrap().selected_index(), 0);
+
+        state.menu_select_previous();
+        assert_eq!(state.active_menu().unwrap().selected_index(), 2);
+    }
+
+    #[test]
+    fn menu_activate_selected_returns_inert_action_intent() {
+        use crate::shell::transient_menu::TransientMenuAction;
+
+        let mut state = SduiNativeState::empty();
+        let menu =
+            TransientMenuSession::new(TransientMenuSessionId(7), "Commands").with_items(vec![
+                TransientMenuItem::new("a", "Alpha", TransientMenuAction::new("clay.alpha")),
+                TransientMenuItem::new("b", "Beta", TransientMenuAction::new("clay.beta")),
+            ]);
+        state.set_active_menu(menu);
+        state.menu_select_next();
+
+        let intent = state
+            .menu_activate_selected()
+            .expect("selected item action");
+        assert_eq!(intent.command_id, "clay.beta");
     }
 }

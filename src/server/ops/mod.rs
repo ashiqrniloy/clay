@@ -443,6 +443,36 @@ impl ClayOpState {
             .collect()
     }
 
+    pub(super) fn execute_command(
+        &self,
+        request: crate::server::command_execution::CommandExecutionRequest,
+    ) -> Result<
+        crate::server::command_execution::CommandExecutionResult,
+        crate::server::command_execution::CommandExecutionDiagnostic,
+    > {
+        let executor = crate::server::command_execution::CommandExecutor::new();
+        // Phase 18.9 mode-discovery commands resolve their payload by reading
+        // installed `ModeRegistry` state (read-only; no filesystem scan, package
+        // evaluation, or other authority). Package commands and other built-in
+        // commands go through the standard validation-only execution path.
+        if crate::server::command_execution::is_mode_discovery_command(&request.command_id) {
+            return executor.execute_discovery(
+                &self
+                    .modes
+                    .lock()
+                    .expect("Clay runtime op state mutex poisoned"),
+                request,
+            );
+        }
+        executor.execute(
+            &self
+                .commands
+                .lock()
+                .expect("Clay runtime op state mutex poisoned"),
+            request,
+        )
+    }
+
     pub(super) fn registered_command_ids(&self) -> Vec<String> {
         self.commands
             .lock()

@@ -17,6 +17,9 @@ use masonry::kurbo::Rect;
 use serde_json::{Map, Value};
 
 use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
+use super::transient_menu::{
+    TransientMenuFocusPolicy, TransientMenuItem, TransientMenuSession, TransientMenuStatus,
+};
 
 const MAX_FIXED_PANELS: usize = 4;
 const MAX_TRANSIENT_OVERLAYS: usize = 16;
@@ -75,6 +78,7 @@ pub(crate) enum PackageOverlayAnchor {
     ActivePane,
     Main,
     Pointer,
+    Bottom,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +113,7 @@ pub(crate) struct PackageUiListItem {
     pub(crate) label: String,
     pub(crate) detail: Option<String>,
     pub(crate) action_command_id: Option<String>,
+    pub(crate) selected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -405,6 +410,133 @@ impl TransientPackageOverlay {
             action_targets,
         }
     }
+
+    /// Projects a generic `TransientMenuSession` onto a Clay-owned transient
+    /// overlay anchored to the bottom of the main pane. The resulting component
+    /// tree carries only inert command IDs and bounded JSON arguments; it does
+    /// not embed callbacks, native handles, raw CSS, or executable code.
+    pub(crate) fn from_menu_session(session: &TransientMenuSession) -> Self {
+        let prompt_id = format!("clay.menu.{}.prompt", session.session_id().0);
+        let query_id = format!("clay.menu.{}.query", session.session_id().0);
+        let list_id = format!("clay.menu.{}.list", session.session_id().0);
+        let status_id = format!("clay.menu.{}.status", session.session_id().0);
+
+        let mut children = vec![
+            PackageUiComponentTree {
+                id: prompt_id,
+                kind: "label".to_string(),
+                title: None,
+                text: Some(session.prompt().to_string()),
+                label: Some(session.prompt().to_string()),
+                action_command_id: None,
+                items: Vec::new(),
+                children: Vec::new(),
+            },
+            PackageUiComponentTree {
+                id: query_id,
+                kind: "label".to_string(),
+                title: None,
+                text: Some(session.query().to_string()),
+                label: Some(session.query().to_string()),
+                action_command_id: None,
+                items: Vec::new(),
+                children: Vec::new(),
+            },
+        ];
+
+        match session.status() {
+            TransientMenuStatus::Empty { message } => {
+                children.push(PackageUiComponentTree {
+                    id: status_id,
+                    kind: "statusItem".to_string(),
+                    title: None,
+                    text: Some(message.clone()),
+                    label: Some(message.clone()),
+                    action_command_id: None,
+                    items: Vec::new(),
+                    children: Vec::new(),
+                });
+            }
+            _ => {
+                let selected_index = session.selected_index();
+                let items: Vec<PackageUiListItem> = session
+                    .items()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| menu_item_to_list_item(index, item, selected_index))
+                    .collect();
+                let action_targets: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| item.action_command_id.clone())
+                    .collect();
+                children.push(PackageUiComponentTree {
+                    id: list_id,
+                    kind: "list".to_string(),
+                    title: None,
+                    text: None,
+                    label: None,
+                    action_command_id: None,
+                    items,
+                    children: Vec::new(),
+                });
+                return Self {
+                    id: format!("clay.menu.{}", session.session_id().0),
+                    anchor: PackageOverlayAnchor::Bottom,
+                    focus_policy: match session.focus_policy() {
+                        TransientMenuFocusPolicy::Modal => "modal".to_string(),
+                        TransientMenuFocusPolicy::Modeless => "modeless".to_string(),
+                    },
+                    dismissal_policy: "escape".to_string(),
+                    component: PackageUiComponentTree {
+                        id: format!("clay.menu.{}.root", session.session_id().0),
+                        kind: "stack".to_string(),
+                        title: Some(session.prompt().to_string()),
+                        text: None,
+                        label: Some(session.prompt().to_string()),
+                        action_command_id: None,
+                        items: Vec::new(),
+                        children,
+                    },
+                    action_targets,
+                };
+            }
+        }
+
+        Self {
+            id: format!("clay.menu.{}", session.session_id().0),
+            anchor: PackageOverlayAnchor::Bottom,
+            focus_policy: match session.focus_policy() {
+                TransientMenuFocusPolicy::Modal => "modal".to_string(),
+                TransientMenuFocusPolicy::Modeless => "modeless".to_string(),
+            },
+            dismissal_policy: "escape".to_string(),
+            component: PackageUiComponentTree {
+                id: format!("clay.menu.{}.root", session.session_id().0),
+                kind: "stack".to_string(),
+                title: Some(session.prompt().to_string()),
+                text: None,
+                label: Some(session.prompt().to_string()),
+                action_command_id: None,
+                items: Vec::new(),
+                children,
+            },
+            action_targets: Vec::new(),
+        }
+    }
+}
+
+fn menu_item_to_list_item(
+    index: usize,
+    item: &TransientMenuItem,
+    selected_index: usize,
+) -> PackageUiListItem {
+    PackageUiListItem {
+        id: format!("item.{index}"),
+        label: item.label.clone(),
+        detail: item.detail.clone(),
+        action_command_id: Some(item.action.command_id.clone()),
+        selected: index == selected_index,
+    }
 }
 
 impl PackagePanelVisibility {
@@ -423,6 +555,7 @@ impl PackageOverlayAnchor {
             "active-pane" => Self::ActivePane,
             "main" => Self::Main,
             "pointer" => Self::Pointer,
+            "bottom" => Self::Bottom,
             _ => Self::WorkingArea,
         }
     }
@@ -431,6 +564,7 @@ impl PackageOverlayAnchor {
         match self {
             Self::Main => main_rect,
             Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
+            Self::Bottom => bottom_rect(main_rect),
             Self::WorkingArea | Self::ActivePane => working_area,
         }
     }
@@ -491,6 +625,25 @@ impl PackageUiComponentTree {
 }
 
 impl PackageUiListItem {
+    pub(crate) fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        action_command_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            detail: None,
+            action_command_id,
+            selected: false,
+        }
+    }
+
+    pub(crate) fn with_selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
     fn from_value(value: &Value) -> Result<Self, String> {
         let object = value
             .as_object()
@@ -504,6 +657,10 @@ impl PackageUiListItem {
                 .and_then(Value::as_object)
                 .and_then(|action| optional_text(action, "commandId"))
                 .map(ToOwned::to_owned),
+            selected: object
+                .get("selected")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         })
     }
 }
@@ -527,12 +684,25 @@ fn centered_rect(bounds: Rect, width: f64, height: f64) -> Rect {
     Rect::new(x0, y0, x0 + width, y0 + height)
 }
 
+fn bottom_rect(main_rect: Rect) -> Rect {
+    let height = (main_rect.height() * 0.35).clamp(120.0, 240.0);
+    Rect::new(
+        main_rect.x0,
+        main_rect.y1 - height,
+        main_rect.x1,
+        main_rect.y1,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use masonry::kurbo::Rect;
     use serde_json::json;
 
     use super::*;
+    use crate::shell::transient_menu::{
+        TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+    };
 
     fn component(id: &str) -> PackageUiComponentTree {
         PackageUiComponentTree::from_declaration(&json!({
@@ -643,5 +813,108 @@ mod tests {
         let overlay = with_overlay.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0));
         assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 900.0, 480.0));
         assert_eq!(overlay[0].rect, geometry.main_rect);
+    }
+
+    #[test]
+    fn menu_session_projects_to_bottom_transient_overlay() {
+        use crate::shell::transient_menu::TransientMenuAction;
+
+        let session = TransientMenuSession::new(TransientMenuSessionId(7), "Control Center")
+            .with_items(vec![
+                TransientMenuItem::new(
+                    "cmd.a",
+                    "Alpha Command",
+                    TransientMenuAction::new("clay.alpha"),
+                )
+                .with_detail("does alpha"),
+                TransientMenuItem::new(
+                    "cmd.b",
+                    "Beta Command",
+                    TransientMenuAction::new("clay.beta"),
+                ),
+            ]);
+        let overlay = TransientPackageOverlay::from_menu_session(&session);
+
+        assert_eq!(overlay.id, "clay.menu.7");
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Bottom);
+        assert_eq!(overlay.focus_policy, "modal");
+        assert_eq!(overlay.dismissal_policy, "escape");
+        assert_eq!(overlay.component.kind, "stack");
+        assert_eq!(overlay.action_targets, vec!["clay.alpha", "clay.beta"]);
+
+        let list_component = overlay
+            .component
+            .children
+            .iter()
+            .find(|child| child.kind == "list")
+            .expect("menu overlay contains list component");
+        assert_eq!(list_component.items.len(), 2);
+        assert_eq!(list_component.items[0].label, "Alpha Command");
+        assert_eq!(
+            list_component.items[0].detail.as_deref(),
+            Some("does alpha")
+        );
+        assert_eq!(
+            list_component.items[0].action_command_id,
+            Some("clay.alpha".to_string())
+        );
+        assert!(list_component.items[0].selected);
+        assert!(!list_component.items[1].selected);
+    }
+
+    #[test]
+    fn bottom_menu_overlay_does_not_consume_fixed_slot_geometry() {
+        let session = TransientMenuSession::new(TransientMenuSessionId(8), "Control Center")
+            .with_items(vec![TransientMenuItem::new(
+                "cmd.a",
+                "Alpha",
+                TransientMenuAction::new("clay.alpha"),
+            )]);
+        let overlay = TransientPackageOverlay::from_menu_session(&session);
+
+        let mut runtime = PackageUiRuntimeState::new();
+        runtime
+            .apply_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Bottom,
+                    PackagePanelVisibility::Visible,
+                    component("markdown.preview.root"),
+                    Vec::new(),
+                )],
+                transient_overlays: vec![overlay],
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+
+        let geometry = runtime
+            .slot_layout()
+            .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
+        // Bottom fixed panel consumes the fixed slot; the transient menu overlay
+        // is projected inside the remaining main rect and does not alter it.
+        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 900.0, 480.0));
+
+        let overlay_rect = runtime.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0))[0].rect;
+        assert!(overlay_rect.y0 >= geometry.main_rect.y0);
+        assert_eq!(overlay_rect.y1, geometry.main_rect.y1);
+        assert_eq!(overlay_rect.x0, geometry.main_rect.x0);
+        assert_eq!(overlay_rect.x1, geometry.main_rect.x1);
+        assert!(overlay_rect.height() <= 240.0);
+    }
+
+    #[test]
+    fn empty_menu_session_shows_status_without_action_targets() {
+        let session = TransientMenuSession::new(TransientMenuSessionId(9), "Control Center");
+        let overlay = TransientPackageOverlay::from_menu_session(&session);
+
+        assert!(overlay.action_targets.is_empty());
+        let status_component = overlay
+            .component
+            .children
+            .iter()
+            .find(|child| child.kind == "statusItem")
+            .expect("empty menu overlay contains status component");
+        assert_eq!(status_component.text.as_deref(), Some("No results"));
     }
 }

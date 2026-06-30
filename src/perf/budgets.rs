@@ -34,6 +34,14 @@ pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
 pub const SYNTAX_CACHE_BUDGET_BYTES: usize = 30 * 1024 * 1024;
 pub const COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
+
+// Phase 18.8 command execution and transient menu budgets.
+pub const COMMAND_ARGUMENT_BUDGET_BYTES: usize = 4 * 1024;
+pub const TRANSIENT_MENU_MAX_ITEMS: usize = 256;
+pub const TRANSIENT_MENU_MAX_QUERY_CHARS: usize = 256;
+pub const TRANSIENT_MENU_MAX_LABEL_CHARS: usize = 128;
+pub const TRANSIENT_MENU_MAX_DETAIL_CHARS: usize = 256;
+pub const TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS: usize = 256;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;

@@ -18,6 +18,7 @@ Validated fields include:
 - `name` and semver-like `version`
 - `clay.apiPrefix`
 - `clay.permissions`
+- `clay.capabilities`
 - `clay.modes`
 - `clay.entry`
 - optional `clay.loadEntry`
@@ -34,7 +35,7 @@ Validation keeps provenance in every `PackageDiagnostic`:
 - deterministic `PackageValidationRule`
 - actionable `message`
 
-`permissions.rs` owns the known permission table and rejects both unknown permissions and prohibited default authorities such as `network`, `shell`, `raw-deno-ops`, and `client-javascript`.
+`permissions.rs` owns the known permission table and identifies prohibited default authorities such as `filesystem`, `network`, `shell`, `wasm`, `ai-tools`, `workspace-mutation`, `native-ui`, `client-runtime`, `raw-ops`, `package-control`, and `package-import`. `clay.permissions` and the runtime `serverValidatePackagePermissions` facade reject those authorities by default. `clay.capabilities` may name powerful authorities only as requested capabilities that still require a separate user/admin authorization grant before enablement.
 
 ## Security and Invariants
 
@@ -53,7 +54,7 @@ Run focused coverage with:
 cargo test --test package_primitive_gate
 ```
 
-The tests cover the first-party Markdown fixture, invalid/reserved prefixes, unknown/prohibited permissions, duplicate package prefixes, raw op metadata, and client hook metadata.
+The tests cover the first-party Markdown fixture, invalid/reserved prefixes, unknown/prohibited permissions, duplicate package prefixes, raw op metadata, client hook metadata, and the split between default-denied `clay.permissions` and separately authorized powerful `clay.capabilities`.
 
 ## Related Documentation
 

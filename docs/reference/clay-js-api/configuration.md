@@ -243,3 +243,42 @@ Plan 034 added first-party runtime hardening and a minimal separate-process sand
 
 Configuration evaluation remains startup, package-load, reload, or explicit setting-change work. Ordinary keypress, paint, layout, scroll, edit acknowledgement, text-event handling, parse-result publication, and decoration rendering paths do not execute configuration JavaScript, wait on sandbox round trips, or re-check runtime hardening knobs.
 
+
+## Phase 18.8 command execution and transient menu configuration review
+
+Phase 18.8 added the server-owned `CommandExecution` boundary, the generic `TransientMenuSession` state model, and the first Control Center consumer. This review did **not** promote a new user-facing `clay:configuration` API for menu placement, control-center behavior, command filtering, default key bindings, or package action customization. The user-visible configuration surfaces reuse the existing Clay JS APIs; menu/session internals are kept `pub(crate)`/internal.
+
+User-visible Phase 18.8 configuration surfaces:
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Control Center launch key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `clay.controlCenter.open`; no default chord exists in Rust, so the Control Center is only reachable when `init.js` binds a key |
+| Control Center command id | built-in server command | `clay.controlCenter.open` (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`) | A fixed Clay command ID routed by inert behavior manifests after configuration evaluation; not an `init.js` key |
+| Built-in server commands (`workspace.refresh`, `document.focus_active`, `document.open_recent`) | built-in server command | `builtin_server_command_ids` / `builtin_server_command` | Fixed Clay command IDs, not user configuration |
+| Package command/action customization | reused, runtime-backed | [`clay.commands.serverRegisterCommand`](commands/server-register-command.md), [`clay.ui.serverRegisterPanelContribution`](ui/server-register-panel-contribution.md), [`clay.ui.serverRegisterInputContribution`](ui/server-register-input-contribution.md), [`clay.configuration.setPackageOption`](configuration/set-package-option.md) | Package commands, action targets, and `action.default`/`input.default` overrides flow through phase 18.3/18.4 package UI/configuration APIs |
+| Transient menu session state | internal | `TransientMenuSession` (`src/shell/transient_menu.rs`, `pub(crate)`) | Clay-owned session state: prompt, query, bounded items, selection, status, focus policy, inert activation actions; not user configuration |
+| Control Center menu building | internal | `ControlCenter` (`src/server/control_center.rs`, `pub(crate)`) | Filters the registered command snapshot, excludes client-first/client-ui commands, and appends built-ins; not user configuration |
+| Command execution validation | internal | `CommandExecutor` (`src/server/command_execution.rs`, `pub(crate)`) | Validates command id, routing policy, provenance, permissions, argument budget, target context, and session/action freshness per request; not user configuration |
+
+The expected end-user Control Center configuration is a normal `~/.config/clay/init.js` binding:
+
+```js
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+Shift+P", "clay.controlCenter.open", { scope: "editor" });
+```
+
+`clay.controlCenter.open` is a fixed Clay command ID that can be routed by inert behavior manifests after configuration evaluation. No default `Ctrl+Shift+P` shortcut in Rust exists; without an `init.js` binding (or test/fixture binding) the Control Center is not bound by default. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
+
+Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
+
+- `controlCenter.key`, `controlCenter.defaultKey`, `controlCenter.shortcut`
+- `menu.position`, `menu.alignment`, `menu.maxItems`, `menu.height`, `menu.width`
+- `transientMenu.focusPolicy`, `transientMenu.maxItems`, `transientMenu.queryCharLimit`
+- `commandExecution.timeout`, `commandExecution.argumentBudget`, `commandExecution.allowBypass`
+- `builtins.controlCenter`, ad hoc built-in command injection keys
+- Unregistered command ids bound to keys, ad hoc package action routing keys, ad hoc menu filter keys
+
+Package command/action registration through [`clay.commands.serverRegisterCommand`](commands/server-register-command.md) declares routing policy, permissions, key bindings, custom properties, and lookup tags at package-load time; it does not grant execution authority. Command execution authority is re-validated per activation through `CommandExecutor` and never granted by registration, menu inclusion, or configuration. Packages may declare commands and expose them in transient menus; they cannot execute commands directly from UI callbacks, bypass command permission/provenance validation, run command handlers in the Rust client, or grant themselves filesystem, network, shell, AI mutation, WASM, workspace mutation, package-manager, package installation, package enable/disable, native widget, raw-op, or client-side JavaScript authority.
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Command registration, action validation, transient menu filtering over installed bounded metadata, and command-id binding through `bindKey` are load/configuration/update-time work. Activating a selected command enqueues a server-first `CommandExecution` request; ordinary keypress routing, Masonry paint/layout, pointer, scroll, text-event handling, edit acknowledgement, and decoration rendering paths do not execute configuration JavaScript, wait on IPC, recompute package action defaults from user code, or run command handlers. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or command-authority grant.

@@ -30,6 +30,13 @@ Plans should classify commands/key behavior as one of:
 - `UiReactivePriority` — trigger async cancellable UI work such as completion/diagnostics.
 - `Background` — non-urgent work that must not delay edits or UI-reactive work.
 
+## Generic Key-Behavior Manifest Kinds (Phase 18.9)
+
+- The generic `TextTransform` kinds (pair insertion `PairRule`, comment continuation `CommentContinuationRule`, Tab `TabRule`, Enter `EnterRule`, and electric characters `ElectricCharacterRule` + `ElectricEffect`) are reusable across all future modes, not Markdown-only or Python-only. Ship two default rule sets: `EditorBehaviorRules::default_text()` / `BehaviorManifest::minimal_text_editing` (no electric) and `EditorBehaviorRules::default_code()` / `BehaviorManifest::core_code_editing` (electric outdent for `}`/`)`/`]`).
+- Electric characters are the only new manifest *kind*; they extend the `EnterRule`/`PairRule` family, not a new primitive *category*. Only Rust-known engines execute them (`insert_electric_with_event`, `dedent_leading_one_level` in `src/editor/surface.rs`); package JSON parsing accepts only the `outdent-one-level` effect and drops unknown effects. Future electric effects each need a Rust-known engine.
+- Built-in `core.*` modes ship their own default behavior manifests without an owning package; `select_behavior_manifest_for_document` detects the `core.` prefix and bypasses package-record lookup.
+- Decision log source: `decision-logs/2026-07-01-0350-phase18-9-generic-text-code-fallback-modes-and-key-behavior.md`.
+
 ## Versioning
 
 - Edits carry `behavior_version` and base document version.

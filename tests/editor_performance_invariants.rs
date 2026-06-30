@@ -132,3 +132,42 @@ fn unicode_boundaries_remain_valid_after_layout_optimizations() {
 
     assert_eq!(editor.visible_text(), "a");
 }
+
+// ── Phase 18.9 Task 7: fallback activation + keypress budget alignment ──
+//
+// Advisory budget references (Phase 14 defers hard latency CI gates): the
+// Phase 18.9 always-available `core.text`/`core.code` fallback activation and
+// synchronous keypress-to-local-paint budgets must have one source of truth
+// the runtime references, so drift between `ModeRegistry::activation_budget_ms`
+// and the documented constants is caught here.
+
+use clay::packages::modes::ModeRegistry;
+use clay::perf::budgets::{
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS,
+    MODE_ACTIVATION_P95_BUDGET_MS,
+};
+
+#[test]
+fn phase18_9_mode_activation_budget_is_single_source_of_truth() {
+    // `ModeRegistry::activation_budget_ms` is the value the activation path
+    // references; it must equal the documented `MODE_ACTIVATION_P95_BUDGET_MS`
+    // so advisory latency assertions and runtime budgets never drift.
+    assert_eq!(
+        ModeRegistry::new().activation_budget_ms(),
+        MODE_ACTIVATION_P95_BUDGET_MS
+    );
+    assert!(MODE_ACTIVATION_P95_BUDGET_MS > 0);
+}
+
+#[test]
+fn phase18_9_keypress_to_paint_budget_orders_below_mode_activation_budget() {
+    // Synchronous keypress-to-local-paint is a strict hot-path budget and must
+    // stay well below open/reload activation latency: a mode activation that
+    // blocked local paint would violate the no-sync-JS-before-paint invariant
+    // Phase 18.9 preserves. Advisory ordering only (no CI latency harness).
+    assert!(
+        KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS < MODE_ACTIVATION_P95_BUDGET_MS,
+        "keypress-to-paint budget must be tighter than mode activation budget"
+    );
+    assert!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES > 0);
+}

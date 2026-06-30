@@ -596,4 +596,81 @@ mod tests {
             .unwrap_err();
         assert!(raw.to_string().contains("raw ops"));
     }
+
+    /// Phase 18.9 introduced hardcoded structural defaults (the core.text/
+    /// core.code fallback modes, electric-character outdent, generic pair
+    /// insertion and comment continuation) rather than runtime-configurable
+    /// Clay JS configuration settings. This test pins that contract: any
+    /// behavior-changing Phase 18.9 key a user might try to set from
+    /// `~/.config/clay/init.js` is rejected by the closed package-option
+    /// allowlist (Plan 037 Task 10 Test Case 1) rather than silently accepted
+    /// as an undocumented setting, and built-in mode defaults therefore
+    /// cannot be overridden through configuration (Security criterion).
+    #[test]
+    fn phase18_9_behavior_changing_defaults_are_not_configurable_and_are_rejected() {
+        let runtime = runtime();
+
+        // The plan's illustrative example: a preferred core fallback mode.
+        let preferred_fallback = runtime
+            .set_package_option(&json!({
+                "packagePrefix": "core",
+                "option": "core.preferredFallbackMode",
+                "value": "core.code"
+            }))
+            .unwrap_err();
+        assert!(
+            preferred_fallback
+                .to_string()
+                .contains("unsupported package option"),
+            "core.preferredFallbackMode must be rejected as unsupported, got: {preferred_fallback}"
+        );
+
+        // Electric-character behavior is a hardcoded core.code default, not a knob.
+        let electric = runtime
+            .set_package_option(&json!({
+                "packagePrefix": "core",
+                "option": "core.electricCharacters",
+                "value": false
+            }))
+            .unwrap_err();
+        assert!(
+            electric.to_string().contains("unsupported package option"),
+            "core.electricCharacters must be rejected as unsupported, got: {electric}"
+        );
+
+        // Generic pair-insertion / comment-continuation toggles are likewise
+        // hardcoded behavior-rule defaults, not configurable settings.
+        let pair_insertion = runtime
+            .set_package_option(&json!({
+                "packagePrefix": "core",
+                "option": "core.pairInsertion",
+                "value": false
+            }))
+            .unwrap_err();
+        assert!(
+            pair_insertion
+                .to_string()
+                .contains("unsupported package option")
+        );
+
+        let comment_continuation = runtime
+            .set_package_option(&json!({
+                "packagePrefix": "core",
+                "option": "core.commentContinuation",
+                "value": false
+            }))
+            .unwrap_err();
+        assert!(
+            comment_continuation
+                .to_string()
+                .contains("unsupported package option")
+        );
+
+        // No Phase 18.9 behavior-changing key was recorded as configuration state.
+        let state = runtime.state_json();
+        assert!(!state.contains("preferredFallbackMode"));
+        assert!(!state.contains("electricCharacters"));
+        assert!(!state.contains("pairInsertion"));
+        assert!(!state.contains("commentContinuation"));
+    }
 }

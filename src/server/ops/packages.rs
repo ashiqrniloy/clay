@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::packages::{
     manifest::{PackageDiagnostic, validate_manifest_value},
-    permissions::{PermissionValidationError, parse_permission},
+    permissions::{PermissionValidationError, is_prohibited_authority, parse_permission},
     record::{PackageRecordError, assemble_package_record},
 };
 
@@ -265,6 +265,11 @@ pub(super) fn op_clay_packages_validate_permissions(
                 "clay.packages.invalid_permissions: permissions must be an array of strings",
             ));
         };
+        if is_prohibited_authority(permission) {
+            return Err(JsErrorBox::generic(format!(
+                "clay.packages.prohibited_authority: prohibited authority `{permission}` cannot be requested by default"
+            )));
+        }
         match parse_permission(permission) {
             Ok(permission) => permissions.push(permission.as_str()),
             Err(PermissionValidationError::UnknownPermission { .. }) => {

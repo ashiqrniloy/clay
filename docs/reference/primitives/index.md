@@ -1,6 +1,6 @@
 # Clay Primitives Reference
 
-This directory is the Phase 16 architecture source for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18, including Phase 18.3 runtime-backed slot-aware package UI contribution primitives and Phase 18.4 runtime-backed package input/state/layout-override/configuration primitives.
+This directory is the Phase 16 architecture source for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18, including Phase 18.3 runtime-backed slot-aware package UI contribution primitives, Phase 18.4 runtime-backed package input/state/layout-override/configuration primitives, and Phase 18.9 generic `core.text`/`core.code` fallback modes, shebang/content-probe classification, generic key-behavior (electric/pair/comment) transforms, and mode-discovery commands (package-author contract in [Creating Clay Packages](../packages/creating-packages.md#phase-189-authoring-contract-generic-textcode-fallback-modes-and-generic-key-behavior)).
 
 ## Documents
 

@@ -3,11 +3,14 @@
 ## Source
 
 - `src/packages/commands.rs`
+- `src/server/command_execution.rs`
+- `src/server/control_center.rs`
+- `src/server/ops/mod.rs`
 - `tests/package_primitive_gate.rs`
 
 ## Overview
 
-The command registry is the Phase 16.5 server-side primitive gate for package-owned command metadata and behavior-manifest contributions. It validates package-prefixed command declarations, load/activation-time key routing data, and inert text-transform metadata before any future package command execution path exists. Phase 18.4 package input declarations and component-scoped action metadata reuse this registry boundary: input/action records may reference only already-registered package command IDs, and declaring input metadata does not create command execution authority.
+The command registry is the Phase 16.5 server-side primitive gate for package-owned command metadata and behavior-manifest contributions. It validates package-prefixed command declarations, load/activation-time key routing data, and inert text-transform metadata. Phase 18.8 adds the server-owned command execution foundation in `src/server/command_execution.rs`: execution requests reuse registered command metadata or the small built-in server command table, validate provenance/permissions/arguments/targets/routing, and currently return a typed accepted result for downstream SDUI, keybinding, and transient-menu routing work. Phase 18.4 package input declarations and component-scoped action metadata reuse this registry boundary: input/action records may reference only already-registered package command IDs, and declaring input metadata does not create command execution authority. Phase 18.9 adds read-only mode-discovery built-in server commands (`clay.modes.listActiveModes`/`clay.modes.explainActiveMode`) resolved through a dedicated `CommandExecutor::execute_discovery` path that reads installed `ModeRegistry` state and carries no execution/document/workspace authority.
 
 ## Responsibilities
 
@@ -15,8 +18,10 @@ The command registry is the Phase 16.5 server-side primitive gate for package-ow
 - Validate behavior-manifest contributions by composing package declarations into the existing inert `BehaviorManifest` schema and reusing `validate_manifest` for duplicate command and ambiguous key binding checks.
 - Reject command registration without `command-registration`, invalid or reserved command IDs, undeclared command permissions, client-first package command authority, executable text transform fields, duplicate command IDs, and ambiguous key bindings.
 - Provide the registered-command source of truth used by Phase 18.4 `PackageInputContribution` and layout/action defaults so component-scoped actions remain inert command intents rather than package callbacks.
+- Validate `CommandExecutionRequest` values against the registry before any command side effect can be wired: command ID, server-owned routing policy, package provenance, expected permissions, bounded JSON-object arguments, and document/workspace target.
+- Provide the command snapshot consumed by the built-in Control Center (`src/server/control_center.rs`). The Control Center lists executable commands, filters them by query, and routes selected commands through the same `CommandExecutor`, keeping command-palette behavior package-aware without a bespoke dispatcher.
 
-It does not execute package JavaScript, install command handlers, grant filesystem/workspace/AI/shell/network authority, or add any synchronous package work to the keypress hot path.
+It does not execute package JavaScript, install command handlers, grant filesystem/workspace/AI/shell/network authority, or add any synchronous package work to the keypress hot path. The Phase 18.8 executor is intentionally a foundation: it accepts validated server-owned commands and rejects unsafe shapes; later routing tasks attach SDUI/keybinding/menu sources to this same path.
 
 ## How It Works
 
@@ -25,6 +30,21 @@ It does not execute package JavaScript, install command handlers, grant filesyst
 `CommandRegistry::validate_behavior_contribution` accepts `PackageBehaviorContribution` metadata for mode/package loading. It validates provenance and text transforms first, then builds a candidate `BehaviorManifest` by combining the default text manifest, package command declarations, contributed keymaps, editor rules, and already registered commands. The candidate goes through `src/behavior/manifest.rs::validate_manifest`, so existing manifest invariants continue to reject duplicate command IDs, unknown command targets, ambiguous key bindings, invalid editor rules, and authority/routing mismatches.
 
 `PackageTextTransformDeclaration` is intentionally metadata-only. Its `kind` identifies a Rust-known transform category, while `javascript_callback` and `code` are forbidden fields used by the gate to reject executable payload shapes in fixtures before Phase 17 package loading expands the source of these declarations.
+
+`CommandExecutor::execute` accepts a `CommandRegistry` plus `CommandExecutionRequest`. It looks up the registered command, falls back to the built-in server command table for Clay-owned IDs such as `clay.controlCenter.open`, rejects client-first/client-UI routing, checks optional provenance against the registered package name/version/prefix, requires every `expected_permissions` entry to appear on the registered command, limits arguments to `null` or a JSON object under 4 KiB, rejects document target `0`, and requires `workspace-mutation` for workspace targets. `ClayOpState::execute_command` exposes the same path inside the server runtime op state. `src/server/connection.rs` also normalizes inbound `ClientMessage::SduiAction` and `ClientMessage::CommandIntent` values into `CommandExecutionRequest`, so SDUI actions, package UI action regions, behavior-manifest server-first keybindings, transient-menu selections, and Control Center selections share the same executor instead of parallel dispatchers. `ControlCenter::open` uses `CommandRegistry::list` plus the built-in command table to populate the generic `TransientMenuSession`, and `ControlCenter::execute_selected` routes the selected inert action back through `CommandExecutor`.
+
+### Phase 18.9 mode discovery commands
+
+Phase 18.9 registers two read-only built-in server commands for Control Center and package diagnostics: `clay.modes.listActiveModes` and `clay.modes.explainActiveMode`. They are declared in the built-in server command table (`builtin_server_command`/`builtin_server_command_ids`) with `RoutingPolicy::ServerFirst` and an empty permissions list, in the same list as `clay.controlCenter.open`, `workspace.refresh`, `document.focus_active`, and `document.open_recent`. They have **no op wrapper and no Clay JS facade** — the built-in command ID is the user-facing surface, so they are server-first commands rather than Clay JS APIs (mirroring `clay.controlCenter.open`).
+
+Because discovery commands resolve payload data rather than execute side effects, they bypass the general `CommandExecutor::execute` path and route through a dedicated resolver `CommandExecutor::execute_discovery(mode_registry, request)`. The resolver still runs the shared `validate()` helper (command ID, arguments, provenance, permissions, target) but then branches on the command ID:
+
+- `clay.modes.listActiveModes` -> calls `ModeRegistry::list_active_modes()` returning `Vec<ActiveModeSummary>`, one entry per document with an active major mode: `{ document_id, mode_id, package_name, api_prefix, provenance (CoreBuiltIn | Package), classification_source (ModePatternKind) }`.
+- `clay.modes.explainActiveMode` -> extracts a `documentId` argument (rejects missing/non-`u64` with `InvalidArguments`) and calls `ModeRegistry::explain_active_mode(document_id)` returning `Option<ModeExplanation>`: `{ active_mode, display_name, package_name, package_version, api_prefix, provenance, classification_source, fallback_used, why }` where `why` is a human-readable rationale derived from the stored `matched_by` kind and `is_builtin` flag.
+
+The resolved payload is returned as `CommandExecutionStatus::Discovery(DiscoveryResult::ActiveModes(_) | ModeExplanation(_))`. `ClayRuntimeOpState::execute_command` (in `src/server/ops/mod.rs`) routes discovery command IDs to `execute_discovery` with `ModeRegistry` access rather than plain `execute`.
+
+`list_active_modes` and `explain_active_mode` are crate-internal (`pub(crate)`) resolver methods on `ModeRegistry` used only by `execute_discovery` within the same crate; they are read-only entrypoints over installed registry state and are **not** part of the public Rust embedder API or the Clay JS surface. The built-in `clay.modes.*` commands are the user-facing surface. Discovery commands carry no execution/document/workspace authority: they read installed `ModeRegistry` state, perform no filesystem scan, package evaluation, or parse work, and never mutate document/workspace state. This satisfies the deny-by-default model — adding a command to the built-in list grants no package authority.
 
 ## Code Examples
 
@@ -47,18 +67,27 @@ registry.register_command(&manifest, PackageCommandDeclaration {
 ## Invariants and Constraints
 
 - Command IDs are package-owned and unique among enabled package commands.
-- Command registration does not grant execution authority; command-specific permissions must already be present in the package manifest and are only metadata for future execution checks.
+- Command registration does not grant execution authority; command-specific permissions must already be present in the package manifest and are rechecked by command execution requests.
 - Behavior contributions are load/activation-time validation work and only return inert manifest data for the client.
 - Client-first local paint behavior remains Rust-known manifest behavior; package commands cannot become arbitrary client-first handlers.
+- Command execution requests are server-first validation work and must not run package JavaScript, raw ops, filesystem/network/shell/AI/WASM work, or synchronous client hot-path work.
 
 ## Tests
 
-- `tests/package_primitive_gate.rs`: validates duplicate command rejection, package-aware key binding ambiguity rejection, successful inert behavior contribution validation, executable text-transform rejection, provenance, permissions, and budget references.
+- `tests/package_primitive_gate.rs`: validates duplicate command rejection, package-aware key binding ambiguity rejection, successful inert behavior contribution validation, executable text-transform rejection, client-first and client-ui routing rejection, provenance, permissions, and budget references.
+- `src/server/command_execution.rs` unit tests: validate successful built-in and registered command execution, unknown command rejection, provenance mismatch rejection, undeclared expected permission rejection, client-first route rejection, malformed/oversize arguments, and unauthorized workspace targets.
+- `tests/command_execution.rs`: integration/security tests for unknown command rejection, client-first/client-ui routing rejection, provenance mismatch, undeclared permission, malformed/oversize arguments, invalid document target, workspace-mutation target requirement, and duplicate command ID rejection. It also covers Phase 18.9 mode-discovery commands: `clay.modes.explainActiveMode` reports `core.code` built-in fallback rationale when no language package matched (and `core.text` universal fallback), `clay.modes.listActiveModes` reports package vs `core` built-in provenance with classification source, unknown documents return `None`, discovery commands are reachable from the Control Center built-in command listing, and discovery commands reject no-authority violations (invalid arguments, unauthorized workspace target, non-discovery/bogus command IDs).
+- `src/server/connection.rs` unit tests: validate that SDUI/package UI actions and keybinding/menu command intents share command execution and reject unregistered package action targets.
+- `src/client/mod.rs` unit tests: validate that server-first keybindings enqueue bounded `ClientMessage::CommandIntent` values and use `try_send` backpressure.
+- `src/editor/surface.rs` unit tests: validate that ordinary character typing updates local text synchronously while server-first keybindings produce only an intent, preserving the no-block-during-typing invariant.
 
 Run focused coverage with:
 
 ```text
 cargo test --test package_primitive_gate
+cargo test --test command_execution
+cargo test --lib command_execution
+cargo test --lib editor
 ```
 
 ## Related

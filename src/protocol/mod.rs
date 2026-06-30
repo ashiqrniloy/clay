@@ -97,6 +97,22 @@ impl BehaviorManifest {
         }
     }
 
+    /// Default manifest shipped by the always-on built-in `core.code` fallback
+    /// major mode. Same keybindings and commands as
+    /// [`Self::minimal_text_editing`], but with the code-oriented editor rules
+    /// ([`EditorBehaviorRules::default_code`], including electric-character
+    /// reflow) so generic code editing works with no package loaded.
+    pub fn core_code_editing(behavior_version: BehaviorVersion) -> Self {
+        Self {
+            manifest_id: "clay.default.code".to_string(),
+            behavior_version,
+            scope: BehaviorScope::GlobalDefault,
+            keymaps: default_keymaps(),
+            commands: default_commands(),
+            editor_rules: EditorBehaviorRules::default_code(),
+        }
+    }
+
     pub fn allows_client_first_edit(&self, operation: &EditOperation) -> bool {
         self.editor_rules.text_edits.iter().any(|capability| {
             matches!(
@@ -285,10 +301,19 @@ pub struct EditorBehaviorRules {
     pub tab: TabRule,
     pub pairs: Vec<PairRule>,
     pub comments: Vec<CommentContinuationRule>,
+    /// Generic electric-character rules. Each rule reflows the current line
+    /// locally when its trigger character is typed, e.g. outdenting a line so a
+    /// closing `}` aligns with its opener. Any future language package can
+    /// declare its own trigger/effect parameters; no language-specific Rust
+    /// branch is consulted.
+    pub electric_characters: Vec<ElectricCharacterRule>,
     pub autocomplete_triggers: Vec<AutocompleteTrigger>,
 }
 
 impl EditorBehaviorRules {
+    /// Generic plain-text rule set shipped by the always-on built-in
+    /// [`crate::packages::modes::core_text_mode`] fallback. No electric
+    /// characters: plain text has no block structure to reflow.
     pub fn default_text() -> Self {
         Self {
             text_edits: vec![
@@ -312,11 +337,29 @@ impl EditorBehaviorRules {
                 line_prefix: "//".to_string(),
                 continue_prefix: "// ".to_string(),
             }],
+            electric_characters: Vec::new(),
             autocomplete_triggers: vec![AutocompleteTrigger {
                 trigger: ".".to_string(),
                 routing_policy: RoutingPolicy::UiReactivePriority,
             }],
         }
+    }
+
+    /// Generic code-oriented rule set shipped by the always-on built-in
+    /// [`crate::packages::modes::core_code_mode`] fallback. Identical to
+    /// [`Self::default_text`] for indentation, pairs, and comment
+    /// continuation, plus electric-character reflow for the common closing
+    /// brackets so a typed `}`/`)`/`]` aligns with its opener without a server
+    /// round trip. Language packages extend or override these parameters via
+    /// manifest data.
+    pub fn default_code() -> Self {
+        let mut rules = Self::default_text();
+        rules.electric_characters = vec![
+            ElectricCharacterRule::outdent("}"),
+            ElectricCharacterRule::outdent(")"),
+            ElectricCharacterRule::outdent("]"),
+        ];
+        rules
     }
 }
 
@@ -397,6 +440,37 @@ pub enum PairRuleContext {
 pub struct CommentContinuationRule {
     pub line_prefix: String,
     pub continue_prefix: String,
+}
+
+/// Deterministic local reflow applied when an electric-character trigger is
+/// typed. Executed entirely by Rust-known transform engines on the client from
+/// manifest data; no callbacks, JavaScript, or IPC are involved.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum ElectricEffect {
+    /// Outdent the current line by one indentation unit when the trigger is
+    /// typed as the first non-whitespace character on an over-indented line,
+    /// so a closing bracket aligns with the block opener.
+    OutdentOneLevel,
+}
+
+/// A generic electric-character rule. The trigger is a single character (e.g.
+/// `}`); the effect is a declarative reflow. Any language package can declare
+/// its own rules; the Rust client executes only [`ElectricEffect`] variants it
+/// knows, so packages contribute rule parameters only.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ElectricCharacterRule {
+    pub trigger: String,
+    pub effect: ElectricEffect,
+}
+
+impl ElectricCharacterRule {
+    /// Convenience constructor for the common outdent-on-close case.
+    pub fn outdent(trigger: impl Into<String>) -> Self {
+        Self {
+            trigger: trigger.into(),
+            effect: ElectricEffect::OutdentOneLevel,
+        }
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -515,6 +589,12 @@ pub enum ClientMessage {
         client_id: ClientId,
         ui_version: SduiVersion,
         intent: SduiActionIntent,
+    },
+    CommandIntent {
+        client_id: ClientId,
+        document_id: DocumentId,
+        behavior_version: BehaviorVersion,
+        command_id: String,
     },
 }
 

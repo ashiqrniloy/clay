@@ -40,6 +40,12 @@ pub fn validate_manifest(manifest: &BehaviorManifest) -> Result<(), ManifestVali
         }
     }
 
+    for electric in &manifest.editor_rules.electric_characters {
+        if electric.trigger.is_empty() {
+            return Err(ManifestValidationError::InvalidElectricCharacterRule);
+        }
+    }
+
     for trigger in &manifest.editor_rules.autocomplete_triggers {
         if trigger.trigger.is_empty() {
             return Err(ManifestValidationError::InvalidAutocompleteTrigger);
@@ -103,6 +109,7 @@ pub enum ManifestValidationError {
     AmbiguousKeyBinding { command_id: String },
     InvalidTabWidth,
     InvalidPairRule,
+    InvalidElectricCharacterRule,
     InvalidAutocompleteTrigger,
     InvalidAutocompleteRouting,
     ExecutableOrSideEffectAuthority { command_id: String },
@@ -205,6 +212,30 @@ mod tests {
             });
         }
 
+        validate_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn manifest_rejects_malformed_electric_character_rules() {
+        use crate::protocol::ElectricCharacterRule;
+
+        // A trigger must be non-empty; an empty trigger is a malformed rule set
+        // and must be rejected before the manifest can be installed.
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest
+            .editor_rules
+            .electric_characters
+            .push(ElectricCharacterRule {
+                trigger: String::new(),
+                effect: crate::protocol::ElectricEffect::OutdentOneLevel,
+            });
+        assert_eq!(
+            validate_manifest(&manifest).unwrap_err(),
+            ManifestValidationError::InvalidElectricCharacterRule
+        );
+
+        // A well-formed electric rule (`core.code` default set) validates fine.
+        let manifest = BehaviorManifest::core_code_editing(1);
         validate_manifest(&manifest).unwrap();
     }
 }

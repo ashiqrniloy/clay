@@ -124,6 +124,18 @@ Use `clay.commands.serverRegisterCommand` when the user asks for Register Comman
 - Backing Rust/current owner: `src/packages/commands.rs::CommandRegistry::register_command`
 - Current implementation audit path: `src/packages/commands.rs::CommandRegistry; src/packages/commands.rs::PackageCommandDeclaration`
 
+## Phase 18.8 command execution boundary
+
+Phase 18.8 added the server-owned `CommandExecutor` (`src/server/command_execution.rs`) as the single normalization boundary for command execution. The following surfaces are intentionally **not** public Clay JS APIs and have no JavaScript facade, `Deno.core.ops` op, or inventory entry:
+
+- **Command execution from JavaScript** — there is no `clay.commands.serverExecuteCommand` facade/op. Packages cannot execute commands directly from package code, UI callbacks, or transient menu items; menu/SDUI/keybinding activation enqueues an inert `CommandIntent` that the server re-validates through `CommandExecutor` (command id, routing policy, package provenance, declared permissions, target context, argument budget, and session/action freshness) before any side effect. `CommandExecutor` and its request/result/provenance/rule types are public-to-the-crate Rust but are explicitly classified as non-JS server infrastructure in the Rust visibility mapping (`tests/rust_visibility_api_mapping.rs`); they back no Clay JS API.
+- **Transient menu sessions** — `TransientMenuSession` and related types (`src/shell/transient_menu.rs`) are `pub(crate)` Clay-owned session state (prompt, query, bounded items, selection, status, focus policy, inert activation actions). There is no `clay.ui.serverOpenTransientMenu` facade/op; transient menu requests differ from fixed `PanelContribution`/`TransientOverlayContribution` panels because the menu owns dynamic query/selection state and is projected onto existing shell overlay primitives.
+- **Control Center** — the Control Center (`src/server/control_center.rs`, `pub(crate)`) is a built-in command-palette workflow reached by binding a key to the built-in server-first command `clay.controlCenter.open` through [`clay.keybindings.bindKey`](../keybindings/bind-key.md); it has no callable Clay JS facade of its own.
+
+Command registration through this API declares metadata only — routing policy, permissions, key bindings, custom properties, and lookup tags — at package-load time. It grants **no execution authority**: execution authority is re-derived per activation through `CommandExecutor` from the registered routing policy, declared permissions, and provenance. Command execution and transient menu query/filter/selection updates are server-first or UI-reactive (local bounded filtering) and are not part of the ordinary keypress-to-paint, layout, scroll, text-event, edit acknowledgement, parse-result publication, or decoration rendering hot paths.
+
+See `docs/reference/clay-js-api/configuration.md` (Phase 18.8 configuration review) and `docs/reference/primitives/package-security.md` for the full validation checklist and denied-authority list.
+
 ## Lookup metadata
 
 - Stable ID: `clay.commands.serverRegisterCommand`

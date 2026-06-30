@@ -882,6 +882,20 @@ fn phase18_5_markdown_replan_primitive_review() -> String {
     .expect("read Phase 18.5 Markdown replan primitive review")
 }
 
+fn phase18_8_transient_menu_command_execution_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.8-transient-menu-command-execution-primitive-review.md",
+    ))
+    .expect("read Phase 18.8 transient menu and command execution primitive review")
+}
+
+fn phase18_9_generic_text_code_modes_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.9-generic-text-code-modes-primitive-review.md",
+    ))
+    .expect("read Phase 18.9 generic text/code modes primitive review")
+}
+
 #[test]
 fn phase18_1_shell_layout_primitive_review_records_existing_inventory() {
     let wiki_index =
@@ -1308,6 +1322,251 @@ fn phase18_4_input_state_config_review_rejects_mode_specific_branches() {
         assert!(
             review.contains(required),
             "Phase 18.4 primitive review must reject unsafe/mode-specific implementation shape: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_8_transient_menu_command_execution_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let registry = primitives_registry();
+    let shell_strategy = shell_layout_strategy();
+    let review = phase18_8_transient_menu_command_execution_primitive_review();
+
+    assert!(
+        wiki_index
+            .contains("modules/phase18.8-transient-menu-command-execution-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.8 primitive review"
+    );
+    assert!(
+        primitive_architecture
+            .contains("phase18.8-transient-menu-command-execution-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.8 primitive review"
+    );
+    assert!(
+        wiki_index.contains("modules/transient-menu-session.md"),
+        "docs/wiki/index.md must link the Transient Menu Session implementation wiki"
+    );
+    assert!(
+        primitive_architecture.contains("transient-menu-session.md"),
+        "primitive architecture wiki must link the Transient Menu Session implementation wiki"
+    );
+    assert!(
+        wiki_index.contains("modules/control-center.md"),
+        "docs/wiki/index.md must link the Control Center implementation wiki"
+    );
+    assert!(
+        primitive_architecture.contains("control-center.md"),
+        "primitive architecture wiki must link the Control Center implementation wiki"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Command metadata and behavior routes",
+        "SDUI/action primitives",
+        "Shell, slot, and transient overlay primitives",
+        "Package UI, input, state, and configuration primitives",
+        "Persistent server runtime primitives",
+        "`src/packages/commands.rs::CommandRegistry`",
+        "`runtime/js/commands.ts`",
+        "`src/protocol/sdui.rs::SduiActionIntent`",
+        "`src/shell/layout.rs`",
+        "`src/shell/package_ui.rs::PackageUiRuntimeState`",
+        "`src/server/js_runtime.rs::ClayJsRuntimeService`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.8 primitive review must record inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.8 Primitive Gaps",
+        "### `CommandExecution`",
+        "### `TransientMenuSession`",
+        "Local Filtering vs Server-First Execution",
+        "Command metadata listing snapshot",
+        "Query update over installed menu items",
+        "Activate selected item",
+        "Server-first command execution",
+        "SDUI actions, package UI actions, behavior-manifest keybindings, and transient-menu selections",
+        "Control Center is the first consumer",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.8 primitive review must map generic gaps/hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Do not add `ControlCenterWidget`",
+        "Do not implement command activation separately for SDUI buttons, package UI actions, keybindings, and transient-menu selections",
+        "Do not make `TransientOverlayContribution` alone carry active query",
+        "raw op names",
+        "No bottom transient menu path may run package JavaScript",
+        "filesystem, network, shell, AI, WASM, package-manager, package installation, package enable/disable",
+        "raw-op, client-side JavaScript",
+        "The Phase 18.8 review introduces no new filesystem, network, shell, AI, WASM, native-widget, raw-op, client-side JavaScript, package-manager, package-install, or package-enable/disable authority",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.8 primitive review must reject unsafe or authority-expanding shape: {required}"
+        );
+    }
+
+    for required in [
+        "CommandExecution",
+        "TransientMenuSession",
+        "serverExecuteCommand",
+        "serverOpenTransientMenu",
+        "Phase 18.8 primitive review",
+    ] {
+        assert!(
+            registry.contains(required) || shell_strategy.contains(required),
+            "primitive registry or shell strategy must mention Phase 18.8 primitive term: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_8_package_guide_documents_command_execution_and_transient_menu_contract() {
+    let guide = creating_packages_guide();
+
+    for required in [
+        "Phase 18.8 authoring contract: command execution and transient menus",
+        "inert command intent",
+        "clay.commands.serverRegisterCommand",
+        "CommandExecution",
+        "TransientMenuSession",
+        "fixed panel",
+        "transient overlay",
+        "transient menu",
+        "Control Center",
+        "Command execution lifecycle",
+        "server-owned execution path",
+        "no callbacks or client-side handlers",
+        "client-side JavaScript",
+        "raw `Deno.core.ops`",
+        "Masonry widgets",
+        "bypass command permission",
+        "package installation",
+        "package enable/disable",
+        "Ordinary typing remains client-first",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must document Phase 18.8 command execution/transient menu contract phrase: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_9_generic_text_code_modes_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let registry = primitives_registry();
+    let review = phase18_9_generic_text_code_modes_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.9-generic-text-code-modes-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.9 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.9-generic-text-code-modes-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.9 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Document classification and major-mode activation",
+        "Behavior manifest and generic text transforms",
+        "Key routing and commands",
+        "SDUI, status, and decoration surfaces",
+        "Document open path",
+        "`src/packages/modes.rs::ModeRegistry`",
+        "`src/protocol/mod.rs::EditorBehaviorRules`",
+        "`src/behavior/manifest.rs`",
+        "`src/packages/commands.rs::CommandRegistry`",
+        "`src/server/command_execution.rs::CommandExecutor`",
+        "`src/server/control_center.rs`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.9 primitive review must record inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.9 Primitive Gaps",
+        "### Built-in always-on `core.text` and `core.code` fallback major modes",
+        "### Classification shebang and bounded leading-content probes",
+        "### Electric characters",
+        "### Mode discovery/listing commands",
+        "precedence: user override > package-declared pattern",
+        "core.code > core.text",
+        "always-on",
+        "require no `~/.config/clay/init.js` line and no package load step",
+        "electric-character manifest kind",
+        "`clay.modes.listActiveModes`",
+        "clay.modes.explainActiveMode",
+        "read-only `CommandDeclaration` consumers routed through `CommandExecutor`",
+        "most generic key behavior already exists as manifest data",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.9 primitive review must map generic gaps/precedence/discovery: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Open/reload-time, no-hot-path",
+        "`ClientFirstPredictable` manifest data",
+        "Server-first explicit command",
+        "Reclassification after package reload/enable/disable",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.9 primitive review must record hot-path classification split: {required}"
+        );
+    }
+
+    for required in [
+        "Do not add `PlainTextMode`",
+        "Do not implement `core.text`/`core.code` as first-party `@clay/core-text`/`@clay/core-code` JS packages requiring `loadPackage`",
+        "Do not add a parallel `FallbackModeRegistry`",
+        "Do not invent a `CommentContinuation` or `PairInsertion` primitive",
+        "No new primitive column is required: built-in modes are `MajorModeActivation`/`DocumentClassification` data registered by Clay itself. The plan's `FallbackModeDeclaration` notion folds into built-in mode registration, not a separate primitive.",
+        "Do not run filesystem scans, directory walks, arbitrary package predicates",
+        "Do not implement mode discovery as a one-off SDUI panel",
+        "The Phase 18.9 review introduces no new filesystem, network, shell, AI, WASM, native-widget, raw-op, client-side JavaScript, package-manager, package-install, or package-enable/disable authority",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.9 primitive review must reject unsafe/mode-specific/authority-expanding shape: {required}"
+        );
+    }
+
+    for required in [
+        "core.text",
+        "core.code",
+        "shebang and bounded leading-content probes",
+        "precedence ladder",
+        "electric-character manifest kind",
+        "fallback command routing",
+    ] {
+        assert!(
+            registry.contains(required),
+            "primitive registry must mention Phase 18.9 primitive term: {required}"
         );
     }
 }
@@ -3593,4 +3852,90 @@ fn phase18_5_markdown_wiki_documents_default_load_and_no_default_panel() {
         index.contains("markdownLoadMode") && index.contains("no-default-panel"),
         "wiki index description for the Markdown package page must mention the Phase 18.5 fallback and no-default-panel contract"
     );
+}
+
+#[test]
+fn phase18_8_command_execution_implementation_wiki_covers_final_implementation() {
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let command_registry =
+        fs::read_to_string(repository_path("docs/wiki/modules/command-registry.md"))
+            .expect("read command registry wiki");
+    let transient_menu = fs::read_to_string(repository_path(
+        "docs/wiki/modules/transient-menu-session.md",
+    ))
+    .expect("read transient menu session wiki");
+    let control_center = fs::read_to_string(repository_path("docs/wiki/modules/control-center.md"))
+        .expect("read control center wiki");
+
+    // Master index must link all three Phase 18.8 implementation pages.
+    for linked in [
+        "modules/command-registry.md",
+        "modules/transient-menu-session.md",
+        "modules/control-center.md",
+    ] {
+        assert!(
+            index.contains(linked),
+            "docs/wiki/index.md must link the Phase 18.8 implementation page `{linked}`"
+        );
+    }
+
+    // Command registry wiki must explain the server-owned command execution
+    // flow, source/test paths, authority boundaries, and confirm packages
+    // cannot execute handlers, run package JS, or broaden authority.
+    for required in [
+        "Phase 18.8 adds the server-owned command execution foundation",
+        "`CommandExecutor::execute`",
+        "`CommandExecutionRequest`",
+        "built-in server command table",
+        "`ClayOpState::execute_command`",
+        "`src/server/connection.rs` also normalizes inbound",
+        "does not execute package JavaScript, install command handlers, grant filesystem/workspace/AI/shell/network authority",
+        "Command registration does not grant execution authority",
+        "tests/command_execution.rs",
+    ] {
+        assert!(
+            command_registry.contains(required),
+            "command registry wiki must document Phase 18.8 detail: {required}"
+        );
+    }
+
+    // Transient menu session wiki must document the generic session model,
+    // bounds, inert action contract, integration with CommandExecutor, and
+    // must not present pub(crate) types as a public importable API.
+    for required in [
+        "`src/shell/transient_menu.rs`",
+        "`TransientMenuSession`",
+        "`MAX_ITEMS` (256)",
+        "`MAX_QUERY_CHARS`",
+        "`MAX_LABEL_CHARS`",
+        "inert `TransientMenuAction`",
+        "`CommandExecutionRequest` through the Phase 18.8 `CommandExecutor`",
+        "routes it through `CommandExecutor`",
+        "`TransientMenuSession` does not own rendering, focus restoration, or command execution semantics",
+        "are `pub(crate)` and are not part of the public Clay JS API surface",
+    ] {
+        assert!(
+            transient_menu.contains(required),
+            "transient menu session wiki must document implementation detail: {required}"
+        );
+    }
+
+    // Control Center wiki must document the open/filter/execute/cancel
+    // workflow, source/test paths, security boundaries, and no-hot-path rule.
+    for required in [
+        "Phase 18.8 Task 7",
+        "`ControlCenter::open",
+        "`ControlCenter::set_query",
+        "built-in server commands",
+        "`CommandExecutor` validation",
+        "Client-first and client-ui commands are excluded",
+        "no callbacks, native handles, raw ops, or executable package code",
+        "The Control Center does not consume fixed-slot geometry",
+        "src/server/control_center.rs",
+    ] {
+        assert!(
+            control_center.contains(required),
+            "control center wiki must document implementation detail: {required}"
+        );
+    }
 }

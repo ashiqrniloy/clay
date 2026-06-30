@@ -2,7 +2,7 @@ pub(crate) mod buffer;
 pub(crate) mod cursor;
 mod layout;
 pub(crate) mod selection;
-mod surface;
+pub mod surface;
 mod viewport;
 
 use masonry::peniko::Color;

@@ -16,7 +16,7 @@ Phases 10 and 11 were implemented before Phase 9 was finished because cross-plat
 
 The following items consolidate the compromises and further actions from completed plan documents so future roadmap phases cover them explicitly instead of leaving them scattered across `plans/`:
 
-- **Manual GUI validation:** Several completed phases relied on automated tests or bounded launch observations because the agent shell was non-interactive. Future hardening phases must include repeatable interactive smoke coverage for launch, typing, selection, multi-client read-only observer behavior, runtime SDUI, Windows GUI behavior, Unix GUI behavior, and the Phase 19 Windows Markdown open-dialog path (`cargo run -- smoke-gui --config-fixture windows-markdown-open`, `Ctrl+O`, select a `.md` file, verify Markdown status/decorations and responsive edit-only behavior). The Phase 19 interactive OS file browser remains manual, not automated; run it before treating the file-open experience as release-validated.
+- **Manual GUI validation:** Several completed phases relied on automated tests or bounded launch observations because the agent shell was non-interactive. Future hardening phases must include repeatable interactive smoke coverage for launch, typing, selection, multi-client read-only observer behavior, runtime SDUI, Windows GUI behavior, Unix GUI behavior, and the selected-file open-dialog path (`cargo run -- smoke-gui --config-fixture windows-markdown-open`, `Ctrl+O`, select a `.md` file, verify Markdown status/decorations and responsive edit-only behavior). The Phase 18.12 interactive OS/file-browser path remains manual until automated; run it before treating the file-open experience as release-validated.
 - **Performance and scaling:** Early full-buffer prototype compromises were mostly replaced by viewport-bounded extraction and layout caching, but rigorous large-file benchmarks, layout/render profiling, pixel-accurate scrolling refinements, and memory/latency budgets remain future product-hardening work. Phase 14 established baseline Criterion benchmarks, typed budget constants in `src/perf/budgets.rs`, deterministic hard guards for payload ceilings and queue/viewport invariants, and advisory latency/memory targets. Advisory Criterion thresholds are not yet enforced as hard CI failures because a stable CI runner does not yet exist; promotion to hard thresholds is deferred to Phase 21. If the developer-only profiling activation (`CLAY_PERF_PROFILE=1`, `--profile-perf`) is ever promoted to a stable user-facing diagnostic surface, a `clay:diagnostics` Clay JS API must be introduced with Markdown docs, inventory entry, and registry coverage before the hooks are exposed publicly; this is deferred to Phase 21 or a dedicated hardening phase.
 - **Synchronization recovery:** Phase 5 uses snapshot-based resync that can discard unacknowledged optimistic edits. Richer correction transactions, pending-edit replay, user-visible pending/error reporting, and recovery UX remain future synchronization/product-hardening work.
 - **Leases, locks, and collaboration:** Collaboration is currently a single-writer lease model with read-only observers. Lease transfer/steal/renewal UX, first-class region-lock ownership APIs, persistence, UI, AI/extension lock workflows, and multi-document/multi-client scaling remain future work.
@@ -691,7 +691,7 @@ Expected outcome:
 Carried-forward items:
 
 - Non-`@clay/*` package specifier resolution (third-party package registries, `npm install` integration, external package stores) remains out of scope until Phase 23 ecosystem hardening provides trust, integrity, and compatibility guarantees.
-- Hot reload of already-loaded packages (`loadPackage` called more than once for the same specifier, or runtime reload after configuration change) is deferred to Phase 19 hot-reload semantics, which depends on the Phase 18.7 persistent runtime.
+- Hot reload of already-loaded packages (`loadPackage` called more than once for the same specifier, or runtime reload after configuration change) is deferred to Phase 19 hot-reload semantics, which depends on the Phase 18.7 persistent runtime and now waits until the Phase 18.8-18.14 package-capability sequence is complete.
 - Persistent shared package enable/disable state across processes is deferred to Phase 17 completion or Phase 23 ecosystem hardening.
 - The persistent runtime and JS `ParseHandler` bridge needed to remove the hardcoded Markdown open path (Plan 030 P2-3) are deferred to Phase 18.7.
 
@@ -732,17 +732,184 @@ Expected outcome:
 
 Carried-forward items:
 
-- Hot reload of already-loaded packages and runtime reload after configuration change remain deferred to Phase 19 hot-reload semantics (Phase 18.7 establishes the persistent runtime Phase 19 builds on).
+- Hot reload of already-loaded packages and runtime reload after configuration change remain deferred to Phase 19 hot-reload semantics (Phase 18.7 establishes the persistent runtime, and Phases 18.8-18.14 add the package-capability surface Phase 19 builds on).
 - V8 heap-limit guard via `v8::CreateParams` heap limits and a separate-process JS sandbox, deferred from Plan 030 task 6, may be folded into this phase or tracked separately; either way they are prerequisites-for-hardening, not blockers for the generic activation path.
 - Non-`@clay/*` package specifier resolution remains out of scope until Phase 23 ecosystem hardening.
 
-## Phase 19: Hot Reload and Behavior Update Semantics
+## Phase 18.8: Bottom Pane Transient Menu and Command Execution Foundation
 
-Make runtime package and mode behavior changes safe and non-janky after the first package/mode path exists.
+Create the reusable transient-menu and command-execution foundation before adding completion, Control Center, file navigation, or Git workflows.
 
 Entry gate:
 
-- Depends on **Phase 18.7**'s persistent server-side JS runtime; hot reload cannot be safe or non-janky without a runtime whose lifecycle outlives a single evaluation. Do not start Phase 19 until Phase 18.7 is complete.
+- Do not start until Phase 18.7 has established the persistent runtime, generic package/mode activation path, and no Markdown-specific open-time Rust branch.
+
+Focus areas:
+
+- Implement a Clay-owned `TransientMenuSession` primitive for prompt text, query text, item list, selected index, actions, status text, cancellation, focus policy, and accessibility labels.
+- Render the default transient session in the bottom pane/overlay using the Clay shell and slot-aware package UI primitives; packages may request transient UI only through inert declarations and command intents.
+- Add command execution on top of the existing command registry: server validates command ID, package provenance, routing policy, permissions, arguments, and target document/workspace before executing side effects.
+- Wire SDUI actions, package UI actions, keybindings, and transient-menu selections through the same server-first command execution path.
+- Build the first Control Center workflow by listing registered commands, filtering them, showing key bindings/status/provenance, and executing the selected command.
+- Keep ordinary text input hot paths independent of command search and execution; transient filtering may be local over bounded metadata, but command side effects remain server-authoritative.
+- Add Clay JS API docs, generated registry coverage, deterministic conflict/security tests, and wiki coverage for command execution and transient menu state.
+
+Expected outcome:
+
+- Clay has one reusable bottom-pane transient interaction model for command browsing, menu-driven workflows, future completion, file search, and Git pickers.
+- Command declarations become executable through a validated server authority path rather than metadata-only discovery.
+- Control Center is implemented as the first consumer without one-off UI or command-routing logic.
+
+## Phase 18.9: Generic Text/Code Modes, Key Behavior, and Mode Discovery Fallbacks
+
+Install durable generic editing behavior before language-specific modes so every file remains editable even when no specialized package is installed.
+
+Entry gate:
+
+- Do not start until Phase 18.8 command execution and transient menu routing are available for user-visible mode/help commands.
+
+Focus areas:
+
+- Add always-available `core.text` and `core.code` fallback major modes. Missing, disabled, or invalid language packages must never block opening or editing a document.
+- Extend server-owned document classification with extension, exact filename, MIME hint, shebang, and bounded leading-content probes; keep filesystem scans and arbitrary package predicates out of the hot path.
+- Define deterministic precedence between user override, package-declared pattern, shebang/content hint, `core.code`, and `core.text`.
+- Expose generic key behavior through behavior manifests: Tab, Enter, indentation, pair insertion, comment continuation hooks, electric characters, and fallback command routing.
+- Keep client execution limited to Rust-known inert transform engines; packages provide parameters and rule declarations, not client-side JavaScript.
+- Add mode discovery/listing commands for Control Center and package diagnostics, including why a document selected its active mode or fallback.
+- Document and test activation latency, manifest payload budgets, reclassification after package reload, stale behavior-version rejection, and no synchronous JavaScript before local paint.
+
+Expected outcome:
+
+- Any file opens into a predictable text/code mode with documented fallback behavior.
+- Tab/Enter and other generic key behaviors are exposed as primitives packages can reuse later.
+- Language packages can add capabilities incrementally without becoming required for basic editing.
+
+## Phase 18.10: Package-Provided Tree-sitter Grammar and Syntax Highlighting Primitive
+
+Add syntax highlighting through package-provided grammars rather than core-bundled language grammars, proving that language infrastructure can arrive from packages before those packages become full modes.
+
+Entry gate:
+
+- Do not start until Phase 18.9 has generic text/code modes and deterministic document classification fallbacks.
+
+Focus areas:
+
+- Add a generic `SyntaxGrammarContribution` primitive: package prefix, language ID, supported file patterns, Tree-sitter grammar artifact/source metadata, highlight/query files, injection/local query metadata where supported, style-token mapping, version/provenance, and performance budget metadata.
+- Create first-party grammar-only packages `@clay/rust`, `@clay/typescript`, and `@clay/javascript`. In this phase they provide syntax grammars and highlight queries only; they must not declare full modes, language-specific commands, completion providers, or bespoke Rust branches.
+- Make syntax provider selection attach to `core.code`/`core.text` fallback documents through validated grammar contributions. Active major mode and active syntax grammar are related but not the same thing.
+- Implement the Tree-sitter parse/highlight engine as server-side background work: incremental tree updates where possible, query-based capture extraction, conversion to bounded `DecorationSet` values, stale-version rejection, cancellation, and viewport-prioritized publication.
+- Keep parser execution, grammar validation, and query processing off Masonry paint/text-event handlers and off the ordinary client-first typing path.
+- Do not embed Rust/TypeScript/JavaScript grammar ownership in Clay core. Core owns the grammar contribution contract and renderer/decorator validation; first-party packages own the grammar/query assets.
+- Treat arbitrary third-party grammar/native artifact loading as out of scope until a later security/trust decision. This phase may allow only resolver-validated first-party package grammar artifacts if native loading is required.
+- Add docs, generated registry coverage, package-author guidance, tests for package-provided grammar resolution, syntax decoration payload limits, invalid query diagnostics, and disabled-package fallback.
+
+Expected outcome:
+
+- Opening Rust, TypeScript, and JavaScript files can show syntax highlighting sourced from first-party grammar packages while still using generic fallback modes.
+- Clay proves grammar contributions can be package-provided without hard-coding language branches into the Rust editor core.
+- Future language packages can expand from grammar-only packages into full modes on top of the same primitive.
+
+## Phase 18.11: Completion Provider Framework
+
+Add a generic completion framework after transient menus and generic mode/key behavior exist, so completion UI and routing do not become language-specific one-offs.
+
+Entry gate:
+
+- Do not start until Phase 18.10 has syntax/decoration plumbing and package provenance for language-related contributions.
+
+Focus areas:
+
+- Promote the deferred `CompletionTriggerAndResult` primitive into an implemented provider registry with package provenance, permissions, trigger metadata, provider priority, cancellation, and payload budgets.
+- Put trigger characters and simple word-boundary trigger rules into behavior manifests so the client can request completion without running package JavaScript.
+- Execute completion providers server-side on a UI-reactive priority lane; cancel stale requests on edits, cursor movement, mode changes, provider reload, or newer requests.
+- Reuse `TransientMenuSession` for completion display, selection, commit characters, dismissal, accessibility, and status/error messages.
+- Implement one minimal provider first, such as buffer-word completion, to validate the framework without introducing LSP, network, shell, or AI authority.
+- Add Clay JS APIs, docs, generated registry entries, tests for stale result rejection, payload ceilings, provider conflicts, no hot-path blocking, and disabled-provider fallback.
+
+Expected outcome:
+
+- Clay has a reusable completion architecture with one working provider and a UI that future language packages can consume.
+- Completion computation is asynchronous, cancellable, versioned, bounded, and separate from local typing/rendering.
+- LSP, AI, and workspace-index providers remain later add-ons rather than prerequisites.
+
+## Phase 18.12: Workspace Discovery and File Browser Foundation
+
+Add workspace discovery and file navigation on top of server file/workspace authority and the transient-menu/shell primitives.
+
+Entry gate:
+
+- Do not start until Phase 18.8 and Phase 18.9 have command execution, transient menus, and generic fallback modes.
+
+Focus areas:
+
+- Add server-owned workspace-root discovery from CLI/current directory, opened-file ancestry, explicit user grants, and marker files such as `.git`, `Cargo.toml`, `package.json`, and other bounded known project markers.
+- Represent roots as a future-compatible multi-root model while shipping a one-root default UI if that is the smallest working product.
+- Add a bounded file tree/list service with ignore rules, depth/count limits, cancellation, refresh, diagnostics, and no arbitrary package filesystem authority.
+- Implement a Clay-owned file browser UI: left fixed panel for tree/list browsing and a bottom transient fuzzy-open workflow for quick navigation.
+- Route open/reveal/save-related actions through server-authoritative file/workspace APIs and selected-file grants rather than direct client filesystem access.
+- Defer destructive file operations, watchers, autosave, save-as, rename/delete, and conflict-resolution UX unless explicitly needed for browsing/opening.
+- Document Clay JS APIs, configuration hooks, package/user override boundaries, wiki pages, and tests for root discovery, file listing limits, ignored paths, permissions, and UI actions.
+
+Expected outcome:
+
+- Clay can discover a workspace root, show a browsable file tree, and open files through validated server authority.
+- File navigation reuses the same transient menu, command execution, and shell panel primitives as other workflows.
+- The implementation is ready for richer file workflows without granting broad client or package filesystem authority.
+
+## Phase 18.13: Git Discovery Service and First-Party `@clay/git` Package
+
+Add Git and branch discovery as a typed server service plus a first-party package UI, without granting arbitrary shell authority.
+
+Entry gate:
+
+- Do not start until Phase 18.12 has server-owned workspace roots and file navigation.
+
+Focus areas:
+
+- Add a typed Git discovery service for workspace roots using the `git` CLI behind a narrow process boundary: repository root, current branch or detached HEAD, dirty/clean summary, changed-file count, and last refresh status.
+- Cache Git status per workspace with explicit refresh and bounded/polling behavior so Git work does not delay typing, rendering, or UI-reactive completion.
+- Keep arbitrary shell execution out of scope; every Git operation must be a typed command with bounded args, cwd rooted in a known workspace, timeout, sanitized output, and deterministic diagnostics.
+- Create first-party `@clay/git` as a package consuming the typed Git APIs: status item/panel, branch/status Control Center commands, and transient branch/action pickers.
+- Start read-only by default. Mutating operations such as checkout, stage, commit, reset, rebase, and stash require explicit command authority and may be deferred unless the phase plan approves a minimal safe subset.
+- Add docs, generated registry coverage, package guide updates, tests for repo/non-repo roots, branch discovery, dirty status parsing, timeout/error handling, and no shell/network authority expansion.
+
+Expected outcome:
+
+- Clay shows repository and branch state for the active workspace through a first-party package.
+- Git workflows reuse typed server commands, transient menus, shell panels, and package UI primitives.
+- The boundary is ready for future mutating Git commands without exposing arbitrary shell access.
+
+## Phase 18.14: First-Party Rust, TypeScript, and JavaScript Language Package Expansion
+
+Expand the grammar-only first-party language packages into real language packages only after the generic syntax, completion, command, workspace, and Git foundations exist.
+
+Entry gate:
+
+- Do not start until Phases 18.10 and 18.11 have package-provided syntax grammars and generic completion, and until Phases 18.8/18.9 have command/key/mode foundations.
+
+Focus areas:
+
+- Revisit `@clay/rust`, `@clay/typescript`, and `@clay/javascript` as package consumers of existing primitives before adding any new Rust code.
+- Add mode declarations only where they provide user-visible behavior beyond grammar selection, such as language-specific indentation parameters, comment toggles, structural commands, completion trigger metadata, status items, or package configuration.
+- Keep all language behavior on generic primitives: behavior manifests, command declarations/execution, syntax grammar contributions, decoration ranges, completion providers, transient menus, package UI, and configuration APIs.
+- Do not add Rust branches such as `if language == "rust"` or package-specific parser/render callbacks. New gaps must become reusable primitives or be explicitly deferred.
+- Reuse workspace and Git information only through documented Clay APIs; do not let language packages read arbitrary files, spawn toolchains, or contact package managers without a later decision.
+- Treat LSP, formatter execution, build/test runner integration, semantic indexing, import management, and AI-assisted code actions as later phases unless explicitly promoted by a new decision.
+- Add package docs, API registry entries, wiki coverage, smoke fixtures, performance measurements, and fallback tests for disabled/invalid packages.
+
+Expected outcome:
+
+- Rust, TypeScript, and JavaScript become first-party language packages built on generic Clay primitives, not hard-coded editor modes.
+- Grammar-only packages have a clear upgrade path into fuller modes without changing the package-provided syntax architecture.
+- Phase 19 hot reload can then operate against several real package contributions instead of only Markdown.
+
+## Phase 19: Hot Reload and Behavior Update Semantics
+
+Make runtime package and mode behavior changes safe and non-janky after the package capability sequence has several real contribution types to reload.
+
+Entry gate:
+
+- Depends on **Phase 18.7**'s persistent server-side JS runtime and the **Phase 18.8 through 18.14** command, transient menu, generic mode, syntax grammar, completion, workspace, Git, and first-party language package sequence. Hot reload cannot be safe or non-janky without a persistent runtime and enough real package contributions to validate reload semantics. Do not start Phase 19 until Phase 18.14 is complete.
 
 Focus areas:
 
@@ -773,10 +940,10 @@ Focus areas:
 - IME/composition support.
 - Theme system.
 - Accessibility improvements.
-- Cross-platform UI polish, including platform-native file-open dialogs for macOS/Linux that reuse the Phase 19 client UI command and selected-file grant primitives rather than adding broad client filesystem authority.
+- Cross-platform UI polish, including platform-native file-open dialogs for macOS/Linux that reuse the Phase 18.8 command execution and Phase 18.12 selected-file grant/file-browser primitives rather than adding broad client filesystem authority.
 - Revisit Phase 15's deferred pixel-buffer/GPU snapshot coverage during UI hardening; if Masonry/winit now supports deterministic offscreen rendering, add pixel-accurate snapshots for shipped editor, SDUI, and mode/package compositions while keeping structural observability tests as fast headless coverage.
 - Multi-document behavior, including per-document mode selection, per-document status, dirty state, leases, and package manifest versions.
-- Selected-file save/conflict persistence for files opened through the Phase 19 single-file grant path, including explicit dirty-state/persistence UX before save-after-open becomes user-facing.
+- Selected-file save/conflict persistence for files opened through the Phase 18.12 single-file grant/file-browser path, including explicit dirty-state/persistence UX before save-after-open becomes user-facing.
 - Dedicated file-open/save/reload workflow documentation if selected-file save, save-as, file watchers, autosave, or conflict-resolution flows outgrow the Phase 9 module-level wiki.
 - User-visible pending-edit/error reporting, reconnect/resync prompts, and richer recovery UX.
 

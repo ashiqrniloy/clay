@@ -1467,6 +1467,86 @@ fn open_dialog_api_security_notes_cover_selected_file_authority() {
 }
 
 #[test]
+fn phase18_8_command_execution_and_transient_menu_configuration_uses_existing_apis() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let entries = inventory_entries();
+    let bind_key = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.keybindings.bindKey")
+        .expect("bindKey inventory entry");
+
+    // bindKey is the documented Control Center launch configuration surface and
+    // carries the same custom properties as the Phase 19 Windows open-dialog route.
+    for property in ["key", "command", "scope", "when"] {
+        assert!(
+            inventory_custom_property_names(bind_key.get("custom_properties"))
+                .contains(&property.to_string()),
+            "bindKey custom_properties must include {property}"
+        );
+    }
+
+    for required in [
+        "Phase 18.8 command execution and transient menu configuration review",
+        "did **not** promote a new user-facing `clay:configuration` API",
+        "clay.controlCenter.open",
+        "No default `Ctrl+Shift+P` shortcut in Rust exists",
+        "bindKey",
+        "TransientMenuSession",
+        "ControlCenter",
+        "CommandExecutor",
+        "MAX_ITEMS = 256",
+        "controlCenter.key",
+        "menu.position",
+        "transientMenu.focusPolicy",
+        "commandExecution.timeout",
+        "builtin_server_command",
+        "RoutingPolicy::ServerFirst",
+        "re-validated per activation",
+        "package enable/disable",
+        "client-side JavaScript",
+        "raw-op",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 18.8 config surface `{required}`"
+        );
+    }
+
+    for required in [
+        "clay.controlCenter.open",
+        "Phase 18.8 Control Center launch route",
+        "built-in server-first command id",
+        "CommandExecutor",
+        "not a callable `clay:configuration` API",
+    ] {
+        assert!(
+            bind_key_doc.contains(required),
+            "bind-key.md must document Phase 18.8 command execution target note `{required}`"
+        );
+    }
+
+    // No new clay.configuration.* APIs were introduced for menu/control-center/
+    // transient-menu/command-execution behavior.
+    assert!(
+        entries.iter().all(|entry| {
+            let id = entry.get("id");
+            !(id.starts_with("clay.configuration.")
+                && (id.contains("ControlCenter")
+                    || id.contains("TransientMenu")
+                    || id.contains("Menu")
+                    || id.contains("CommandExecution")))
+        }),
+        "Phase 18.8 must not add hidden clay.configuration menu/control-center/transient-menu/command-execution APIs"
+    );
+}
+
+#[test]
 fn api_inventory_has_required_fields() {
     let entries = inventory_entries();
     let required_fields = [

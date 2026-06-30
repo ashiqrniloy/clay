@@ -48,6 +48,26 @@ Place this task after the primitive-review task and before broad implementation 
 
 Decision source: `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`.
 
+## Package-Provided Grammar Task
+
+Each Clay phase plan that implements or materially changes syntax highlighting, language grammar support, Tree-sitter integration, language packages, or language-mode expansion must include acceptance criteria and/or a dedicated task for package-provided grammar contributions.
+
+The task should require:
+
+- Syntax grammar support is expressed through generic package primitives, not hard-coded Rust branches for Rust, TypeScript, JavaScript, or any later language.
+- `@clay/rust`, `@clay/typescript`, and `@clay/javascript` start as grammar-only packages when first introduced: grammar/query assets, language metadata, style-token mapping, docs, tests, and provenance, with no full mode behavior until a later expansion phase.
+- Active syntax grammar remains separate from active major mode so grammar packages can attach highlighting to `core.code`/`core.text` fallback modes.
+- Arbitrary third-party grammar/native artifact loading is out of scope unless a dedicated security/trust decision approves integrity, sandboxing, and user authorization rules.
+- Tests cover package-provided grammar resolution, disabled/invalid package fallback, query/decoration payload bounds, no client-side JavaScript or parser code in paint/text hot paths, and no language-specific Rust server/client branches.
+
+Recommended task title when a separate task is useful:
+
+```markdown
+- [ ] Review package-provided grammar primitives before language package work
+```
+
+Decision source: `decision-logs/2026-06-29-2006-package-provided-grammar-and-capability-phases.md`.
+
 ## Package UI/Layout and Authoring Documentation Task
 
 Each Clay phase plan that implements or materially changes package UI, mode UI, SDUI, layout, pane/window behavior, component primitives, input routing, package actions, package state/data, styling/theme tokens, or package configuration must include acceptance criteria and/or a dedicated task for the package authoring contract.

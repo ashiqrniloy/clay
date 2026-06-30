@@ -271,6 +271,20 @@ impl ClientEditQueue {
         })
     }
 
+    pub(crate) fn enqueue_command_intent(
+        &self,
+        document_id: DocumentId,
+        behavior_version: crate::protocol::BehaviorVersion,
+        command_id: String,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::CommandIntent {
+            client_id: self.client_id,
+            document_id,
+            behavior_version,
+            command_id,
+        })
+    }
+
     pub fn enqueue_open_selected_file(
         &self,
         selected_path: PathBuf,
@@ -1093,6 +1107,43 @@ mod tests {
                 intent,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn server_keybinding_emits_bounded_command_intent() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
+
+        queue
+            .enqueue_command_intent(7, 3, "clay.controlCenter.open".to_string())
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::CommandIntent {
+                client_id: 42,
+                document_id: 7,
+                behavior_version: 3,
+                command_id: "clay.controlCenter.open".to_string(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn command_intent_hot_path_uses_try_send_backpressure() {
+        let (queue, _receiver) = ClientEditQueue::bounded(1);
+        queue
+            .enqueue_command_intent(7, 3, "clay.controlCenter.open".to_string())
+            .unwrap();
+
+        let error = queue
+            .enqueue_command_intent(7, 3, "clay.controlCenter.open".to_string())
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            tokio::sync::mpsc::error::TrySendError::Full(_)
+        ));
     }
 
     #[tokio::test]

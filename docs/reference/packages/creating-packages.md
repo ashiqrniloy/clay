@@ -129,6 +129,7 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.5 | Document the Phase 18.5 authoring contract: no default fixed panel unless explicitly registered, optional preview as `PanelContribution` with `defaultVisibility: "hidden"`, main editor placement via `PaneSlotLayout.main`, theme token usage, and `setPackageOption`/`serverSetLayoutOverride` customization. Update Markdown package docs to consume generic shell/layout primitives and remove fixture-only UI guidance from user-facing defaults. |
 | Phase 18.6/Plan 035 | Document the shipped one-line `loadPackage("@clay/markdown")` loader, source-aware package loading, and `PackageLoadEntryAllowlist` package-root boundary. |
 | Phase 18.7 | Document persistent-runtime parse-handler registration, generic open-time mode activation, no-client-JS/no-hot-path-JS invariants, parse budgets, and forbidden per-mode/per-open shortcuts. |
+| Phase 18.8 | Document the command execution lifecycle, inert action intents, transient menu sessions, and the difference between fixed panels, transient overlays, and bottom-pane transient menus. Update anti-patterns to reject client-side command execution, raw callbacks, and command-permission bypass. |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
@@ -758,6 +759,8 @@ Clay validates that:
 
 Phase 18.4 component-scoped action routing composes this command contract with `serverRegisterInputContribution` and `serverSetLayoutOverride`: input/action defaults must reference registered package command IDs, declarations are validated at package load/configuration/update time, and Masonry hot paths read only installed inert action metadata.
 
+Phase 18.8 adds a server-owned `CommandExecution` boundary. SDUI actions, package UI action intents, behavior-manifest keybindings, and transient-menu selections all normalize to the same `CommandExecutionRequest`. The server validates command ID, routing policy, package provenance, declared permissions, target context, and bounded arguments before any side effect. Packages may declare commands and expose them in transient menus; they cannot execute commands directly from UI callbacks, bypass permission checks, or run command handlers in the Rust client.
+
 ## Input
 
 Packages declare input interests. They do not receive raw arbitrary client input by default.
@@ -1099,6 +1102,155 @@ Package authors should treat input, actions, state, and configuration as one val
 
 Deferred surfaces remain explicit: durable state-value mutation, persisted workspace/document/user-config storage, pane selector syntax, multi-panel ordering, overlay z-order, cross-window layout behavior, direct working-area/split/pane-slot mutation, and package enable/disable from configuration are planned/deferred until separate documented APIs ship.
 
+## Phase 18.8 authoring contract: command execution and transient menus
+
+Phase 18.8 closes the loop between command registration and command activation. A package registers commands with `clay:commands.serverRegisterCommand`; package UI components, keybindings, and transient menus activate those commands through inert command intents, not through callbacks or client-side handlers.
+
+### Inert action intents
+
+Every interactive package UI action must be an inert command intent:
+
+```js
+defineButton({
+  label: "Toggle Preview",
+  action: {
+    commandId: "markdown.togglePreview",
+    arguments: { source: "preview-button" },
+  },
+});
+```
+
+The intent carries only a registered command ID and bounded primitive arguments. It does not carry a JavaScript callback, a raw op name, a native handle, a filesystem path, or executable code. Clay rejects unregistered command targets, mismatched package provenance, undeclared permissions, malformed arguments, and oversize payloads before the action becomes active.
+
+### Fixed panels, transient overlays, and transient menus
+
+Package UI contributions use three distinct shell surfaces:
+
+- **Fixed panels** participate in `PaneSlotLayout` and reduce the size of the `main` slot while visible. Register them with `clay.ui.serverRegisterPanelContribution` for `left`, `right`, `top`, or `bottom` slots.
+- **Transient overlays** overlay the pane or working area and are dismissible/focus-scoped. Register them with `clay.ui.serverRegisterTransientOverlayContribution` for command palettes, dropdowns, hover docs, modals, or temporary find/replace bars.
+- **Transient menus** are Clay-owned active sessions for bottom-pane command browsing and future picker workflows. They reuse the overlay/component primitives for rendering but are managed as a `TransientMenuSession` with prompt, query, bounded items, selection, status, and inert activation actions. The Control Center is the first consumer; future completion, file search, symbol search, and Git pickers can reuse the same generic session model.
+
+A transient menu is not a fixed bottom panel and does not consume fixed `PaneSlotLayout` geometry unless a later explicit declaration installs fixed bottom chrome. It is also not a generic `TransientOverlayContribution`; the overlay contribution declares static overlay metadata, while the transient menu session owns dynamic query/selection/activation state.
+
+### Command execution lifecycle
+
+The lifecycle for package-invoked commands is:
+
+1. **Register** the command with `serverRegisterCommand` at package load time.
+2. **Declare** action targets in UI components, input contributions, keybindings, or transient menu items.
+3. **Validate** at package load/configuration/update time that every action target resolves to a registered command with compatible routing and declared permissions.
+4. **Enqueue** an inert command intent from the client when the user activates the action.
+5. **Execute** server-side: `CommandExecutor` validates command ID, routing policy, provenance, permissions, target context, argument budget, and session/action freshness before running the handler.
+
+Command execution is explicit server-first work. It may be async and cancellable, but it never runs synchronously in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers. Ordinary typing remains client-first and does not wait for command execution.
+
+### Performance rule
+
+Package command registration, action validation, and transient menu filtering are load/configuration/update-time work. The client may filter bounded installed metadata locally during query/selection movement, but command side effects run only through the server-owned execution path. No package JavaScript, command handler, package validation, IPC round trip, filesystem, network, shell, AI, WASM, or full-document serialization work may run in Masonry paint/layout/pointer/scroll/key/text-event handlers.
+
+### Security rule
+
+Packages may request transient UI and declare action intents, but they cannot:
+
+- execute client-side JavaScript in the Rust client to handle commands
+- create or mutate Masonry widgets directly
+- call raw `Deno.core.ops` or expose raw op names as user-facing API
+- bypass command permission/provenance validation
+- grant themselves filesystem, network, shell, AI mutation, WASM, workspace mutation, package-manager, package installation, package enable/disable, native widget, or raw-op authority
+- smuggle callbacks, native handles, filesystem paths, or executable code inside action arguments
+
+Command execution authority is validated per request. Registration or inclusion in a menu does not grant execution authority; the server re-checks permissions, provenance, routing policy, and target context on every activation.
+
+## Phase 18.9 authoring contract: generic text/code fallback modes and generic key behavior
+
+Phase 18.9 makes every document editable even when no language package is installed, disabled, or invalid, by registering always-on Clay-owned fallback major modes (`core.text`, `core.code`) at server startup. Language packages do **not** replace these fallbacks; they **extend** `core.code`/`core.text` by declaring modes, classification patterns, and behavior manifests through the same generic primitives every other mode uses: `DocumentClassification`, `MajorModeActivation`, `TextTransform`, `KeyRoutingOverride`, and `CommandDeclaration`. The canonical primitive detail lives in [Primitive Registry Schema](../primitives/registry.md); this section is the package-author contract.
+
+### What a language package declares
+
+A language package extends the built-in fallbacks with declarative metadata only — it must not add language-specific Rust branches or client-side JavaScript:
+
+```js
+import { serverRegisterModePattern, serverActivateMajorMode } from "clay:modes";
+
+// Declare a package-owned major mode and its classification pattern.
+serverRegisterModePattern({
+  apiPrefix: "rust",
+  modeId: "rust",
+  patterns: [
+    { kind: "extension", value: "rs" },
+    { kind: "filename", value: "Cargo.toml" },
+    { kind: "shebang", value: "rust-*" } // single-wildcard glob, optional
+  ],
+  editorRules: {
+    tab: { mode: "insert-spaces", width: 4 },
+    pairs: [ { opener: "{", close: "}" } /* ... */ ],
+    electricCharacters: [ { trigger: "}", effect: "outdent-one-level" } ]
+  }
+});
+
+serverActivateMajorMode(/* ... via the documented activation path ... */);
+```
+
+Packages contribute **parameters** (rule data) only; Clay executes only Rust-known transform engines. Unknown `electricCharacters` effects are dropped, not executed. A language package is the recommended way to change classification/behavior — there is no undocumented configuration key to override `core.*` defaults (see [Configuration Runtime](../../wiki/modules/configuration-runtime.md)).
+
+### Classification precedence (package authors must not rely on load order)
+
+When a document opens, Clay chooses one active major mode from a deterministic precedence ladder; no package wins by load order:
+
+1. User override via documented Clay JS APIs (e.g., an init.js-declared package pattern)
+2. Package-declared pattern: exact filename > wildcard filename > extension > MIME
+3. Shebang line (interpreter matches a declared pattern)
+4. Bounded leading-content probe (literal marker at document start)
+5. `core.code` (code-like extensions and any shebang)
+6. `core.text` (universal fallback)
+
+On an equal-precedence tie, a package-declared mode beats a built-in, and only same-provenance ties raise an `AmbiguousClassification` diagnostic. Probes read only a bounded constant prefix (`MAX_LEADING_CONTENT_BYTES = 512`) of an already-open document supplied by the open path; they perform no filesystem scan, directory walk, or arbitrary package predicate, and oversize slices are rejected and classified to a fallback mode.
+
+### Generic transform kinds are reusable across future modes
+
+The `TextTransform` kinds that ship `core.code` are deliberately generic and reusable by any future language mode, not Markdown-only or Python-only:
+
+- **Pair insertion** (`PairRule`) — opener/close pairs inserted client-side from inert manifest data.
+- **Comment continuation** (`CommentContinuationRule`) — Enter inside a comment continues the comment marker.
+- **Electric characters** (`ElectricCharacterRule` + `ElectricEffect::OutdentOneLevel`) — typing a closing `}`/`)`/`]` auto-outdents an over-indented line.
+- **Tab** (`TabRule`) and **Enter** (`EnterRule`) — indentation and newline transforms.
+
+Two default rule sets ship: `EditorBehaviorRules::default_text()` (plain text, no electric) via `BehaviorManifest::minimal_text_editing`, and `EditorBehaviorRules::default_code()` (code-oriented, with electric reflow) via `BehaviorManifest::core_code_editing`. `core.code` ships a default electric set for `}`/`)`/`]`; `core.text` ships none. A future language package declares its own rule parameters under `clay.modes` editor rules and only the `outdent-one-level` electric effect is accepted.
+
+### Discovery command contract
+
+Package authors and the Control Center can inspect active modes through built-in, read-only, server-first commands (not Clay JS facades, no execution/document/workspace authority):
+
+- `clay.modes.listActiveModes` — returns per-document `modeId`, `provenance` (`CoreBuiltIn` or `Package`), and `classificationSource`.
+- `clay.modes.explainActiveMode` — returns the active mode, display name, `fallbackUsed` flag, and a human-readable `why` rationale (e.g., "core.text universal fallback: no language package matched").
+
+These commands carry empty permissions and are resolved server-side via `CommandExecutor::execute_discovery`; they introduce no new authority.
+
+### Performance budgets (hot-path contract)
+
+Generic key behavior is `ClientFirstPredictable`: the Rust client executes inert behavior-manifest data for Tab/Enter/pair/comment/electric transforms with **no synchronous JavaScript, IPC, or server round trip before local paint**. Packages must respect:
+
+- `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS = 16` — keypress-to-local-paint budget; no sync JS before paint.
+- `MODE_ACTIVATION_P95_BUDGET_MS = 100` — mode-activation budget.
+- `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES = 2048` — behavior manifest payload budget; oversize manifests are rejected with `PayloadBudgetExceeded` at record time.
+
+Mode/classification defaults are compile-time (no configuration-evaluation cost at paint/text time). Configuration evaluation is bounded to init.js/package load or explicit setting change by `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS = 25`.
+
+### Security boundaries
+
+- **`core.*` ID ownership is reserved.** The `core.` mode-ID prefix is reserved for Clay-owned built-ins and cannot be registered by a package (`register_mode`/`register_minor_mode` reject `core.*` and `clay.*`).
+- **Deny-by-default authority.** Built-in fallback modes require no package and grant no package authority. Packages cannot grant themselves filesystem, network, shell, AI mutation, WASM, package-manager, package installation/enable-disable, native widget, raw-op, or client-side-JavaScript authority.
+- **Packages contribute parameters/declarations only.** Electric characters, pair insertion, and comment continuation are declarative manifest data; Rust-known engines execute them. Packages must not add language-specific Rust branches, raw `Deno.core.ops`, native handles, raw CSS, callbacks, or client-side JavaScript.
+- **Built-in defaults cannot be overridden to grant authority.** `setPackageOption` uses a closed suffix allowlist and rejects Phase 18.9 behavior-changing keys (`core.preferredFallbackMode`, `core.electricCharacters`, `core.pairInsertion`, `core.commentContinuation`) as unsupported options.
+- **Bounded probing.** Shebang/content probes read only a bounded prefix of an already-open document; no filesystem scan authority is introduced.
+
+### Migration notes and limitations
+
+- Files that previously produced "no classification match" now open into `core.text` (or `core.code` for code-like extensions / any shebang); packages that asserted `NoClassificationMatch` in tests should assert `core.text`/`core.code` fallback instead.
+- A language package with a higher-precedence pattern continues to win over `core.code`/`core.text`; no migration is needed for existing package-declared modes.
+- Built-in modes ship their own default behavior manifests without an owning package; `select_behavior_manifest_for_document` detects the `core.` prefix and bypasses package-record lookup.
+- There is intentionally no runtime configuration knob for the fallback mode or electric toggles (YAGNI; the package system is the override escape hatch). Do not add undocumented `setPackageOption` keys for these.
+
 ## Documentation Requirements
 
 Each package should include docs for:
@@ -1137,14 +1289,14 @@ Recommended test categories:
 1. **Manifest validation** — required fields, prefix, permissions, docs, performance metadata.
 2. **Conflict tests** — duplicate modes, commands, keybindings, slots, config keys, theme tokens.
 3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage(specifier)` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the module loader only accepts resolver-validated package load entries.
-4. **Mode tests** — classification, activation, behavior manifest composition.
+4. **Mode tests** — classification, activation, behavior manifest composition. For Phase 18.9: assert unknown/plain-text files fall back to `core.text` and code-like extensions/shebangs to `core.code`; assert a package-declared pattern wins precedence over built-ins; assert electric/pair/comment transforms execute client-side from the manifest without IPC; assert `core.*`/`clay.*` mode IDs are rejected at registration; assert oversize behavior manifests are rejected at the payload budget.
 5. **Input tests** — key routing, command routing, mouse/component actions.
 6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy.
 7. **Theme/style tests** — token validation, same-type fallback mapping, typed style variables, and raw CSS/color rejection.
 8. **Package metadata tests** — `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, `themeTokens`, duplicate fixed slot claims, and bounded payload diagnostics.
 9. **Parse/render tests** — bounded snapshots, stale result rejection, decoration payload budgets.
 10. **Docs tests** — package docs, primitive docs, and master index links stay current.
-11. **Manual smoke tests** — actual GUI package loading and user workflow checks.
+11. **Manual smoke tests** — actual GUI package loading and user workflow checks. For Phase 18.9, the smoke path in [Launch and GUI Smoke](../../development/launch-and-gui-smoke.md) opens files with no language package and confirms editable `core.text`/`core.code` fallback modes.
 
 ## Minimal Package Checklist
 
@@ -1161,6 +1313,7 @@ For a simple package:
 - [ ] Optional configuration is documented through Clay JS APIs.
 - [ ] Commands/actions are registered before UI targets them.
 - [ ] UI contributions are inert and slot-aware when shell APIs are available.
+- [ ] Command action intents are inert and transient menu items are bounded; no callbacks or client-side handlers.
 - [ ] Style uses tokens/typed variables, not CSS.
 - [ ] Tests cover validation, loading, runtime behavior, and docs.
 
@@ -1182,6 +1335,9 @@ Do not:
 - Hard-code a side panel position or width; let the shell compose `PaneSlotLayout` from the declared `slot` and user overrides.
 - Treat smoke fixtures as user-facing setup instructions.
 - Treat planned working-area/split-tree/slot-layout/state/override `clay:ui` snippets or planned configuration helpers as callable runtime code before public API docs, docs-index links, generated registry entries, and backing ops ship. In current Phase 18.4 wording, this means planned working-area/split-tree/direct pane-slot/state-value mutation snippets, package enable/disable helpers, or any undocumented configuration helper.
+- Execute commands from UI callbacks or transient menu items without routing through the server-owned `CommandExecution` path.
+- Bypass command permission/provenance validation from package code.
+- Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
 - Treat `serverLoadPackage` as ordinary end-user package installation, enablement, or execution authority.
 
 ## Example: Markdown as a Package

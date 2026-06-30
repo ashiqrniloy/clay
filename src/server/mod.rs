@@ -1,6 +1,8 @@
 mod behavior;
+pub mod command_execution;
 mod configuration;
 mod connection;
+pub(crate) mod control_center;
 pub mod decorations;
 pub(crate) mod document;
 #[allow(dead_code)]

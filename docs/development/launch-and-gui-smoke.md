@@ -110,6 +110,54 @@ Manual Windows 11 verification:
 3. Confirm Markdown decorations are visible for the opened file. Decoration refresh may arrive asynchronously; ordinary typing should remain responsive and local.
 4. Type a small edit in the opened document, then close/discard it. Do not test save in Phase 19.
 
+### Phase 18.8 Control Center manual smoke
+
+Phase 18.8 adds the server-owned `CommandExecutor` validation boundary, the generic `TransientMenuSession` state model, and the built-in `clay.controlCenter.open` command-palette workflow. The Control Center has no default Rust key binding and no dedicated smoke fixture; it is reached only by binding a key to the built-in command through the existing `clay.keybindings.bindKey` configuration API. Because pixel snapshots are unavailable, manual validation is required.
+
+Manual Control Center smoke:
+
+1. Create or extend `~/.config/clay/init.js` to bind a key to the built-in command:
+
+   ```js
+   import { bindKey } from "clay:keybindings";
+
+   bindKey("Ctrl+Shift+P", "clay.controlCenter.open", { scope: "editor" });
+   ```
+
+2. Launch Clay with the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`).
+3. Press the configured `Ctrl+Shift+P` (or chosen chord). The bottom-pane Control Center transient overlay should appear with a bounded list of executable commands (registered package commands with `server-first`/`background`/`ui-reactive-priority` routing plus built-in commands such as `clay.controlCenter.open` and `workspace.refresh`); client-first/client-ui commands must not appear.
+4. Type a filter query and confirm the list narrows by label, command id, key binding, or package provenance; item count stays within `MAX_ITEMS` (256) and the query is truncated at `MAX_QUERY_CHARS` (256).
+5. Move the selection with `Up`/`Down` (wraps at boundaries) and confirm the selected item stays within bounds.
+6. Press `Enter` on a selected safe command (for example `workspace.refresh` or a registered `server-first` command). The activation should enqueue an inert command intent that the server-owned `CommandExecutor` re-validates (command id, routing policy, package provenance, declared permissions, argument budget, target context) before any side effect; the menu should close on successful activation.
+7. Press `Escape` to cancel the Control Center without executing a command and confirm focus returns to the editor.
+8. Type in the editor and confirm ordinary typing remains responsive, local, and optimistic; the transient menu / command execution path must not run on the keypress-to-paint, layout, scroll, text-event, edit acknowledgement, parse-result publication, or decoration rendering hot paths.
+9. Open the Control Center again with an empty registry-only filter (no package commands registered in a bare install) and confirm the built-in commands still appear and the menu handles the empty/no-match state without panicking.
+
+Automated coverage (no manual execution needed): `CommandExecutor` validation (unknown command, invalid routing policy, invalid provenance, undeclared permission, malformed/oversize arguments, unauthorized target) is covered by `tests/command_execution.rs` and the `command_execution` module unit tests; Control Center open/filter/execute/empty-reject/client-first-exclusion/item-detail are covered by the `control_center` module unit tests; transient menu session bounds/selection/cancel/stale-rejection are covered by the `transient_menu` module unit tests; built-in command membership is covered by `builtin_server_command`/`builtin_server_command_ids`; internal-vs-public API boundary (no public `serverExecuteCommand`/`serverOpenTransientMenu`/`clay.controlCenter.open` facade) is covered by `tests/rust_visibility_api_mapping.rs::phase18_8_command_execution_and_transient_menu_surfaces_are_internal`; configuration-via-`bindKey` and no-hidden-keys contracts are covered by `tests/clay_js_api_inventory.rs` and `tests/primitives_docs.rs`.
+
+What the manual smoke adds on top of automated tests: the rendered bottom-pane overlay geometry, real keyboard focus restore after `Escape`, and perceptual confirmation that typing stays responsive while the Control Center is open — none of which pixel-free automated tests can assert.
+
+### Phase 18.9 built-in fallback mode smoke (no `init.js`)
+
+Phase 18.9 ships always-on built-in Clay-owned fallback modes `core.text` and `core.code` (registered at server startup through `ModeRegistry::new()`), so any file opens into a predictable, editable mode even when no language package is installed, disabled, or invalid — and first open needs no JavaScript round trip for fallback editing because the built-in modes are registered before any configuration/package evaluation runs. No `~/.config/clay/init.js` line and no `loadPackage` step are required for fallback editing.
+
+Manual fallback smoke:
+
+1. Launch Clay with **no `~/.config/clay/init.js`** (or an empty one) using the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`). No language package is loaded.
+2. Open a plain-text file such as a `README.txt` (or any file whose extension no package claims). Confirm the document opens editable with generic Tab/Enter/backspace behavior — its active major mode is the built-in `core.text` universal fallback (`clay.modes.explainActiveMode` reports `fallbackUsed: true`).
+3. Open a code-like file such as `main.rs` (or any file with one of the curated built-in `core.code` extensions). Confirm the document opens editable with code-oriented behavior — its active major mode is the built-in `core.code` fallback, and closing braces/brackets/parens reflow via electric outdent rules shipped by the `core_code_editing` manifest.
+4. Confirm ordinary typing stays local and optimistic and that no synchronous JavaScript round trip occurs before local paint (built-in mode manifests are inert `ClientFirstPredictable` data executed by Rust-known engines).
+5. (Optional) Add the one-line default loader to `~/.config/clay/init.js` and relaunch:
+   ```js
+   import { loadPackage } from "clay:packages";
+   await loadPackage("@clay/markdown");
+   ```
+   Open a `README.md` and confirm the Markdown package mode activates (package-declared pattern wins precedence over `core.code`); open `main.rs` again and confirm it still resolves to `core.code` — language packages *extend* `core.code`, they do not replace it. Remove the line and `.md` falls back to `core.text` (still editable, just without Markdown-specific behavior/decorations).
+
+What the manual smoke adds on top of automated tests: perceptual confirmation that documents remain editable with no `init.js` present and that the package opt-in extends rather than shadows the built-in fallback for unrelated extensions.
+
+Automated coverage (no manual execution needed): built-in `core.text`/`core.code` classification and activation with zero packages (absent `init.js`) and editable manifest composition (`minimal_text_editing`/`core_code_editing`) are covered by `tests/package_primitive_gate.rs::empty_init_js_opens_txt_and_rs_into_core_fallbacks_and_remains_editable`; `loadPackage("@clay/markdown")` package-wins-over-`core.code` coexistence is covered by `tests/package_primitive_gate.rs::load_package_markdown_extends_core_code_for_md_while_rs_still_uses_core_code`; the always-on registration at `ModeRegistry::new()` is covered by `builtin_core_modes_are_present_and_classify_with_zero_packages` and `builtin_core_modes_activate_and_remain_editable_without_packages`; fallback manifest payload budget is covered by `fallback_activation_manifest_fits_payload_budget`.
+
 ### Phase 19 Windows Markdown open-dialog smoke contract
 
 Phase 19 starts from this baseline:

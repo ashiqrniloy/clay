@@ -106,6 +106,10 @@ Use `clay.commands.serverListCommands` when the user asks for List Commands thro
 - Backing Rust/current owner: `src/packages/commands.rs::CommandRegistry::list`
 - Current implementation audit path: `src/packages/commands.rs::CommandRegistry; src/packages/commands.rs::RegisteredCommand`
 
+## Phase 18.8 control-center reuse note
+
+Phase 18.8 reuses this listing API to populate the built-in Control Center command palette: the internal `ControlCenter` workflow (`src/server/control_center.rs`, `pub(crate)`) takes a snapshot of the registered command list, filters out client-first/client-ui commands, and appends built-in server commands such as `clay.controlCenter.open`. Because listing returns only validated command metadata, it grants no execution authority; activating a listed command from a transient menu enqueues an inert `CommandIntent` that the server-owned `CommandExecutor` re-validates before any side effect. There is no public `clay.commands.serverExecuteCommand` JS facade/op — see [`serverRegisterCommand`](server-register-command.md#phase-188-command-execution-boundary) for the full Phase 18.8 command execution and transient menu boundary.
+
 ## Lookup metadata
 
 - Stable ID: `clay.commands.serverListCommands`
