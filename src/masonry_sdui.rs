@@ -25,10 +25,10 @@ use crate::protocol::{
     SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
 };
 use crate::shell::{
-    FixedSlotId, FixedSlotState, PackageUiComponentTree, PackageUiOverlayObservation,
-    PackageUiPanelObservation, PackageUiRuntimeError, PackageUiRuntimeState,
-    PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession, layout::PaneSlotId,
-    theme::SduiThemeStyle,
+    CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiComponentTree,
+    PackageUiOverlayObservation, PackageUiPanelObservation, PackageUiRuntimeError,
+    PackageUiRuntimeState, PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession,
+    layout::PaneSlotId, theme::SduiThemeStyle,
 };
 
 #[cfg(test)]
@@ -118,6 +118,9 @@ impl SduiNativeState {
     pub(crate) fn menu_activate_selected(&mut self) -> Option<crate::protocol::SduiActionIntent> {
         let menu = self.active_menu.as_ref()?;
         let action = menu.activate_selected()?;
+        if action.completion_accept.is_some() {
+            return None;
+        }
         Some(crate::protocol::SduiActionIntent::command(
             action.command_id.clone(),
             crate::protocol::SduiActionSource::ListItem {
@@ -125,6 +128,11 @@ impl SduiNativeState {
                 item_id: menu.selected_index().to_string(),
             },
         ))
+    }
+
+    pub(crate) fn menu_activate_completion(&mut self) -> Option<CompletionMenuAcceptAction> {
+        let menu = self.active_menu.as_ref()?;
+        menu.activate_selected()?.completion_accept.clone()
     }
 
     pub(crate) fn menu_cancel(&mut self) {

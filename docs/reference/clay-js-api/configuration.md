@@ -100,6 +100,24 @@ Parse budgets introduced or exercised by the bridge are package-author registrat
 
 Configuration remains startup/package-load/explicit setting-change work only. Ordinary typing, edit acknowledgement, local paint, viewport scrolling, selected-file parse scheduling, parse-result publication, and decoration rendering do not execute user configuration JavaScript. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or parser-authority grant.
 
+## Phase 18.10 syntax grammar configuration review
+
+Phase 18.10 reviewed package-provided Tree-sitter syntax grammars and does **not** promote a new user-facing syntax configuration API. The only end-user configuration needed in this phase is explicit first-party package loading from `~/.config/clay/init.js`:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+```
+
+That call loads an installed, validated, first-party grammar-only package and lets the package load entry register inert grammar metadata through [`clay.syntax.serverRegisterSyntaxGrammar`](syntax/server-register-syntax-grammar.md). Active syntax grammar selection, grammar/query/style-map validation, and Tree-sitter parse/highlight scheduling are package-load/open/reload/reclassification work. They are not recomputed from user JavaScript during keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, or decoration rendering.
+
+No hidden JSON/TOML/ad hoc syntax keys are valid in this phase. Rejected examples include `syntax.preferredGrammar`, `treeSitter.grammarPath`, `syntax.styleMap`, `syntax.captureStyles`, `syntax.autoLoad`, `autoLoadSyntaxPackages`, and raw grammar path/style-map override blobs. Grammar artifacts, query paths, file patterns, and style maps are package-owned manifest metadata validated by `assemble_package_record` and `clay:syntax`, not end-user configuration knobs. Grammar package enablement is explicit `loadPackage("@clay/<language>")`, not automatic core loading and not an auto-load flag.
+
+This review adds no filesystem, network, shell, package-manager, AI, WASM, raw-op, native-widget, client-runtime, package-control, package-enable/disable, third-party grammar, native artifact, or client-side JavaScript authority. If a future phase adds syntax preferences, grammar overrides, or theme/style configuration, each behavior-changing option must be a documented Clay JS API with custom properties, Markdown docs, generated registry coverage, hot-path policy, and security tests.
+
 ## Phase 19 persistent-runtime hot reload configuration review
 
 Phase 19 reviewed persistent runtime hot reload and did **not** promote a new user-facing reload setting, command, key binding, or `clay:configuration` API. Hot reload is an internal/developer-only server lifecycle primitive in this phase, triggered headlessly through `IpcServer::trigger_developer_hot_reload` for tests and developer workflow. That Rust helper and its `RuntimeReloadOutcome`/`ReloadedDocumentRefresh` types are `#[doc(hidden)]` test/developer surfaces around the shared reload primitive; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`.
@@ -282,3 +300,44 @@ Hidden/ad hoc configuration keys that are rejected by policy and are not valid u
 Package command/action registration through [`clay.commands.serverRegisterCommand`](commands/server-register-command.md) declares routing policy, permissions, key bindings, custom properties, and lookup tags at package-load time; it does not grant execution authority. Command execution authority is re-validated per activation through `CommandExecutor` and never granted by registration, menu inclusion, or configuration. Packages may declare commands and expose them in transient menus; they cannot execute commands directly from UI callbacks, bypass command permission/provenance validation, run command handlers in the Rust client, or grant themselves filesystem, network, shell, AI mutation, WASM, workspace mutation, package-manager, package installation, package enable/disable, native widget, raw-op, or client-side JavaScript authority.
 
 Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Command registration, action validation, transient menu filtering over installed bounded metadata, and command-id binding through `bindKey` are load/configuration/update-time work. Activating a selected command enqueues a server-first `CommandExecution` request; ordinary keypress routing, Masonry paint/layout, pointer, scroll, text-event handling, edit acknowledgement, and decoration rendering paths do not execute configuration JavaScript, wait on IPC, recompute package action defaults from user code, or run command handlers. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or command-authority grant.
+
+## Phase 18.11 completion provider configuration review
+
+Phase 18.11 added the `CompletionTriggerAndResult` primitive, the server-side completion provider framework, the built-in `core.bufferWords` provider, and `TransientMenuSession`-based completion display/acceptance. This review did **not** promote a new user-facing `clay:configuration` API for provider priority, provider enable/disable, trigger characters, buffer-word limits, completion menu placement, commit behavior, or result item budgets. The user-visible configuration surfaces reuse the existing Clay JS APIs; provider/coordinator/menu/acceptance internals are kept `pub(crate)`/internal.
+
+User-visible Phase 18.11 configuration surfaces:
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Manual completion trigger key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in `UiReactivePriority` command `completion.trigger`; no default chord exists in Rust, so manual completion is only reachable when `init.js` binds a key (e.g. `Ctrl+Space`) |
+| Completion trigger command id | built-in server command | `completion.trigger` (registered through `CommandDeclaration::ui_reactive`, `RoutingPolicy::UiReactivePriority`) | A fixed Clay command ID routed by inert behavior manifests after configuration evaluation; not an `init.js` key |
+| Autocomplete trigger characters | package manifest metadata | `clay.contributions.autocompleteTriggers` | Inert single-character manifest entries classified locally by `ClientBehaviorState`; not user configuration |
+| Completion provider metadata registration | runtime-backed package load entry | [`clay.completion.serverRegisterCompletionProvider`](completion/server-register-completion-provider.md) | Package-prefixed provider id, priority, inert trigger characters, inert word-boundary chars, bounded `timeoutMs`/`maxItems`; metadata-only in Phase 18.11 |
+| Completion provider enable/disable | package load/disable | `clay.packages.loadPackage` / `PackageService` disable | Provider enablement is tied to package load/disable, not a hidden config key; the built-in `core.bufferWords` provider is always available and is not removed by package disable/reload |
+| Completion result/item budgets | compiled security boundaries | `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`, `COMPLETION_RESULT_MAX_ITEMS`, per-field char caps in `src/perf/budgets.rs` | Enforced before client publication; not tunable from `init.js` |
+| Completion request payload budget | compiled security boundary | `COMPLETION_REQUEST_PAYLOAD_BUDGET_BYTES` in `src/perf/budgets.rs` | Not tunable from `init.js` |
+| Completion coordinator/menu state | internal | `CompletionCoordinator` (`src/server/completion.rs`, `pub(crate)`), `TransientMenuSession` completion projection (`src/shell/transient_menu.rs`, `pub(crate)`) | Clay-owned scheduling/cancellation/stale-drop/menu state; not user configuration |
+| Completion acceptance | internal | `EditorSurface::accept_completion_with_event` (`src/editor/surface.rs`, `pub(crate)`) | Commits a validated text replacement in the active document only; never executes a command, raw op, or provider code |
+
+The expected end-user manual completion configuration is a normal `~/.config/clay/init.js` binding:
+
+```js
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
+```
+
+`completion.trigger` is a fixed Clay command ID that can be routed by inert behavior manifests after configuration evaluation. No default `Ctrl+Space` shortcut in Rust exists; without an `init.js` binding (or test/fixture binding) manual completion is not bound by default. `bindKey` is the documented configuration surface — the completion menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit, query/label/detail/accessibility bounds, focus policy, commit-character handling, and built-in provider membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
+
+Provider priority, provider enablement, trigger characters, buffer-word limits, completion menu placement, and commit behavior are not hidden JSON/TOML/ad hoc `init.js` keys. Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
+
+- `completion.trigger`, `completion.defaultKey`, `completion.shortcut`, `autocomplete.key`
+- `completion.providerPriority`, `completion.providers`, `completion.enabledProviders`
+- `completion.triggerCharacters`, `completion.wordBoundaryChars`, `completion.bufferWordLimit`
+- `completion.menuPlacement`, `completion.menu.height`, `completion.menu.maxItems`, `completion.commitCharacters`
+- `completion.timeout`, `completion.maxItems`, `completion.payloadBudget`
+- Unregistered provider ids, ad hoc provider-enable/disable keys, ad hoc trigger-character override keys
+
+Package completion provider registration through [`clay.completion.serverRegisterCompletionProvider`](completion/server-register-completion-provider.md) declares package-prefixed provider id, priority, inert trigger characters, inert word-boundary chars, and bounded `timeoutMs`/`maxItems` at package-load time; it does not grant execution authority. Phase 18.11 is metadata-only: Clay rejects `handler`/`callback`/`complete`/`function`/`module` executable values, raw ops, native handles, client JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate ids, reserved `clay.*` ids, and oversize metadata. Providers may read only Clay-provided open-document content/windows; completion grants no filesystem, network, shell, AI mutation, extension loading, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-JS, or provider execution authority without later documented APIs and an approved decision log.
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Provider metadata registration, trigger classification over installed inert manifest state, completion request enqueueing through a bounded non-blocking channel, and command-id binding through `bindKey` are load/configuration/update-time work. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication; ordinary keypress routing, local text mutation, Masonry paint/layout, pointer, scroll, text-event handling, edit acknowledgement, and decoration rendering paths do not execute configuration JavaScript, wait on IPC, run provider code, recompute provider metadata from user code, or mutate native layout from package code. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or provider-authority grant.

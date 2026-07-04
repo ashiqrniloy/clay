@@ -90,7 +90,7 @@ Phase 14 adds `src/perf/budgets.rs` which centralises all typed budget constants
 | Constant | Value | Checked by |
 |---|---|---|
 | `CLIENT_EDIT_PAYLOAD_BUDGET_BYTES` | 512 B | `cargo test --test performance_protocol` |
-| `EDIT_ACK_PAYLOAD_BUDGET_BYTES` | 96 B | `cargo test --test performance_protocol` |
+| `EDIT_ACK_PAYLOAD_BUDGET_BYTES` | 128 B | `cargo test --test performance_protocol` |
 | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | 2 048 B | `cargo test --test performance_protocol` |
 | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` | 4 096 B | `cargo test --test performance_protocol` |
 | `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | 1 024 B | `cargo test --test performance_protocol` |

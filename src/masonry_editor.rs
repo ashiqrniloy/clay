@@ -19,8 +19,8 @@ use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, backgrou
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
-    BehaviorManifest, DocumentAccess, DocumentId, DocumentVersion, KeyCode, KeyModifiers,
-    KeyStroke, RuntimeDiagnostic,
+    BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
+    DocumentVersion, KeyCode, KeyModifiers, KeyStroke, RuntimeDiagnostic,
 };
 
 const STATUS_BAR_HEIGHT: f64 = 28.0;
@@ -186,6 +186,8 @@ pub struct EditorWidget {
     editor: EditorSurface,
     edit_queue: Option<ClientEditQueue>,
     next_transaction_id: u64,
+    next_completion_request_id: u64,
+    active_completion_request_id: Option<CompletionRequestId>,
     status: EditorStatus,
     sdui: SduiNativeState,
 }
@@ -203,6 +205,8 @@ impl Default for EditorWidget {
             editor,
             edit_queue: None,
             next_transaction_id: 1,
+            next_completion_request_id: 1,
+            active_completion_request_id: None,
             status,
             sdui: SduiNativeState::empty(),
         }
@@ -228,6 +232,8 @@ impl EditorWidget {
             editor,
             edit_queue: None,
             next_transaction_id: 1,
+            next_completion_request_id: 1,
+            active_completion_request_id: None,
             status,
             sdui: SduiNativeState::empty(),
         }
@@ -308,6 +314,16 @@ impl EditorWidget {
             }
             ClientConnectionEvent::SduiUpdate(update) => self.sdui.apply_update(update),
             ClientConnectionEvent::DecorationSet(set) => self.editor.apply_decoration_set(set),
+            ClientConnectionEvent::CompletionResult(result) => self.apply_completion_result(result),
+            ClientConnectionEvent::CompletionRejected { request_id, .. } => {
+                if self.active_completion_request_id == Some(request_id) {
+                    self.active_completion_request_id = None;
+                    self.sdui.clear_active_menu();
+                    true
+                } else {
+                    false
+                }
+            }
             ClientConnectionEvent::RuntimeDiagnostic(diagnostic) => {
                 let mut next_status = self.status.clone();
                 next_status.runtime_diagnostic = Some(diagnostic);
@@ -378,6 +394,22 @@ impl EditorWidget {
         true
     }
 
+    fn apply_completion_result(&mut self, result: CompletionResultSet) -> bool {
+        if self.active_completion_request_id != Some(result.request_id) {
+            return false;
+        }
+        let document = self.editor.document_state();
+        if result.document_id != document.document_id
+            || result.document_version != document.document_version
+            || result.behavior_version != document.behavior_version
+        {
+            return false;
+        }
+        self.sdui
+            .set_active_menu(crate::shell::completion_result_to_menu_session(&result));
+        true
+    }
+
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
         let outcome = self.editor.command_with_event(command);
         if let Some(event) = outcome.edit_event
@@ -388,6 +420,8 @@ impl EditorWidget {
             let _ = edit_queue.enqueue_edit_event(event, transaction_id);
         }
         if outcome.changed {
+            self.active_completion_request_id = None;
+            self.sdui.clear_active_menu();
             ctx.request_render();
             ctx.request_accessibility_update();
         }
@@ -399,7 +433,15 @@ impl EditorWidget {
             return;
         }
         let outcome = self.editor.route_key_with_event(&key);
+        let changed = outcome.command_outcome.changed;
         self.finish_local_outcome(ctx, outcome.command_outcome);
+        if let Some(completion) = outcome.completion_request {
+            self.enqueue_completion_request(completion);
+            ctx.set_handled();
+        } else if changed {
+            self.active_completion_request_id = None;
+            self.sdui.clear_active_menu();
+        }
         if let Some(command) = outcome.client_ui_command {
             ctx.submit_action::<EditorAction>(EditorAction::ClientUiCommand(command));
             ctx.set_handled();
@@ -436,31 +478,53 @@ impl EditorWidget {
                 ctx.set_handled();
                 true
             }
-            KeyCode::Enter => {
-                if let Some(intent) = self.sdui.menu_activate_selected() {
-                    if let Some(edit_queue) = &self.edit_queue {
-                        let document = self.editor.document_state();
-                        let _ = edit_queue.enqueue_command_intent(
-                            document.document_id,
-                            document.behavior_version,
-                            intent.command_id,
-                        );
-                    }
-                }
-                self.sdui.clear_active_menu();
-                ctx.request_render();
-                ctx.set_handled();
+            KeyCode::Enter | KeyCode::Tab => {
+                self.activate_menu_selection(ctx, None);
                 true
             }
             KeyCode::Escape => {
                 self.sdui.menu_cancel();
                 self.sdui.clear_active_menu();
+                self.active_completion_request_id = None;
                 ctx.request_render();
                 ctx.set_handled();
                 true
             }
+            KeyCode::Character(ref text) => {
+                let Some(completion) = self.sdui.menu_activate_completion() else {
+                    return false;
+                };
+                if completion.commit_characters.contains(text) {
+                    self.activate_menu_selection(ctx, Some(text));
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
+    }
+
+    fn activate_menu_selection(&mut self, ctx: &mut EventCtx<'_>, commit_character: Option<&str>) {
+        if let Some(completion) = self.sdui.menu_activate_completion() {
+            let outcome = self
+                .editor
+                .accept_completion_with_event(&completion, commit_character);
+            self.finish_local_outcome(ctx, outcome);
+            self.active_completion_request_id = None;
+        } else if let Some(intent) = self.sdui.menu_activate_selected()
+            && let Some(edit_queue) = &self.edit_queue
+        {
+            let document = self.editor.document_state();
+            let _ = edit_queue.enqueue_command_intent(
+                document.document_id,
+                document.behavior_version,
+                intent.command_id,
+            );
+        }
+        self.sdui.clear_active_menu();
+        ctx.request_render();
+        ctx.set_handled();
     }
 
     fn finish_local_outcome(&mut self, ctx: &mut EventCtx<'_>, outcome: EditorCommandOutcome) {
@@ -476,6 +540,16 @@ impl EditorWidget {
             ctx.request_accessibility_update();
             ctx.set_handled();
         }
+    }
+
+    fn enqueue_completion_request(&mut self, event: crate::editor::EditorCompletionRequestEvent) {
+        let Some(edit_queue) = &self.edit_queue else {
+            return;
+        };
+        let request_id = self.next_completion_request_id;
+        self.next_completion_request_id = self.next_completion_request_id.saturating_add(1).max(1);
+        self.active_completion_request_id = Some(request_id);
+        let _ = edit_queue.enqueue_completion_request(event, request_id);
     }
 
     fn accessibility_label(&self) -> String {
@@ -767,9 +841,11 @@ mod tests {
     };
     use crate::editor::EditorCommand;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation, KeyCode,
-        KeyModifiers, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode,
-        SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+        BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
+        CompletionReplacementRange, CompletionResultSet, CompletionStatus, DocumentAccess,
+        DocumentMetadata, EditOperation, KeyCode, KeyModifiers, RuntimeDiagnostic,
+        SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
+        SduiTreeOperation, SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
@@ -817,6 +893,66 @@ mod tests {
             access,
             behavior_manifest: BehaviorManifest::minimal_text_editing(3),
         }
+    }
+
+    fn completion_result(request_id: u64) -> CompletionResultSet {
+        CompletionResultSet {
+            request_id,
+            client_id: 11,
+            document_id: 7,
+            document_version: 12,
+            behavior_version: 3,
+            provider_generation: 1,
+            replacement_range: CompletionReplacementRange::new(0, 3),
+            status: CompletionStatus::Ok,
+            items: vec![CompletionItem {
+                label: "println".to_string(),
+                insert_text: "println!".to_string(),
+                detail: "macro".to_string(),
+                commit_characters: ";".to_string(),
+                provenance: CompletionProvenance::builtin_core(),
+            }],
+            provenance: CompletionProvenance::builtin_core(),
+        }
+    }
+
+    #[test]
+    fn completion_result_installs_bottom_transient_menu_for_active_request() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.active_completion_request_id = Some(4);
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::CompletionResult(
+                completion_result(4)
+            ))
+        );
+
+        let menu = widget
+            .sdui
+            .active_menu()
+            .expect("completion menu installed");
+        assert_eq!(menu.prompt(), "Completion");
+        assert_eq!(menu.items()[0].label, "println");
+        assert_eq!(menu.selected_index(), 0);
+    }
+
+    #[test]
+    fn stale_completion_result_is_ignored_after_newer_request() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.active_completion_request_id = Some(5);
+
+        assert!(
+            !widget.apply_connection_event(ClientConnectionEvent::CompletionResult(
+                completion_result(4)
+            ))
+        );
+        assert!(widget.sdui.active_menu().is_none());
     }
 
     #[test]

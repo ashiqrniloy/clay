@@ -5,17 +5,20 @@ use masonry::kurbo::{Affine, Circle, Point, Rect};
 use masonry::peniko::{Color, Fill};
 
 use crate::client::behavior::{
-    ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, RoutedBehavior, ServerIntentRoute,
+    ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, CompletionTriggerRoute,
+    RoutedBehavior, ServerIntentRoute,
 };
 use crate::perf::{
     budgets::{DECORATION_NEAR_VIEWPORT_GUARD_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     metrics::PerfRecorder,
 };
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, DecorationChunkKey, DecorationKind, DecorationSet,
-    DecorationSpan, DocumentAccess, DocumentId, DocumentVersion, EditOperation,
-    ElectricCharacterRule, ElectricEffect, EnterRule, KeyStroke, PairRule,
+    BehaviorManifest, BehaviorVersion, CompletionReplacementRange, CompletionTrigger,
+    DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan, DocumentAccess, DocumentId,
+    DocumentVersion, EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule, KeyStroke,
+    PairRule,
 };
+use crate::shell::CompletionMenuAcceptAction;
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
 use super::cursor::CursorState;
@@ -87,6 +90,7 @@ pub(crate) struct EditorKeyOutcome {
     pub(crate) command_outcome: EditorCommandOutcome,
     pub(crate) server_intent: Option<ServerIntentRoute>,
     pub(crate) client_ui_command: Option<ClientUiCommandRoute>,
+    pub(crate) completion_request: Option<EditorCompletionRequestEvent>,
 }
 
 impl EditorKeyOutcome {
@@ -95,6 +99,7 @@ impl EditorKeyOutcome {
             command_outcome,
             server_intent: None,
             client_ui_command: None,
+            completion_request: None,
         }
     }
 
@@ -103,6 +108,7 @@ impl EditorKeyOutcome {
             command_outcome: EditorCommandOutcome::unchanged(),
             server_intent: Some(server_intent),
             client_ui_command: None,
+            completion_request: None,
         }
     }
 
@@ -111,12 +117,37 @@ impl EditorKeyOutcome {
             command_outcome: EditorCommandOutcome::unchanged(),
             server_intent: None,
             client_ui_command: Some(client_ui_command),
+            completion_request: None,
         }
+    }
+
+    fn completion(completion_request: EditorCompletionRequestEvent) -> Self {
+        Self {
+            command_outcome: EditorCommandOutcome::unchanged(),
+            server_intent: None,
+            client_ui_command: None,
+            completion_request: Some(completion_request),
+        }
+    }
+
+    fn with_completion(mut self, completion_request: Option<EditorCompletionRequestEvent>) -> Self {
+        self.completion_request = completion_request;
+        self
     }
 
     fn unhandled() -> Self {
         Self::client(EditorCommandOutcome::unchanged())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorCompletionRequestEvent {
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) cursor_byte_offset: u64,
+    pub(crate) replacement_range: CompletionReplacementRange,
+    pub(crate) trigger: CompletionTrigger,
 }
 
 impl EditorCommandOutcome {
@@ -290,6 +321,10 @@ fn ranges_intersect(left_start: u64, left_end: u64, right_start: u64, right_end:
     left_start < right_end && left_end > right_start
 }
 
+fn is_completion_word_character(character: char) -> bool {
+    character == '_' || character.is_alphanumeric()
+}
+
 #[derive(Debug, Default)]
 pub struct EditorSurface {
     buffer: EditorBuffer,
@@ -360,7 +395,7 @@ impl EditorSurface {
         };
 
         match router.route_key(key) {
-            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text)) => {
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text), completion_trigger) => {
                 let outcome = if let Some(pair) = self.pair_rule_for_inserted_text(&text).cloned() {
                     self.insert_pair_with_event(&pair)
                 } else if let Some(electric) = self.electric_rule_for_inserted_text(&text).cloned()
@@ -369,11 +404,20 @@ impl EditorSurface {
                 } else {
                     self.insert_text_with_event(&text)
                 };
-                EditorKeyOutcome::client(outcome)
+                let completion_request = outcome
+                    .changed
+                    .then(|| completion_trigger)
+                    .flatten()
+                    .and_then(|route| self.completion_request_event(route));
+                EditorKeyOutcome::client(outcome).with_completion(completion_request)
             }
-            RoutedBehavior::ClientEdit(ClientLocalEdit::Newline) => {
+            RoutedBehavior::ClientEdit(ClientLocalEdit::Newline, _) => {
                 EditorKeyOutcome::client(self.insert_newline_with_event())
             }
+            RoutedBehavior::Completion(completion_trigger) => self
+                .completion_request_event(completion_trigger)
+                .map(EditorKeyOutcome::completion)
+                .unwrap_or_else(EditorKeyOutcome::unhandled),
             RoutedBehavior::ServerIntent(intent) => EditorKeyOutcome::server(intent),
             RoutedBehavior::ClientUiCommand(command) => EditorKeyOutcome::client_ui(command),
             RoutedBehavior::Unhandled => EditorKeyOutcome::unhandled(),
@@ -429,6 +473,40 @@ impl EditorSurface {
 
     pub fn insert_text(&mut self, text: &str) -> bool {
         self.insert_text_with_event(text).changed
+    }
+
+    pub(crate) fn accept_completion_with_event(
+        &mut self,
+        action: &CompletionMenuAcceptAction,
+        commit_character: Option<&str>,
+    ) -> EditorCommandOutcome {
+        if !self.is_editable()
+            || self.document.document_id != action.document_id
+            || self.document.document_version != action.document_version
+            || self.document.behavior_version != action.behavior_version
+            || !action.replacement_range.is_ordered()
+        {
+            return EditorCommandOutcome::unchanged();
+        }
+        let start = action.replacement_range.byte_start as usize;
+        let end = action.replacement_range.byte_end as usize;
+        if end > self.buffer.document_end_byte() {
+            return EditorCommandOutcome::unchanged();
+        }
+        let mut text = action.insert_text.clone();
+        if let Some(commit_character) = commit_character {
+            text.push_str(commit_character);
+        }
+        if text.is_empty() && start == end {
+            return EditorCommandOutcome::unchanged();
+        }
+        let operation = EditOperation::Replace {
+            start: start as u64,
+            end: end as u64,
+            text: text.clone(),
+        };
+        let result = self.buffer.replace_range(start..end, &text);
+        self.finish_edit_with_operation(result, operation)
     }
 
     pub fn insert_text_with_event(&mut self, text: &str) -> EditorCommandOutcome {
@@ -915,6 +993,41 @@ impl EditorSurface {
         (range.start < range.end).then_some(range)
     }
 
+    fn completion_request_event(
+        &self,
+        route: CompletionTriggerRoute,
+    ) -> Option<EditorCompletionRequestEvent> {
+        if !matches!(
+            route.routing_policy,
+            crate::protocol::RoutingPolicy::UiReactivePriority
+        ) {
+            return None;
+        }
+        let cursor = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let start = self.word_prefix_start(cursor);
+        Some(EditorCompletionRequestEvent {
+            document_id: self.document.document_id,
+            document_version: self.document.document_version,
+            behavior_version: self.document.behavior_version,
+            cursor_byte_offset: cursor as u64,
+            replacement_range: CompletionReplacementRange::new(start as u64, cursor as u64),
+            trigger: route.trigger,
+        })
+    }
+
+    fn word_prefix_start(&self, cursor: usize) -> usize {
+        let cursor = self.buffer.clamp_byte_offset(cursor);
+        let line_start = self.buffer.line_start_byte(cursor);
+        let before = self.buffer.text_range(line_start..cursor);
+        let start_in_line = before
+            .char_indices()
+            .rev()
+            .find(|(_, character)| !is_completion_word_character(*character))
+            .map(|(index, character)| index + character.len_utf8())
+            .unwrap_or(0);
+        line_start + start_in_line
+    }
+
     fn pair_rule_for_inserted_text(&self, text: &str) -> Option<&PairRule> {
         let manifest = self.document.behavior_manifest.as_ref()?;
         manifest
@@ -1303,10 +1416,11 @@ mod tests {
     use crate::editor::layout::LayoutCacheKey;
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
-        BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration, DocumentAccess,
-        EditOperation, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, KeyStroke,
-        RoutingPolicy, TabMode,
+        BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration, CompletionTrigger,
+        DocumentAccess, EditOperation, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers,
+        KeyStroke, RoutingPolicy, TabMode,
     };
+    use crate::shell::CompletionMenuAcceptAction;
 
     fn generated_lines(line_count: usize) -> String {
         let mut text = String::new();
@@ -1442,6 +1556,120 @@ mod tests {
         assert_eq!(
             outcome.command_outcome.edit_event.unwrap().behavior_version,
             3
+        );
+    }
+
+    #[test]
+    fn editor_routes_autocomplete_trigger_after_local_edit() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "value".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.set_caret_for_test("value".len());
+
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character(".".to_string())));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "value.");
+        let completion = outcome
+            .completion_request
+            .expect("trigger requests completion");
+        assert_eq!(completion.document_id, 7);
+        assert_eq!(completion.document_version, 12);
+        assert_eq!(completion.behavior_version, 3);
+        assert_eq!(completion.cursor_byte_offset, 6);
+        assert_eq!(completion.replacement_range.byte_start, 6);
+        assert_eq!(completion.replacement_range.byte_end, 6);
+        assert_eq!(
+            completion.trigger,
+            CompletionTrigger::Character(".".to_string())
+        );
+    }
+
+    #[test]
+    fn editor_accepts_completion_as_local_replacement() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "pri".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        let action = CompletionMenuAcceptAction {
+            request_id: 1,
+            document_id: 7,
+            document_version: 12,
+            behavior_version: 3,
+            replacement_range: crate::protocol::CompletionReplacementRange::new(0, 3),
+            insert_text: "println!".to_string(),
+            commit_characters: ";".to_string(),
+        };
+
+        let outcome = editor.accept_completion_with_event(&action, Some(";"));
+
+        assert!(outcome.changed);
+        assert_eq!(editor.visible_text(), "println!;");
+        assert_eq!(
+            outcome.edit_event.unwrap().operation,
+            EditOperation::Replace {
+                start: 0,
+                end: 3,
+                text: "println!;".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn editor_routes_manual_completion_without_text_mutation() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "completion.trigger".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character(" ".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::UiReactivePriority,
+        });
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "hello value".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(manifest);
+        editor.set_caret_for_test("hello value".len());
+
+        let outcome = editor.route_key_with_event(&KeyStroke {
+            key: KeyCode::Character(" ".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert!(!outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "hello value");
+        let completion = outcome.completion_request.expect("manual request");
+        assert_eq!(completion.trigger, CompletionTrigger::Manual);
+        assert_eq!(completion.cursor_byte_offset, "hello value".len() as u64);
+        assert_eq!(
+            completion.replacement_range.byte_start,
+            "hello ".len() as u64
+        );
+        assert_eq!(
+            completion.replacement_range.byte_end,
+            "hello value".len() as u64
         );
     }
 

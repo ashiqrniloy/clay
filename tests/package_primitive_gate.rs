@@ -12,6 +12,7 @@ use clay::packages::modes::{
     ModeRegistry, ModeValidationRule, core_code_mode, core_text_mode,
 };
 use clay::packages::permissions::PackagePermission;
+use clay::packages::record::{PackageRecordRule, assemble_package_record};
 use clay::perf::budgets::BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES;
 use clay::protocol::{
     BehaviorManifest, BehaviorScope, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers,
@@ -48,6 +49,32 @@ fn command_fixture() -> Value {
         "parse-document"
     ]);
     fixture
+}
+
+fn completion_provider_fixture() -> Value {
+    json!({
+        "name": "@vendor/words",
+        "version": "0.1.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "words",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "permissions": ["completion-provider"],
+            "modes": [],
+            "docs": "./docs/index.md",
+            "contributions": {
+                "completionProviders": [{
+                    "id": "words.buffer",
+                    "priority": 10,
+                    "triggerCharacters": ["."],
+                    "wordBoundaryChars": [".", ","],
+                    "budgets": { "timeoutMs": 50, "maxItems": 32 }
+                }]
+            }
+        }
+    })
 }
 
 fn markdown_command_declaration(command_id: &str) -> PackageCommandDeclaration {
@@ -174,6 +201,73 @@ fn package_permissions_reject_unknown_or_prohibited_authority() {
     let error = validate_manifest_value(&prohibited).unwrap_err();
     assert_eq!(error.rule, PackageValidationRule::ProhibitedAuthority);
     assert!(error.message.contains("network"));
+}
+
+#[test]
+fn completion_provider_contributions_require_permission_and_inert_metadata() {
+    let valid = assemble_package_record(&completion_provider_fixture())
+        .expect("completion provider metadata fixture validates");
+    assert_eq!(valid.contributions.completion_providers.len(), 1);
+    assert_eq!(
+        valid.contributions.completion_providers[0].id,
+        "words.buffer"
+    );
+
+    let mut missing_permission = completion_provider_fixture();
+    missing_permission["clay"]["permissions"] = json!([]);
+    let error = assemble_package_record(&missing_permission).unwrap_err();
+    assert_eq!(
+        error.rule,
+        PackageRecordRule::UndeclaredPermissionForContribution
+    );
+
+    for prohibited in [
+        ("rawOps", json!(["op_secret"])),
+        ("command", json!("workspace.delete")),
+        ("snippet", json!("${1:run}")),
+        ("shellCommand", json!("rm -rf .")),
+        ("downloadUrl", json!("https://example.invalid/provider.js")),
+        ("clientJavaScript", json!("window.alert(1)")),
+    ] {
+        let mut fixture = completion_provider_fixture();
+        fixture["clay"]["contributions"]["completionProviders"][0][prohibited.0] = prohibited.1;
+        let error = assemble_package_record(&fixture).unwrap_err();
+        assert!(
+            matches!(
+                error.rule,
+                PackageRecordRule::InvalidContributionDescriptor
+                    | PackageRecordRule::ManifestValidationFailed
+            ),
+            "field `{}` must be rejected as executable/external authority, got {:?}",
+            prohibited.0,
+            error.rule
+        );
+    }
+}
+
+#[test]
+fn completion_provider_contributions_reject_conflicts_and_oversize_metadata() {
+    let mut duplicate = completion_provider_fixture();
+    duplicate["clay"]["contributions"]["completionProviders"] = json!([
+        { "id": "words.buffer", "triggerCharacters": ["."], "wordBoundaryChars": ["."] },
+        { "id": "words.buffer", "triggerCharacters": [":"], "wordBoundaryChars": [":"] }
+    ]);
+    let error = assemble_package_record(&duplicate).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::DuplicateContributionId);
+
+    let mut bad_prefix = completion_provider_fixture();
+    bad_prefix["clay"]["contributions"]["completionProviders"][0]["id"] = json!("other.buffer");
+    let error = assemble_package_record(&bad_prefix).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    let mut oversize = completion_provider_fixture();
+    oversize["clay"]["contributions"]["completionProviders"][0]["detail"] =
+        json!("x".repeat(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES + 1));
+    let error = assemble_package_record(&oversize).unwrap_err();
+    assert!(matches!(
+        error.rule,
+        PackageRecordRule::PayloadBudgetExceeded | PackageRecordRule::ManifestValidationFailed
+    ));
 }
 
 #[test]

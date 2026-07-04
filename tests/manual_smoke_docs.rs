@@ -28,6 +28,47 @@ fn wiki_doc(path: &str) -> String {
 }
 
 #[test]
+fn phase18_10_manual_syntax_smoke_has_runnable_fixture_contract() {
+    let launch_doc = launch_smoke_doc();
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/configuration/syntax-grammars/init.js"
+    ))
+    .expect("read syntax-grammars smoke fixture");
+
+    for expected in [
+        "Phase 18.10 syntax grammar package smoke",
+        "cargo run -- smoke-gui --config-fixture syntax-grammars",
+        "loadPackage(\"@clay/rust\")",
+        "loadPackage(\"@clay/typescript\")",
+        "loadPackage(\"@clay/javascript\")",
+        "tests/fixtures/syntax/rust.rs",
+        "tests/fixtures/syntax/typescript.ts",
+        "tests/fixtures/syntax/javascript.js",
+        "editable under its active `core.code`/`core.text` fallback behavior",
+        "Remove the language package load lines and relaunch",
+        "Automated coverage (no manual execution needed)",
+        "manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow",
+        "first_party_syntax_fixtures_produce_bounded_decoration_sets",
+        "syntax_provider_selection_falls_back_to_no_highlighting_without_changing_mode",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Phase 18.10 syntax smoke marker `{expected}`"
+        );
+    }
+
+    assert!(
+        fixture.contains("loadPackage(\"@clay/rust\")")
+            && fixture.contains("loadPackage(\"@clay/typescript\")")
+            && fixture.contains("loadPackage(\"@clay/javascript\")")
+            && !fixture.contains("serverRegisterSyntaxGrammar")
+            && !fixture.contains("Deno.core.ops"),
+        "syntax-grammars smoke fixture must use only end-user loadPackage calls"
+    );
+}
+
+#[test]
 fn phase19_manual_smoke_docs_define_open_dialog_scope() {
     let launch_doc = launch_smoke_doc();
     let windows_doc = windows_doc();
@@ -226,6 +267,45 @@ fn phase20_markdown_baseline_no_default_panel_and_edit_only_selected_file() {
         assert!(
             markdown_ref.contains(required),
             "docs/reference/packages/markdown.md must record the Phase 20 Markdown baseline invariant `{required}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_11_manual_completion_smoke_has_runnable_contract() {
+    let launch_doc = launch_smoke_doc();
+
+    for expected in [
+        "Phase 18.11 completion provider smoke",
+        "bindKey(\"Ctrl+Space\", \"completion.trigger\", { scope: \"editor\" })",
+        "core.bufferWords",
+        "TransientMenuSession",
+        "ArrowUp",
+        "ArrowDown",
+        "Enter",
+        "Tab",
+        "Escape",
+        "commit character",
+        "autocomplete trigger character",
+        "edits locally first",
+        "bounded non-blocking channel",
+        "UiReactivePriority",
+        "cancellable",
+        "stale result is dropped",
+        "Disable/reload a package provider",
+        "built-in `core.bufferWords` provider should still produce completions",
+        "inert text-replacement data only",
+        "Automated coverage (no manual execution needed)",
+        "completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only",
+        "representative_completion_result_payload_stays_bounded",
+        "tests/completion_provider.rs",
+        "tests/editor_performance_invariants.rs",
+        "tests/performance_protocol.rs",
+        "tests/package_primitive_gate.rs",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Phase 18.11 completion smoke marker `{expected}`"
         );
     }
 }

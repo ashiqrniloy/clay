@@ -1,8 +1,10 @@
 pub mod codec;
+pub mod completion;
 pub mod decorations;
 pub mod parse;
 pub mod sdui;
 
+pub use completion::*;
 pub use decorations::*;
 pub use parse::*;
 pub use sdui::*;
@@ -596,6 +598,15 @@ pub enum ClientMessage {
         behavior_version: BehaviorVersion,
         command_id: String,
     },
+    /// Phase 18.11 completion request. Enqueued after a local-first edit that
+    /// hit a behavior-manifest autocomplete trigger, or after a manual
+    /// `completion.trigger` command. Carries typed request metadata only (no
+    /// document text); the server-side provider lane stale-drops older
+    /// requests against `document_version`/`behavior_version`/
+    /// `provider_generation`.
+    CompletionRequest {
+        request: CompletionRequest,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -700,6 +711,20 @@ pub enum ServerMessage {
         document_id: Option<DocumentId>,
     },
     RuntimeDiagnostic(RuntimeDiagnostic),
+    /// Phase 18.11 completion result set. Bounded, versioned, provenance-bearing
+    /// completion items published to the client after the server-side provider
+    /// lane validates the result against the current document/behavior version
+    /// and provider generation. Items are inert text-replacement data only.
+    CompletionResult {
+        result: CompletionResultSet,
+    },
+    /// Phase 18.11 completion result rejection. Published in place of a result
+    /// when a result set fails validation (stale version/generation, invalid
+    /// range, payload/item/field budget) before client publication.
+    CompletionRejected {
+        request_id: CompletionRequestId,
+        reason: CompletionRejection,
+    },
     Error {
         code: ProtocolErrorCode,
         message: String,

@@ -1092,6 +1092,52 @@ current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/ser
 registry_public = true
 
 [[api]]
+id = "clay.syntax.serverRegisterSyntaxGrammar"
+category = "syntax-grammar-registration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:syntax"
+js_export = "serverRegisterSyntaxGrammar"
+user_facing_name = "Register Syntax Grammar"
+authority = "server-first-syntax-grammar-registration"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Syntax grammar metadata is registered at package load/reload time; parse/highlight execution runs later as cancellable Background work and must never block keypress, paint, layout, scroll, pointer, or text-event hot paths."
+facade_path = "runtime/js/syntax.ts::serverRegisterSyntaxGrammar"
+backing_rust = "src/server/syntax.rs::SyntaxGrammarRegistry::register_package"
+deno_op = "op_clay_syntax_register_syntax_grammar"
+deno_op_path = "src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar"
+documentation_path = "docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md"
+key_bindings = []
+custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=parse-document+render-decorations", "syntaxGrammar:object=required-without-packageManifest", "languageId:string=required", "filePatterns:object=required", "grammar:tree-sitter-wasm=package-root-confined", "queries:scm=package-root-confined", "styleMap:object=known-style-tokens", "budgets:object=bounded"]
+permissions = ["parse-document", "render-decorations"]
+security_notes = "Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, package-root-confined tree-sitter-wasm and .scm paths, known style-token maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party grammar artifact loading in Phase 18.10."
+current_rust_owner = "src/server/syntax.rs::SyntaxGrammarRegistry; src/server/ops/syntax.rs"
+registry_public = true
+
+[[api]]
+id = "clay.completion.serverRegisterCompletionProvider"
+category = "completion-provider-registration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:completion"
+js_export = "serverRegisterCompletionProvider"
+user_facing_name = "Register Completion Provider"
+authority = "server-first-completion-provider-registration"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Completion provider metadata is registered at package load/reload time; provider execution remains cancellable UiReactivePriority work and never runs on paint, layout, scroll, pointer, text-event, key local-edit, or keypress-to-local-paint hot paths."
+facade_path = "runtime/js/completion.ts::serverRegisterCompletionProvider"
+backing_rust = "src/server/completion.rs::CompletionProviderMeta"
+deno_op = "op_clay_completion_register_completion_provider"
+deno_op_path = "src/server/ops/completion.rs::op_clay_completion_register_completion_provider"
+documentation_path = "docs/reference/clay-js-api/completion/server-register-completion-provider.md"
+key_bindings = []
+custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=completion-provider", "completionProvider:object=required-without-packageManifest", "providerId:string=package-prefixed", "triggerCharacters:string[]=inert", "wordBoundaryChars:string[]=inert", "priority:number=0", "timeoutMs:number=500", "maxItems:number=64"]
+permissions = ["completion-provider"]
+security_notes = "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
+current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::CompletionProviderMeta"
+registry_public = true
+
+[[api]]
 id = "clay.folding.serverPublishFoldingRanges"
 category = "folding-range-publication"
 visibility = "public"

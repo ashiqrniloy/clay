@@ -182,6 +182,100 @@
       "async": false
     },
     {
+      "id": "clay.completion.serverRegisterCompletionProvider",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/completion/server-register-completion-provider.md",
+      "js_module": "clay:completion",
+      "js_export": "serverRegisterCompletionProvider",
+      "js_facade": "runtime/js/completion.ts::serverRegisterCompletionProvider",
+      "backing_rust": "src/server/completion.rs::CompletionProviderMeta",
+      "deno_op": "op_clay_completion_register_completion_provider",
+      "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_register_completion_provider",
+      "name": "serverRegisterCompletionProvider",
+      "user_facing_name": "Register Completion Provider",
+      "summary": "Register package-provided completion provider metadata for Clay's server-side completion framework.",
+      "owner": "server",
+      "phase": "Phase 18.11",
+      "visibility": "public",
+      "permissions": ["completion-provider"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "packageManifest",
+          "type": "object",
+          "default": "optional",
+          "description": "Full package.json-shaped manifest; when provided, Clay validates its completionProviders metadata directly."
+        },
+        {
+          "name": "packageName",
+          "type": "string",
+          "default": "required-without-packageManifest",
+          "description": "Package name used for provenance when a load entry passes one provider descriptor."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "required-without-packageManifest",
+          "description": "Package apiPrefix used for provider ID ownership and provenance."
+        },
+        {
+          "name": "permissions",
+          "type": "string[]",
+          "default": "required-without-packageManifest",
+          "description": "Must include completion-provider."
+        },
+        {
+          "name": "completionProvider",
+          "type": "object",
+          "default": "required-without-packageManifest",
+          "description": "Inert completion provider descriptor matching clay.contributions.completionProviders."
+        },
+        {
+          "name": "providerId",
+          "type": "string",
+          "default": "required-without-completionProvider",
+          "description": "Package-prefixed provider ID such as example.words."
+        },
+        {
+          "name": "triggerCharacters",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Inert trigger characters. They request completion but never execute callbacks."
+        },
+        {
+          "name": "wordBoundaryChars",
+          "type": "string[]",
+          "default": "core-buffer-word-boundaries",
+          "description": "Inert word-boundary characters used by providers to split tokens."
+        },
+        {
+          "name": "priority",
+          "type": "number",
+          "default": "0",
+          "description": "Higher priority providers are considered first; ties are deterministic by ID."
+        },
+        {
+          "name": "timeoutMs",
+          "type": "number",
+          "default": "500",
+          "description": "Provider timeout budget, bounded to 1..=5000."
+        },
+        {
+          "name": "maxItems",
+          "type": "number",
+          "default": "64",
+          "description": "Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS."
+        }
+      ],
+      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
+      "agent_guidance": "Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, snippets, commands, or UI widget code.",
+      "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.11"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.configuration.getConfigurationState",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/configuration/get-configuration-state.md",
@@ -1772,6 +1866,100 @@
       "help_visible": true,
       "stability": "runtime-backed",
       "async": true
+    },
+    {
+      "id": "clay.syntax.serverRegisterSyntaxGrammar",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md",
+      "js_module": "clay:syntax",
+      "js_export": "serverRegisterSyntaxGrammar",
+      "js_facade": "runtime/js/syntax.ts::serverRegisterSyntaxGrammar",
+      "backing_rust": "src/server/syntax.rs::SyntaxGrammarRegistry::register_package",
+      "deno_op": "op_clay_syntax_register_syntax_grammar",
+      "deno_op_path": "src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar",
+      "name": "serverRegisterSyntaxGrammar",
+      "user_facing_name": "Register Syntax Grammar",
+      "summary": "Register first-party package-provided Tree-sitter grammar metadata for server-side syntax highlighting.",
+      "owner": "server",
+      "phase": "Phase 18.10",
+      "visibility": "public",
+      "permissions": ["parse-document", "render-decorations"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "packageManifest",
+          "type": "object",
+          "default": "optional",
+          "description": "Full package.json-shaped manifest; when provided, Clay validates its syntaxGrammars metadata directly."
+        },
+        {
+          "name": "packageName",
+          "type": "string",
+          "default": "required-without-packageManifest",
+          "description": "First-party package name such as @clay/rust."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "required-without-packageManifest",
+          "description": "Package apiPrefix used for contribution ownership and provenance."
+        },
+        {
+          "name": "permissions",
+          "type": "string[]",
+          "default": "required-without-packageManifest",
+          "description": "Must include parse-document and render-decorations."
+        },
+        {
+          "name": "syntaxGrammar",
+          "type": "object",
+          "default": "required-without-packageManifest",
+          "description": "Inert syntax grammar contribution descriptor matching clay.contributions.syntaxGrammars."
+        },
+        {
+          "name": "languageId",
+          "type": "string",
+          "default": "required-inside-syntaxGrammar",
+          "description": "Lowercase language identifier selected independently from the active major mode."
+        },
+        {
+          "name": "filePatterns",
+          "type": "object",
+          "default": "required-inside-syntaxGrammar",
+          "description": "Extensions or exact file names that select this grammar."
+        },
+        {
+          "name": "grammar",
+          "type": "object",
+          "default": "required-inside-syntaxGrammar",
+          "description": "tree-sitter-wasm grammar artifact path confined to the package root."
+        },
+        {
+          "name": "queries",
+          "type": "object",
+          "default": "required-inside-syntaxGrammar",
+          "description": "Package-root-confined highlights .scm query path."
+        },
+        {
+          "name": "styleMap",
+          "type": "object",
+          "default": "required-inside-syntaxGrammar",
+          "description": "Tree-sitter capture names mapped to known Clay style tokens."
+        },
+        {
+          "name": "budgets",
+          "type": "object",
+          "default": "optional",
+          "description": "timeoutMs and maxWindowBytes metadata bounded by shared syntax budgets."
+        }
+      ],
+      "security": "Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, package-root-confined tree-sitter-wasm and .scm paths, known style-token maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party grammar artifact loading in Phase 18.10.",
+      "agent_guidance": "Use `clay.syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage(\"@clay/rust\")`, `loadPackage(\"@clay/typescript\")`, or `loadPackage(\"@clay/javascript\")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.",
+      "lookup_tags": ["js-api", "syntax", "tree-sitter", "grammar", "highlighting"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
     },
     {
       "id": "clay.ui.serverRegisterComponentContribution",

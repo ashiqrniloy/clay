@@ -154,6 +154,7 @@ pub struct PackageContributionWithdrawalCounts {
     pub sdui: usize,
     pub parse_handlers: usize,
     pub decorations: usize,
+    pub syntax_grammars: usize,
     pub completions: usize,
     pub layout: usize,
     pub input: usize,
@@ -177,13 +178,8 @@ impl PackageContributionWithdrawalCounts {
                     .contains(&PackagePermission::ParseDocument),
             ),
             decorations: record.contributions.decorations.len(),
-            completions: usize::from(
-                record
-                    .manifest
-                    .clay
-                    .permissions
-                    .contains(&PackagePermission::CompletionProvider),
-            ),
+            syntax_grammars: record.contributions.syntax_grammars.len(),
+            completions: record.contributions.completion_providers.len(),
             layout: record.contributions.ui_panels.len()
                 + record.contributions.ui_components.len()
                 + record.contributions.ui_overlays.len()

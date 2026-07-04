@@ -8,6 +8,7 @@ use clay::{
         baselines::representative_sdui_tree,
         budgets::{
             BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
+            COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
             DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
             EDIT_ACK_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
             SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
@@ -16,10 +17,11 @@ use clay::{
         metrics::{PerfConfig, install_global_recorder},
     },
     protocol::{
-        BehaviorManifest, ClientMessage, DecorationKind, DecorationProvenance, DecorationSet,
-        DecorationSpan, DocumentAccess, EditOperation, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowRequest, ParseWindowSnapshot,
-        ServerMessage, SyntaxMemoryBudget,
+        BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
+        CompletionReplacementRange, CompletionResultSet, CompletionStatus, CompletionTrigger,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentAccess,
+        EditOperation, IncrementalParseUpdate, ParseByteRange, ParseEditNotification, ParsePolicy,
+        ParseUnit, ParseWindowRequest, ParseWindowSnapshot, ServerMessage, SyntaxMemoryBudget,
         codec::{Codec, CodecError},
     },
     server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
@@ -227,6 +229,62 @@ fn decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport() {
         .len();
 
     assert!(bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
+}
+
+#[test]
+fn representative_completion_result_payload_stays_bounded() {
+    // A representative full completion result set (max items, short labels)
+    // must stay under `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` so completion
+    // publication never blows the protocol frame budget.
+    let codec = Codec::default();
+    let provenance = CompletionProvenance::builtin_core();
+    let items: Vec<CompletionItem> = (0..COMPLETION_RESULT_MAX_ITEMS)
+        .map(|i| CompletionItem::new(format!("item{i}"), format!("item{i}"), provenance.clone()))
+        .collect();
+    let result = CompletionResultSet {
+        request_id: 42,
+        client_id: 9,
+        document_id: 7,
+        document_version: 31,
+        behavior_version: 3,
+        provider_generation: 2,
+        replacement_range: CompletionReplacementRange::new(10, 12),
+        status: CompletionStatus::Ok,
+        items,
+        provenance: CompletionProvenance::builtin_core(),
+    };
+    assert!(
+        clay::protocol::check_result_payload_budget(&result).is_ok(),
+        "representative completion result must pass the pre-publication payload budget check"
+    );
+    let message = ServerMessage::CompletionResult { result };
+    let payload = payload_len(&codec.encode_server_message(&message).unwrap());
+    assert!(
+        payload <= COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
+        "representative completion result payload {payload} exceeds budget {COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES}"
+    );
+}
+
+#[test]
+fn completion_request_payload_stays_bounded() {
+    let codec = Codec::default();
+    let request = clay::protocol::CompletionRequest {
+        request_id: 42,
+        client_id: 9,
+        document_id: 7,
+        document_version: 31,
+        behavior_version: 3,
+        cursor_byte_offset: 12,
+        replacement_range: CompletionReplacementRange::new(10, 12),
+        trigger: CompletionTrigger::Character(".".to_string()),
+        provider_generation: 2,
+    };
+    let message = ClientMessage::CompletionRequest { request };
+    let payload = payload_len(&codec.encode_client_message(&message).unwrap());
+    assert!(
+        payload <= clay::perf::budgets::COMPLETION_REQUEST_PAYLOAD_BUDGET_BYTES,
+        "completion request payload {payload} exceeds request budget"
+    );
 }
 
 #[test]

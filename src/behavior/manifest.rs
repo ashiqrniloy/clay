@@ -46,8 +46,12 @@ pub fn validate_manifest(manifest: &BehaviorManifest) -> Result<(), ManifestVali
         }
     }
 
+    if manifest.editor_rules.autocomplete_triggers.len() > 32 {
+        return Err(ManifestValidationError::InvalidAutocompleteTrigger);
+    }
+    let mut autocomplete_triggers = HashSet::new();
     for trigger in &manifest.editor_rules.autocomplete_triggers {
-        if trigger.trigger.is_empty() {
+        if trigger.trigger.chars().count() != 1 || !autocomplete_triggers.insert(&trigger.trigger) {
             return Err(ManifestValidationError::InvalidAutocompleteTrigger);
         }
         if !matches!(trigger.routing_policy, RoutingPolicy::UiReactivePriority) {
@@ -213,6 +217,33 @@ mod tests {
         }
 
         validate_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn manifest_rejects_malformed_autocomplete_triggers() {
+        use crate::protocol::AutocompleteTrigger;
+
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.editor_rules.autocomplete_triggers = vec![AutocompleteTrigger {
+            trigger: "..".to_string(),
+            routing_policy: RoutingPolicy::UiReactivePriority,
+        }];
+        assert_eq!(
+            validate_manifest(&manifest).unwrap_err(),
+            ManifestValidationError::InvalidAutocompleteTrigger
+        );
+
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.editor_rules.autocomplete_triggers = (0..33)
+            .map(|index| AutocompleteTrigger {
+                trigger: char::from_u32(0x21 + index).unwrap().to_string(),
+                routing_policy: RoutingPolicy::UiReactivePriority,
+            })
+            .collect();
+        assert_eq!(
+            validate_manifest(&manifest).unwrap_err(),
+            ManifestValidationError::InvalidAutocompleteTrigger
+        );
     }
 
     #[test]

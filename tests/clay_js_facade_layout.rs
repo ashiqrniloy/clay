@@ -100,6 +100,11 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
     ),
     ("runtime/js/decorations.ts", &["serverPublishDecorations"]),
     ("runtime/js/parse.ts", &["serverRegisterParseHandler"]),
+    ("runtime/js/syntax.ts", &["serverRegisterSyntaxGrammar"]),
+    (
+        "runtime/js/completion.ts",
+        &["serverRegisterCompletionProvider"],
+    ),
 ];
 
 #[test]

@@ -36,6 +36,20 @@ Clay registers two always-on built-in Clay-owned fallback modes at server startu
 
 `ModeRegistry::activate_major_mode` requires `mode-activation`, verifies that the classification still belongs to the package manifest, and writes `MajorModeActivation` into server-owned registry state. Re-activating a document replaces the previous major mode deterministically and increments the behavior version. Stale behavior-version rejection is enforced downstream at the connection layer: `ActiveBehaviorManifest::validate_message_version` rejects edits whose `behavior_version` is not the current server version, returning `EditRejection::InvalidBehaviorVersion`; the registry-level precondition is that every re-activation produces a strictly greater `MajorModeActivation::behavior_version` for the same document, so any edit built against a prior manifest is provably stale.
 
+## Active syntax grammar is separate from active major mode (Phase 18.10)
+
+Phase 18.10 adds syntax grammar selection in `src/server/syntax.rs` without changing the major-mode registry contract. `ModeRegistry` still owns exactly one active major mode per document and still owns behavior-version changes. `SyntaxGrammarRegistry::select_for_document` receives the already-selected `MajorModeActivation` plus the same open-document classification metadata, records an optional `active_syntax_grammar`, and copies the active mode/behavior version only for diagnostics.
+
+This lets fallback documents stay editable through `core.code` or `core.text` while a grammar-only package supplies highlighting:
+
+```text
+active_major_mode: core.code
+active_syntax_grammar: rust from @clay/rust, selected by extension rs
+edit behavior: core.code behavior manifest
+```
+
+If the grammar package is absent, disabled, or invalid, `active_syntax_grammar` is `None`; the active major mode, command routing, file authority, and behavior manifest remain unchanged. Syntax grammar selection runs on open/reload/reclassification/package load or reload inputs, not from keypress, paint, layout, scroll, pointer, or text-event handlers.
+
 ## Package disable / mid-session reclassification (Phase 18.9)
 
 `ModeRegistry::unregister_mode(mode_id)` drops a mode declaration from the candidate set — used when an owning package is disabled mid-session. It is symmetric with `register_mode`/`register_builtin_mode` (not a new primitive), grants no new authority (in-process registry mutation only), and always preserves built-in `core.*` modes (returns `false`) so the always-available fallback guarantee holds. It does **not** by itself reclassify open documents: the centralized activation path (`classify` + `activate_major_mode`/`activate_builtin_major_mode`) must be re-run for each affected document so it reclassifies deterministically and gets a strictly greater behavior version. The prior active activation for the removed mode is deliberately retained until reclassification replaces it — it cannot bypass validation because `select_behavior_manifest_for_document` errors for an unregistered mode (its owning package is no longer in the enabled list), forcing reclassification. Thus disabling/removing a language package never blocks open/edit: the affected document reclassifies to `core.code` (shebang/code extensions) or `core.text` (everything else) deterministically.
@@ -70,6 +84,7 @@ let activation = registry.activate_major_mode(&manifest, classification)?;
 ## Invariants and Constraints
 
 - A document has at most one active major mode in `active_major_modes`.
+- A document may also have an optional active syntax grammar in `SyntaxGrammarRegistry`; it never replaces the active major mode or changes behavior version.
 - Mode activation references `MODE_ACTIVATION_P95_BUDGET_MS` through the registry API, but Phase 16.5 does not add a hard latency CI gate.
 - Patterns are static metadata only: no callbacks, client predicates, filesystem scans, or raw ops.
 - The Rust client receives future validated behavior/protocol data; it does not select or execute package modes itself.
@@ -81,6 +96,7 @@ let activation = registry.activate_major_mode(&manifest, classification)?;
 - `tests/package_primitive_gate.rs`: Phase 18.9 Task 8 default loading experience — with a fresh `ModeRegistry::new()` (absent/empty `init.js`), `.txt` activates `core.text` (Fallback) and `.rs` activates `core.code` (Extension), both remaining editable (`core.text` ships `minimal_text_editing` with no electric chars; `core.code` ships `core_code_editing` with electric outdent rules for `}`/`)`/`]`) with no `loadPackage` step; with markdown registered (simulating `loadPackage("@clay/markdown")`), `.md` activates the Markdown package mode while `.rs` still uses `core.code` (packages extend, not replace, the built-in fallback).
 - `tests/package_primitive_gate.rs`: Phase 18.9 Task 7 reclassification + stale behavior-version + payload budget — disabling a language package mid-session reclassifies an open document to `core.text` fallback with a strictly greater behavior version (no stale active mode bypasses validation); reactivation serves a strictly newer manifest version (registry-level stale-version precondition, paired with the connection-layer `EditRejection::InvalidBehaviorVersion` test); fallback (`core.text`/`core.code`) behavior-manifest payloads stay within `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`.
 - `tests/editor_performance_invariants.rs`: Phase 18.9 Task 7 advisory budget alignment — `ModeRegistry::activation_budget_ms()` equals `MODE_ACTIVATION_P95_BUDGET_MS` (single source of truth) and `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` orders below mode-activation latency (no sync work before local paint).
+- `tests/syntax_grammar.rs`: Phase 18.10 active syntax grammar selection — `.rs` keeps active major mode `core.code` while selecting the `rust` syntax grammar when loaded, exact filenames can attach grammars to `core.text`, unloaded registries fall back to no syntax grammar, grammar selection cannot override mode ID or behavior version, and the deterministic manual-smoke flow verifies `.rs`/`.ts`/`.js` fixtures stay editable under `core.code` while syntax decorations refresh after edits.
 
 Run focused coverage with:
 
@@ -103,6 +119,8 @@ These read installed registry state only: no filesystem scan, package evaluation
 
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Primitive Architecture](primitive-architecture.md)
+- [Syntax Grammar Registry](syntax-grammar-registry.md)
+- [Package Loading](package-loading.md)
 - `docs/reference/primitives/registry.md#DocumentClassification`
 - `docs/reference/primitives/registry.md#MajorModeActivation`
 - `docs/reference/primitives/markdown-mode-requirements.md`

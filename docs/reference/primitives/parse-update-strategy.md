@@ -162,6 +162,14 @@ No code is added in Phase 16, but later phases should attach parsing at these bo
 
 This split keeps `DocumentState` focused on canonical document mutation, `ClayJsRuntimeService` focused on constrained JavaScript execution, and a new coordinator focused on scheduling and parse-result policy.
 
+## Phase 18.10 Syntax Grammar Parse/Highlight Path
+
+`SyntaxGrammarContribution` reuses this background parse strategy for first-party grammar-only packages. Package load validates grammar metadata, package-root-confined `tree-sitter-wasm`/`.scm` asset paths, capture-to-style-token maps, permissions, and budgets before any document selects a grammar.
+
+At open/reload/reclassification/package reload time, Clay may select an active syntax grammar independently of the active major mode. A document can therefore remain editable as `core.code` or `core.text` while a loaded `@clay/rust`, `@clay/typescript`, or `@clay/javascript` package supplies syntax highlighting. If no grammar is loaded, disabled, or invalid, the active major mode and editability are unchanged and the document simply has no syntax grammar.
+
+Tree-sitter parse/highlight work runs through `ParseCoordinator` as `Background` no-hot-path work: it is cancellable, stale-version rejecting, viewport-prioritized, and bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`. The Rust client receives only inert validated `DecorationSet` spans; no grammar package JavaScript, Tree-sitter parser work, native artifact loading, filesystem/network/shell/AI/raw-op authority, or full-document IPC runs in keypress, paint, layout, scroll, pointer, or text-event hot paths.
+
 ## Security Rules
 
 - Background parse tasks run server-side through the constrained `deno_core` runtime, not in the Rust client.

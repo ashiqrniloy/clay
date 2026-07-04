@@ -53,6 +53,9 @@ Packages must be installed and authorized before loading. Install/provenance dis
 import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/markdown");
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
 await loadPackage("@vendor/foo");
 await loadPackage("github:user/repo");
 ```
@@ -65,6 +68,9 @@ import { loadPackage } from "clay:packages";
 import { bindKey } from "clay:keybindings";
 
 await loadPackage("@clay/markdown");
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
@@ -82,7 +88,7 @@ No behavior-changing custom properties. The `specifier` is the only user input; 
 
 ## Return and async behavior
 
-Returns a promise that resolves to the resolver's typed summary (`name`, `version`, `apiPrefix`, `loadEntrySpecifier`, `modes`, `permissions`, and contribution counts). The loadEntry default export is invoked before the promise resolves, so the package's mode, commands, and parse handler are registered by the time the caller receives the result.
+Returns a promise that resolves to the resolver's typed summary (`name`, `version`, `apiPrefix`, `loadEntrySpecifier`, `modes`, `permissions`, and contribution counts including `syntaxGrammars`). The loadEntry default export is invoked before the promise resolves, so the package's mode, commands, parse handler, and syntax grammar metadata are registered by the time the caller receives the result.
 
 ## Errors
 

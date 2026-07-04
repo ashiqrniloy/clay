@@ -252,15 +252,18 @@ mod tests {
     use super::{Codec, CodecError, DEFAULT_MAX_FRAME_SIZE, LENGTH_PREFIX_BYTES};
     use crate::{
         perf::budgets::{
+            COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
             MAX_OPENABLE_FILE_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
             SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         },
         protocol::{
-            BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, EditOperation,
-            EditRejection, FileErrorCode, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
-            RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
-            SduiNodeId, SduiNodeKind, SduiTree, SduiTreeUpdate, ServerMessage,
-            representative_panel_update, representative_sdui_tree,
+            BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
+            CompletionRejection, CompletionReplacementRange, CompletionRequest,
+            CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentAccess,
+            DocumentMetadata, EditOperation, EditRejection, FileErrorCode, LockOwner,
+            PROTOCOL_VERSION, RegionLockConflict, RuntimeDiagnostic, SduiActionIntent,
+            SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
+            SduiTreeUpdate, ServerMessage, representative_panel_update, representative_sdui_tree,
         },
     };
 
@@ -651,6 +654,156 @@ mod tests {
 
         let error = codec.encode_server_message(&message).unwrap_err();
 
+        assert!(matches!(error, CodecError::FrameTooLarge { max: 64, .. }));
+    }
+
+    #[test]
+    fn completion_request_codec_round_trips() {
+        let codec = Codec::default();
+        let request = CompletionRequest {
+            request_id: 42,
+            client_id: 9,
+            document_id: 7,
+            document_version: 31,
+            behavior_version: 3,
+            cursor_byte_offset: 12,
+            replacement_range: CompletionReplacementRange::new(10, 12),
+            trigger: CompletionTrigger::Character(".".to_string()),
+            provider_generation: 2,
+        };
+        let message = ClientMessage::CompletionRequest { request };
+
+        let frame = codec.encode_client_message(&message).unwrap();
+        let decoded = codec.decode_client_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn completion_request_manual_trigger_round_trips() {
+        let codec = Codec::default();
+        let request = CompletionRequest {
+            request_id: 43,
+            client_id: 9,
+            document_id: 7,
+            document_version: 31,
+            behavior_version: 3,
+            cursor_byte_offset: 12,
+            replacement_range: CompletionReplacementRange::new(10, 12),
+            trigger: CompletionTrigger::Manual,
+            provider_generation: 2,
+        };
+        let message = ClientMessage::CompletionRequest { request };
+
+        let frame = codec.encode_client_message(&message).unwrap();
+        let decoded = codec.decode_client_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn completion_result_codec_round_trips_metadata_and_items() {
+        let codec = Codec::default();
+        let provenance = CompletionProvenance::builtin_core();
+        let result = CompletionResultSet {
+            request_id: 42,
+            client_id: 9,
+            document_id: 7,
+            document_version: 31,
+            behavior_version: 3,
+            provider_generation: 2,
+            replacement_range: CompletionReplacementRange::new(10, 12),
+            status: CompletionStatus::Ok,
+            items: vec![
+                CompletionItem::new("foo", "foo", provenance.clone()),
+                CompletionItem::new("bar", "bar", provenance),
+            ],
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let message = ServerMessage::CompletionResult { result };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn completion_rejected_codec_round_trips() {
+        let codec = Codec::default();
+        let message = ServerMessage::CompletionRejected {
+            request_id: 42,
+            reason: CompletionRejection::StaleDocumentVersion {
+                result_version: 30,
+                current_version: 31,
+            },
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn representative_completion_result_payload_stays_under_budget() {
+        let codec = Codec::default();
+        let provenance = CompletionProvenance::builtin_core();
+        let items: Vec<CompletionItem> = (0..COMPLETION_RESULT_MAX_ITEMS)
+            .map(|i| {
+                CompletionItem::new(format!("item{i}"), format!("item{i}"), provenance.clone())
+            })
+            .collect();
+        let result = CompletionResultSet {
+            request_id: 42,
+            client_id: 9,
+            document_id: 7,
+            document_version: 31,
+            behavior_version: 3,
+            provider_generation: 2,
+            replacement_range: CompletionReplacementRange::new(10, 12),
+            status: CompletionStatus::Ok,
+            items,
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let message = ServerMessage::CompletionResult { result };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let payload_len = frame.len() - LENGTH_PREFIX_BYTES;
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+        assert!(
+            payload_len <= COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
+            "representative completion result payload was {payload_len} bytes; budget is {COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES} bytes"
+        );
+    }
+
+    #[test]
+    fn oversized_completion_result_frame_is_rejected() {
+        // A completion result whose encoded payload exceeds the codec frame
+        // limit is rejected at encode, mirroring the SDUI and manifest guards.
+        let codec = Codec::new(64);
+        let provenance = CompletionProvenance::builtin_core();
+        let result = CompletionResultSet {
+            request_id: 42,
+            client_id: 9,
+            document_id: 7,
+            document_version: 31,
+            behavior_version: 3,
+            provider_generation: 2,
+            replacement_range: CompletionReplacementRange::new(10, 12),
+            status: CompletionStatus::Ok,
+            items: vec![CompletionItem::new(
+                "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                provenance,
+            )],
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let message = ServerMessage::CompletionResult { result };
+
+        let error = codec.encode_server_message(&message).unwrap_err();
         assert!(matches!(error, CodecError::FrameTooLarge { max: 64, .. }));
     }
 

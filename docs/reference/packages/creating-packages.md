@@ -1251,6 +1251,118 @@ Mode/classification defaults are compile-time (no configuration-evaluation cost 
 - Built-in modes ship their own default behavior manifests without an owning package; `select_behavior_manifest_for_document` detects the `core.` prefix and bypasses package-record lookup.
 - There is intentionally no runtime configuration knob for the fallback mode or electric toggles (YAGNI; the package system is the override escape hatch). Do not add undocumented `setPackageOption` keys for these.
 
+## Phase 18.10 authoring contract: grammar-only syntax packages
+
+Phase 18.10 adds `SyntaxGrammarContribution` metadata for grammar-only language packages. A grammar-only package highlights documents whose active major mode may still be `core.code` or `core.text`; it does **not** register a full major mode, commands, completions, UI, key behavior, or language-specific Rust branches.
+
+Declare grammar assets under `clay.contributions.syntaxGrammars`:
+
+```json
+{
+  "clay": {
+    "apiPrefix": "rust",
+    "permissions": ["parse-document", "render-decorations"],
+    "apiDependencies": ["clay.syntax.serverRegisterSyntaxGrammar"],
+    "contributions": {
+      "syntaxGrammars": [{
+        "languageId": "rust",
+        "filePatterns": { "extensions": ["rs"] },
+        "grammar": { "kind": "tree-sitter-wasm", "path": "./grammars/rust.wasm" },
+        "queries": { "highlights": "./queries/highlights.scm" },
+        "styleMap": {
+          "keyword": "keyword.control",
+          "string": "string.quoted",
+          "comment": "comment.line",
+          "punctuation": "punctuation.definition"
+        },
+        "budgets": { "timeoutMs": 5000, "maxWindowBytes": 4096 }
+      }]
+    }
+  }
+}
+```
+
+Validation is load-time only and reuses the package metadata budget. Phase 18.10 accepts grammar contributions from first-party `@clay/*` packages only; arbitrary third-party/native grammar artifact loading is out of scope. Grammar/query paths must be package-root-confined relative `./` asset paths; grammar artifacts must be `tree-sitter-wasm`, query files must be `.scm`, style-map values must be known Clay style tokens, and packages must declare both `parse-document` and `render-decorations`. Clay rejects non-`@clay/*` grammar packages, absolute paths, parent traversal, URLs/downloads, native libraries, package-manager/shell fields, raw ops, client JavaScript, CSS/raw colors, duplicate language IDs, and duplicate file-pattern claims. Parse/highlight work runs as `Background`, cancellable, viewport-prioritized server work bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; it never runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. First-party grammar packages are loaded explicitly from `~/.config/clay/init.js`; they are not auto-loaded.
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+```
+
+Do not add hidden JSON/TOML/ad hoc syntax configuration keys for preferred grammar selection, grammar paths, style maps, capture styles, or auto-load behavior. If a later phase exposes any of those as user preferences, they must be promoted as documented Clay JS APIs with custom properties and registry coverage.
+
+Shipped Phase 18.10 grammar-only packages are documented at:
+
+- [`@clay/rust`](rust.md)
+- [`@clay/typescript`](typescript.md)
+- [`@clay/javascript`](javascript.md)
+
+## Phase 18.11 authoring contract: completion providers
+
+Phase 18.11 adds the `CompletionTriggerAndResult` primitive and a server-side completion provider framework. Completion providers are **metadata-only** in Phase 18.11: a package declares provider metadata and trigger/word-boundary parameters, and Clay owns trigger classification, result computation scheduling, and the completion picker UI. Package authors do **not** ship an executable completion handler, raw callback, raw op, native handle, client JavaScript, snippet with executable transforms, command side effect on accept, CSS, or any completion-specific popup widget.
+
+Completion reuses the Phase 18.8 `TransientMenuSession` bottom overlay and `SduiNativeState` active-menu rendering with `KeyBindingContext::CompletionMenu`; do not add a completion-specific Masonry widget tree, custom popup, or fixed bottom panel for completions. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code.
+
+Declare completion provider contributions under `clay.contributions.completionProviders` and register the metadata from the package load entry through `clay.completion.serverRegisterCompletionProvider`:
+
+```json
+{
+  "clay": {
+    "apiPrefix": "words",
+    "permissions": ["completion-provider"],
+    "apiDependencies": ["clay.completion.serverRegisterCompletionProvider"],
+    "contributions": {
+      "completionProviders": [{
+        "id": "words.buffer",
+        "priority": 10,
+        "triggerCharacters": ["."],
+        "wordBoundaryChars": [".", ","],
+        "budgets": { "timeoutMs": 500, "maxItems": 64 }
+      }]
+    }
+  }
+}
+```
+
+```js
+import { serverRegisterCompletionProvider } from "clay:completion";
+
+export default function load() {
+  serverRegisterCompletionProvider({
+    packageName: "@vendor/words",
+    packageVersion: "0.1.0",
+    packagePrefix: "words",
+    permissions: ["completion-provider"],
+    providerId: "words.buffer",
+    triggerCharacters: ["."],
+    wordBoundaryChars: [".", ","],
+    timeoutMs: 500,
+    maxItems: 64
+  });
+}
+```
+
+End users load a completion provider package with one explicit `loadPackage` call; no provider package auto-loads silently:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@vendor/words");
+```
+
+Validation is load/registration-time only and reuses the package metadata budget. Provider IDs must be package-owned (`<apiPrefix>.<name>`), must not claim the reserved `clay.*` namespace, and must be unique within a package. Trigger characters are inert single-character strings; word-boundary characters are inert strings. `timeoutMs` must be within `1..=5000` and `maxItems` within `1..=COMPLETION_RESULT_MAX_ITEMS`. Clay rejects raw callbacks (`handler`, `callback`, `complete`, `function`, `module`), raw ops, native handles, client-side JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate provider IDs, and oversize metadata.
+
+Result items are inert text-replacement data only: `label`, `insertText`, `detail`, `commitCharacters`, and provenance. They carry no callbacks, command side effects, file paths, shell/network/AI directives, raw op names, or client JavaScript. Providers may read only Clay-provided open-document content/windows; completion grants no filesystem/network/shell/AI/raw-op/native-UI/client-runtime authority without later documented APIs and an approved decision log. Per-field and result payload budgets (`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`, `COMPLETION_RESULT_MAX_ITEMS`, and per-field char caps) are enforced before client publication.
+
+Trigger classification is local manifest lookup: typing a trigger character edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Manual `completion.trigger` requests completions without mutating text. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Provider work is UI-reactive/cancellable and never runs on keypress-to-local-paint, paint, layout, scroll, pointer, or text-event hot paths.
+
+Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Package providers registered through `clay.completion.serverRegisterCompletionProvider` are metadata-only: the registered provider metadata is retained, but no executable JS provider token is exposed this phase. A future constrained handler bridge may add executable package providers; until then the built-in buffer-word provider remains the only executable provider. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
+
+See [`clay.completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/modules/phase18.11-completion-provider-primitive-review.md`](../../wiki/modules/phase18.11-completion-provider-primitive-review.md) for the implementation review.
+
 ## Documentation Requirements
 
 Each package should include docs for:

@@ -158,6 +158,29 @@ What the manual smoke adds on top of automated tests: perceptual confirmation th
 
 Automated coverage (no manual execution needed): built-in `core.text`/`core.code` classification and activation with zero packages (absent `init.js`) and editable manifest composition (`minimal_text_editing`/`core_code_editing`) are covered by `tests/package_primitive_gate.rs::empty_init_js_opens_txt_and_rs_into_core_fallbacks_and_remains_editable`; `loadPackage("@clay/markdown")` package-wins-over-`core.code` coexistence is covered by `tests/package_primitive_gate.rs::load_package_markdown_extends_core_code_for_md_while_rs_still_uses_core_code`; the always-on registration at `ModeRegistry::new()` is covered by `builtin_core_modes_are_present_and_classify_with_zero_packages` and `builtin_core_modes_activate_and_remain_editable_without_packages`; fallback manifest payload budget is covered by `fallback_activation_manifest_fits_payload_budget`.
 
+### Phase 18.10 syntax grammar package smoke
+
+Phase 18.10 adds first-party grammar-only syntax packages. They are explicit opt-in packages, not auto-loaded core behavior:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+```
+
+Manual syntax smoke:
+
+1. Put the three `loadPackage` lines above in `~/.config/clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
+2. Launch Clay with `cargo run`, `cargo run -- smoke-gui`, or the fixture command above.
+3. Open small `.rs`, `.ts`, and `.js` files similar to `tests/fixtures/syntax/rust.rs`, `tests/fixtures/syntax/typescript.ts`, and `tests/fixtures/syntax/javascript.js`.
+4. Confirm each file remains editable under its active `core.code`/`core.text` fallback behavior while syntax decorations arrive asynchronously from the background parse/decor path.
+5. Type a small edit and scroll; local editing and paint must remain responsive while highlighting may refresh later.
+6. Remove the language package load lines and relaunch. The same files should still open editable, but with no active syntax grammar and no syntax highlights.
+
+Automated coverage (no manual execution needed): `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow` runs the documented smoke contract deterministically by loading all three grammar packages, selecting active syntax grammars for `.rs`, `.ts`, and `.js` fixture paths while preserving `core.code`, producing decorations before and after a small edit, and verifying unloaded no-highlight fallback editability. `tests/syntax_grammar.rs::first_party_syntax_fixtures_produce_bounded_decoration_sets` parses the Rust, TypeScript, and JavaScript fixture files with the package highlight queries and verifies bounded `DecorationSet` output; `syntax_provider_selection_falls_back_to_no_highlighting_without_changing_mode` covers unloaded fallback editability; `tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`, `tests/parse_coordinator.rs`, `tests/decoration_transport.rs`, and `tests/editor_performance_invariants.rs` cover background scheduling, stale-result rejection, payload/cache budgets, and hot-path source guards.
+
 ### Phase 19 Windows Markdown open-dialog smoke contract
 
 Phase 19 starts from this baseline:
@@ -187,6 +210,34 @@ Out of scope for Phase 19 smoke: saving the selected file, full HTML preview or 
 Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
 
 On non-Windows platforms during Phase 19, the command should report an unsupported diagnostic/status without panics; non-Windows native dialogs are intentionally not part of the smoke contract.
+
+### Phase 18.11 completion provider smoke
+
+Phase 18.11 adds the `CompletionTriggerAndResult` primitive, the server-side completion provider framework, the built-in `core.bufferWords` provider, and `TransientMenuSession`-based completion display/acceptance. The built-in buffer-word provider is always available; package providers are metadata-only opt-ins registered through `clay.completion.serverRegisterCompletionProvider` and loaded with one explicit `loadPackage` call. No default manual completion key binding exists in Rust, so manual completion is only reachable when `init.js` binds a key.
+
+Manual completion smoke:
+
+1. Configure the manual completion trigger key binding through `~/.config/clay/init.js`:
+
+   ```js
+   import { bindKey } from "clay:keybindings";
+
+   bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
+   ```
+
+2. Launch Clay with `cargo run` or `cargo run -- smoke-gui` and open or create an editable document containing repeated words (for example `fn hello hello_world helper`).
+3. Type a prefix such as `hel` and press the configured `Ctrl+Space` manual completion binding. A bottom transient completion menu should appear with unique matching buffer words (for example `hello`, `hello_world`, `helper`), the selected item highlighted, and provider provenance/detail text.
+4. Use `ArrowUp`/`ArrowDown` to move the selection locally. Confirm the menu re-renders without server round trips.
+5. Press `Enter` or `Tab` to accept the selected completion. Clay should commit a validated text replacement in the active document only (replacing the current word prefix range with the selected `insertText`) and dismiss the menu. Confirm no command, raw op, or provider code runs on accept.
+6. Type a completion item's commit character (if the result item advertises `commitCharacters`) while the menu is open. Clay should accept the completion with that character and insert the commit character through the local edit path only.
+7. Press `Escape` while the menu is open. Clay should dismiss the menu without mutating text and clear the active completion request.
+8. Type an autocomplete trigger character declared by the active behavior manifest (for example `.`). Local text should mutate first, then a completion request is enqueued asynchronously; typing must remain responsive even if the server result arrives later.
+9. Continue typing while a slow completion result is pending. Local edits must remain non-blocking; if a newer edit/cursor movement/mode change supersedes the request, the stale result is dropped and the menu is not installed.
+10. Disable/reload a package provider (or remove its `loadPackage` line and relaunch). The package provider's results should disappear, but the built-in `core.bufferWords` provider should still produce completions.
+
+Performance and security contract: trigger classification is local manifest lookup; typing a trigger edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Ordinary typing, local text mutation, paint, layout, scroll, pointer, and text-event paths must not execute configuration/provider JavaScript, wait on IPC, run provider code, or recompute provider metadata. Completion grants no filesystem, network, shell, AI mutation, extension loading, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-JS, or provider execution authority; result items are inert text-replacement data only.
+
+Automated coverage (no manual execution needed): `tests/completion_provider.rs` covers buffer-word unique sorted prefix matches, empty-match status, result payload caps, bounded-window rejection, package cancellation preserving the built-in provider, registry budget validation, request validation, superseded request abort, generation replacement, priority ordering, non-blocking scheduling, unregistered provider rejection, stale document-version/provider-generation result rejection, duplicate provider-ID conflict diagnostics, disabled package provider fallback, and oversized result rejection. `tests/editor_performance_invariants.rs::completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only` statically guards that completion hot paths use inert state and non-blocking enqueue only. `tests/performance_protocol.rs::representative_completion_result_payload_stays_bounded` checks the completion result payload budget. `tests/package_primitive_gate.rs` covers completion-provider contribution permission/conflict/oversize-metadata rejection. `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`, and `tests/rust_visibility_api_mapping.rs` cover the public `clay:completion` facade, registry/docs entry, and internal-status mapping. `tests/package_loading_docs.rs` and `tests/primitives_docs.rs` cover the package authoring contract and primitive review documentation.
 
 ### Foreground server plus clients
 

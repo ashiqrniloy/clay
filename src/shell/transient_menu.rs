@@ -19,6 +19,10 @@ use crate::perf::budgets::{
     TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_DETAIL_CHARS,
     TRANSIENT_MENU_MAX_ITEMS, TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS,
 };
+use crate::protocol::{
+    BehaviorVersion, CompletionItem, CompletionReplacementRange, CompletionRequestId,
+    CompletionResultSet, CompletionStatus, DocumentId, DocumentVersion,
+};
 
 const MAX_ITEMS: usize = TRANSIENT_MENU_MAX_ITEMS;
 const MAX_QUERY_CHARS: usize = TRANSIENT_MENU_MAX_QUERY_CHARS;
@@ -54,6 +58,18 @@ pub(crate) struct TransientMenuItem {
 pub(crate) struct TransientMenuAction {
     pub(crate) command_id: String,
     pub(crate) arguments: Value,
+    pub(crate) completion_accept: Option<CompletionMenuAcceptAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CompletionMenuAcceptAction {
+    pub(crate) request_id: CompletionRequestId,
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) replacement_range: CompletionReplacementRange,
+    pub(crate) insert_text: String,
+    pub(crate) commit_characters: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +148,15 @@ impl TransientMenuSession {
             };
         } else {
             self.status = TransientMenuStatus::Active;
+        }
+        self
+    }
+
+    pub(crate) fn with_empty_status(mut self, message: impl Into<String>) -> Self {
+        if self.items.is_empty() {
+            self.status = TransientMenuStatus::Empty {
+                message: truncate(&message.into(), MAX_DETAIL_CHARS),
+            };
         }
         self
     }
@@ -243,6 +268,15 @@ impl TransientMenuAction {
         Self {
             command_id: command_id.into(),
             arguments: Value::Null,
+            completion_accept: None,
+        }
+    }
+
+    pub(crate) fn completion_accept(action: CompletionMenuAcceptAction) -> Self {
+        Self {
+            command_id: "completion.accept".to_string(),
+            arguments: Value::Null,
+            completion_accept: Some(action),
         }
     }
 
@@ -250,6 +284,67 @@ impl TransientMenuAction {
         self.arguments = arguments;
         self
     }
+}
+
+pub(crate) fn completion_result_to_menu_session(
+    result: &CompletionResultSet,
+) -> TransientMenuSession {
+    let items = result
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| completion_item_to_menu_item(result, index, item))
+        .collect();
+    let session =
+        TransientMenuSession::new(TransientMenuSessionId(result.request_id), "Completion")
+            .with_focus_policy(TransientMenuFocusPolicy::Modeless)
+            .with_items(items);
+    if !result.items.is_empty() {
+        return session;
+    }
+    session.with_empty_status(match result.status {
+        CompletionStatus::Ok | CompletionStatus::Empty => "No completions",
+        CompletionStatus::Timeout => "Completion provider timed out",
+        CompletionStatus::ProviderError => "Completion provider error",
+    })
+}
+
+fn completion_item_to_menu_item(
+    result: &CompletionResultSet,
+    index: usize,
+    item: &CompletionItem,
+) -> TransientMenuItem {
+    let action = CompletionMenuAcceptAction {
+        request_id: result.request_id,
+        document_id: result.document_id,
+        document_version: result.document_version,
+        behavior_version: result.behavior_version,
+        replacement_range: result.replacement_range,
+        insert_text: item.insert_text.clone(),
+        commit_characters: item.commit_characters.clone(),
+    };
+    let detail = if item.detail.is_empty() {
+        format!(
+            "{} {}",
+            item.provenance.package_name, item.provenance.package_version
+        )
+    } else {
+        format!(
+            "{} · {} {}",
+            item.detail, item.provenance.package_name, item.provenance.package_version
+        )
+    };
+    TransientMenuItem::new(
+        format!("completion.{index}"),
+        item.label.clone(),
+        TransientMenuAction::completion_accept(action),
+    )
+    .with_detail(detail)
+    .with_accessibility_label(format!("Completion {}", item.label))
+    .with_package_provenance(
+        item.provenance.package_name.clone(),
+        item.provenance.package_version.clone(),
+    )
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {
@@ -439,6 +534,72 @@ mod tests {
             item.action.arguments,
             serde_json::json!({ "preview": true })
         );
+        assert!(item.action.completion_accept.is_none());
         // No callbacks, native handles, raw ops, or executable code on the item.
+    }
+
+    #[test]
+    fn completion_error_status_projects_to_empty_menu_status() {
+        let result = CompletionResultSet {
+            request_id: 13,
+            client_id: 1,
+            document_id: 7,
+            document_version: 8,
+            behavior_version: 9,
+            provider_generation: 1,
+            replacement_range: CompletionReplacementRange::new(3, 5),
+            status: CompletionStatus::ProviderError,
+            items: Vec::new(),
+            provenance: crate::protocol::CompletionProvenance::builtin_core(),
+        };
+
+        let session = completion_result_to_menu_session(&result);
+
+        assert_eq!(
+            session.status(),
+            &TransientMenuStatus::Empty {
+                message: "Completion provider error".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn completion_result_projects_to_transient_menu_session() {
+        let result = CompletionResultSet {
+            request_id: 12,
+            client_id: 1,
+            document_id: 7,
+            document_version: 8,
+            behavior_version: 9,
+            provider_generation: 1,
+            replacement_range: CompletionReplacementRange::new(3, 5),
+            status: CompletionStatus::Ok,
+            items: vec![CompletionItem {
+                label: "println".to_string(),
+                insert_text: "println!".to_string(),
+                detail: "macro".to_string(),
+                commit_characters: ";".to_string(),
+                provenance: crate::protocol::CompletionProvenance::builtin_core(),
+            }],
+            provenance: crate::protocol::CompletionProvenance::builtin_core(),
+        };
+
+        let session = completion_result_to_menu_session(&result);
+
+        assert_eq!(session.prompt(), "Completion");
+        assert_eq!(session.focus_policy(), TransientMenuFocusPolicy::Modeless);
+        assert_eq!(session.items()[0].label, "println");
+        assert_eq!(session.items()[0].accessibility_label, "Completion println");
+        let accept = session.items()[0]
+            .action
+            .completion_accept
+            .as_ref()
+            .expect("completion item has inert accept payload");
+        assert_eq!(
+            accept.replacement_range,
+            CompletionReplacementRange::new(3, 5)
+        );
+        assert_eq!(accept.insert_text, "println!");
+        assert_eq!(accept.commit_characters, ";");
     }
 }

@@ -8,15 +8,15 @@
 ///
 /// Enable/load validation runs only at install/enable/reload time and is never
 /// called from typing, paint, layout, scroll, or text-event handlers.
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde_json::Value;
 
 use crate::packages::manifest::{ClayPackageManifest, PackageDiagnostic, validate_manifest_value};
 use crate::packages::permissions::PackagePermission;
 use crate::perf::budgets::{
-    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEMS,
+    SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
 };
 use crate::shell::{
     components::validate_component_kind,
@@ -96,6 +96,66 @@ pub struct DecorationContributionDescriptor {
     pub primitive_id: String,
     /// Known decoration kind or style token namespace.
     pub kind: String,
+}
+
+/// Inert descriptor for a package-provided Tree-sitter syntax grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxGrammarContributionDescriptor {
+    /// Package-owned contribution ID, defaulting to `<apiPrefix>.<languageId>`.
+    pub id: String,
+    /// Language identifier selected independently from the active major mode.
+    pub language_id: String,
+    /// Supported file extensions without leading dots.
+    pub extensions: Vec<String>,
+    /// Supported exact file names.
+    pub file_names: Vec<String>,
+    /// Server-owned grammar artifact kind; Phase 18.10 only accepts `tree-sitter-wasm`.
+    pub grammar_kind: String,
+    /// Package-root-confined grammar artifact path.
+    pub grammar_path: String,
+    /// Optional source/provenance label for the bundled artifact.
+    pub grammar_source: Option<String>,
+    /// Required Tree-sitter highlights query path.
+    pub highlights_query_path: String,
+    /// Optional locals query path.
+    pub locals_query_path: Option<String>,
+    /// Optional injections query path.
+    pub injections_query_path: Option<String>,
+    /// Tree-sitter capture name to known Clay style token.
+    pub style_map: BTreeMap<String, String>,
+    /// Optional parser timeout budget in milliseconds.
+    pub timeout_ms: Option<u64>,
+    /// Optional parse-window byte budget override.
+    pub max_window_bytes: Option<usize>,
+    /// Estimated bounded metadata payload for the contribution.
+    pub estimated_payload_bytes: usize,
+}
+
+/// Inert descriptor for a package-provided completion provider.
+///
+/// Phase 18.11 completion provider contributions are metadata only: provider
+/// ID, priority, trigger characters, word-boundary rule, timeout, and item
+/// budgets. No callbacks, snippets, command side effects, or executable code
+/// are represented here. The package's `completion-provider` permission is the
+/// authority gate; the descriptor carries no extra authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionProviderContributionDescriptor {
+    /// Package-prefixed provider ID (e.g. `<apiPrefix>.words`). Must not claim
+    /// the reserved `clay.*` namespace.
+    pub id: String,
+    /// Higher priority providers run first when multiple match a trigger.
+    pub priority: i32,
+    /// Inert trigger characters that should request completion from this
+    /// provider. Never executed.
+    pub trigger_characters: Vec<String>,
+    /// Inert word-boundary characters used by the provider to split tokens.
+    pub word_boundary_chars: Vec<String>,
+    /// Per-provider timeout in milliseconds. Must be within `1..=5000`.
+    pub timeout_ms: u64,
+    /// Per-provider cap on result item count. Must be within `1..=COMPLETION_RESULT_MAX_ITEMS`.
+    pub max_items: usize,
+    /// Estimated bounded metadata payload for the contribution.
+    pub estimated_payload_bytes: usize,
 }
 
 /// Inert descriptor for a fixed slot-aware package UI panel.
@@ -229,6 +289,8 @@ pub struct PackageContributions {
     pub text_transforms: Vec<TextTransformContributionDescriptor>,
     pub sdui: Vec<SduiContributionDescriptor>,
     pub decorations: Vec<DecorationContributionDescriptor>,
+    pub syntax_grammars: Vec<SyntaxGrammarContributionDescriptor>,
+    pub completion_providers: Vec<CompletionProviderContributionDescriptor>,
     pub ui_panels: Vec<UiPanelContributionDescriptor>,
     pub ui_components: Vec<UiComponentContributionDescriptor>,
     pub ui_overlays: Vec<UiOverlayContributionDescriptor>,
@@ -526,6 +588,7 @@ fn validate_api_dependency_permissions(
             "clay.decorations.serverPublishDecorations" => {
                 Some(PackagePermission::RenderDecorations)
             }
+            "clay.syntax.serverRegisterSyntaxGrammar" => Some(PackagePermission::ParseDocument),
             "clay.ui.serverRegisterPanelContribution"
             | "clay.ui.serverRegisterComponentContribution"
             | "clay.ui.serverRegisterTransientOverlayContribution"
@@ -604,6 +667,14 @@ fn parse_contributions(
         Some(v) => parse_decoration_contributions(v, api_prefix, ctx)?,
         None => Vec::new(),
     };
+    let syntax_grammars = match map.get("syntaxGrammars") {
+        Some(v) => parse_syntax_grammar_contributions(v, api_prefix, permissions, ctx)?,
+        None => Vec::new(),
+    };
+    let completion_providers = match map.get("completionProviders") {
+        Some(v) => parse_completion_provider_contributions(v, api_prefix, permissions, ctx)?,
+        None => Vec::new(),
+    };
     let theme_tokens = match map.get("themeTokens") {
         Some(v) => parse_theme_token_contributions(v, api_prefix, ctx)?,
         None => Vec::new(),
@@ -651,6 +722,8 @@ fn parse_contributions(
         text_transforms,
         sdui,
         decorations,
+        syntax_grammars,
+        completion_providers,
         ui_panels,
         ui_components,
         ui_overlays,
@@ -1294,6 +1367,342 @@ fn parse_decoration_contributions(
     }
 
     Ok(descriptors)
+}
+
+fn parse_syntax_grammar_contributions(
+    value: &Value,
+    api_prefix: &str,
+    permissions: &[PackagePermission],
+    ctx: &ErrorContext,
+) -> Result<Vec<SyntaxGrammarContributionDescriptor>, PackageRecordError> {
+    let entries = array_field(value, "clay.contributions.syntaxGrammars", ctx)?;
+    if !entries.is_empty()
+        && (!permissions.contains(&PackagePermission::ParseDocument)
+            || !permissions.contains(&PackagePermission::RenderDecorations))
+    {
+        return Err(ctx.error(
+            PackageRecordRule::UndeclaredPermissionForContribution,
+            None,
+            "syntax grammar contributions require `parse-document` and `render-decorations` permissions",
+        ));
+    }
+    if !entries.is_empty()
+        && !ctx
+            .package_name
+            .as_deref()
+            .is_some_and(|package_name| package_name.starts_with("@clay/"))
+    {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            "Phase 18.10 syntax grammar contributions are first-party-only; arbitrary third-party grammar packages are not accepted",
+        ));
+    }
+
+    let mut seen_ids = HashSet::new();
+    let mut seen_languages = HashSet::new();
+    let mut descriptors = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let estimated_payload_bytes = contribution_payload_size(entry);
+        if estimated_payload_bytes > BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES {
+            return Err(ctx.error(
+                PackageRecordRule::PayloadBudgetExceeded,
+                None,
+                format!(
+                    "syntax grammar metadata payload ({estimated_payload_bytes} bytes) exceeds BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES ({BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_syntax_grammar_prohibited_authority(entry, ctx)?;
+        let obj = object_field(entry, "syntax grammar contribution", ctx)?;
+        let language_id = required_str_field(obj, "languageId", ctx)?;
+        if !is_valid_language_id(language_id) {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(language_id),
+                "syntax grammar languageId must use lowercase letters, digits, hyphen, underscore, plus, or dot",
+            ));
+        }
+        let id = obj
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("{api_prefix}.{language_id}"));
+        if id.starts_with("clay.") {
+            return Err(ctx.error(
+                PackageRecordRule::ReservedClayIdInContribution,
+                Some(&id),
+                "syntax grammar IDs cannot claim the reserved clay.* namespace",
+            ));
+        }
+        if !is_package_owned_id(&id, api_prefix) {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                "syntax grammar IDs must use the package apiPrefix namespace",
+            ));
+        }
+        if !seen_ids.insert(id.clone()) || !seen_languages.insert(language_id.to_string()) {
+            return Err(ctx.error(
+                PackageRecordRule::DuplicateContributionId,
+                Some(&id),
+                "syntax grammar IDs and languageIds must be unique within a package",
+            ));
+        }
+
+        let patterns = obj
+            .get("filePatterns")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "syntax grammar contribution must include filePatterns object",
+                )
+            })?;
+        let extensions =
+            optional_string_vec(patterns.get("extensions"), "filePatterns.extensions", ctx)?;
+        for extension in &extensions {
+            if extension.starts_with('.')
+                || extension.contains('/')
+                || extension.contains('\\')
+                || extension.trim().is_empty()
+            {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(extension),
+                    "syntax grammar extensions must be bare extension names without path separators or leading dots",
+                ));
+            }
+        }
+        let file_names =
+            optional_string_vec(patterns.get("fileNames"), "filePatterns.fileNames", ctx)?;
+        if extensions.is_empty() && file_names.is_empty() {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                "syntax grammar filePatterns must declare extensions or fileNames",
+            ));
+        }
+
+        let grammar = obj
+            .get("grammar")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "syntax grammar contribution must include grammar object",
+                )
+            })?;
+        let grammar_kind = required_str_field(grammar, "kind", ctx)?;
+        if grammar_kind != "tree-sitter-wasm" {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(grammar_kind),
+                "Phase 18.10 syntax grammars only support kind `tree-sitter-wasm`; native libraries are not accepted",
+            ));
+        }
+        let grammar_path = required_str_field(grammar, "path", ctx)?;
+        validate_package_asset_path(grammar_path, "grammar.path", Some(".wasm"), ctx)?;
+        let grammar_source = grammar
+            .get("source")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned);
+
+        let queries = obj
+            .get("queries")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "syntax grammar contribution must include queries object",
+                )
+            })?;
+        let highlights_query_path = required_str_field(queries, "highlights", ctx)?;
+        validate_package_asset_path(
+            highlights_query_path,
+            "queries.highlights",
+            Some(".scm"),
+            ctx,
+        )?;
+        let locals_query_path = optional_asset_path(queries.get("locals"), "queries.locals", ctx)?;
+        let injections_query_path =
+            optional_asset_path(queries.get("injections"), "queries.injections", ctx)?;
+        let style_map = parse_syntax_style_map(obj.get("styleMap"), &id, ctx)?;
+
+        let budgets = obj.get("budgets").and_then(Value::as_object);
+        let timeout_ms = optional_u64_budget(budgets, "timeoutMs", &id, ctx)?;
+        let max_window_bytes = optional_usize_budget(budgets, "maxWindowBytes", &id, ctx)?;
+
+        descriptors.push(SyntaxGrammarContributionDescriptor {
+            id,
+            language_id: language_id.to_string(),
+            extensions,
+            file_names,
+            grammar_kind: grammar_kind.to_string(),
+            grammar_path: grammar_path.to_string(),
+            grammar_source,
+            highlights_query_path: highlights_query_path.to_string(),
+            locals_query_path,
+            injections_query_path,
+            style_map,
+            timeout_ms,
+            max_window_bytes,
+            estimated_payload_bytes,
+        });
+    }
+    Ok(descriptors)
+}
+
+fn parse_completion_provider_contributions(
+    value: &Value,
+    api_prefix: &str,
+    permissions: &[PackagePermission],
+    ctx: &ErrorContext,
+) -> Result<Vec<CompletionProviderContributionDescriptor>, PackageRecordError> {
+    let entries = array_field(value, "clay.contributions.completionProviders", ctx)?;
+    if !entries.is_empty() && !permissions.contains(&PackagePermission::CompletionProvider) {
+        return Err(ctx.error(
+            PackageRecordRule::UndeclaredPermissionForContribution,
+            None,
+            "completion provider contributions require `completion-provider` permission",
+        ));
+    }
+
+    let mut seen_ids = HashSet::new();
+    let mut descriptors = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let estimated_payload_bytes = contribution_payload_size(entry);
+        if estimated_payload_bytes > BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES {
+            return Err(ctx.error(
+                PackageRecordRule::PayloadBudgetExceeded,
+                None,
+                format!(
+                    "completion provider metadata payload ({estimated_payload_bytes} bytes) exceeds BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES ({BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_completion_provider_prohibited_authority(entry, ctx)?;
+        let obj = object_field(entry, "completion provider contribution", ctx)?;
+        let id = package_owned_field(obj, "id", api_prefix, ctx)?.to_string();
+        if !seen_ids.insert(id.clone()) {
+            return Err(ctx.error(
+                PackageRecordRule::DuplicateContributionId,
+                Some(&id),
+                "completion provider IDs must be unique within a package",
+            ));
+        }
+        let priority = obj.get("priority").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let trigger_characters =
+            optional_string_vec(obj.get("triggerCharacters"), "triggerCharacters", ctx)?;
+        let word_boundary_chars =
+            optional_string_vec(obj.get("wordBoundaryChars"), "wordBoundaryChars", ctx)?;
+        let timeout_ms = optional_u64_budget(
+            obj.get("budgets").and_then(Value::as_object),
+            "timeoutMs",
+            &id,
+            ctx,
+        )?
+        .unwrap_or(500);
+        let max_items = optional_usize_budget(
+            obj.get("budgets").and_then(Value::as_object),
+            "maxItems",
+            &id,
+            ctx,
+        )?
+        .unwrap_or(64);
+        if timeout_ms == 0 || timeout_ms > 5_000 {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                "completion provider timeoutMs must be within 1..=5000",
+            ));
+        }
+        if max_items == 0 || max_items > COMPLETION_RESULT_MAX_ITEMS {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "completion provider maxItems must be within 1..={COMPLETION_RESULT_MAX_ITEMS}"
+                ),
+            ));
+        }
+        descriptors.push(CompletionProviderContributionDescriptor {
+            id,
+            priority,
+            trigger_characters,
+            word_boundary_chars,
+            timeout_ms,
+            max_items,
+            estimated_payload_bytes,
+        });
+    }
+    Ok(descriptors)
+}
+
+fn reject_completion_provider_prohibited_authority(
+    value: &Value,
+    ctx: &ErrorContext,
+) -> Result<(), PackageRecordError> {
+    match value {
+        Value::String(text)
+            if text.contains("://")
+                || text.contains("Deno.core.ops")
+                || text.contains("nativeHandle")
+                || text.contains("drawCallback")
+                || text.contains("clientJavaScript")
+                || text.contains("rawOps")
+                || text.contains("css")
+                || text.contains("rawColor") =>
+        {
+            Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                "completion provider metadata must not contain URLs, raw ops, native handles, client JavaScript, CSS, or raw colors",
+            ))
+        }
+        Value::Object(object) => {
+            for (key, nested) in object {
+                if matches!(
+                    key.as_str(),
+                    "nativeHandle"
+                        | "nativeLibrary"
+                        | "dynamicLibrary"
+                        | "downloadUrl"
+                        | "packageManager"
+                        | "shellCommand"
+                        | "clientJavaScript"
+                        | "drawCallback"
+                        | "rawOps"
+                        | "css"
+                        | "rawColor"
+                        | "snippet"
+                        | "command"
+                ) {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        None,
+                        format!(
+                            "completion provider metadata must not include executable or external authority field `{key}`"
+                        ),
+                    ));
+                }
+                reject_completion_provider_prohibited_authority(nested, ctx)?;
+            }
+            Ok(())
+        }
+        Value::Array(values) => {
+            for nested in values {
+                reject_completion_provider_prohibited_authority(nested, ctx)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn parse_theme_token_contributions(
@@ -2600,6 +3009,232 @@ fn target_package_prefix(target_id: &str) -> &str {
     target_id.split('.').next().unwrap_or(target_id)
 }
 
+fn reject_syntax_grammar_prohibited_authority(
+    value: &Value,
+    ctx: &ErrorContext,
+) -> Result<(), PackageRecordError> {
+    match value {
+        Value::String(text)
+            if text.contains("://")
+                || text.contains("Deno.core.ops")
+                || text.contains("nativeHandle")
+                || text.contains("drawCallback")
+                || text.contains("clientJavaScript")
+                || text.contains("rawOps")
+                || text.contains("css")
+                || text.contains("rawColor") =>
+        {
+            Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                "syntax grammar metadata must not contain URLs, raw ops, native handles, client JavaScript, CSS, or raw colors",
+            ))
+        }
+        Value::Object(object) => {
+            for (key, nested) in object {
+                if matches!(
+                    key.as_str(),
+                    "nativeHandle"
+                        | "nativeLibrary"
+                        | "dynamicLibrary"
+                        | "downloadUrl"
+                        | "packageManager"
+                        | "shellCommand"
+                        | "clientJavaScript"
+                        | "drawCallback"
+                        | "rawOps"
+                        | "css"
+                        | "rawColor"
+                ) {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        None,
+                        format!(
+                            "syntax grammar metadata must not include executable or external authority field `{key}`"
+                        ),
+                    ));
+                }
+                reject_syntax_grammar_prohibited_authority(nested, ctx)?;
+            }
+            Ok(())
+        }
+        Value::Array(values) => {
+            for nested in values {
+                reject_syntax_grammar_prohibited_authority(nested, ctx)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn is_valid_language_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|ch| {
+            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_' | '+' | '.')
+        })
+}
+
+fn validate_package_asset_path(
+    path: &str,
+    field: &str,
+    required_suffix: Option<&str>,
+    ctx: &ErrorContext,
+) -> Result<(), PackageRecordError> {
+    let valid = path.starts_with("./")
+        && !path.contains('\\')
+        && !path.contains("://")
+        && !path.contains("Deno.core.ops")
+        && path[2..]
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..");
+    if !valid {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(path),
+            format!("{field} must be a package-root-confined relative ./ path without traversal, URLs, or raw ops"),
+        ));
+    }
+    if let Some(suffix) = required_suffix
+        && !path.ends_with(suffix)
+    {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(path),
+            format!("{field} must end with {suffix}"),
+        ));
+    }
+    Ok(())
+}
+
+fn optional_asset_path(
+    value: Option<&Value>,
+    field: &str,
+    ctx: &ErrorContext,
+) -> Result<Option<String>, PackageRecordError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(path)) if !path.trim().is_empty() => {
+            validate_package_asset_path(path, field, Some(".scm"), ctx)?;
+            Ok(Some(path.clone()))
+        }
+        _ => Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            format!("{field} must be a non-empty string path when present"),
+        )),
+    }
+}
+
+fn parse_syntax_style_map(
+    value: Option<&Value>,
+    contribution_id: &str,
+    ctx: &ErrorContext,
+) -> Result<BTreeMap<String, String>, PackageRecordError> {
+    let Some(Value::Object(map)) = value else {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(contribution_id),
+            "syntax grammar styleMap must be an object mapping captures to known Clay style tokens",
+        ));
+    };
+    if map.is_empty() {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(contribution_id),
+            "syntax grammar styleMap must not be empty",
+        ));
+    }
+    let mut style_map = BTreeMap::new();
+    for (capture, token) in map {
+        if capture.trim().is_empty()
+            || capture.starts_with('@')
+            || capture.contains('{')
+            || capture.contains('}')
+        {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(capture),
+                "syntax grammar capture names must be non-empty names without @, braces, CSS, or query payloads",
+            ));
+        }
+        let Some(token) = token.as_str().filter(|value| !value.trim().is_empty()) else {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(capture),
+                "syntax grammar styleMap values must be known Clay style token strings",
+            ));
+        };
+        if !is_known_syntax_style_token(token) {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(token),
+                "syntax grammar styleMap values must be known Clay style tokens, not raw CSS or colors",
+            ));
+        }
+        style_map.insert(capture.clone(), token.to_string());
+    }
+    Ok(style_map)
+}
+
+fn is_known_syntax_style_token(token: &str) -> bool {
+    matches!(
+        token,
+        "markup.heading.1"
+            | "markup.heading.2"
+            | "markup.heading.3"
+            | "markup.heading.4"
+            | "markup.heading.5"
+            | "markup.heading.6"
+            | "markup.strong"
+            | "markup.emphasis"
+            | "markup.inline-code"
+            | "markup.code-block"
+            | "markup.list-marker"
+            | "keyword.control"
+            | "string.quoted"
+            | "comment.line"
+            | "punctuation.definition"
+            | "diagnostic.error"
+            | "diagnostic.warning"
+            | "diagnostic.info"
+            | "search.match"
+            | "text"
+    )
+}
+
+fn optional_u64_budget(
+    budgets: Option<&serde_json::Map<String, Value>>,
+    field: &str,
+    contribution_id: &str,
+    ctx: &ErrorContext,
+) -> Result<Option<u64>, PackageRecordError> {
+    match budgets.and_then(|budgets| budgets.get(field)) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(number)) => number.as_u64().map(Some).ok_or_else(|| {
+            ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(contribution_id),
+                format!("budgets.{field} must be a non-negative integer"),
+            )
+        }),
+        _ => Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(contribution_id),
+            format!("budgets.{field} must be a non-negative integer"),
+        )),
+    }
+}
+
+fn optional_usize_budget(
+    budgets: Option<&serde_json::Map<String, Value>>,
+    field: &str,
+    contribution_id: &str,
+    ctx: &ErrorContext,
+) -> Result<Option<usize>, PackageRecordError> {
+    optional_u64_budget(budgets, field, contribution_id, ctx).map(|value| value.map(|n| n as usize))
+}
+
 fn theme_resolver_for_package_tokens(
     tokens: &[ThemeTokenContributionDescriptor],
 ) -> ThemeTokenResolver {
@@ -2709,6 +3344,37 @@ fn package_owned_field<'a>(
         ));
     }
     Ok(value)
+}
+
+fn optional_string_vec(
+    value: Option<&Value>,
+    key: &str,
+    ctx: &ErrorContext,
+) -> Result<Vec<String>, PackageRecordError> {
+    match value {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| {
+                        ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            None,
+                            format!("{key} entries must be non-empty strings"),
+                        )
+                    })
+            })
+            .collect(),
+        _ => Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            format!("{key} must be an array"),
+        )),
+    }
 }
 
 fn string_vec_field(

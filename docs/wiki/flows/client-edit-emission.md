@@ -34,6 +34,8 @@ The event stores the editor's current document version and the installed manifes
 
 `EditorWidget::local_command` never performs socket I/O. If an edit event exists and a queue is attached, it calls `ClientEditQueue::enqueue_edit_event`, which uses Tokio's bounded channel `try_send`. A full or missing queue does not prevent the already-applied local edit from rendering; failed sends roll back the pending-version reservation. A queue without a lease ID rejects enqueue attempts without sending an IPC edit message, which prevents read-only client sessions from emitting mutations even if called directly.
 
+Completion triggers reuse this local-first emission shape without turning completions into edits. `EditorSurface::route_key_with_event` returns an `EditorCompletionRequestEvent` only after a trigger character has been inserted locally, or immediately for manual `completion.trigger` without mutating text. `EditorWidget` assigns a monotonically increasing completion request ID and calls `ClientEditQueue::enqueue_completion_request`, which performs only a bounded `try_send` of `ClientMessage::CompletionRequest`; provider execution remains server-side and asynchronous.
+
 ## Code Examples
 
 ```rust
@@ -47,7 +49,7 @@ if let Some(event) = outcome.edit_event {
 
 - Ordinary edit messages are deltas, not snapshots.
 - Edit emission uses existing cursor/selection/range data and does not inspect the whole document.
-- Masonry input handlers stay synchronous and local; the only optional client boundary call is bounded `try_send` plus constant-time client sync metadata updates.
+- Masonry input handlers stay synchronous and local; the only optional client boundary calls are bounded `try_send` operations for edit events, server intents, SDUI actions, and completion requests plus constant-time client sync metadata updates.
 - Emitted operations are inert text edits only. Keyboard/pointer events are not serialized as commands, scripts, file paths, network requests, extension calls, or AI/tool actions.
 - Without an installed client-first behavior manifest, local editing still works but no client edit event is emitted.
 - With `DocumentAccess::ReadOnly`, text mutation commands are no-ops; navigation and selection still work.
@@ -65,6 +67,7 @@ if let Some(event) = outcome.edit_event {
 - `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side read-only enforcement.
 - `src/client/mod.rs`: `bounded_edit_queue_applies_backpressure` validates bounded queue behavior and pending rollback.
 - `src/client/mod.rs`: `client_hot_path_does_not_await_full_ipc_queue` validates a full queue returns immediately instead of awaiting capacity.
+- `src/client/mod.rs`: `completion_request_is_enqueued_as_non_blocking_message` validates completion request metadata becomes a typed outbound protocol message without edit mutation.
 - `src/client/mod.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates optimistic base-version assignment and pending state.
 - Relevant commands: `cargo test editor --quiet`, `cargo test client --quiet`, `cargo test --quiet`.
 

@@ -915,6 +915,218 @@ fn package_default_init_js_user_installed_one_line_path_is_documented_and_verifi
 }
 
 #[test]
+fn grammar_package_reference_docs_cover_authoring_primitive_security_and_performance() {
+    let docs_index = read("docs/index.md");
+    let primitive_index = read("docs/reference/primitives/index.md");
+    let registry = read("docs/reference/primitives/registry.md");
+    let package_security = read("docs/reference/primitives/package-security.md");
+    let parse_strategy = read("docs/reference/primitives/parse-update-strategy.md");
+    let rendering_strategy = read("docs/reference/primitives/rendering-strategy.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let syntax_wiki = read("docs/wiki/modules/syntax-grammar-registry.md");
+
+    assert!(
+        primitive_index.contains("#phase-1810-authoring-contract-grammar-only-syntax-packages"),
+        "primitive index must link the Phase 18.10 grammar authoring contract, not an older anchor"
+    );
+
+    let primitive_docs = [
+        registry.as_str(),
+        package_security.as_str(),
+        parse_strategy.as_str(),
+        rendering_strategy.as_str(),
+        package_guide.as_str(),
+        syntax_wiki.as_str(),
+    ]
+    .join("\n---\n");
+    for phrase in [
+        "SyntaxGrammarContribution",
+        "active major mode",
+        "core.code",
+        "core.text",
+        "first-party",
+        "package-root-confined",
+        "tree-sitter-wasm",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+        "Background",
+        "no-hot-path",
+    ] {
+        assert!(
+            primitive_docs.contains(phrase),
+            "grammar primitive docs must mention `{phrase}`"
+        );
+    }
+
+    for package in ["rust", "typescript", "javascript"] {
+        let reference_doc = read(&format!("docs/reference/packages/{package}.md"));
+        let package_doc = read(&format!("packages/{package}/docs/index.md"));
+        assert!(
+            docs_index.contains(&format!("reference/packages/{package}.md")),
+            "docs/index.md must link @{package} reference docs"
+        );
+        for source in [&reference_doc, &package_doc] {
+            for phrase in [
+                "grammar-only",
+                "loadPackage(\"@clay/",
+                "not auto-loaded",
+                "core.code",
+                "parse-document",
+                "render-decorations",
+                "punctuation.definition",
+                "no major mode",
+                "no commands",
+                "third-party/native grammar artifact loading",
+                "keypress, paint, layout, scroll, pointer, or text-event hot paths",
+            ] {
+                assert!(
+                    source.contains(phrase),
+                    "{package} docs must mention `{phrase}`"
+                );
+            }
+        }
+    }
+
+    assert!(
+        package_guide.contains("serverRegisterSyntaxGrammar")
+            && !package_guide.contains("Runtime facade/op remains a later Phase 18.10 task"),
+        "package guide should document manifest API dependency without presenting low-level manual registration as end-user setup"
+    );
+    assert!(
+        !package_guide.contains("serverLoadPackage(packageJson) as the ordinary end-user"),
+        "package guide must not present serverLoadPackage(packageJson) as ordinary setup"
+    );
+}
+
+#[test]
+fn syntax_grammar_packages_document_explicit_init_js_loading() {
+    let load_package_api = read("docs/reference/clay-js-api/packages/load-package.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let syntax_wiki = read("docs/wiki/modules/syntax-grammar-registry.md");
+    let package_loading_wiki = read("docs/wiki/modules/package-loading.md");
+    let fixture = read("tests/fixtures/configuration/syntax-grammars-init.js");
+    let runtime = read("src/server/js_runtime.rs");
+    let package_ops = read("src/server/ops/packages.rs");
+
+    for specifier in ["@clay/rust", "@clay/typescript", "@clay/javascript"] {
+        for source in [&load_package_api, &package_guide, &syntax_wiki, &fixture] {
+            assert!(
+                source.contains(&format!("loadPackage(\"{specifier}\")")),
+                "explicit init.js docs/fixture must show one-line load for {specifier}"
+            );
+        }
+    }
+
+    for source in [
+        &load_package_api,
+        &package_guide,
+        &syntax_wiki,
+        &package_loading_wiki,
+    ] {
+        assert!(
+            source.contains("grants no capabilities")
+                || source.contains("does not grant")
+                || source.contains("no capabilities of its own"),
+            "docs must state loadPackage/init.js does not grant extra authority"
+        );
+        assert!(
+            source.contains("not auto-loaded")
+                || source.contains("no automatic language package load")
+                || source.contains("explicit"),
+            "docs must forbid silent grammar package auto-loading"
+        );
+    }
+
+    assert!(
+        fixture.contains("loadPackage")
+            && !fixture.contains("serverLoadPackage")
+            && !fixture.contains("serverRegisterSyntaxGrammar")
+            && !fixture.contains("Deno.core.ops"),
+        "syntax grammar init fixture must use only end-user loadPackage calls"
+    );
+    assert!(
+        runtime.contains("syntax_grammar_packages_default_load_from_init_js"),
+        "runtime tests must execute the syntax grammar init.js default path"
+    );
+    assert!(
+        package_ops.contains("\"syntaxGrammars\": record.contributions.syntax_grammars.len()"),
+        "loadPackage summary must expose syntax grammar contribution counts"
+    );
+}
+
+#[test]
+fn syntax_grammar_configuration_review_uses_only_documented_clay_js_apis() {
+    let configuration = read("docs/reference/clay-js-api/configuration.md");
+    let load_package_api = read("docs/reference/clay-js-api/packages/load-package.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let syntax_wiki = read("docs/wiki/modules/syntax-grammar-registry.md");
+    let fixture = read("tests/fixtures/configuration/syntax-grammars-init.js");
+    let api_inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+    let generated_registry = read("docs/generated/clay-js-api-registry.json");
+
+    for phrase in [
+        "Phase 18.10 syntax grammar configuration review",
+        "does **not** promote a new user-facing syntax configuration API",
+        "explicit first-party package loading from `~/.config/clay/init.js`",
+        "loadPackage(\"@clay/rust\")",
+        "loadPackage(\"@clay/typescript\")",
+        "loadPackage(\"@clay/javascript\")",
+        "No hidden JSON/TOML/ad hoc syntax keys are valid",
+        "syntax.preferredGrammar",
+        "treeSitter.grammarPath",
+        "syntax.styleMap",
+        "autoLoadSyntaxPackages",
+        "not end-user configuration knobs",
+        "not automatic core loading and not an auto-load flag",
+        "documented Clay JS API with custom properties",
+    ] {
+        assert!(
+            configuration.contains(phrase),
+            "configuration docs must pin syntax grammar configuration boundary: {phrase}"
+        );
+    }
+
+    assert!(
+        load_package_api.contains("await loadPackage(\"@clay/rust\");")
+            && load_package_api.contains("await loadPackage(\"@clay/typescript\");")
+            && load_package_api.contains("await loadPackage(\"@clay/javascript\");"),
+        "loadPackage docs must remain the end-user syntax grammar configuration path"
+    );
+    assert!(
+        package_guide.contains("Do not add hidden JSON/TOML/ad hoc syntax configuration keys")
+            && syntax_wiki.contains("User config remains one-line `loadPackage`"),
+        "package authoring/wiki docs must reject hidden syntax configuration keys"
+    );
+    assert!(
+        fixture.contains("loadPackage")
+            && !fixture.contains("serverRegisterSyntaxGrammar")
+            && !fixture.contains("Deno.core.ops")
+            && !fixture.contains("syntax.preferredGrammar")
+            && !fixture.contains("treeSitter.grammarPath")
+            && !fixture.contains("autoLoadSyntaxPackages"),
+        "syntax init fixture must use only documented loadPackage calls"
+    );
+
+    for forbidden_api in [
+        "clay.configuration.setSyntaxGrammar",
+        "clay.configuration.setSyntaxStyleMap",
+        "clay.configuration.setTreeSitterGrammarPath",
+        "syntax.preferredGrammar",
+        "treeSitter.grammarPath",
+        "autoLoadSyntaxPackages",
+    ] {
+        assert!(
+            !api_inventory.contains(forbidden_api),
+            "API inventory must not promote hidden syntax config `{forbidden_api}`"
+        );
+        assert!(
+            !generated_registry.contains(forbidden_api),
+            "generated registry must not promote hidden syntax config `{forbidden_api}`"
+        );
+    }
+}
+
+#[test]
 fn package_default_load_gap_is_decision_log_backed_with_package_owned_fallback() {
     // Phase 18.5 (plans/028 Task 4) defers the generic loadPackage("@clay/*")
     // resolver with a decision-log-backed rationale and ships a clean
@@ -1357,6 +1569,138 @@ fn clay_packages_load_package_registry_entry_is_runtime_backed() {
 }
 
 #[test]
+fn phase18_10_code_wiki_documents_final_syntax_implementation() {
+    let wiki_index = read("docs/wiki/index.md");
+    let syntax_wiki = read("docs/wiki/modules/syntax-grammar-registry.md");
+    let parse_wiki = read("docs/wiki/modules/parse-coordinator.md");
+    let decoration_wiki = read("docs/wiki/modules/decoration-transport.md");
+    let mode_wiki = read("docs/wiki/modules/mode-registry.md");
+    let package_wiki = read("docs/wiki/modules/package-loading.md");
+    let review = read("docs/wiki/modules/phase18.10-tree-sitter-grammar-primitive-review.md");
+    let facade_skeleton = read("docs/wiki/modules/clay-js-facade-skeleton.md");
+
+    for link in [
+        "modules/syntax-grammar-registry.md",
+        "modules/parse-coordinator.md",
+        "modules/decoration-transport.md",
+        "modules/mode-registry.md",
+        "modules/package-loading.md",
+        "modules/phase18.10-tree-sitter-grammar-primitive-review.md",
+        "modules/clay-js-facade-skeleton.md",
+    ] {
+        assert!(
+            wiki_index.contains(link),
+            "wiki index must link Phase 18.10 implementation page {link}"
+        );
+    }
+
+    for phrase in [
+        "runtime/js/syntax.ts",
+        "src/server/ops/syntax.rs",
+        "TreeSitterSyntaxHandler",
+        "SyntaxGrammarRegistry",
+        "serverRegisterSyntaxGrammar",
+        "loadPackage(\"@clay/rust\")",
+        "loadPackage(\"@clay/typescript\")",
+        "loadPackage(\"@clay/javascript\")",
+        "parse-document",
+        "render-decorations",
+        "first-party",
+        "package-root-confined",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+        "manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow",
+        "tests/fixtures/configuration/syntax-grammars/init.js",
+    ] {
+        assert!(
+            syntax_wiki.contains(phrase),
+            "syntax grammar wiki must document final implementation detail `{phrase}`"
+        );
+    }
+
+    for (name, source, phrases) in [
+        (
+            "parse coordinator wiki",
+            parse_wiki.as_str(),
+            [
+                "TreeSitterSyntaxHandler",
+                "ParseWindowSnapshot",
+                "Background",
+                "stale",
+                "payload-budget",
+            ],
+        ),
+        (
+            "decoration transport wiki",
+            decoration_wiki.as_str(),
+            [
+                "Tree-sitter syntax highlighting",
+                "DecorationSet",
+                "DECORATION_PAYLOAD_BUDGET_BYTES",
+                "SyntaxChunkCache",
+                "punctuation.definition",
+            ],
+        ),
+        (
+            "mode registry wiki",
+            mode_wiki.as_str(),
+            [
+                "Active syntax grammar is separate from active major mode",
+                "core.code",
+                "active_syntax_grammar",
+                "behavior version",
+                "manual-smoke",
+            ],
+        ),
+        (
+            "package loading wiki",
+            package_wiki.as_str(),
+            [
+                "runtime/js/syntax.ts",
+                "clay:syntax",
+                "contributions.syntaxGrammars",
+                "loadPackage",
+                "ordinary end-user config uses one-line",
+            ],
+        ),
+        (
+            "primitive review wiki",
+            review.as_str(),
+            [
+                "Final Implementation Status",
+                "src/packages/record.rs",
+                "src/server/syntax.rs",
+                "runtime/js/syntax.ts",
+                "tests/syntax_grammar.rs",
+            ],
+        ),
+        (
+            "facade skeleton wiki",
+            facade_skeleton.as_str(),
+            [
+                "runtime/js/syntax.ts",
+                "clay:syntax.serverRegisterSyntaxGrammar",
+                "generated Clay JS API registry",
+                "clay:syntax",
+                "first-party grammar-only package load entries",
+            ],
+        ),
+    ] {
+        for phrase in phrases {
+            assert!(
+                source.contains(phrase),
+                "{name} must document Phase 18.10 final wiki detail `{phrase}`"
+            );
+        }
+    }
+
+    assert!(
+        !package_wiki.contains("clay:decorations` and `clay:parse` are importable runtime modules, but their public Phase 18 functions currently delegate to the planned-unavailable op"),
+        "package-loading wiki must not retain stale planned-unavailable language for runtime-backed parse/decor/syntax facades"
+    );
+}
+
+#[test]
 fn load_package_introduces_no_hidden_configuration_key() {
     // configuration verification: loadPackage is an explicit action, not a config key.
     let facade = read("runtime/js/packages.ts");
@@ -1453,5 +1797,103 @@ fn package_ui_layout_authoring_contract_is_unified_across_package_sources() {
     assert!(
         package_guide.contains("no `if github_package` / `if npm_package`"),
         "package guide must forbid source-specific UI/layout primitive branches"
+    );
+}
+
+#[test]
+fn phase18_11_completion_provider_authoring_contract_documented_in_package_guide() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_security = read("docs/reference/primitives/package-security.md");
+    let registry = read("docs/reference/primitives/registry.md");
+    let api_reference =
+        read("docs/reference/clay-js-api/completion/server-register-completion-provider.md");
+
+    // Functional: package authors learn the registration API, trigger metadata,
+    // result item/commit-character shapes, and transient menu reuse.
+    for phrase in [
+        "Phase 18.11 authoring contract: completion providers",
+        "serverRegisterCompletionProvider",
+        "clay.contributions.completionProviders",
+        "completion-provider",
+        "triggerCharacters",
+        "wordBoundaryChars",
+        "commitCharacters",
+        "TransientMenuSession",
+        "core.bufferWords",
+        "completion.trigger",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "package guide must document completion provider authoring contract: {phrase}"
+        );
+    }
+
+    // End-user loading is explicit one-line loadPackage, not raw ops or copied
+    // manifests, and no provider package auto-loads silently.
+    assert!(
+        package_guide.contains("await loadPackage(\"@vendor/words\")"),
+        "package guide must show explicit one-line loadPackage for completion providers"
+    );
+    assert!(
+        package_guide.contains("no provider package auto-loads silently"),
+        "package guide must forbid silent completion provider auto-loading"
+    );
+
+    // Performance: provider work is UI-reactive/cancellable and off hot paths.
+    for phrase in [
+        "UiReactivePriority",
+        "cancellable",
+        "edits locally first",
+        "bounded non-blocking channel",
+        "keypress-to-local-paint, paint, layout, scroll, pointer, or text-event hot paths",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "package guide must document completion hot-path/performance boundary: {phrase}"
+        );
+    }
+
+    // Security: providers need completion-provider, read only Clay-provided
+    // open-document content/windows, and gain no extra authority.
+    for phrase in [
+        "raw callbacks",
+        "raw ops",
+        "client-side JavaScript",
+        "no filesystem/network/shell/AI/raw-op/native-UI/client-runtime authority",
+        "metadata-only",
+        "inert text-replacement data",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "package guide must document completion security boundary: {phrase}"
+        );
+    }
+
+    // Code quality: examples use the clay:completion facade and loadPackage,
+    // not raw ops or a completion-specific widget tree.
+    assert!(
+        package_guide
+            .contains("import { serverRegisterCompletionProvider } from \"clay:completion\""),
+        "package guide must use the clay:completion facade, not raw ops"
+    );
+    assert!(
+        package_guide.contains("do not add a completion-specific Masonry widget tree"),
+        "package guide must forbid completion-specific widget scaffolding"
+    );
+
+    // Primitive security and registry references stay current.
+    assert!(
+        package_security.contains("CompletionTriggerAndResult")
+            && package_security.contains("metadata-only"),
+        "package-security.md must document the metadata-only completion boundary"
+    );
+    assert!(
+        registry.contains("CompletionTriggerAndResult")
+            && registry.contains("TransientMenuSession"),
+        "primitive registry must keep the completion primitive and transient menu reuse"
+    );
+    assert!(
+        api_reference.contains("clay.completion.serverRegisterCompletionProvider"),
+        "completion provider API reference must be linked from the authoring contract"
     );
 }

@@ -21,6 +21,9 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Phase 17 Package Loading Runtime Facades](reference/primitives/package-loading.md) — package load/runtime boundaries, conflict handling, runtime facade wiring, hot-path policy, and Phase 18 decoration/parse handoff.
 - [Creating Clay Packages](reference/packages/creating-packages.md) — package authoring guide covering manifests, explicit loading, UI/layout, components, input, actions, logic, data/state, configuration, styling/theme tokens, permissions, documentation, tests, and current/planned shell architecture.
 - [@clay/markdown Package](reference/packages/markdown.md) — first-party Markdown package contract, entries, permissions, file patterns, and runtime boundary.
+- [@clay/rust Package](reference/packages/rust.md) — first-party grammar-only Rust syntax package contract, permissions, file patterns, and runtime boundary.
+- [@clay/typescript Package](reference/packages/typescript.md) — first-party grammar-only TypeScript syntax package contract, permissions, file patterns, and runtime boundary.
+- [@clay/javascript Package](reference/packages/javascript.md) — first-party grammar-only JavaScript syntax package contract, permissions, file patterns, and runtime boundary.
 - [Primitive Implementation Gate](reference/primitives/implementation-gate.md) — Phase 16.5 package/mode validation gate, fixture format, deterministic failure coverage, and Phase 17/18 handoff.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, `smoke-gui`, foreground server/client, GUI status, and local IPC smoke validation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
@@ -64,6 +67,8 @@ The generated documentation registry must read this section as the explicit incl
 - [serverLoadPackage](reference/clay-js-api/packages/server-load-package.md) — `clay.packages.serverLoadPackage`
 - [loadPackage](reference/clay-js-api/packages/load-package.md) — `clay.packages.loadPackage`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `clay.parse.serverRegisterParseHandler`
+- [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `clay.syntax.serverRegisterSyntaxGrammar`
+- [serverRegisterCompletionProvider](reference/clay-js-api/completion/server-register-completion-provider.md) — `clay.completion.serverRegisterCompletionProvider`
 - [serverValidatePackageManifest](reference/clay-js-api/packages/server-validate-package-manifest.md) — `clay.packages.serverValidatePackageManifest`
 - [serverValidatePackagePermissions](reference/clay-js-api/packages/server-validate-package-permissions.md) — `clay.packages.serverValidatePackagePermissions`
 - [setPackageOption](reference/clay-js-api/configuration/set-package-option.md) — `clay.configuration.setPackageOption`

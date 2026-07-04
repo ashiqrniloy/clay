@@ -1,10 +1,10 @@
 pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
 // Edit acknowledgement payload budget.  Advisory: rkyv union-layout sizing means
 // the serialized size of `ServerMessage::EditAck` grows with the largest enum
-// variant.  112 bytes reflects the current union floor after adding
-// `Vec<String>`-carrying `EnterRule::ContinueLineMarkers` and
-// `EnterRule::PreserveFenceBodyIndent` variants (Phase 18 — usable by any mode).
-pub const EDIT_ACK_PAYLOAD_BUDGET_BYTES: usize = 112;
+// variant.  128 bytes reflects the current union floor after adding completion
+// result/rejection variants and leaves a small fixed-envelope margin without
+// changing the edit-ack message shape.
+pub const EDIT_ACK_PAYLOAD_BUDGET_BYTES: usize = 128;
 pub const BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES: usize = 2048;
 pub const SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
@@ -32,7 +32,29 @@ pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
 // 18.5 uses this as the 30 MiB Markdown-specific overhead target while keeping
 // the primitive language-neutral for future modes.
 pub const SYNTAX_CACHE_BUDGET_BYTES: usize = 30 * 1024 * 1024;
-pub const COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES: usize = 4096;
+// Phase 18.11 completion result payload budget. A completion result reuses the
+// `TransientMenuSession` picker, which caps display at `TRANSIENT_MENU_MAX_ITEMS`
+// (256), so the wire budget must accommodate a full 256-item result with short
+// labels. A representative 256-item, short-label result serializes to ~14.5 KiB
+// via rkyv; 16 KiB leaves headroom for the envelope and provenance while staying
+// in the same order of magnitude as `RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES`.
+// Per-item and per-field budgets below are the finer guards that keep a single
+// item or field from blowing the whole result budget.
+pub const COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
+// Phase 18.11 completion request payload budget. A `CompletionRequest` carries
+// only request/document/version/cursor/range/trigger metadata (no document
+// text), so this is a small ceiling checked before the request is dispatched to
+// the server-side provider lane.
+pub const COMPLETION_REQUEST_PAYLOAD_BUDGET_BYTES: usize = 512;
+// Phase 18.11 completion result item and per-field budgets. The result payload
+// budget above is the hard ceiling checked before client publication; these
+// finer budgets let a single item or field not blow the whole result budget and
+// keep completion picker strings inside the transient menu label/detail caps.
+pub const COMPLETION_RESULT_MAX_ITEMS: usize = 256;
+pub const COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS: usize = 128;
+pub const COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS: usize = 256;
+pub const COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS: usize = 256;
+pub const COMPLETION_RESULT_MAX_ITEM_COMMIT_CHARS: usize = 32;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
 
 // Phase 18.8 command execution and transient menu budgets.

@@ -338,6 +338,72 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
 }
 
 #[test]
+fn syntax_grammar_public_api_has_docs_registry_and_security_metadata() {
+    let root = repository_root();
+    let indexed_paths: BTreeSet<_> = registry_source_paths(&root)
+        .expect("registry source paths")
+        .into_iter()
+        .collect();
+    assert!(
+        indexed_paths
+            .contains("docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md"),
+        "docs/index.md must link syntax grammar registration API docs"
+    );
+
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+    let syntax = registry
+        .by_id("clay.syntax.serverRegisterSyntaxGrammar")
+        .expect("syntax grammar API is generated from docs");
+    assert_eq!(syntax.js_module, "clay:syntax");
+    assert_eq!(syntax.js_export, "serverRegisterSyntaxGrammar");
+    assert_eq!(syntax.key_bindings, Vec::<String>::new());
+    for permission in ["parse-document", "render-decorations"] {
+        assert!(
+            syntax.permissions.iter().any(|value| value == permission),
+            "syntax API registry entry must preserve {permission} permission"
+        );
+    }
+    for property in [
+        "packageManifest",
+        "packageName",
+        "packagePrefix",
+        "permissions",
+        "syntaxGrammar",
+        "languageId",
+        "filePatterns",
+        "grammar",
+        "queries",
+        "styleMap",
+        "budgets",
+    ] {
+        assert!(
+            syntax
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "syntax API registry entry must preserve custom property {property}"
+        );
+    }
+    let doc = std::fs::read_to_string(
+        root.join("docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md"),
+    )
+    .expect("read syntax API doc");
+    for phrase in [
+        "tree-sitter-wasm",
+        "package-root-confined",
+        "first-party-only",
+        "third-party/native grammar artifact loading",
+        "raw Deno ops",
+        "Background",
+        "no-hot-path",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+    ] {
+        assert!(doc.contains(phrase), "syntax API doc must mention {phrase}");
+    }
+}
+
+#[test]
 fn large_file_api_docs_are_linked_from_index() {
     let root = repository_root();
     let indexed_paths: BTreeSet<_> = registry_source_paths(&root)

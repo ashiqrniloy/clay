@@ -95,12 +95,45 @@ fn paint_uses_cached_inert_spans_without_package_javascript() {
         "markdownIt",
         "parseMarkdown",
         "serverPublishDecorations",
+        "TreeSitterSyntaxHandler",
+        "tree_sitter",
         "Deno.core",
         "op_clay",
     ] {
         assert!(
             !paint_sources.contains(forbidden),
             "paint/layout source must not call package/server/parser code: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only() {
+    let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let widget_source =
+        fs::read_to_string("src/masonry_editor.rs").expect("editor widget readable");
+    let client_queue_source =
+        fs::read_to_string("src/client/mod.rs").expect("client queue readable");
+    let combined = format!("{surface_source}\n{widget_source}");
+
+    assert!(surface_source.contains("completion_request_event"));
+    assert!(widget_source.contains("enqueue_completion_request"));
+    assert!(client_queue_source.contains("ClientMessage::CompletionRequest"));
+    assert!(client_queue_source.contains("try_send"));
+    for forbidden in [
+        "CompletionCoordinator",
+        "schedule_completion",
+        "serverRegisterCompletionProvider",
+        "loadPackage",
+        "Deno.core",
+        "op_clay",
+        "BufferWordCompletionProvider",
+        "tokio::spawn",
+        "std::fs",
+    ] {
+        assert!(
+            !combined.contains(forbidden),
+            "editor key/text/paint path must not run completion provider/package/server work: {forbidden}"
         );
     }
 }

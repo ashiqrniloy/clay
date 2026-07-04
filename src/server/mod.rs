@@ -1,5 +1,6 @@
 mod behavior;
 pub mod command_execution;
+pub mod completion;
 mod configuration;
 mod connection;
 pub(crate) mod control_center;
@@ -13,6 +14,7 @@ pub mod parse_coordinator;
 #[doc(hidden)]
 pub mod runtime_sandbox;
 mod sdui;
+pub mod syntax;
 mod ui;
 mod workspace;
 
@@ -922,6 +924,8 @@ mod runtime_outputs_tests {
             js_parse_handlers: vec![],
             behavior_manifest: Some(valid_manifest()),
             ui_contributions: Default::default(),
+            syntax_grammars: vec![],
+            completion_providers: vec![],
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -958,6 +962,8 @@ mod runtime_outputs_tests {
             js_parse_handlers: vec![],
             behavior_manifest: None,
             ui_contributions: Default::default(),
+            syntax_grammars: vec![],
+            completion_providers: vec![],
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -991,6 +997,8 @@ mod runtime_outputs_tests {
             js_parse_handlers: vec![],
             behavior_manifest: None,
             ui_contributions: Default::default(),
+            syntax_grammars: vec![],
+            completion_providers: vec![],
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;

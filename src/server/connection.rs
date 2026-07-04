@@ -13,8 +13,9 @@ use tokio::{
 use crate::{
     packages::commands::CommandRegistry,
     protocol::{
-        ClientId, ClientMessage, DocumentId, DocumentMetadata, PROTOCOL_VERSION, ParseByteRange,
-        ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
+        ClientId, ClientMessage, CompletionProvenance, CompletionResultSet, CompletionStatus,
+        DocumentId, DocumentMetadata, PROTOCOL_VERSION, ParseByteRange, ParsePolicy,
+        ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
         SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
     },
@@ -353,6 +354,44 @@ where
                 }) {
                     codec.write_server_message(&mut stream, &response).await?;
                 }
+            }
+            ClientMessage::CompletionRequest { request } => {
+                // Phase 18.11 task 3 wires the protocol shapes only; the
+                // server-side provider registry and cancellable UI-reactive
+                // coordinator are task 4. Until then, acknowledge the request
+                // with an empty, versioned result set so the protocol path is
+                // type-correct and the codec round-trips without implementing
+                // provider execution. No document mutation, no provider code.
+                if let Err(rejection) = request.validate() {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message: format!("completion request rejected: {rejection:?}"),
+                            },
+                        )
+                        .await?;
+                    continue;
+                }
+                let empty = CompletionResultSet {
+                    request_id: request.request_id,
+                    client_id: request.client_id,
+                    document_id: request.document_id,
+                    document_version: request.document_version,
+                    behavior_version: request.behavior_version,
+                    provider_generation: request.provider_generation,
+                    replacement_range: request.replacement_range,
+                    status: CompletionStatus::Empty,
+                    items: Vec::new(),
+                    provenance: CompletionProvenance::builtin_core(),
+                };
+                codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::CompletionResult { result: empty },
+                    )
+                    .await?;
             }
             ClientMessage::Hello { .. } => {
                 codec

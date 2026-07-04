@@ -1,7 +1,7 @@
 use crate::behavior::manifest::{ManifestValidationError, validate_manifest};
 use crate::protocol::{
-    BehaviorManifest, CommandAuthority, KeyBindingContext, KeyCode, KeyModifiers, KeyStroke,
-    RoutingPolicy,
+    BehaviorManifest, CommandAuthority, CompletionTrigger, KeyBindingContext, KeyCode,
+    KeyModifiers, KeyStroke, RoutingPolicy,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +37,7 @@ impl ClientBehaviorState {
     pub(crate) fn autocomplete_trigger_for_key(
         &self,
         key: &KeyStroke,
-    ) -> Option<AutocompleteTriggerRoute> {
+    ) -> Option<CompletionTriggerRoute> {
         if key.modifiers != KeyModifiers::NONE {
             return None;
         }
@@ -51,8 +51,8 @@ impl ClientBehaviorState {
             .iter()
             .find(|trigger| trigger.trigger == *text)?;
 
-        Some(AutocompleteTriggerRoute {
-            trigger: trigger.trigger.clone(),
+        Some(CompletionTriggerRoute {
+            trigger: CompletionTrigger::Character(trigger.trigger.clone()),
             routing_policy: trigger.routing_policy.clone(),
         })
     }
@@ -69,10 +69,13 @@ impl ClientBehaviorState {
         match &rule.routing_policy {
             RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck => {
                 match rule.command_id.as_str() {
-                    "text.insert_newline" => RoutedBehavior::ClientEdit(ClientLocalEdit::Newline),
-                    "text.insert_tab" => RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(
-                        tab_text(&self.active).to_string(),
-                    )),
+                    "text.insert_newline" => {
+                        RoutedBehavior::ClientEdit(ClientLocalEdit::Newline, None)
+                    }
+                    "text.insert_tab" => RoutedBehavior::ClientEdit(
+                        ClientLocalEdit::InsertText(tab_text(&self.active).to_string()),
+                        None,
+                    ),
                     _ => RoutedBehavior::Unhandled,
                 }
             }
@@ -103,10 +106,19 @@ impl ClientBehaviorState {
                     .find(|command| command.command_id == rule.command_id)
                     .map(|command| command.authority.clone());
                 if authority == Some(CommandAuthority::ServerIntent) {
-                    RoutedBehavior::ServerIntent(ServerIntentRoute {
-                        command_id: rule.command_id.clone(),
-                        routing_policy: rule.routing_policy.clone(),
-                    })
+                    if rule.command_id == "completion.trigger"
+                        && matches!(rule.routing_policy, RoutingPolicy::UiReactivePriority)
+                    {
+                        RoutedBehavior::Completion(CompletionTriggerRoute {
+                            trigger: CompletionTrigger::Manual,
+                            routing_policy: rule.routing_policy.clone(),
+                        })
+                    } else {
+                        RoutedBehavior::ServerIntent(ServerIntentRoute {
+                            command_id: rule.command_id.clone(),
+                            routing_policy: rule.routing_policy.clone(),
+                        })
+                    }
                 } else {
                     RoutedBehavior::Unhandled
                 }
@@ -115,7 +127,7 @@ impl ClientBehaviorState {
     }
 
     fn route_unbound_key(&self, key: &KeyStroke) -> RoutedBehavior {
-        let _autocomplete_trigger = self.autocomplete_trigger_for_key(key);
+        let completion_trigger = self.autocomplete_trigger_for_key(key);
         if !key.modifiers.control
             && !key.modifiers.alt
             && !key.modifiers.super_key
@@ -127,7 +139,10 @@ impl ClientBehaviorState {
                     text: text.clone(),
                 })
         {
-            return RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text.clone()));
+            return RoutedBehavior::ClientEdit(
+                ClientLocalEdit::InsertText(text.clone()),
+                completion_trigger,
+            );
         }
 
         RoutedBehavior::Unhandled
@@ -145,7 +160,8 @@ fn tab_text(manifest: &BehaviorManifest) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RoutedBehavior {
-    ClientEdit(ClientLocalEdit),
+    ClientEdit(ClientLocalEdit, Option<CompletionTriggerRoute>),
+    Completion(CompletionTriggerRoute),
     ServerIntent(ServerIntentRoute),
     ClientUiCommand(ClientUiCommandRoute),
     Unhandled,
@@ -170,20 +186,20 @@ pub struct ClientUiCommandRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AutocompleteTriggerRoute {
-    pub(crate) trigger: String,
+pub(crate) struct CompletionTriggerRoute {
+    pub(crate) trigger: CompletionTrigger,
     pub(crate) routing_policy: RoutingPolicy,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AutocompleteTriggerRoute, ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute,
+        ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, CompletionTriggerRoute,
         RoutedBehavior, ServerIntentRoute,
     };
     use crate::protocol::{
-        BehaviorManifest, CommandDeclaration, KeyBindingContext, KeyBindingRule, KeyCode,
-        KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
+        BehaviorManifest, CommandDeclaration, CompletionTrigger, KeyBindingContext, KeyBindingRule,
+        KeyCode, KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
     };
 
     #[test]
@@ -222,7 +238,7 @@ mod tests {
 
         assert_eq!(
             routed,
-            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("x".to_string()))
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("x".to_string()), None)
         );
     }
 
@@ -241,7 +257,7 @@ mod tests {
 
         assert_eq!(
             routed,
-            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("A".to_string()))
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("A".to_string()), None)
         );
     }
 
@@ -272,7 +288,7 @@ mod tests {
 
         assert_eq!(
             routed,
-            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("  ".to_string()))
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("  ".to_string()), None)
         );
     }
 
@@ -285,14 +301,54 @@ mod tests {
 
         assert_eq!(
             routed,
-            Some(AutocompleteTriggerRoute {
-                trigger: ".".to_string(),
+            Some(CompletionTriggerRoute {
+                trigger: CompletionTrigger::Character(".".to_string()),
                 routing_policy: RoutingPolicy::UiReactivePriority,
             })
         );
         assert_eq!(
             state.route_key(&KeyStroke::new(KeyCode::Character(".".to_string()))),
-            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(".".to_string()))
+            RoutedBehavior::ClientEdit(
+                ClientLocalEdit::InsertText(".".to_string()),
+                Some(CompletionTriggerRoute {
+                    trigger: CompletionTrigger::Character(".".to_string()),
+                    routing_policy: RoutingPolicy::UiReactivePriority,
+                }),
+            )
+        );
+    }
+
+    #[test]
+    fn client_routes_manual_completion_as_first_class_completion_route() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "completion.trigger".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character(" ".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::UiReactivePriority,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character(" ".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::Completion(CompletionTriggerRoute {
+                trigger: CompletionTrigger::Manual,
+                routing_policy: RoutingPolicy::UiReactivePriority,
+            })
         );
     }
 

@@ -49,6 +49,8 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
         "clay:commands" => Some(CLAY_FACADE_COMMANDS),
         "clay:decorations" => Some(CLAY_FACADE_DECORATIONS),
         "clay:parse" => Some(CLAY_FACADE_PARSE),
+        "clay:syntax" => Some(CLAY_FACADE_SYNTAX),
+        "clay:completion" => Some(CLAY_FACADE_COMPLETION),
         "clay:application" => Some(CLAY_FACADE_APPLICATION),
         "clay:editor" => Some(CLAY_FACADE_EDITOR),
         _ => None,
@@ -297,6 +299,32 @@ export function serverRegisterParseHandler(options) {
     globalThis.__clayParseHandlers[registration.token] = handler;
   }
   return registration;
+}
+"#;
+
+const CLAY_FACADE_SYNTAX: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+export function serverRegisterSyntaxGrammar(options) {
+  for (const key of ["handler", "callback", "onParse", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
+    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
+      throw new Error(`clay.syntax.invalid_grammar: executable or raw authority field ${key} is not accepted by the public registration contract`);
+    }
+  }
+  return parse(ops.op_clay_syntax_register_syntax_grammar(JSON.stringify(options ?? null)));
+}
+"#;
+
+const CLAY_FACADE_COMPLETION: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+export function serverRegisterCompletionProvider(options) {
+  for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps", "module"]) {
+    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
+      throw new Error(`clay.completion.invalid_provider: executable or raw authority field ${key} is not accepted by the public registration contract`);
+    }
+  }
+  return parse(ops.op_clay_completion_register_completion_provider(JSON.stringify(options ?? null)));
 }
 "#;
 
@@ -607,6 +635,8 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) js_parse_handlers: Vec<crate::server::parse_coordinator::JsParseHandlerRegistration>,
     pub(crate) behavior_manifest: Option<crate::protocol::BehaviorManifest>,
     pub(crate) ui_contributions: crate::server::ui::PackageUiRegistrySnapshot,
+    pub(crate) syntax_grammars: Vec<crate::server::syntax::SyntaxGrammarContribution>,
+    pub(crate) completion_providers: Vec<crate::server::completion::CompletionProviderMeta>,
 }
 
 #[derive(Debug)]
@@ -1012,6 +1042,8 @@ async fn evaluate_loaded_module(
             behavior_manifest: (behavior_manifest.behavior_version > 1)
                 .then_some(behavior_manifest),
             ui_contributions: op_state.ui_contributions(),
+            syntax_grammars: op_state.syntax_grammars(),
+            completion_providers: op_state.completion_providers(),
         })
     }
     .await;
@@ -1703,6 +1735,189 @@ mod tests {
                 "unexpected registration error: {message}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn syntax_facade_registers_grammar_metadata_without_raw_ops() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterSyntaxGrammar } from "clay:syntax";
+                const result = serverRegisterSyntaxGrammar({
+                  packageName: "@clay/rust",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "rust",
+                  permissions: ["parse-document", "render-decorations"],
+                  syntaxGrammar: {
+                    languageId: "rust",
+                    filePatterns: { extensions: ["rs"] },
+                    grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
+                    queries: { highlights: "./queries/highlights.scm" },
+                    styleMap: {
+                      keyword: "keyword.control",
+                      string: "string.quoted",
+                      comment: "comment.line",
+                      punctuation: "punctuation.definition"
+                    },
+                    budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
+                  }
+                });
+                Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.languages[0]}:${result.registeredGrammarCount}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(evaluation.op_records, vec!["rust:rust:1"]);
+        assert_eq!(evaluation.syntax_grammars.len(), 1);
+        assert_eq!(evaluation.syntax_grammars[0].language_id, "rust");
+    }
+
+    #[tokio::test]
+    async fn syntax_facade_rejects_raw_authority_and_third_party_grammars() {
+        let service = ClayJsRuntimeService::default();
+        for source in [
+            r#"
+            import { serverRegisterSyntaxGrammar } from "clay:syntax";
+            serverRegisterSyntaxGrammar({
+              packageName: "@clay/rust",
+              packagePrefix: "rust",
+              permissions: ["parse-document", "render-decorations"],
+              rawOps: true
+            });
+            "#,
+            r#"
+            import { serverRegisterSyntaxGrammar } from "clay:syntax";
+            serverRegisterSyntaxGrammar({
+              packageName: "@vendor/rust",
+              packagePrefix: "vendor-rust",
+              permissions: ["parse-document", "render-decorations"],
+              syntaxGrammar: {
+                languageId: "rust",
+                filePatterns: { extensions: ["rs"] },
+                grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
+                queries: { highlights: "./queries/highlights.scm" },
+                styleMap: { keyword: "keyword.control" }
+              }
+            });
+            "#,
+        ] {
+            let error = service
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("clay.syntax.invalid_grammar")
+                    || message.contains("first-party-only"),
+                "unexpected syntax registration error: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn completion_facade_registers_provider_metadata_without_raw_ops() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                const result = serverRegisterCompletionProvider({
+                  packageName: "@vendor/words",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "words",
+                  permissions: ["completion-provider"],
+                  providerId: "words.buffer",
+                  triggerCharacters: ["."],
+                  wordBoundaryChars: [".", ","],
+                  priority: 2,
+                  timeoutMs: 50,
+                  maxItems: 20
+                });
+                Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.providers[0]}:${result.registeredProviderCount}:${result.runtimeBridge}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(evaluation.op_records, vec!["words:words.buffer:1:false"]);
+        assert_eq!(evaluation.completion_providers.len(), 1);
+        assert_eq!(evaluation.completion_providers[0].id, "words.buffer");
+        assert_eq!(
+            evaluation.completion_providers[0].provenance.package_prefix,
+            "words"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_facade_rejects_callbacks_missing_permission_and_bad_prefix() {
+        let service = ClayJsRuntimeService::default();
+        for source in [
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              packageName: "@vendor/evil",
+              packagePrefix: "evil",
+              permissions: ["completion-provider"],
+              providerId: "evil.words",
+              handler() {}
+            });
+            "#,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              packageName: "@vendor/nope",
+              packagePrefix: "nope",
+              permissions: [],
+              providerId: "nope.words"
+            });
+            "#,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              packageName: "@vendor/bad",
+              packagePrefix: "bad",
+              permissions: ["completion-provider"],
+              providerId: "other.words"
+            });
+            "#,
+        ] {
+            let error = service
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("clay.completion.invalid_provider")
+                    || message.contains("completion-provider"),
+                "unexpected completion registration error: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn load_package_registers_first_party_syntax_grammars() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                await loadPackage("@clay/rust");
+                await loadPackage("@clay/typescript");
+                await loadPackage("@clay/javascript");
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let languages = evaluation
+            .syntax_grammars
+            .iter()
+            .map(|grammar| grammar.language_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(languages, vec!["javascript", "rust", "typescript"]);
     }
 
     #[tokio::test]
@@ -2778,6 +2993,38 @@ mod tests {
         assert_eq!(
             result.op_records,
             vec!["1:5:markdown:1:markdown.togglePreview:1"]
+        );
+    }
+
+    #[tokio::test]
+    async fn syntax_grammar_packages_default_load_from_init_js() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let root = config_fixture("syntax-grammar-init-load");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+
+            const loaded = [];
+            for (const specifier of ["@clay/rust", "@clay/typescript", "@clay/javascript"]) {
+              const summary = await loadPackage(specifier);
+              loaded.push(`${summary.name}:${summary.apiPrefix}:${summary.modes.length}:${summary.permissions.join("+")}:${summary.contributions.syntaxGrammars}`);
+            }
+            Deno.core.ops.op_clay_runtime_record(loaded.join("|"));
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.op_records,
+            vec![
+                "@clay/rust:rust:0:parse-document+render-decorations:1|@clay/typescript:typescript:0:parse-document+render-decorations:1|@clay/javascript:javascript:0:parse-document+render-decorations:1"
+            ]
         );
     }
 
@@ -3994,6 +4241,102 @@ mod tests {
         .expect("authorized scoped package must load through shared package path");
 
         assert_eq!(result.op_records, vec!["helper loaded"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn load_package_completion_provider_fixture_registers_metadata() {
+        let root = config_fixture("completion-provider-package-load").join("completion-provider");
+        write_loadable_package(
+            &root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            export default function load() {
+              serverRegisterCompletionProvider({
+                packageName: "completion-provider",
+                packageVersion: "0.1.0",
+                packagePrefix: "completionprovider",
+                permissions: ["completion-provider"],
+                providerId: "completionprovider.words",
+                triggerCharacters: ["."],
+                timeoutMs: 50,
+                maxItems: 20
+              });
+            }
+            "#,
+        );
+        let op_state = Arc::new(crate::server::ops::ClayOpState::new_for_document(
+            Arc::new(Mutex::new(WorkspaceState::new())),
+            1,
+        ));
+        let mut package_json =
+            loadable_package_fixture("completion-provider", "completionprovider");
+        package_json["clay"]["permissions"] = serde_json::json!(["completion-provider"]);
+        {
+            let mut service = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            service
+                .install_from_value_at_root_with_spec(
+                    package_json,
+                    root.clone(),
+                    "completion-provider",
+                )
+                .expect("seed completion package install succeeds");
+            service
+                .authorize_package(
+                    "completion-provider",
+                    vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+                    crate::packages::authorization::RuntimeProfile::NativeTrust,
+                    "test-user",
+                )
+                .expect("seed completion package authorization succeeds");
+        }
+        let main_specifier = ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER).unwrap();
+        let loader = Rc::new(ClayModuleLoader::new(
+            main_specifier,
+            None,
+            None,
+            op_state.load_entry_allowlist(),
+        ));
+        let (mut runtime, heap_limit_hit) = create_js_runtime(
+            Arc::clone(&op_state),
+            Rc::clone(&loader),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+        );
+        let loaded = prepare_runtime_entry(
+            RuntimeEntry::ControlledSource(
+                r#"
+                import { loadPackage } from "clay:packages";
+                await loadPackage("completion-provider");
+                "#
+                .to_string(),
+            ),
+            1,
+        )
+        .unwrap();
+        loader.set_entry(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+        );
+        let result = evaluate_loaded_module(
+            &mut runtime,
+            &op_state,
+            loaded,
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            true,
+            &heap_limit_hit,
+        )
+        .await
+        .expect("completion provider loadPackage path succeeds");
+
+        assert_eq!(result.completion_providers.len(), 1);
+        assert_eq!(
+            result.completion_providers[0].id,
+            "completionprovider.words"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

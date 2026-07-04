@@ -465,9 +465,11 @@ impl TransientPackageOverlay {
                     .enumerate()
                     .map(|(index, item)| menu_item_to_list_item(index, item, selected_index))
                     .collect();
-                let action_targets: Vec<String> = items
+                let action_targets: Vec<String> = session
+                    .items()
                     .iter()
-                    .filter_map(|item| item.action_command_id.clone())
+                    .filter(|item| item.action.completion_accept.is_none())
+                    .map(|item| item.action.command_id.clone())
                     .collect();
                 children.push(PackageUiComponentTree {
                     id: list_id,
@@ -534,7 +536,11 @@ fn menu_item_to_list_item(
         id: format!("item.{index}"),
         label: item.label.clone(),
         detail: item.detail.clone(),
-        action_command_id: Some(item.action.command_id.clone()),
+        action_command_id: item
+            .action
+            .completion_accept
+            .is_none()
+            .then(|| item.action.command_id.clone()),
         selected: index == selected_index,
     }
 }
@@ -901,6 +907,39 @@ mod tests {
         assert_eq!(overlay_rect.x0, geometry.main_rect.x0);
         assert_eq!(overlay_rect.x1, geometry.main_rect.x1);
         assert!(overlay_rect.height() <= 240.0);
+    }
+
+    #[test]
+    fn completion_menu_projection_has_no_command_action_targets() {
+        let result = crate::protocol::CompletionResultSet {
+            request_id: 10,
+            client_id: 1,
+            document_id: 2,
+            document_version: 3,
+            behavior_version: 4,
+            provider_generation: 1,
+            replacement_range: crate::protocol::CompletionReplacementRange::new(0, 1),
+            status: crate::protocol::CompletionStatus::Ok,
+            items: vec![crate::protocol::CompletionItem::new(
+                "alpha",
+                "alpha",
+                crate::protocol::CompletionProvenance::builtin_core(),
+            )],
+            provenance: crate::protocol::CompletionProvenance::builtin_core(),
+        };
+        let session = crate::shell::completion_result_to_menu_session(&result);
+        let overlay = TransientPackageOverlay::from_menu_session(&session);
+
+        assert!(overlay.action_targets.is_empty());
+        let list_component = overlay
+            .component
+            .children
+            .iter()
+            .find(|child| child.kind == "list")
+            .expect("completion menu overlay contains list component");
+        assert_eq!(list_component.items[0].label, "alpha");
+        assert!(list_component.items[0].action_command_id.is_none());
+        assert!(list_component.items[0].selected);
     }
 
     #[test]

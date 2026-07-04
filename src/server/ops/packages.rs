@@ -462,6 +462,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
                 "uiStateScopes": record.contributions.ui_state_scopes.len(),
                 "layoutOverrides": record.contributions.layout_overrides.len(),
                 "packageOptions": record.contributions.package_options.len(),
+                "syntaxGrammars": record.contributions.syntax_grammars.len(),
             }
         })
     };

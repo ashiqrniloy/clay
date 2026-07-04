@@ -1547,6 +1547,95 @@ fn phase18_8_command_execution_and_transient_menu_configuration_uses_existing_ap
 }
 
 #[test]
+fn phase18_11_completion_provider_configuration_uses_existing_apis() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let completion_api_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/completion/server-register-completion-provider.md"),
+    )
+    .expect("read completion provider API docs");
+    let entries = inventory_entries();
+    let bind_key = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.keybindings.bindKey")
+        .expect("bindKey inventory entry");
+
+    // bindKey remains the documented manual completion trigger configuration
+    // surface and carries the same custom properties.
+    for property in ["key", "command", "scope", "when"] {
+        assert!(
+            inventory_custom_property_names(bind_key.get("custom_properties"))
+                .contains(&property.to_string()),
+            "bindKey custom_properties must include {property}"
+        );
+    }
+
+    for required in [
+        "Phase 18.11 completion provider configuration review",
+        "did **not** promote a new user-facing `clay:configuration` API",
+        "completion.trigger",
+        "No default `Ctrl+Space` shortcut in Rust exists",
+        "bindKey",
+        "TransientMenuSession",
+        "core.bufferWords",
+        "clay.completion.serverRegisterCompletionProvider",
+        "completion.menuPlacement",
+        "completion.providerPriority",
+        "completion.triggerCharacters",
+        "completion.bufferWordLimit",
+        "completion.timeout",
+        "RoutingPolicy::UiReactivePriority",
+        "metadata-only",
+        "package enable/disable",
+        "client-side JavaScript",
+        "raw-op",
+        "WASM",
+        "provider execution authority",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 18.11 config surface `{required}`"
+        );
+    }
+
+    for required in [
+        "completion.trigger",
+        "Phase 18.11 manual completion trigger route",
+        "built-in `UiReactivePriority` completion command id",
+        "not a callable `clay:configuration` API",
+    ] {
+        assert!(
+            bind_key_doc.contains(required),
+            "bind-key.md must document Phase 18.11 completion trigger note `{required}`"
+        );
+    }
+
+    assert!(
+        completion_api_doc.contains("clay.completion.serverRegisterCompletionProvider"),
+        "completion provider API docs must reference the registration API"
+    );
+
+    // No new clay.configuration.* APIs were introduced for completion provider /
+    // menu / trigger / provider-priority / provider-enable behavior.
+    assert!(
+        entries.iter().all(|entry| {
+            let id = entry.get("id");
+            !(id.starts_with("clay.configuration.")
+                && (id.contains("Completion")
+                    || id.contains("Autocomplete")
+                    || id.contains("CompletionProvider")
+                    || id.contains("CompletionMenu")))
+        }),
+        "Phase 18.11 must not add hidden clay.configuration completion/autocomplete APIs"
+    );
+}
+
+#[test]
 fn api_inventory_has_required_fields() {
     let entries = inventory_entries();
     let required_fields = [
@@ -3230,6 +3319,70 @@ fn phase20_rust_public_functions_have_api_mappings_or_internal_visibility() {
 /// would defeat the boundary — e.g. lift the timeout to bypass the watchdog).
 /// This test pins that they remain documented as intentionally non-configurable
 /// and absent from the runtime-backed configuration inventory.
+#[test]
+fn syntax_grammar_registration_api_has_public_facade_op_inventory_and_docs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+        .expect("read api-inventory.toml");
+    let runtime_facade =
+        fs::read_to_string(root.join("src/server/js_runtime.rs")).expect("read js_runtime.rs");
+    let facade =
+        fs::read_to_string(root.join("runtime/js/syntax.ts")).expect("read runtime/js/syntax.ts");
+    let op = fs::read_to_string(root.join("src/server/ops/syntax.rs")).expect("read syntax op");
+    let docs = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md"),
+    )
+    .expect("read syntax API docs");
+
+    for required in [
+        "clay.syntax.serverRegisterSyntaxGrammar",
+        "js_module = \"clay:syntax\"",
+        "js_export = \"serverRegisterSyntaxGrammar\"",
+        "facade_path = \"runtime/js/syntax.ts::serverRegisterSyntaxGrammar\"",
+        "deno_op = \"op_clay_syntax_register_syntax_grammar\"",
+        "key_bindings = []",
+        "custom_properties = [",
+        "parse-document",
+        "render-decorations",
+    ] {
+        assert!(
+            inventory.contains(required),
+            "api-inventory.toml must contain syntax API metadata `{required}`"
+        );
+    }
+    assert!(
+        facade.contains("export function serverRegisterSyntaxGrammar")
+            && facade.contains("op_clay_syntax_register_syntax_grammar")
+            && facade.contains("raw authority field"),
+        "runtime/js/syntax.ts must export the public facade and reject raw authority fields"
+    );
+    assert!(
+        runtime_facade.contains("\"clay:syntax\" => Some(CLAY_FACADE_SYNTAX)")
+            && runtime_facade.contains("op_clay_syntax_register_syntax_grammar"),
+        "embedded runtime facade must expose clay:syntax and wire the op"
+    );
+    assert!(
+        op.contains("assemble_package_record")
+            && op.contains("register_syntax_grammar_package")
+            && op.contains("reject_prohibited_authority"),
+        "syntax op must reuse package validation, registry insertion, and authority rejection"
+    );
+    for required in [
+        "tree-sitter-wasm",
+        "package-root-confined",
+        "first-party-only",
+        "raw Deno ops",
+        "third-party/native grammar artifact loading",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+    ] {
+        assert!(
+            docs.contains(required),
+            "syntax API docs must contain security/performance phrase `{required}`"
+        );
+    }
+}
+
 #[test]
 fn plan_030_security_budgets_are_intentionally_non_configurable() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

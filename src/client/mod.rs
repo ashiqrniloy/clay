@@ -12,11 +12,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::editor::EditorEditEvent;
+use crate::editor::{EditorCompletionRequestEvent, EditorEditEvent};
 use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, DecorationSet, DocumentAccess,
+    BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, CompletionRejection,
+    CompletionRequest, CompletionRequestId, CompletionResultSet, DecorationSet, DocumentAccess,
     DocumentId, DocumentMetadata, DocumentVersion, EditOperation, EditRejection, FileErrorCode,
     PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
     SduiTreeUpdate, ServerMessage, TransactionId, WorkspaceRootId,
@@ -285,6 +286,26 @@ impl ClientEditQueue {
         })
     }
 
+    pub(crate) fn enqueue_completion_request(
+        &self,
+        event: EditorCompletionRequestEvent,
+        request_id: CompletionRequestId,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::CompletionRequest {
+            request: CompletionRequest {
+                request_id,
+                client_id: self.client_id,
+                document_id: event.document_id,
+                document_version: event.document_version,
+                behavior_version: event.behavior_version,
+                cursor_byte_offset: event.cursor_byte_offset,
+                replacement_range: event.replacement_range,
+                trigger: event.trigger,
+                provider_generation: 0,
+            },
+        })
+    }
+
     pub fn enqueue_open_selected_file(
         &self,
         selected_path: PathBuf,
@@ -389,6 +410,11 @@ pub enum ClientConnectionEvent {
     },
     SduiUpdate(SduiTreeUpdate),
     DecorationSet(DecorationSet),
+    CompletionResult(CompletionResultSet),
+    CompletionRejected {
+        request_id: CompletionRequestId,
+        reason: CompletionRejection,
+    },
     RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
     ServerError {
@@ -763,6 +789,12 @@ async fn run_connection<S>(
                     Ok(ServerMessage::DecorationSet(set)) => {
                         let _ = events.send(ClientConnectionEvent::DecorationSet(set)).await;
                     }
+                    Ok(ServerMessage::CompletionResult { result }) => {
+                        let _ = events.send(ClientConnectionEvent::CompletionResult(result)).await;
+                    }
+                    Ok(ServerMessage::CompletionRejected { request_id, reason }) => {
+                        let _ = events.send(ClientConnectionEvent::CompletionRejected { request_id, reason }).await;
+                    }
                     Ok(ServerMessage::RuntimeDiagnostic(diagnostic)) => {
                         let _ = events.send(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)).await;
                     }
@@ -829,16 +861,16 @@ mod tests {
     };
     #[cfg(any(unix, windows))]
     use super::{ClientSession, connect};
-    use crate::editor::EditorEditEvent;
+    use crate::editor::{EditorCompletionRequestEvent, EditorEditEvent};
     #[cfg(any(unix, windows))]
     use crate::ipc::IpcEndpoint;
     #[cfg(any(unix, windows))]
     use crate::protocol::EditRejection;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess, EditOperation,
-        FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource,
-        SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage,
-        codec::Codec,
+        BehaviorManifest, ClientMessage, CommandDeclaration, CompletionReplacementRange,
+        CompletionTrigger, DocumentAccess, EditOperation, FileErrorCode, PROTOCOL_VERSION,
+        RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
+        SduiNodeId, SduiNodeKind, SduiTree, ServerMessage, codec::Codec,
     };
     #[cfg(any(unix, windows))]
     use crate::server::{IpcServer, ServerConfig};
@@ -1000,6 +1032,43 @@ mod tests {
                 operation: EditOperation::Insert {
                     byte_offset: 2,
                     text: "x".to_string()
+                }
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_request_is_enqueued_as_non_blocking_message() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::Editable { lease_id: 1 });
+
+        queue
+            .enqueue_completion_request(
+                EditorCompletionRequestEvent {
+                    document_id: 4,
+                    document_version: 5,
+                    behavior_version: 6,
+                    cursor_byte_offset: 9,
+                    replacement_range: CompletionReplacementRange::new(7, 9),
+                    trigger: CompletionTrigger::Manual,
+                },
+                11,
+            )
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::CompletionRequest {
+                request: crate::protocol::CompletionRequest {
+                    request_id: 11,
+                    client_id: 42,
+                    document_id: 4,
+                    document_version: 5,
+                    behavior_version: 6,
+                    cursor_byte_offset: 9,
+                    replacement_range: CompletionReplacementRange::new(7, 9),
+                    trigger: CompletionTrigger::Manual,
+                    provider_generation: 0,
                 }
             }
         );

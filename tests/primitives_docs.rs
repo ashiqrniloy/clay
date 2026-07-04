@@ -166,7 +166,7 @@ fn primitives_budget_constants_compile() {
     assert_eq!(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, 4096);
     assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
     assert_eq!(MODE_ACTIVATION_P95_BUDGET_MS, 100);
-    assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 4096);
+    assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
     assert_eq!(FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, 2048);
     assert_eq!(PRIMITIVES_REGISTRY_VERSION, "phase16-primitives-v1");
 }
@@ -183,6 +183,7 @@ fn primitives_registry_categories_cover_required_list() {
         "TextTransform",
         "IncrementalParseUpdate",
         "DecorationRange",
+        "SyntaxGrammarContribution",
         "FoldingRange",
         "CompletionTriggerAndResult",
         "CommandDeclaration",
@@ -896,6 +897,20 @@ fn phase18_9_generic_text_code_modes_primitive_review() -> String {
     .expect("read Phase 18.9 generic text/code modes primitive review")
 }
 
+fn phase18_10_tree_sitter_grammar_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.10-tree-sitter-grammar-primitive-review.md",
+    ))
+    .expect("read Phase 18.10 Tree-sitter grammar primitive review")
+}
+
+fn phase18_11_completion_provider_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.11-completion-provider-primitive-review.md",
+    ))
+    .expect("read Phase 18.11 completion provider primitive review")
+}
+
 #[test]
 fn phase18_1_shell_layout_primitive_review_records_existing_inventory() {
     let wiki_index =
@@ -1569,6 +1584,269 @@ fn phase18_9_generic_text_code_modes_primitive_review_records_inventory_and_gaps
             "primitive registry must mention Phase 18.9 primitive term: {required}"
         );
     }
+}
+
+#[test]
+fn phase18_10_tree_sitter_grammar_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+    let review = phase18_10_tree_sitter_grammar_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.10-tree-sitter-grammar-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.10 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.10-tree-sitter-grammar-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.10 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Document classification and major-mode activation",
+        "Package loading and manifest validation",
+        "Parse coordinator and background work",
+        "Decoration transport and style-token validation",
+        "Docs registry and wiki coverage",
+        "`src/packages/modes.rs::ModeRegistry`",
+        "`src/packages/manifest.rs`",
+        "`src/packages/permissions.rs`",
+        "`src/server/parse_coordinator.rs`",
+        "`src/server/decorations.rs`",
+        "`runtime/js/parse.ts`",
+        "`runtime/js/decorations.ts`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.10 primitive review must record existing inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.10 Primitive Gaps",
+        "### `SyntaxGrammarContribution`",
+        "### Grammar registry",
+        "### Query/capture validation",
+        "### Syntax provider selection",
+        "active syntax grammar separate from active major mode",
+        "active_major_mode: core.code",
+        "active_syntax_grammar: rust",
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "grammar-only packages",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.10 primitive review must map generic grammar gaps: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Package load / grammar validation",
+        "Document open / reload / explicit reclassification",
+        "Background parse/highlight work",
+        "Paint/text-event/key hot path",
+        "No Tree-sitter parsing",
+        "no synchronous IPC before local paint",
+        "`INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`",
+        "`DECORATION_PAYLOAD_BUDGET_BYTES`",
+        "`SYNTAX_CACHE_BUDGET_BYTES`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.10 primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "First-party-only grammar artifact scope",
+        "Package-root path confinement",
+        "No arbitrary native/third-party artifact loading",
+        "No new filesystem, network, shell, AI, WASM, native-widget, raw-op, client-side JavaScript, package-manager, package-install, package-enable/disable, or package-control authority",
+        "Do not add language-specific Rust parser/highlighter branches",
+        "Do not implement `@clay/rust`, `@clay/typescript`, or `@clay/javascript` as full major modes",
+        "Do not silently auto-load grammar packages",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.10 primitive review must reject unsafe/language-specific shape: {required}"
+        );
+    }
+
+    for required in [
+        "SyntaxGrammarContribution",
+        "clay.syntax.serverRegisterSyntaxGrammar",
+        "active syntax grammar",
+        "first-party grammar-only packages",
+        "no arbitrary native/third-party artifact loading",
+    ] {
+        assert!(
+            registry.contains(required) || backlog.contains(required) || review.contains(required),
+            "Phase 18.10 docs must mention grammar primitive term: {required}"
+        );
+    }
+
+    assert!(
+        registry.contains("SyntaxGrammarContribution"),
+        "primitive registry must contain the SyntaxGrammarContribution row"
+    );
+    assert!(
+        backlog.contains("SyntaxGrammarContribution"),
+        "primitive backlog must contain the SyntaxGrammarContribution handoff row"
+    );
+}
+
+#[test]
+fn phase18_11_completion_provider_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let registry = primitives_registry();
+    let backlog = primitives_backlog();
+    let review = phase18_11_completion_provider_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.11-completion-provider-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.11 completion provider primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.11-completion-provider-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.11 completion provider primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Behavior manifests and autocomplete trigger metadata",
+        "Client behavior routing and local edit path",
+        "Command registry, command execution, and manual completion trigger",
+        "Transient menu session and overlay projection",
+        "Mode registry, fallback modes, and classification",
+        "Parse coordinator and background work",
+        "Syntax grammar registry and package provenance",
+        "Decoration transport and payload budgets",
+        "Package loading, manifest validation, and permissions",
+        "Performance budgets and protocol codec",
+        "Docs registry and wiki coverage",
+        "`src/protocol/mod.rs`",
+        "`src/client/behavior.rs`",
+        "`src/perf/budgets.rs`",
+        "`src/shell/transient_menu.rs`",
+        "`src/server/parse_coordinator.rs`",
+        "`src/server/syntax.rs`",
+        "`src/packages/permissions.rs`",
+        "`src/packages/service.rs`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.11 primitive review must record existing inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.11 Primitive Gaps",
+        "### `CompletionRequest` / `CompletionResultSet` / `CompletionItem`",
+        "### `CompletionProviderRegistry`",
+        "### `CompletionCoordinator` (cancellable UI-reactive lane)",
+        "### Behavior-manifest trigger routing and manual trigger",
+        "### `TransientMenuSession` completion display/accept adapter",
+        "### Built-in buffer-word provider",
+        "### Clay JS completion provider registration API",
+        "CompletionTriggerAndResult",
+        "clay.completion.serverRegisterCompletionProvider",
+        "completion-provider",
+        "TransientMenuSession",
+        "built-in buffer-word provider",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.11 primitive review must map generic completion gaps: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Trigger classification / local edit",
+        "Request enqueue",
+        "Provider execution / result computation",
+        "Menu render / selection / accept",
+        "`ClientFirstPredictable`",
+        "`UiReactivePriority`",
+        "cancellable",
+        "No synchronous IPC before local paint",
+        "`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`",
+        "`BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.11 primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "Completion provider permission required",
+        "Inert result items only",
+        "No new default authority",
+        "Package provenance and loading boundary",
+        "Trigger metadata is manifest data only",
+        "completion-provider",
+        "no filesystem access beyond already-open Clay-provided document snapshots, network, shell, AI, workspace index, WASM, raw ops, native widgets, client-side JavaScript, package-manager execution, package enable/disable, or side-effectful accept actions",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.11 primitive review must record permission/security boundary: {required}"
+        );
+    }
+
+    for required in [
+        "Do not add language-specific Rust completion branches",
+        "Do not add a completion-only menu widget",
+        "Do not run provider JavaScript or completion computation in Masonry paint, layout, keypress, pointer, scroll, or text-event handlers",
+        "Do not block local typing/rendering on synchronous IPC",
+        "Do not silently auto-load completion provider packages",
+        "Do not implement LSP, AI, workspace-index, snippet-expansion, shell/tool, or network-backed providers in this phase",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.11 primitive review must reject unsafe/language-specific shape: {required}"
+        );
+    }
+
+    assert!(
+        registry.contains("CompletionTriggerAndResult"),
+        "primitive registry must contain the CompletionTriggerAndResult row"
+    );
+    assert!(
+        backlog.contains("CompletionTriggerAndResult"),
+        "primitive backlog must contain the CompletionTriggerAndResult handoff row"
+    );
+    assert!(
+        backlog.contains("Phase-18.11-completion"),
+        "primitive backlog must record the Phase-18.11-completion priority tier"
+    );
+    let deferred_start = backlog
+        .find("## Deferred")
+        .expect("backlog must have a Deferred section");
+    let deferred_end = backlog[deferred_start + 1..]
+        .find("\n## ")
+        .map(|rel| deferred_start + 1 + rel)
+        .unwrap_or(backlog.len());
+    assert!(
+        !backlog[deferred_start..deferred_end].contains("CompletionTriggerAndResult"),
+        "primitive backlog must move CompletionTriggerAndResult out of the Deferred section into Phase-18.11-completion"
+    );
 }
 
 #[test]

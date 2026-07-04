@@ -12,10 +12,12 @@
 - `src/masonry_editor.rs`
 - `tests/decoration_transport.rs`
 - `packages/markdown/dist/parser.js`
+- `src/server/syntax.rs`
+- `tests/syntax_grammar.rs`
 
 ## Overview
 
-The decoration transport carries package-produced inline editor decorations as bounded inert data. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `clay.decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. The first-party Markdown package now uses this path from its parser adapter for heading, emphasis, code, fence, and list-marker spans. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript.
+The decoration transport carries package-produced inline editor decorations as bounded inert data. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `clay.decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. The first-party Markdown package uses this path from its parser adapter for heading, emphasis, code, fence, and list-marker spans. Phase 18.10 reuses the same primitive for Tree-sitter syntax highlighting: `TreeSitterSyntaxHandler` maps package-approved query captures to known style tokens, validates the resulting syntax `DecorationSet`, enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and lets the parse coordinator publish the inert update. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript.
 
 ## Responsibilities
 
@@ -32,7 +34,7 @@ The decoration transport carries package-produced inline editor decorations as b
 1. Package code produces spans server-side, but only the Rust validation path may publish them.
 2. Package JavaScript calls `serverPublishDecorations`, which serializes options into `op_clay_decorations_publish_decorations`; the op reconstructs package provenance and rejects missing `render-decorations` permission before publication.
 3. `validate_decoration_publication` first checks the package has `PackagePermission::RenderDecorations`, then delegates to `validate_decoration_set` for cheap range/version/style/provenance checks.
-4. Validation rejects unknown style tokens/kinds, rejects spans outside the declared viewport, sorts spans viewport-first by intersection, priority, and byte range, then serializes the set with `rkyv::to_bytes` to enforce `DECORATION_PAYLOAD_BUDGET_BYTES` before sending.
+4. Validation rejects unknown style tokens/kinds, rejects spans outside the declared viewport, sorts spans viewport-first by intersection, priority, and byte range, then serializes the set with `rkyv::to_bytes` to enforce `DECORATION_PAYLOAD_BUDGET_BYTES` before sending. Tree-sitter syntax handlers perform the same serialized payload check before inserting a validated syntax set into `SyntaxChunkCache`, so oversized query output fails closed instead of being cached.
 5. The protocol sends validated data as `ServerMessage::DecorationSet(DecorationSet)` through the existing codec; there is no decoration-specific serialization side channel.
 6. The client connection task converts the message into `ClientConnectionEvent::DecorationSet`.
 7. `EditorWidget::apply_connection_event` installs the chunk through `EditorSurface::apply_decoration_set`, which rejects mismatched document IDs or versions.
@@ -59,6 +61,7 @@ let message = ServerMessage::DecorationSet(set);
 ## Tests
 
 - `tests/decoration_transport.rs`: oversized payload rejection, stale-version rejection, invalid range/unknown token rejection, off-viewport rejection, generic non-Markdown language package syntax-span acceptance, representative Markdown decoration payload budget coverage, near-viewport client pruning, stale-version cache clearing, protocol codec round trip, and client render-hook application.
+- `tests/syntax_grammar.rs`: Tree-sitter syntax handlers produce bounded `DecorationSet` values for Rust, TypeScript, and JavaScript fixtures, reject per-viewport capture overflow, reject unmapped captures, and preserve package provenance on syntax spans.
 - `src/server/decorations.rs::tests::large_file_decoration_cache_respects_30_mib_budget`: verifies server-side chunk-cache budget accounting and LRU eviction.
 - `tests/performance_protocol.rs::decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport`: verifies chunk IPC payloads remain under the decoration transport budget.
 - `tests/editor_performance_invariants.rs::paint_uses_cached_inert_spans_without_package_javascript`: guards paint/layout source against package JavaScript, parser, server, or op calls.

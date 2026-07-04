@@ -1,5 +1,6 @@
 mod behavior;
 mod commands;
+mod completion;
 mod configuration;
 mod decorations;
 mod documents;
@@ -9,6 +10,7 @@ mod packages;
 mod parse;
 mod planned;
 mod sdui;
+mod syntax;
 mod ui;
 mod workspace;
 
@@ -29,6 +31,7 @@ use crate::{
 use self::{
     behavior::{op_clay_behavior_get_active_manifest, op_clay_behavior_list_routes},
     commands::{op_clay_commands_list_commands, op_clay_commands_register_command},
+    completion::op_clay_completion_register_completion_provider,
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,
         op_clay_configuration_set_package_option,
@@ -55,6 +58,7 @@ use self::{
     parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
+    syntax::op_clay_syntax_register_syntax_grammar,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
         op_clay_ui_register_panel_contribution, op_clay_ui_register_theme_token,
@@ -84,6 +88,8 @@ pub(crate) struct ClayOpState {
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
     ui: Mutex<crate::server::ui::PackageUiRegistry>,
+    syntax_grammars: Mutex<crate::server::syntax::SyntaxGrammarRegistry>,
+    completion_providers: Mutex<Vec<crate::server::completion::CompletionProviderMeta>>,
     runtime_context: Mutex<ClayRuntimeContext>,
     // Shared PackageService for loadPackage resolution. Bundled packages are
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
@@ -130,6 +136,8 @@ impl ClayOpState {
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
             ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
+            syntax_grammars: Mutex::new(crate::server::syntax::SyntaxGrammarRegistry::new()),
+            completion_providers: Mutex::new(Vec::new()),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
@@ -489,6 +497,51 @@ impl ClayOpState {
             .snapshot()
     }
 
+    pub(crate) fn syntax_grammars(&self) -> Vec<crate::server::syntax::SyntaxGrammarContribution> {
+        self.syntax_grammars
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .list()
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn completion_providers(
+        &self,
+    ) -> Vec<crate::server::completion::CompletionProviderMeta> {
+        self.completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    pub(super) fn register_completion_provider_metadata(
+        &self,
+        metas: Vec<crate::server::completion::CompletionProviderMeta>,
+    ) -> Result<Vec<crate::server::completion::CompletionProviderMeta>, String> {
+        let mut providers = self
+            .completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        for meta in &metas {
+            if providers.iter().any(|existing| existing.id == meta.id) {
+                return Err(format!("provider `{}` is already registered", meta.id));
+            }
+        }
+        providers.extend(metas.clone());
+        Ok(metas)
+    }
+
+    pub(super) fn register_syntax_grammar_package(
+        &self,
+        package: &crate::packages::record::PackageRecord,
+    ) -> Result<usize, crate::server::syntax::SyntaxGrammarRegistryError> {
+        self.syntax_grammars
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_package(package)
+    }
+
     pub(super) fn register_panel_contribution(
         &self,
         package: &crate::packages::manifest::ClayPackageManifest,
@@ -657,6 +710,8 @@ extension!(
         op_clay_decorations_publish_decorations,
         op_clay_parse_register_parse_handler,
         op_clay_parse_store_update,
+        op_clay_syntax_register_syntax_grammar,
+        op_clay_completion_register_completion_provider,
         op_clay_runtime_unavailable,
     ],
 );

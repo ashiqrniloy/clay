@@ -168,6 +168,28 @@ Security and performance rules:
 - Paint consumes already-applied local spans only; cache eviction, chunk validation, parser execution, and package JavaScript remain outside paint, keypress, scroll, layout, and text-event handlers.
 - Rust cache/renderer primitives do not branch on Markdown syntax or markdown-it token names; package adapters translate language-specific parser output to generic decoration chunks before publication.
 
+## Phase 18.10 Syntax Grammar Capture Validation
+
+`SyntaxGrammarContribution` packages translate `tree-sitter-wasm` highlight captures to generic Clay style tokens through the `Background` no-hot-path parse/decor path before any `DecorationSet` reaches the client. The package declares a `styleMap` such as:
+
+```json
+{
+  "keyword": "keyword.control",
+  "string": "string.quoted",
+  "comment": "comment.line",
+  "punctuation": "punctuation.definition"
+}
+```
+
+Validation runs outside paint/key/text hot paths and remains bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` plus the shared `SYNTAX_CACHE_BUDGET_BYTES` syntax-chunk cache:
+
+1. Package metadata validation rejects raw CSS, raw color strings, unknown style tokens, native handles, raw ops, client JavaScript, and external/traversing grammar/query paths.
+2. `TreeSitterSyntaxHandler::new` compiles the highlight query and rejects any query capture without a `styleMap` entry, returning an actionable diagnostic such as an unmapped `@function` capture.
+3. Viewport parse/highlight execution uses `QueryCursor::set_byte_range`, maps captures to `DecorationKind::Syntax`, clamps spans to the requested viewport, and rejects capture output above the per-viewport cap before serialization/publication.
+4. `DecorationSet` validation and `DECORATION_PAYLOAD_BUDGET_BYTES` checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport.
+
+Invalid or unsupported queries fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar.
+
 ## Phase 17/18 Follow-Up
 
 - Extend chunk publication with explicit empty chunk-clearing metadata if package adapters need to clear an individual off-viewport package chunk without publishing replacement spans.
