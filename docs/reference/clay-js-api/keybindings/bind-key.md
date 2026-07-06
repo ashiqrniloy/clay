@@ -75,14 +75,19 @@ bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 bindKey("Ctrl+Shift+P", "clay.controlCenter.open", { scope: "editor" });
 // Configure the Phase 18.11 manual completion trigger route from ~/.config/clay/init.js.
 bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
+// Configure Phase 18.12 file-browser/fuzzy-open routes from ~/.config/clay/init.js.
+bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 ```
 
 Phase 18.8 note: `clay.controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Binding it through `bindKey` is the documented configuration surface for the Control Center launch route; no default chord exists in Rust. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.
 
+Phase 18.12 note: `clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes; no default `Ctrl+P` or `Ctrl+B` chord exists in Rust. Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
+
 ## Options
 
 - `key` (`string`): Key chord, for example `"Ctrl+I"`.
-- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"clay.editor.serverInsertText"`, `"clay.documents.clientOpenFileDialog"`, the built-in server-first command id `"clay.controlCenter.open"`, or the built-in `UiReactivePriority` completion command id `"completion.trigger"`; future extension commands must be registered and permissioned before they can be bound.
+- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"clay.editor.serverInsertText"`, `"clay.documents.clientOpenFileDialog"`, the built-in server-first command ids `"clay.controlCenter.open"`, `"clay.workspace.openFuzzyFile"`, `"clay.workspace.toggleFileBrowser"`, or the built-in `UiReactivePriority` completion command id `"completion.trigger"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 

@@ -1636,6 +1636,100 @@ fn phase18_11_completion_provider_configuration_uses_existing_apis() {
 }
 
 #[test]
+fn phase18_12_workspace_file_browser_configuration_uses_existing_apis() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let configuration_wiki =
+        fs::read_to_string(root.join("docs/wiki/modules/configuration-runtime.md"))
+            .expect("read configuration wiki");
+    let entries = inventory_entries();
+    let bind_key = entries
+        .iter()
+        .find(|entry| entry.get("id") == "clay.keybindings.bindKey")
+        .expect("bindKey inventory entry");
+
+    for property in ["key", "command", "scope", "when"] {
+        assert!(
+            inventory_custom_property_names(bind_key.get("custom_properties"))
+                .contains(&property.to_string()),
+            "bindKey custom_properties must include {property}"
+        );
+    }
+
+    for required in [
+        "Phase 18.12 workspace file-browser configuration review",
+        "did **not** promote a new user-facing `clay:configuration` API",
+        "clay.workspace.openFuzzyFile",
+        "clay.workspace.toggleFileBrowser",
+        "No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists",
+        "bindKey",
+        "serverOpenFile",
+        "serverRevealInTree",
+        "serverAddWorkspaceRoot",
+        "serverListDirectory",
+        "File-browser listing/open/reveal authority is server-owned",
+        "fileBrowser.defaultVisibility",
+        "workspace.fileBrowser.leftPanelDefault",
+        "workspace.markerFiles",
+        "workspace.ignoreRules",
+        "fileBrowser.maxDepth",
+        "workspace.allowArbitraryPath",
+        "selected-file grants",
+        "raw-op",
+        "client-side JavaScript",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 18.12 config surface `{required}`"
+        );
+    }
+
+    for required in [
+        "clay.workspace.openFuzzyFile",
+        "clay.workspace.toggleFileBrowser",
+        "Phase 18.12 note",
+        "fixed built-in server-first workspace file-browser command ids",
+        "not callable `clay:configuration` APIs",
+    ] {
+        assert!(
+            bind_key_doc.contains(required),
+            "bind-key.md must document Phase 18.12 file-browser binding note `{required}`"
+        );
+    }
+
+    for required in [
+        "Phase 18.12 workspace file-browser defaults",
+        "not new `clay:configuration` APIs",
+        "clay.workspace.openFuzzyFile",
+        "KNOWN_PROJECT_MARKERS",
+        "not hidden `init.js` keys",
+    ] {
+        assert!(
+            configuration_wiki.contains(required),
+            "configuration runtime wiki must document Phase 18.12 file-browser config audit `{required}`"
+        );
+    }
+
+    assert!(
+        entries.iter().all(|entry| {
+            let id = entry.get("id");
+            !(id.starts_with("clay.configuration.")
+                && (id.contains("FileBrowser")
+                    || id.contains("FuzzyOpen")
+                    || id.contains("WorkspaceRoot")
+                    || id.contains("WorkspaceIgnore")
+                    || id.contains("WorkspaceMarker")))
+        }),
+        "Phase 18.12 must not add hidden clay.configuration workspace/file-browser APIs"
+    );
+}
+
+#[test]
 fn api_inventory_has_required_fields() {
     let entries = inventory_entries();
     let required_fields = [

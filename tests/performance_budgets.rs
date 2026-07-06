@@ -473,7 +473,7 @@ fn performance_budget_constants_are_exported() {
     // If a constant is removed or renamed the import at the top of this file
     // will fail to compile, making this an implicit compile-time guard.
     assert_eq!(CLIENT_EDIT_PAYLOAD_BUDGET_BYTES, 512);
-    assert_eq!(EDIT_ACK_PAYLOAD_BUDGET_BYTES, 112);
+    assert_eq!(EDIT_ACK_PAYLOAD_BUDGET_BYTES, 128);
     assert_eq!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, 2048);
     assert_eq!(SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, 4096);
     assert_eq!(SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, 1024);

@@ -2113,8 +2113,13 @@ mod tests {
             )
             .unwrap();
 
+        let mut event = session.events.recv().await.unwrap();
+        if matches!(event, ClientConnectionEvent::SduiSnapshot { .. }) {
+            event = session.events.recv().await.unwrap();
+        }
+
         assert_eq!(
-            session.events.recv().await.unwrap(),
+            event,
             ClientConnectionEvent::EditAck {
                 document_id: session.initial_state.document_id,
                 version: session.initial_state.document_version + 1,

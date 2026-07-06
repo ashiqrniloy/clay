@@ -264,6 +264,8 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/completion.rs::WordBoundaryRule",
         "src/server/completion.rs::WordBoundaryRule::default_buffer_word",
         "src/server/completion.rs::WordBoundaryRule::new",
+        "src/server/command_execution.rs::WorkspaceActionResult",
+        "src/server/workspace.rs::OpenDocumentSnapshot",
     ]
     .into_iter()
     .collect();
@@ -802,8 +804,9 @@ fn phase18_8_command_execution_and_transient_menu_surfaces_are_internal() {
             server_public_items.iter().any(|s| s == item),
             "CommandExecutor surface {item} must remain public to the crate (integration tests rely on it)"
         );
+        let exact_inventory_mapping = format!("backing_rust = \"{item}\"");
         assert!(
-            !inventory_text.contains(item),
+            !inventory_text.contains(&exact_inventory_mapping),
             "CommandExecutor surface {item} must not be mapped as a user-facing Clay JS API"
         );
     }
@@ -857,16 +860,11 @@ fn phase18_8_command_execution_and_transient_menu_surfaces_are_internal() {
         "ControlCenter must not become a public user-facing Rust API"
     );
 
-    // No inventory entry, facade, or op may claim a public execute-command or
-    // open-transient-menu Clay JS API.
+    // No inventory entry, facade, or op may claim public transient-menu/control-center APIs.
     let mut forbidden_ids = Vec::new();
     for entry in &entries {
         let id = entry.get("id");
-        for forbidden in [
-            "clay.commands.serverExecuteCommand",
-            "clay.ui.serverOpenTransientMenu",
-            "clay.controlCenter.open",
-        ] {
+        for forbidden in ["clay.ui.serverOpenTransientMenu", "clay.controlCenter.open"] {
             if id == forbidden {
                 forbidden_ids.push(id.to_string());
             }
@@ -878,9 +876,7 @@ fn phase18_8_command_execution_and_transient_menu_surfaces_are_internal() {
          command execution/transient menu/Control Center are server-internal"
     );
     for forbidden_facade_or_op in [
-        "runtime/js/commands.ts::serverExecuteCommand",
         "runtime/js/ui.ts::serverOpenTransientMenu",
-        "op_clay_commands_execute",
         "op_clay_ui_open_transient_menu",
     ] {
         assert!(
@@ -889,12 +885,6 @@ fn phase18_8_command_execution_and_transient_menu_surfaces_are_internal() {
              packages reach command execution only through server-owned CommandExecutor"
         );
     }
-    assert!(
-        !std::fs::read_to_string(root.join("runtime/js/commands.ts"))
-            .expect("read commands facade")
-            .contains("serverExecuteCommand"),
-        "commands facade must not export a public serverExecuteCommand function"
-    );
     assert!(
         !std::fs::read_to_string(root.join("runtime/js/ui.ts"))
             .expect("read ui facade")

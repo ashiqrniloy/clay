@@ -189,7 +189,7 @@ fn phase18_9_mode_activation_budget_is_single_source_of_truth() {
         ModeRegistry::new().activation_budget_ms(),
         MODE_ACTIVATION_P95_BUDGET_MS
     );
-    assert!(MODE_ACTIVATION_P95_BUDGET_MS > 0);
+    const { assert!(MODE_ACTIVATION_P95_BUDGET_MS > 0) };
 }
 
 #[test]
@@ -198,9 +198,11 @@ fn phase18_9_keypress_to_paint_budget_orders_below_mode_activation_budget() {
     // stay well below open/reload activation latency: a mode activation that
     // blocked local paint would violate the no-sync-JS-before-paint invariant
     // Phase 18.9 preserves. Advisory ordering only (no CI latency harness).
-    assert!(
-        KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS < MODE_ACTIVATION_P95_BUDGET_MS,
-        "keypress-to-paint budget must be tighter than mode activation budget"
-    );
-    assert!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES > 0);
+    const {
+        assert!(
+            KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS < MODE_ACTIVATION_P95_BUDGET_MS,
+            "keypress-to-paint budget must be tighter than mode activation budget"
+        )
+    };
+    const { assert!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES > 0) };
 }

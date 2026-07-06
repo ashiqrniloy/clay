@@ -48,12 +48,11 @@ impl ControlCenter {
             .collect();
 
         for command_id in builtin_server_command_ids() {
-            if registry.get(command_id).is_none() {
-                if let Some(command) =
+            if registry.get(command_id).is_none()
+                && let Some(command) =
                     crate::server::command_execution::builtin_server_command(command_id)
-                {
-                    all_items.push(command_to_menu_item(&command));
-                }
+            {
+                all_items.push(command_to_menu_item(&command));
             }
         }
 
@@ -405,11 +404,11 @@ mod tests {
         );
 
         let mut center = ControlCenter::open(&registry, 3);
-        let session = center.set_query("toggle");
+        let session = center.set_query("togglePreview");
         assert_eq!(session.items().len(), 1);
         assert_eq!(session.items()[0].id, "markdown.togglePreview");
 
-        let session = center.set_query("Toggle");
+        let session = center.set_query("Toggle Preview");
         assert_eq!(session.items().len(), 1);
         assert_eq!(session.items()[0].id, "markdown.togglePreview");
 
@@ -437,7 +436,7 @@ mod tests {
         );
 
         let mut center = ControlCenter::open(&registry, 4);
-        let session = center.set_query("toggle");
+        let session = center.set_query("togglePreview");
         assert_eq!(session.selected_index(), 0);
 
         let result = center

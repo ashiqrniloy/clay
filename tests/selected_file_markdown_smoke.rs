@@ -38,7 +38,8 @@ await loadPackage("@clay/markdown");
     let endpoint = smoke_endpoint("selected-markdown-open");
     let mut config = ServerConfig::new(endpoint.clone());
     config.configuration_root = Some(config_root);
-    let server = tokio::spawn(async move { IpcServer::new(config).run().await });
+    let server = IpcServer::try_new(config).expect("test server config is valid");
+    let server = tokio::spawn(async move { server.run().await });
 
     let result = run_smoke(&endpoint, &selected).await;
     server.abort();

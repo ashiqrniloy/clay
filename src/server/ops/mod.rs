@@ -4,6 +4,7 @@ mod completion;
 mod configuration;
 mod decorations;
 mod documents;
+mod git;
 mod keybindings;
 mod modes;
 mod packages;
@@ -30,7 +31,10 @@ use crate::{
 
 use self::{
     behavior::{op_clay_behavior_get_active_manifest, op_clay_behavior_list_routes},
-    commands::{op_clay_commands_list_commands, op_clay_commands_register_command},
+    commands::{
+        op_clay_commands_execute_command, op_clay_commands_list_commands,
+        op_clay_commands_register_command,
+    },
     completion::op_clay_completion_register_completion_provider,
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,
@@ -42,6 +46,7 @@ use self::{
         op_clay_documents_open_document, op_clay_documents_reload_document,
         op_clay_documents_save_document,
     },
+    git::{op_clay_git_list_statuses, op_clay_git_refresh_status},
     keybindings::{
         op_clay_keybindings_bind_key, op_clay_keybindings_list_key_bindings,
         op_clay_keybindings_unbind_key,
@@ -65,7 +70,11 @@ use self::{
         op_clay_ui_register_transient_overlay_contribution, op_clay_ui_register_ui_state_scope,
         op_clay_ui_set_layout_override,
     },
-    workspace::op_clay_workspace_list_roots,
+    workspace::{
+        op_clay_workspace_add_root, op_clay_workspace_cancel_listing,
+        op_clay_workspace_create_listing_cancel_token, op_clay_workspace_discover_root_for_path,
+        op_clay_workspace_list_directory, op_clay_workspace_list_roots,
+    },
 };
 
 pub(crate) use self::packages::PackageLoadEntryAllowlist;
@@ -88,6 +97,7 @@ pub(crate) struct ClayOpState {
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
     ui: Mutex<crate::server::ui::PackageUiRegistry>,
+    git_status_cache: crate::server::git::GitStatusCache,
     syntax_grammars: Mutex<crate::server::syntax::SyntaxGrammarRegistry>,
     completion_providers: Mutex<Vec<crate::server::completion::CompletionProviderMeta>>,
     runtime_context: Mutex<ClayRuntimeContext>,
@@ -136,6 +146,7 @@ impl ClayOpState {
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
             ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
+            git_status_cache: crate::server::git::GitStatusCache::default(),
             syntax_grammars: Mutex::new(crate::server::syntax::SyntaxGrammarRegistry::new()),
             completion_providers: Mutex::new(Vec::new()),
             runtime_context: Mutex::new(ClayRuntimeContext {
@@ -434,6 +445,10 @@ impl ClayOpState {
             .register_command(package, declaration)
     }
 
+    pub(super) fn git_status_cache(&self) -> crate::server::git::GitStatusCache {
+        self.git_status_cache.clone()
+    }
+
     pub(super) fn list_package_commands(&self) -> Vec<serde_json::Value> {
         self.commands
             .lock()
@@ -451,7 +466,7 @@ impl ClayOpState {
             .collect()
     }
 
-    pub(super) fn execute_command(
+    pub(super) async fn execute_command(
         &self,
         request: crate::server::command_execution::CommandExecutionRequest,
     ) -> Result<
@@ -461,8 +476,7 @@ impl ClayOpState {
         let executor = crate::server::command_execution::CommandExecutor::new();
         // Phase 18.9 mode-discovery commands resolve their payload by reading
         // installed `ModeRegistry` state (read-only; no filesystem scan, package
-        // evaluation, or other authority). Package commands and other built-in
-        // commands go through the standard validation-only execution path.
+        // evaluation, or other authority).
         if crate::server::command_execution::is_mode_discovery_command(&request.command_id) {
             return executor.execute_discovery(
                 &self
@@ -472,6 +486,32 @@ impl ClayOpState {
                 request,
             );
         }
+        // Phase 18.13 Git commands read server-owned workspace roots and Git
+        // cache state. They expose branch/status metadata only: no shell,
+        // network, or mutating Git authority.
+        if crate::server::command_execution::is_git_command(&request.command_id) {
+            let workspace = self.workspace();
+            let workspace = workspace.lock().await;
+            return executor
+                .execute_git(&workspace, self.git_status_cache(), request)
+                .await;
+        }
+        // Phase 18.12 file-browser commands open/reveal files through
+        // server-authoritative workspace APIs and selected-file grants.
+        if crate::server::command_execution::is_workspace_command(&request.command_id) {
+            let registry = self
+                .commands
+                .lock()
+                .expect("Clay runtime op state mutex poisoned")
+                .clone();
+            let workspace = self.workspace();
+            let mut workspace = workspace.lock().await;
+            return executor
+                .execute_workspace(&registry, &mut workspace, request)
+                .await;
+        }
+        // Package commands and other built-in commands go through the standard
+        // validation-only execution path.
         executor.execute(
             &self
                 .commands
@@ -692,6 +732,13 @@ extension!(
         op_clay_documents_get_document_status,
         op_clay_documents_list_documents,
         op_clay_workspace_list_roots,
+        op_clay_workspace_add_root,
+        op_clay_workspace_discover_root_for_path,
+        op_clay_workspace_list_directory,
+        op_clay_workspace_create_listing_cancel_token,
+        op_clay_workspace_cancel_listing,
+        op_clay_git_list_statuses,
+        op_clay_git_refresh_status,
         op_clay_keybindings_bind_key,
         op_clay_keybindings_unbind_key,
         op_clay_keybindings_list_key_bindings,
@@ -707,6 +754,7 @@ extension!(
         op_clay_modes_activate_major_mode,
         op_clay_commands_register_command,
         op_clay_commands_list_commands,
+        op_clay_commands_execute_command,
         op_clay_decorations_publish_decorations,
         op_clay_parse_register_parse_handler,
         op_clay_parse_store_update,

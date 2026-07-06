@@ -911,6 +911,27 @@ fn phase18_11_completion_provider_primitive_review() -> String {
     .expect("read Phase 18.11 completion provider primitive review")
 }
 
+fn phase18_12_workspace_discovery_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.12-workspace-discovery-primitive-review.md",
+    ))
+    .expect("read Phase 18.12 workspace discovery and file browser foundation primitive review")
+}
+
+fn phase18_13_git_discovery_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.13-git-discovery-primitive-review.md",
+    ))
+    .expect("read Phase 18.13 Git discovery service primitive review")
+}
+
+fn workspace_file_browser_wiki() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/workspace-file-browser.md",
+    ))
+    .expect("read workspace discovery and file browser wiki")
+}
+
 #[test]
 fn phase18_1_shell_layout_primitive_review_records_existing_inventory() {
     let wiki_index =
@@ -1846,6 +1867,357 @@ fn phase18_11_completion_provider_primitive_review_records_inventory_and_gaps() 
     assert!(
         !backlog[deferred_start..deferred_end].contains("CompletionTriggerAndResult"),
         "primitive backlog must move CompletionTriggerAndResult out of the Deferred section into Phase-18.11-completion"
+    );
+}
+
+#[test]
+fn phase18_12_workspace_discovery_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_12_workspace_discovery_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.12-workspace-discovery-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.12 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.12-workspace-discovery-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.12 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Workspace roots and file authority",
+        "Shell layout and slots",
+        "Command execution and transient menus",
+        "Package UI components and action intents",
+        "Document classification and fallback modes",
+        "`src/server/workspace.rs::WorkspaceState`",
+        "`WorkspaceState::add_root`",
+        "`WorkspaceState::open_existing_file`",
+        "`WorkspaceState::open_selected_file`",
+        "`src/server/ops/workspace.rs::op_clay_workspace_list_roots`",
+        "`runtime/js/workspace.ts::serverListWorkspaceRoots`",
+        "`src/shell/layout.rs`",
+        "`FixedSlotId::Left`",
+        "`FixedSlotId::Bottom`",
+        "`src/masonry_shell.rs::ClayShellWidget`",
+        "`src/server/command_execution.rs::CommandExecutor`",
+        "`src/shell/transient_menu.rs::TransientMenuSession`",
+        "`src/server/control_center.rs`",
+        "`runtime/js/ui.ts`",
+        "`UiActionIntent`",
+        "`src/packages/modes.rs::ModeRegistry`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.12 primitive review must record inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.12 Primitive Gaps",
+        "### Server-owned workspace-root discovery",
+        "### Bounded server file tree/list service",
+        "### File browser UI is a composition, not a new primitive",
+        "KNOWN_PROJECT_MARKERS",
+        "discover_root_for_path",
+        "add_explicit_user_grant",
+        "FileListRequest",
+        "FileListEntry",
+        "FixedSlotId::Left",
+        "TransientMenuSession",
+        "CommandExecution",
+        "clay.workspace.openFile",
+        "clay.workspace.revealInTree",
+        "composition",
+        "not a new primitive",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.12 primitive review must map generic gaps and composition: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Root discovery at startup",
+        "Root discovery on open",
+        "Directory listing",
+        "Tree rendering",
+        "Fuzzy filtering",
+        "File activation",
+        "Reveal-in-tree",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.12 primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Rejected Implementation Shapes",
+        "Do not add a `FileBrowserWidget`",
+        "Do not implement client-side workspace discovery",
+        "Do not allow packages to add workspace roots",
+        "Do not implement a full nested `.gitignore` parser",
+        "Do not pass raw client-chosen paths straight to an open op",
+        "Do not make the file tree a package contribution",
+        "Do not add file-browser-specific Rust rendering branches",
+        "File browser UI is Clay-owned",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.12 primitive review must reject file-browser-specific shapes: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "no broad client or package filesystem authority",
+        "Explicit user grants are the only path that broadens authority",
+        "Directory listing is scoped to known workspace roots",
+        "Packages cannot list arbitrary paths",
+        "No package may add roots, markers, ignore rules, or listing scopes",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.12 primitive review must record security boundary: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_13_git_discovery_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_13_git_discovery_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.13-git-discovery-primitive-review.md"),
+        "wiki index must link the Phase 18.13 Git discovery primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.13-git-discovery-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.13 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Workspace roots and file authority",
+        "Command execution and Control Center",
+        "Transient menu and picker UI",
+        "Package loading and first-party package defaults",
+        "Package UI, status items, panels, and action intents",
+        "Configuration and documentation registry",
+        "Existing process/timeout helpers",
+        "`src/server/workspace.rs::WorkspaceState`",
+        "`WorkspaceRootDiscovery`",
+        "`BoundedFileListService`",
+        "`runtime/js/workspace.ts::serverListWorkspaceRoots`",
+        "`src/server/command_execution.rs::CommandExecutor`",
+        "`src/server/control_center.rs::ControlCenter`",
+        "`src/shell/transient_menu.rs::TransientMenuSession`",
+        "`runtime/js/packages.ts::loadPackage`",
+        "`@clay/git`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.13 primitive review must record inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "What `@clay/git` Can Achieve With Existing Primitives",
+        "Generic Phase 18.13 Primitive Gaps",
+        "### `GitDiscoveryService`",
+        "### `GitStatusCache`",
+        "### `clay:git` read-only facades",
+        "GitStatusSnapshot",
+        "GitDiscoveryCommand",
+        "RepositoryRoot",
+        "StatusShort",
+        "serverListGitStatuses",
+        "serverRefreshGitStatus",
+        "workspaceRootId",
+        "closed command enum",
+        "per-workspace cache",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.13 primitive review must map generic Git gaps: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Detect workspace roots",
+        "Run `git` CLI",
+        "Read Git status for UI",
+        "Explicit refresh",
+        "Status item/panel render",
+        "Branch/action picker filtering",
+        "Picker/action activation",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.13 primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Rejected Implementation Shapes",
+        "Do not add a Git-specific native widget",
+        "Do not let `@clay/git` spawn `git`",
+        "Do not add a generic shell API",
+        "Do not accept raw Git subcommands",
+        "Do not auto-load `@clay/git`",
+        "Do not implement checkout",
+        "Do not use package-manager process code as a runtime shell escape hatch",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.13 primitive review must reject unsafe/overbuilt Git shapes: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "read-only Git status authority only",
+        "Server-owned, read-only `git` CLI calls through a closed command table",
+        "`cwd` rooted in a known `WorkspaceRootId`",
+        "Not allowed:",
+        "Arbitrary shell execution",
+        "Network/remotes/fetch/push/pull",
+        "Mutating Git operations",
+        "Package process authority",
+        "Client-side Git execution",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.13 primitive review must record security boundary: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_13_git_wiki_pages_document_final_implementation() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let discovery_wiki = fs::read_to_string(repository_path(
+        "docs/wiki/modules/git-discovery-service.md",
+    ))
+    .expect("read git discovery service wiki");
+    let package_wiki = fs::read_to_string(repository_path("docs/wiki/modules/package-git.md"))
+        .expect("read package-git wiki");
+
+    assert!(
+        wiki_index.contains("modules/git-discovery-service.md"),
+        "wiki index must link the Git Discovery Service implementation page"
+    );
+    assert!(
+        wiki_index.contains("modules/package-git.md"),
+        "wiki index must link the first-party @clay/git package implementation page"
+    );
+
+    for required in [
+        "GitDiscoveryService",
+        "GitStatusCache",
+        "closed command table",
+        "cwd must canonicalize under a known workspace root",
+        "coalesces",
+        "Notify",
+        "ETXTBSY",
+    ] {
+        assert!(
+            discovery_wiki.contains(required),
+            "git discovery service wiki must document `{required}`"
+        );
+    }
+
+    for required in [
+        "loadPackage(\"@clay/git\")",
+        "permissions: []",
+        "serverListGitStatuses",
+        "clay:git",
+        "clay:sdui",
+        "git.status",
+        "no action targets",
+        "Future Mutation Authority",
+        "clay.git.listStatuses",
+        "clay.git.refreshStatus",
+    ] {
+        assert!(
+            package_wiki.contains(required),
+            "package-git wiki must document `{required}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_12_workspace_file_browser_wiki_documents_implementation() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let workspace_wiki = workspace_file_browser_wiki();
+    let server_workspace = fs::read_to_string(repository_path(
+        "docs/wiki/modules/server-file-workspace.md",
+    ))
+    .expect("read server workspace wiki");
+    let command_registry =
+        fs::read_to_string(repository_path("docs/wiki/modules/command-registry.md"))
+            .expect("read command registry wiki");
+    let maintenance = fs::read_to_string(repository_path(
+        "docs/wiki/modules/maintenance-validation.md",
+    ))
+    .expect("read maintenance validation wiki");
+
+    assert!(
+        wiki_index.contains("modules/workspace-file-browser.md"),
+        "wiki index must link the Phase 18.12 workspace file-browser implementation page"
+    );
+
+    for required in [
+        "WorkspaceState::discover_root_for_path",
+        "WorkspaceState::list_directory",
+        "serverListDirectory",
+        "serverCreateListingCancelToken",
+        "FileBrowserState::to_sdui_tree",
+        "TransientMenuSession",
+        "CommandExecutor::execute_workspace",
+        "selected-file grants",
+        "no broad client or package filesystem authority",
+        "Linux is the primary validation platform",
+    ] {
+        assert!(
+            workspace_wiki.contains(required),
+            "workspace file-browser wiki must document `{required}`"
+        );
+    }
+
+    assert!(
+        server_workspace
+            .contains("Phase 18.12 bounded listing uses `list_directory(FileListRequest)`")
+            && server_workspace.contains("KNOWN_PROJECT_MARKERS"),
+        "server workspace wiki must document Phase 18.12 root discovery and bounded listing"
+    );
+    assert!(
+        command_registry.contains(
+            "validates that the document is open through `WorkspaceState::document_metadata`"
+        ),
+        "command registry wiki must document reveal command validation"
+    );
+    assert!(
+        maintenance.contains("Linux is the required host platform")
+            && maintenance.contains("Windows remains a long-term target"),
+        "maintenance wiki must document Linux-primary, Windows-long-term validation policy"
     );
 }
 

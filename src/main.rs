@@ -937,10 +937,10 @@ impl ManagedServer {
 
 fn cleanup_managed_endpoint(endpoint: &IpcEndpoint) {
     #[cfg(unix)]
-    if let Err(error) = std::fs::remove_file(endpoint.as_unix_socket_path()) {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("failed to remove managed Clay socket {endpoint}: {error}");
-        }
+    if let Err(error) = std::fs::remove_file(endpoint.as_unix_socket_path())
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("failed to remove managed Clay socket {endpoint}: {error}");
     }
 
     #[cfg(not(unix))]

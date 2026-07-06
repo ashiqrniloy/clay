@@ -7,8 +7,14 @@ use crate::{
         permissions::PackagePermission,
     },
     perf::budgets::COMMAND_ARGUMENT_BUDGET_BYTES,
-    protocol::{DocumentId, RoutingPolicy},
+    protocol::{DocumentId, RoutingPolicy, WorkspaceRootId},
+    server::{
+        git::{GitCachedStatus, GitStatusCache},
+        workspace::{WorkspaceError, WorkspaceState},
+    },
 };
+
+pub use crate::server::workspace::OpenDocumentSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandExecutionRequest {
@@ -50,6 +56,35 @@ pub enum CommandExecutionStatus {
     /// `ModeRegistry` state; the payload carries no execution, document, or
     /// workspace authority.
     Discovery(DiscoveryResult),
+    /// Phase 18.12 workspace action result. Produced by
+    /// [`CommandExecutor::execute_workspace`] when a built-in file-browser
+    /// command opens, reveals, or toggles the file browser through
+    /// server-authoritative workspace APIs.
+    Workspace(WorkspaceActionResult),
+    /// Phase 18.13 read-only Git discovery command result, backed by
+    /// server-owned workspace roots and the Git status cache.
+    Git(GitCommandResult),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitCommandResult {
+    Statuses(Vec<GitCachedStatus>),
+    Refreshed(Box<GitCachedStatus>),
+}
+
+/// Phase 18.12 workspace action result. Carries the outcome of a validated
+/// file-browser command that was executed against [`WorkspaceState`]. No raw
+/// filesystem paths or client authority are returned; only bounded document
+/// metadata already known to the server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceActionResult {
+    /// A file was opened under a known root or via a selected-file grant.
+    Opened(OpenDocumentSnapshot),
+    /// A reveal request was accepted; the server will update the focused tree
+    /// state on the next SDUI snapshot.
+    Revealed,
+    /// A file-browser visibility toggle was accepted.
+    Toggled,
 }
 
 /// Phase 18.9 mode-discovery result payload. Read-only registry state; carries
@@ -182,6 +217,281 @@ impl CommandExecutor {
             status,
         })
     }
+
+    /// Execute a Phase 18.12 file-browser command against server-authoritative
+    /// workspace APIs. The command is validated through the same pipeline as
+    /// package and discovery commands, then resolved by calling
+    /// [`WorkspaceState`] methods that enforce root boundaries and selected-file
+    /// grants. No raw client path is trusted; all paths are re-canonicalized and
+    /// re-validated server-side.
+    pub(crate) async fn execute_workspace(
+        &self,
+        registry: &CommandRegistry,
+        workspace: &mut WorkspaceState,
+        request: CommandExecutionRequest,
+    ) -> Result<CommandExecutionResult, CommandExecutionDiagnostic> {
+        let builtin = builtin_server_command(&request.command_id);
+        let command = registry
+            .get(&request.command_id)
+            .or(builtin.as_ref())
+            .ok_or_else(|| {
+                diagnostic(
+                    &request.command_id,
+                    CommandExecutionRule::UnknownCommand,
+                    "command ID is not registered",
+                )
+            })?;
+        if !is_workspace_command(&request.command_id) {
+            return Err(diagnostic(
+                &request.command_id,
+                CommandExecutionRule::UnknownCommand,
+                "built-in command is not a workspace command",
+            ));
+        }
+        validate(command, &request)?;
+
+        let status = match request.command_id.as_str() {
+            "clay.workspace.openFile" | "clay.workspace.openFuzzyFile" => {
+                execute_open(workspace, &request.arguments, &request.command_id).await?
+            }
+            "clay.workspace.revealInTree" => {
+                let document_id = reveal_document_id(&request.arguments, &request.command_id)?;
+                workspace
+                    .document_metadata(document_id, 1)
+                    .await
+                    .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
+                CommandExecutionStatus::Workspace(WorkspaceActionResult::Revealed)
+            }
+            "clay.workspace.toggleFileBrowser" => {
+                CommandExecutionStatus::Workspace(WorkspaceActionResult::Toggled)
+            }
+            _ => {
+                return Err(diagnostic(
+                    &request.command_id,
+                    CommandExecutionRule::UnknownCommand,
+                    "built-in command is not a workspace command",
+                ));
+            }
+        };
+
+        Ok(CommandExecutionResult {
+            command_id: command.command_id.clone(),
+            routing_policy: command.routing_policy.clone(),
+            target: request.target,
+            status,
+        })
+    }
+
+    pub(crate) async fn execute_git(
+        &self,
+        workspace: &WorkspaceState,
+        git_status_cache: GitStatusCache,
+        request: CommandExecutionRequest,
+    ) -> Result<CommandExecutionResult, CommandExecutionDiagnostic> {
+        let Some(command) = builtin_server_command(&request.command_id) else {
+            return Err(diagnostic(
+                &request.command_id,
+                CommandExecutionRule::UnknownCommand,
+                "command ID is not a built-in Git command",
+            ));
+        };
+        if !is_git_command(&request.command_id) {
+            return Err(diagnostic(
+                &request.command_id,
+                CommandExecutionRule::UnknownCommand,
+                "built-in command is not a Git command",
+            ));
+        }
+        validate(&command, &request)?;
+
+        let status = match request.command_id.as_str() {
+            "clay.git.listStatuses" => CommandExecutionStatus::Git(GitCommandResult::Statuses(
+                git_status_cache.list_cached(workspace).await,
+            )),
+            "clay.git.refreshStatus" => {
+                let root_id = git_workspace_root_id(&request.arguments, &request.command_id)?;
+                let root = workspace
+                    .directory_roots()
+                    .into_iter()
+                    .find(|root| root.workspace_root_id == root_id)
+                    .ok_or_else(|| {
+                        diagnostic(
+                            &request.command_id,
+                            CommandExecutionRule::InvalidArguments,
+                            format!("unknown workspace root `{root_id}`"),
+                        )
+                    })?;
+                CommandExecutionStatus::Git(GitCommandResult::Refreshed(Box::new(
+                    git_status_cache
+                        .refresh_root(root_id, root.canonical_path)
+                        .await,
+                )))
+            }
+            _ => {
+                return Err(diagnostic(
+                    &request.command_id,
+                    CommandExecutionRule::UnknownCommand,
+                    "built-in command is not a Git command",
+                ));
+            }
+        };
+
+        Ok(CommandExecutionResult {
+            command_id: command.command_id.clone(),
+            routing_policy: command.routing_policy.clone(),
+            target: request.target,
+            status,
+        })
+    }
+}
+
+/// Phase 18.12 workspace command IDs. Routed through
+/// [`CommandExecutor::execute_workspace`] so they resolve against
+/// [`WorkspaceState`] root/grant APIs.
+pub(crate) const WORKSPACE_COMMAND_IDS: &[&str] = &[
+    "clay.workspace.openFile",
+    "clay.workspace.revealInTree",
+    "clay.workspace.openFuzzyFile",
+    "clay.workspace.toggleFileBrowser",
+];
+
+pub(crate) fn is_workspace_command(command_id: &str) -> bool {
+    WORKSPACE_COMMAND_IDS.contains(&command_id)
+}
+
+pub(crate) const GIT_COMMAND_IDS: &[&str] = &["clay.git.listStatuses", "clay.git.refreshStatus"];
+
+pub(crate) fn is_git_command(command_id: &str) -> bool {
+    GIT_COMMAND_IDS.contains(&command_id)
+}
+
+/// Execute an open command: in-root files use [`WorkspaceState::open_existing_file`];
+/// out-of-root files use [`WorkspaceState::open_selected_file`] and therefore the
+/// selected-file single-file grant flow.
+async fn execute_open(
+    workspace: &mut WorkspaceState,
+    arguments: &Value,
+    command_id: &str,
+) -> Result<CommandExecutionStatus, CommandExecutionDiagnostic> {
+    let args = OpenFileArguments::extract(arguments, command_id)?;
+
+    let lease = if let Some((root_id, relative_path)) = args.in_root_path() {
+        workspace
+            .open_existing_file(root_id, relative_path, 1)
+            .await
+            .map_err(|error| workspace_diagnostic(command_id, error))?
+    } else if let Some(absolute_path) = args.absolute_path() {
+        workspace
+            .open_selected_file(absolute_path, 1)
+            .await
+            .map_err(|error| workspace_diagnostic(command_id, error))?
+    } else {
+        return Err(diagnostic(
+            command_id,
+            CommandExecutionRule::InvalidArguments,
+            "open command requires either (workspaceRootId + relativePath) or absolutePath",
+        ));
+    };
+
+    let snapshot = lease.snapshot(1).await;
+    Ok(CommandExecutionStatus::Workspace(
+        WorkspaceActionResult::Opened(snapshot),
+    ))
+}
+
+/// Bounded arguments for an open command. Accepts either an in-root path
+/// reference or an absolute path for selected-file grant fallback.
+#[derive(Debug, Default)]
+struct OpenFileArguments {
+    workspace_root_id: Option<WorkspaceRootId>,
+    relative_path: Option<String>,
+    absolute_path: Option<std::path::PathBuf>,
+}
+
+impl OpenFileArguments {
+    fn extract(arguments: &Value, command_id: &str) -> Result<Self, CommandExecutionDiagnostic> {
+        let root_id = arguments.get("workspaceRootId").and_then(Value::as_u64);
+        let relative_path = arguments
+            .get("relativePath")
+            .and_then(Value::as_str)
+            .map(String::from);
+        let absolute_path = arguments
+            .get("absolutePath")
+            .and_then(Value::as_str)
+            .map(std::path::PathBuf::from);
+
+        let has_in_root = root_id.is_some() || relative_path.is_some();
+        let has_absolute = absolute_path.is_some();
+
+        if !has_in_root && !has_absolute {
+            return Err(diagnostic(
+                command_id,
+                CommandExecutionRule::InvalidArguments,
+                "open command requires workspaceRootId/relativePath or absolutePath",
+            ));
+        }
+
+        if root_id.is_some() != relative_path.is_some() {
+            return Err(diagnostic(
+                command_id,
+                CommandExecutionRule::InvalidArguments,
+                "open command requires both workspaceRootId and relativePath together",
+            ));
+        }
+
+        Ok(Self {
+            workspace_root_id: root_id,
+            relative_path,
+            absolute_path,
+        })
+    }
+
+    fn in_root_path(&self) -> Option<(WorkspaceRootId, &str)> {
+        self.workspace_root_id.zip(self.relative_path.as_deref())
+    }
+
+    fn absolute_path(&self) -> Option<&std::path::Path> {
+        self.absolute_path.as_deref()
+    }
+}
+
+fn reveal_document_id(
+    arguments: &Value,
+    command_id: &str,
+) -> Result<DocumentId, CommandExecutionDiagnostic> {
+    arguments
+        .get("documentId")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            diagnostic(
+                command_id,
+                CommandExecutionRule::InvalidArguments,
+                "reveal command requires a non-negative integer `documentId` argument",
+            )
+        })
+}
+
+fn git_workspace_root_id(
+    arguments: &Value,
+    command_id: &str,
+) -> Result<WorkspaceRootId, CommandExecutionDiagnostic> {
+    arguments
+        .get("workspaceRootId")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
+        .or_else(|| arguments.get("workspaceRootId").and_then(Value::as_u64))
+        .ok_or_else(|| {
+            diagnostic(
+                command_id,
+                CommandExecutionRule::InvalidArguments,
+                "Git refresh command requires workspaceRootId",
+            )
+        })
+}
+
+fn workspace_diagnostic(command_id: &str, error: WorkspaceError) -> CommandExecutionDiagnostic {
+    let message = error.diagnostic().message;
+    diagnostic(command_id, CommandExecutionRule::InvalidArguments, message)
 }
 
 /// Validate a registered/built-in command request: routing policy, provenance,
@@ -194,10 +504,10 @@ fn validate(
     request: &CommandExecutionRequest,
 ) -> Result<(), CommandExecutionDiagnostic> {
     validate_routing(command)?;
-    validate_provenance(command, &request)?;
-    validate_permissions(command, &request)?;
-    validate_arguments(&request)?;
-    validate_target(command, &request)?;
+    validate_provenance(command, request)?;
+    validate_permissions(command, request)?;
+    validate_arguments(request)?;
+    validate_target(command, request)?;
     Ok(())
 }
 
@@ -239,6 +549,12 @@ pub fn builtin_server_command_ids() -> &'static [&'static str] {
         "document.open_recent",
         "clay.modes.listActiveModes",
         "clay.modes.explainActiveMode",
+        "clay.workspace.openFile",
+        "clay.workspace.revealInTree",
+        "clay.workspace.openFuzzyFile",
+        "clay.workspace.toggleFileBrowser",
+        "clay.git.listStatuses",
+        "clay.git.refreshStatus",
     ]
 }
 
@@ -249,7 +565,13 @@ pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
         | "document.focus_active"
         | "document.open_recent"
         | "clay.modes.listActiveModes"
-        | "clay.modes.explainActiveMode" => Some(RegisteredCommand {
+        | "clay.modes.explainActiveMode"
+        | "clay.workspace.openFile"
+        | "clay.workspace.revealInTree"
+        | "clay.workspace.openFuzzyFile"
+        | "clay.workspace.toggleFileBrowser"
+        | "clay.git.listStatuses"
+        | "clay.git.refreshStatus" => Some(RegisteredCommand {
             package_name: "clay".to_string(),
             package_version: env!("CARGO_PKG_VERSION").to_string(),
             api_prefix: "clay".to_string(),
@@ -272,6 +594,12 @@ fn builtin_display_name(command_id: &str) -> &'static str {
         "document.open_recent" => "Open Recent Document",
         "clay.modes.listActiveModes" => "List Active Modes",
         "clay.modes.explainActiveMode" => "Explain Active Mode",
+        "clay.workspace.openFile" => "Open File",
+        "clay.workspace.revealInTree" => "Reveal in File Tree",
+        "clay.workspace.openFuzzyFile" => "Open File by Name",
+        "clay.workspace.toggleFileBrowser" => "Toggle File Browser",
+        "clay.git.listStatuses" => "List Git Statuses",
+        "clay.git.refreshStatus" => "Refresh Git Status",
         _ => "Built-in Command",
     }
 }
@@ -519,6 +847,29 @@ mod tests {
     }
 
     #[test]
+    fn git_command_ids_are_read_only_list_and_refresh() {
+        // Phase 18.13: the only server-owned Git Control Center commands are
+        // status list and refresh. Prove no mutating Git operation
+        // (checkout/stage/commit/reset/rebase/stash/push/pull/fetch) is wired.
+        const MUTATING_WORDS: &[&str] = &[
+            "checkout", "switch", "stage", "add", "commit", "reset", "rebase", "stash", "push",
+            "pull", "fetch", "merge", "revert", "tag",
+        ];
+        assert_eq!(
+            GIT_COMMAND_IDS,
+            &["clay.git.listStatuses", "clay.git.refreshStatus"]
+        );
+        for &command in GIT_COMMAND_IDS {
+            for &word in MUTATING_WORDS {
+                assert!(
+                    !command.contains(word),
+                    "server Git command {command} must not name a mutating operation"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn execution_rejects_client_first_routes_malformed_args_and_workspace_target() {
         let mut command = RegisteredCommand {
             package_name: "@clay/markdown".to_string(),
@@ -557,5 +908,209 @@ mod tests {
             .execute_registered(&command, workspace)
             .unwrap_err();
         assert_eq!(error.rule, CommandExecutionRule::UnauthorizedTarget);
+    }
+
+    mod workspace_commands {
+        use std::{fs, path::PathBuf, time::SystemTime};
+
+        use serde_json::{Value, json};
+
+        use super::super::{
+            CommandExecutionRequest, CommandExecutionRule, CommandExecutionStatus,
+            CommandExecutionTarget, CommandExecutor, WorkspaceActionResult,
+        };
+        use crate::packages::commands::CommandRegistry;
+        use crate::server::workspace::WorkspaceState;
+
+        fn temp_workspace(name: &str) -> PathBuf {
+            let unique = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "clay-cmd-workspace-{name}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir(&dir).unwrap();
+            dir
+        }
+
+        fn open_request(root_id: u64, relative_path: &str) -> CommandExecutionRequest {
+            CommandExecutionRequest {
+                command_id: "clay.workspace.openFile".to_string(),
+                arguments: json!({
+                    "workspaceRootId": root_id,
+                    "relativePath": relative_path,
+                }),
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            }
+        }
+
+        #[tokio::test]
+        async fn open_in_root_file_returns_opened_result() {
+            let root = temp_workspace("open-in-root");
+            fs::write(root.join("lib.rs"), "fn main() {}").unwrap();
+
+            let mut workspace = WorkspaceState::new();
+            let root_id = workspace.add_root(root.clone()).unwrap();
+
+            let result = CommandExecutor::new()
+                .execute_workspace(
+                    &CommandRegistry::new(),
+                    &mut workspace,
+                    open_request(root_id, "lib.rs"),
+                )
+                .await
+                .expect("open command should execute");
+
+            assert_eq!(result.command_id, "clay.workspace.openFile");
+            let CommandExecutionStatus::Workspace(WorkspaceActionResult::Opened(snapshot)) =
+                result.status
+            else {
+                panic!("expected Opened workspace result, got {:?}", result.status);
+            };
+            assert_eq!(snapshot.metadata.path, "lib.rs");
+            assert_eq!(snapshot.text, "fn main() {}");
+
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[tokio::test]
+        async fn open_out_of_root_file_uses_selected_file_grant() {
+            let root = temp_workspace("open-out-root");
+            let outside = temp_workspace("outside");
+            fs::write(outside.join("external.txt"), "external content").unwrap();
+
+            let mut workspace = WorkspaceState::new();
+            workspace.add_root(root).unwrap();
+
+            let request = CommandExecutionRequest {
+                command_id: "clay.workspace.openFile".to_string(),
+                arguments: json!({ "absolutePath": outside.join("external.txt").to_string_lossy() }),
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            };
+
+            let result = CommandExecutor::new()
+                .execute_workspace(&CommandRegistry::new(), &mut workspace, request)
+                .await
+                .expect("open command should create selected-file grant");
+
+            let CommandExecutionStatus::Workspace(WorkspaceActionResult::Opened(snapshot)) =
+                result.status
+            else {
+                panic!("expected Opened workspace result, got {:?}", result.status);
+            };
+            assert!(snapshot.metadata.path.contains("external.txt"));
+            assert_eq!(snapshot.text, "external content");
+
+            let _ = fs::remove_dir_all(outside);
+        }
+
+        #[tokio::test]
+        async fn reveal_command_returns_revealed_result() {
+            let root = temp_workspace("reveal");
+            fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+
+            let mut workspace = WorkspaceState::new();
+            let root_id = workspace.add_root(&root).unwrap();
+            let opened = workspace
+                .open_existing_file(root_id, "main.rs", 1)
+                .await
+                .unwrap();
+
+            let result = CommandExecutor::new()
+                .execute_workspace(
+                    &CommandRegistry::new(),
+                    &mut workspace,
+                    CommandExecutionRequest {
+                        command_id: "clay.workspace.revealInTree".to_string(),
+                        arguments: json!({ "documentId": opened.document_id }),
+                        target: CommandExecutionTarget::Global,
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                )
+                .await
+                .expect("reveal command should execute");
+
+            assert_eq!(result.command_id, "clay.workspace.revealInTree");
+            assert_eq!(
+                result.status,
+                CommandExecutionStatus::Workspace(WorkspaceActionResult::Revealed)
+            );
+
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[tokio::test]
+        async fn toggle_command_returns_toggled_result() {
+            let mut workspace = WorkspaceState::new();
+            let result = CommandExecutor::new()
+                .execute_workspace(
+                    &CommandRegistry::new(),
+                    &mut workspace,
+                    CommandExecutionRequest {
+                        command_id: "clay.workspace.toggleFileBrowser".to_string(),
+                        arguments: Value::Null,
+                        target: CommandExecutionTarget::Global,
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                )
+                .await
+                .expect("toggle command should execute");
+
+            assert_eq!(result.command_id, "clay.workspace.toggleFileBrowser");
+            assert_eq!(
+                result.status,
+                CommandExecutionStatus::Workspace(WorkspaceActionResult::Toggled)
+            );
+        }
+
+        #[tokio::test]
+        async fn open_command_rejects_missing_arguments() {
+            let mut workspace = WorkspaceState::new();
+            let error = CommandExecutor::new()
+                .execute_workspace(
+                    &CommandRegistry::new(),
+                    &mut workspace,
+                    CommandExecutionRequest {
+                        command_id: "clay.workspace.openFile".to_string(),
+                        arguments: Value::Null,
+                        target: CommandExecutionTarget::Global,
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                )
+                .await
+                .unwrap_err();
+
+            assert_eq!(error.rule, CommandExecutionRule::InvalidArguments);
+        }
+
+        #[tokio::test]
+        async fn save_related_command_is_not_registered() {
+            let mut workspace = WorkspaceState::new();
+            let error = CommandExecutor::new()
+                .execute_workspace(
+                    &CommandRegistry::new(),
+                    &mut workspace,
+                    CommandExecutionRequest {
+                        command_id: "clay.workspace.saveFile".to_string(),
+                        arguments: Value::Null,
+                        target: CommandExecutionTarget::Global,
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                )
+                .await
+                .unwrap_err();
+
+            assert_eq!(error.rule, CommandExecutionRule::UnknownCommand);
+        }
     }
 }

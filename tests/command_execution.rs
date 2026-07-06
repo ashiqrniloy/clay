@@ -1,7 +1,7 @@
 use clay::packages::commands::{CommandRegistry, CommandValidationRule, PackageCommandDeclaration};
 use clay::packages::manifest::validate_manifest_value;
 use clay::packages::permissions::PackagePermission;
-use clay::protocol::{KeyBindingRule, KeyCode, KeyStroke, RoutingPolicy};
+use clay::protocol::{KeyBindingRule, RoutingPolicy};
 use clay::server::command_execution::{
     CommandExecutionProvenance, CommandExecutionRequest, CommandExecutionRule,
     CommandExecutionStatus, CommandExecutionTarget, CommandExecutor,

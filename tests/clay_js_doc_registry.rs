@@ -559,6 +559,74 @@ fn generated_registry_contains_phase9_file_workspace_apis() {
 }
 
 #[test]
+fn generated_registry_contains_phase18_12_workspace_file_browser_apis() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    for (id, js_module, js_export, security_needle) in [
+        (
+            "clay.workspace.serverAddWorkspaceRoot",
+            "clay:workspace",
+            "serverAddWorkspaceRoot",
+            "selected-file grants",
+        ),
+        (
+            "clay.workspace.serverDiscoverWorkspaceRootForPath",
+            "clay:workspace",
+            "serverDiscoverWorkspaceRootForPath",
+            "closed Clay-owned marker set",
+        ),
+        (
+            "clay.workspace.serverListDirectory",
+            "clay:workspace",
+            "serverListDirectory",
+            "bounded ignore/depth/count rules",
+        ),
+        (
+            "clay.workspace.serverCreateListingCancelToken",
+            "clay:workspace",
+            "serverCreateListingCancelToken",
+            "opaque cancellation token",
+        ),
+        (
+            "clay.workspace.serverCancelListing",
+            "clay:workspace",
+            "serverCancelListing",
+            "opaque token",
+        ),
+        (
+            "clay.commands.serverExecuteCommand",
+            "clay:commands",
+            "serverExecuteCommand",
+            "selected-file grants",
+        ),
+        (
+            "clay.commands.serverOpenFile",
+            "clay:commands",
+            "serverOpenFile",
+            "selected-file single-file grants",
+        ),
+        (
+            "clay.commands.serverRevealInTree",
+            "clay:commands",
+            "serverRevealInTree",
+            "open server workspace metadata",
+        ),
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry missing {id}"));
+        assert_eq!(entry.js_module, js_module);
+        assert_eq!(entry.js_export, js_export);
+        assert!(entry.lookup_tags.iter().any(|tag| tag == "phase18.12"));
+        assert!(
+            entry.security.contains(security_needle),
+            "{id} security metadata must mention {security_needle}"
+        );
+        assert!(entry.security.contains("raw Deno ops"));
+        assert!(entry.security.contains("client-side JavaScript"));
+    }
+}
+
+#[test]
 fn generated_registry_contains_client_open_file_dialog_command_api() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let entry = registry

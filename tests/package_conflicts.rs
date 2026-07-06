@@ -134,7 +134,7 @@ fn replacement_wins_with_package_control_grant_and_records_resolution() {
         serde_json::Map::from_iter([
             (
                 "permissions".to_string(),
-                json!(["mode-registration", "mode-activation", "package-control"]),
+                json!(["mode-registration", "mode-activation"]),
             ),
             ("replaces".to_string(), json!(["@vendor/target"])),
         ]),

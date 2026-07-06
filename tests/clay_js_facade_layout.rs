@@ -43,7 +43,17 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverListDocuments",
         ],
     ),
-    ("runtime/js/workspace.ts", &["serverListWorkspaceRoots"]),
+    (
+        "runtime/js/workspace.ts",
+        &[
+            "serverListWorkspaceRoots",
+            "serverAddWorkspaceRoot",
+            "serverDiscoverWorkspaceRootForPath",
+            "serverListDirectory",
+            "serverCreateListingCancelToken",
+            "serverCancelListing",
+        ],
+    ),
     (
         "runtime/js/behavior.ts",
         &["getActiveBehaviorManifest", "listBehaviorRoutes"],
@@ -96,7 +106,13 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
     ),
     (
         "runtime/js/commands.ts",
-        &["serverRegisterCommand", "serverListCommands"],
+        &[
+            "serverRegisterCommand",
+            "serverListCommands",
+            "serverExecuteCommand",
+            "serverOpenFile",
+            "serverRevealInTree",
+        ],
     ),
     ("runtime/js/decorations.ts", &["serverPublishDecorations"]),
     ("runtime/js/parse.ts", &["serverRegisterParseHandler"]),

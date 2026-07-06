@@ -406,7 +406,7 @@ impl EditorSurface {
                 };
                 let completion_request = outcome
                     .changed
-                    .then(|| completion_trigger)
+                    .then_some(completion_trigger)
                     .flatten()
                     .and_then(|route| self.completion_request_event(route));
                 EditorKeyOutcome::client(outcome).with_completion(completion_request)

@@ -89,7 +89,7 @@ pub enum CommandValidationRule {
     ExecutableTextTransform,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CommandRegistry {
     commands: HashMap<String, RegisteredCommand>,
 }

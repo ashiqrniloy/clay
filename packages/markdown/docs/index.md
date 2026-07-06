@@ -14,7 +14,7 @@
 - Parser/decorator adapter: `./dist/parser.js`
 - SDUI preview/status adapter: `./dist/sdui.js`
 - Documentation entry: `./docs/index.md`
-- Large-file policy defaults: full highlighting for files up to `1 MiB`; viewport/windowed highlighting above `1 MiB`; large-file behavior above `5 MiB`; `64 KiB` parse windows; `4 KiB` guard ranges; `30 MiB` retained syntax/decor budget; `500 ms` parse timeout; `plain-text-fallback` when the budget is exhausted.
+- Large-file policy defaults: full highlighting for files up to `1 MiB`; viewport/windowed highlighting above `1 MiB`; large-file behavior above `5 MiB`; `64 KiB` parse windows; `4 KiB` guard ranges; `30 MiB` retained syntax/decor budget; `5000 ms` parse timeout; `plain-text-fallback` when the budget is exhausted.
 - Configuration status: Phase 18.5 verifies these values as fixed package-owned defaults. `@clay/markdown` declares no `contributions.configuration` entries, does not request `package-configuration`, and does not expose Markdown large-file tuning through `~/.config/clay/init.js` yet. The bounded parse-window values it passes to `clay.parse.serverRegisterParseHandler` are covered by that API's `custom_properties` and server validation; file-size thresholds and status labels remain package constants until a later configuration API is implemented.
 
 ## Permissions
@@ -38,7 +38,7 @@ The package manifest declares inert contribution metadata for:
 - Preview, heading, and list key routing metadata.
 - Client-first predictable list continuation, fenced-code indentation, and pair-handling transform descriptors.
 - A Markdown preview/status SDUI region with inert mode, parse, decoration, highlighting-policy, and preview labels plus a `markdown.togglePreview` button action.
-- A Markdown syntax decoration primitive, `markdown-it` parser dependency, parse handler metadata, deterministic `full`/`windowed`/`degraded`/`plain-text-fallback` status states, and safe span clearing when the syntax budget is exhausted.
+- A Markdown syntax decoration primitive, optional `markdown-it` parser dependency with a tiny built-in scanner fallback for uninstalled dev trees, parse handler metadata, deterministic `full`/`windowed`/`degraded`/`plain-text-fallback` status states, and safe span clearing when the syntax budget is exhausted.
 - A package-owned parser adapter that converts markdown-it token streams and package-owned source/line indexes into viewport-bounded Clay decoration spans for ATX headings, strong/emphasis, inline code, fenced code blocks, and list markers.
 
 Package installation remains separate from execution. Clay validates this metadata during package operations, configuration load, document open/reload, explicit mode activation, or explicit viewport/policy changes; typing, paint, scroll, layout, and text-event handlers do not load the package, run package-manager work, or compute large-file policy. SDUI status messages are fixed/sanitized package strings and never include document text or absolute paths. Configuration cannot install, enable, disable, or grant new permissions to this package; those authorities remain outside `init.js` package options.

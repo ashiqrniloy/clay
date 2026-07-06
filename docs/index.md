@@ -37,8 +37,11 @@ The generated documentation registry must read this section as the explicit incl
 - [quit](reference/clay-js-api/application/quit.md) — `clay.application.quit`
 - [getActiveBehaviorManifest](reference/clay-js-api/behavior/get-active-behavior-manifest.md) — `clay.behavior.getActiveBehaviorManifest`
 - [listBehaviorRoutes](reference/clay-js-api/behavior/list-behavior-routes.md) — `clay.behavior.listBehaviorRoutes`
+- [serverExecuteCommand](reference/clay-js-api/commands/server-execute-command.md) — `clay.commands.serverExecuteCommand`
 - [serverListCommands](reference/clay-js-api/commands/server-list-commands.md) — `clay.commands.serverListCommands`
+- [serverOpenFile](reference/clay-js-api/commands/server-open-file.md) — `clay.commands.serverOpenFile`
 - [serverRegisterCommand](reference/clay-js-api/commands/server-register-command.md) — `clay.commands.serverRegisterCommand`
+- [serverRevealInTree](reference/clay-js-api/commands/server-reveal-in-tree.md) — `clay.commands.serverRevealInTree`
 - [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `clay.decorations.serverPublishDecorations`
 - [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `clay.configuration.getConfigurationState`
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `clay.configuration.loadConfigurationModule`
@@ -58,6 +61,8 @@ The generated documentation registry must read this section as the explicit incl
 - [serverDeleteRange](reference/clay-js-api/editor/server-delete-range.md) — `clay.editor.serverDeleteRange`
 - [serverInsertNewline](reference/clay-js-api/editor/server-insert-newline.md) — `clay.editor.serverInsertNewline`
 - [serverInsertText](reference/clay-js-api/editor/server-insert-text.md) — `clay.editor.serverInsertText`
+- [serverListGitStatuses](reference/clay-js-api/git/server-list-git-statuses.md) — `clay.git.serverListGitStatuses`
+- [serverRefreshGitStatus](reference/clay-js-api/git/server-refresh-git-status.md) — `clay.git.serverRefreshGitStatus`
 - [bindKey](reference/clay-js-api/keybindings/bind-key.md) — `clay.keybindings.bindKey`
 - [listKeyBindings](reference/clay-js-api/keybindings/list-key-bindings.md) — `clay.keybindings.listKeyBindings`
 - [unbindKey](reference/clay-js-api/keybindings/unbind-key.md) — `clay.keybindings.unbindKey`
@@ -87,6 +92,11 @@ The generated documentation registry must read this section as the explicit incl
 - [definePanel](reference/clay-js-api/sdui/define-panel.md) — `clay.sdui.definePanel`
 - [defineStack](reference/clay-js-api/sdui/define-stack.md) — `clay.sdui.defineStack`
 - [publishTree](reference/clay-js-api/sdui/publish-tree.md) — `clay.sdui.publishTree`
+- [serverAddWorkspaceRoot](reference/clay-js-api/workspace/server-add-workspace-root.md) — `clay.workspace.serverAddWorkspaceRoot`
+- [serverCancelListing](reference/clay-js-api/workspace/server-cancel-listing.md) — `clay.workspace.serverCancelListing`
+- [serverCreateListingCancelToken](reference/clay-js-api/workspace/server-create-listing-cancel-token.md) — `clay.workspace.serverCreateListingCancelToken`
+- [serverDiscoverWorkspaceRootForPath](reference/clay-js-api/workspace/server-discover-workspace-root-for-path.md) — `clay.workspace.serverDiscoverWorkspaceRootForPath`
+- [serverListDirectory](reference/clay-js-api/workspace/server-list-directory.md) — `clay.workspace.serverListDirectory`
 - [serverListWorkspaceRoots](reference/clay-js-api/workspace/server-list-workspace-roots.md) — `clay.workspace.serverListWorkspaceRoots`
 
 ## Registry Rules

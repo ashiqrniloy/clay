@@ -68,10 +68,7 @@ fn package_with_package_control_disables_first_party_package() {
         "@vendor/controller",
         "controller",
         serde_json::Map::from_iter([
-            (
-                "permissions".to_string(),
-                json!(["mode-registration", "package-control"]),
-            ),
+            ("permissions".to_string(), json!(["mode-registration"])),
             ("disables".to_string(), json!(["@clay/markdown"])),
         ]),
     );

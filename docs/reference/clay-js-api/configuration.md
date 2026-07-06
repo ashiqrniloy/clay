@@ -341,3 +341,43 @@ Provider priority, provider enablement, trigger characters, buffer-word limits, 
 Package completion provider registration through [`clay.completion.serverRegisterCompletionProvider`](completion/server-register-completion-provider.md) declares package-prefixed provider id, priority, inert trigger characters, inert word-boundary chars, and bounded `timeoutMs`/`maxItems` at package-load time; it does not grant execution authority. Phase 18.11 is metadata-only: Clay rejects `handler`/`callback`/`complete`/`function`/`module` executable values, raw ops, native handles, client JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate ids, reserved `clay.*` ids, and oversize metadata. Providers may read only Clay-provided open-document content/windows; completion grants no filesystem, network, shell, AI mutation, extension loading, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-JS, or provider execution authority without later documented APIs and an approved decision log.
 
 Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Provider metadata registration, trigger classification over installed inert manifest state, completion request enqueueing through a bounded non-blocking channel, and command-id binding through `bindKey` are load/configuration/update-time work. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication; ordinary keypress routing, local text mutation, Masonry paint/layout, pointer, scroll, text-event handling, edit acknowledgement, and decoration rendering paths do not execute configuration JavaScript, wait on IPC, run provider code, recompute provider metadata from user code, or mutate native layout from package code. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or provider-authority grant.
+
+## Phase 18.12 workspace file-browser configuration review
+
+Phase 18.12 added server-owned workspace-root discovery, bounded directory listing, a Clay-owned left file-browser panel, a bottom transient fuzzy-open route, and server-authoritative open/reveal command routing. This review did **not** promote a new user-facing `clay:configuration` API for file-browser visibility, file-browser slot placement, fuzzy-open key binding defaults, workspace root markers, ignore-list overrides, listing depth/count limits, tree refresh policy, reveal behavior, or raw file-open paths. User-visible configuration reuses existing Clay JS APIs: `clay.keybindings.bindKey` for command chords and the Phase 18.12 `clay:workspace` / `clay:commands` APIs for explicit workspace actions.
+
+User-visible Phase 18.12 configuration surfaces:
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Fuzzy-open key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in server-first command `clay.workspace.openFuzzyFile`; no default chord exists in Rust, so fuzzy open is only reachable when `init.js` binds a key or another Clay-owned action opens it |
+| File-browser toggle key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to `clay.workspace.toggleFileBrowser`; the command is validated by `CommandExecutor`, not a hidden panel-visibility key |
+| File open/reveal commands | runtime-backed command APIs | [`clay.commands.serverOpenFile`](commands/server-open-file.md), [`clay.commands.serverRevealInTree`](commands/server-reveal-in-tree.md), [`clay.commands.serverExecuteCommand`](commands/server-execute-command.md) | Open and reveal route through server workspace APIs, root-relative paths, selected-file grants, and open-document metadata validation |
+| Workspace roots and discovery | runtime-backed workspace APIs | [`clay.workspace.serverAddWorkspaceRoot`](workspace/server-add-workspace-root.md), [`clay.workspace.serverDiscoverWorkspaceRootForPath`](workspace/server-discover-workspace-root-for-path.md), [`clay.workspace.serverListWorkspaceRoots`](workspace/server-list-workspace-roots.md) | Roots and grants are explicit server-authoritative workspace APIs, not configuration keys |
+| Directory listing | runtime-backed workspace APIs | [`clay.workspace.serverListDirectory`](workspace/server-list-directory.md), [`clay.workspace.serverCreateListingCancelToken`](workspace/server-create-listing-cancel-token.md), [`clay.workspace.serverCancelListing`](workspace/server-cancel-listing.md) | Listing uses server validation, bounded depth/count, compiled ignore defaults, optional cancellation tokens, and diagnostics |
+| Left file-browser panel visibility/slot | Clay-owned shell state | `src/shell/file_browser.rs::FileBrowserState`; `FixedSlotId::Left` via SDUI composition | The first-party left panel is Clay-owned UI, not package or user configuration in this phase |
+| Marker file set | compiled workspace boundary | `KNOWN_PROJECT_MARKERS` in `src/server/workspace.rs` | Closed Clay-owned marker table (`.git`, `Cargo.toml`, `package.json`); packages/users cannot extend it through `init.js` |
+| Ignore defaults and list budgets | compiled listing boundary | `DEFAULT_IGNORED_NAMES`, `MAX_LIST_DIRECTORY_DEPTH`, `MAX_LIST_DIRECTORY_ENTRIES`, `MAX_LEFT_PANEL_ENTRIES`, `MAX_FUZZY_ITEMS` | Bounded security/performance constants, not hidden `init.js` keys |
+
+The expected end-user fuzzy-open configuration is a normal `~/.config/clay/init.js` binding:
+
+```js
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+```
+
+`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for this phase. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, and listing budgets are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, or granted extra workspace authority through `init.js`.
+
+Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
+
+- `fileBrowser.defaultVisibility`, `fileBrowser.visible`, `fileBrowser.leftPanelDefault`, `workspace.fileBrowser.leftPanelDefault`
+- `fileBrowser.slot`, `fileBrowser.position`, `fileBrowser.width`, `workspace.fileBrowser.width`
+- `fuzzyOpen.key`, `fuzzyOpen.defaultKey`, `fileBrowser.fuzzyOpenKey`, `workspace.fuzzyOpenKey`
+- `workspace.markers`, `workspace.markerFiles`, `workspace.rootMarkers`, `workspace.discoveryDepth`
+- `workspace.ignore`, `workspace.ignoreRules`, `fileBrowser.ignore`, `fileBrowser.exclude`
+- `fileBrowser.maxDepth`, `fileBrowser.maxEntries`, `fileBrowser.maxItems`, `fileBrowser.refreshInterval`
+- `workspace.rawPath`, `workspace.allowArbitraryPath`, `workspace.allowOutsideRoot`, ad hoc selected-file grant keys
+
+File-browser listing/open/reveal authority is server-owned. Root discovery scans only bounded ancestry with a closed marker set; directory listing stays inside known roots and uses bounded ignore/depth/count limits; open file commands route through `WorkspaceState::open_existing_file` or selected-file grants through `WorkspaceState::open_selected_file`; reveal validates open document metadata. Configuration cannot grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native widget, direct Masonry widget, arbitrary root marker, arbitrary ignore-rule, arbitrary path passthrough, or client-side JavaScript authority.

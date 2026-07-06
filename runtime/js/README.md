@@ -11,6 +11,7 @@ Future import-map/runtime wiring should expose these files with Clay-owned modul
 - `clay:configuration` -> `runtime/js/configuration.ts`
 - `clay:documents` -> `runtime/js/documents.ts`
 - `clay:workspace` -> `runtime/js/workspace.ts`
+- `clay:git` -> `runtime/js/git.ts`
 - `clay:behavior` -> `runtime/js/behavior.ts`
 - `clay:ui` -> `runtime/js/ui.ts`
 

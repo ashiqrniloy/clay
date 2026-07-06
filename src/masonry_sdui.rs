@@ -271,21 +271,21 @@ impl SduiNativeState {
                 dismissal_policy: overlay.dismissal_policy.clone(),
             })
             .collect();
-        if let Some(menu) = &self.active_menu {
-            if menu.is_active() {
-                let overlay = crate::shell::TransientPackageOverlay::from_menu_session(menu);
-                overlays.push(PackageUiOverlayObservation {
-                    id: overlay.id,
-                    anchor: overlay.anchor,
-                    rect: overlay
-                        .anchor
-                        .rect(widget_size.to_rect(), slot_geometry.main_rect),
-                    component_id: overlay.component.id,
-                    component_kind: overlay.component.kind,
-                    focus_policy: overlay.focus_policy,
-                    dismissal_policy: overlay.dismissal_policy,
-                });
-            }
+        if let Some(menu) = &self.active_menu
+            && menu.is_active()
+        {
+            let overlay = crate::shell::TransientPackageOverlay::from_menu_session(menu);
+            overlays.push(PackageUiOverlayObservation {
+                id: overlay.id,
+                anchor: overlay.anchor,
+                rect: overlay
+                    .anchor
+                    .rect(widget_size.to_rect(), slot_geometry.main_rect),
+                component_id: overlay.component.id,
+                component_kind: overlay.component.kind,
+                focus_policy: overlay.focus_policy,
+                dismissal_policy: overlay.dismissal_policy,
+            });
         }
         overlays
     }
@@ -880,12 +880,12 @@ impl SduiNativeState {
         let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
         let mut overlays: Vec<crate::shell::TransientPackageOverlay> =
             self.package_ui.overlays().cloned().collect();
-        if let Some(menu) = &self.active_menu {
-            if menu.is_active() {
-                overlays.push(crate::shell::TransientPackageOverlay::from_menu_session(
-                    menu,
-                ));
-            }
+        if let Some(menu) = &self.active_menu
+            && menu.is_active()
+        {
+            overlays.push(crate::shell::TransientPackageOverlay::from_menu_session(
+                menu,
+            ));
         }
         for overlay in overlays {
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);

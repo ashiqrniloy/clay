@@ -2,7 +2,7 @@
 
 This guide explains how to design a Clay package and how packages are expected to work with Clay's editor, shell, UI, input, actions, logic, data, configuration, and theme systems.
 
-Clay package APIs are evolving. This document intentionally distinguishes **current implemented public behavior**, **Phase 18.2 internal shell runtime behavior**, **Phase 18.3 runtime-backed slot UI contribution behavior**, and **planned package-facing shell/layout/configuration behavior** so package authors and phase plans can update it iteratively as Clay's package architecture lands.
+Clay package APIs are evolving. This document intentionally distinguishes **current implemented public behavior**, **Phase 18.2 internal shell runtime behavior**, **Phase 18.3 runtime-backed slot UI contribution behavior**, **Phase 18.12 Clay-owned file browser behavior**, and **planned package-facing shell/layout/configuration behavior** so package authors and phase plans can update it iteratively as Clay's package architecture lands.
 
 ## Goals
 
@@ -87,6 +87,7 @@ Clay currently has foundations for:
 - Package manifest Phase 18.4 input/state/configuration metadata validation for `clay.contributions.input`, `uiStateScopes`, `layoutOverrides`, and `packageOptions`, including deterministic conflict diagnostics and provenance.
 - Decoration publication and parse handler foundations.
 - First-party `@clay/markdown` package scaffold and smoke fixtures.
+- First-party `@clay/git` read-only status package consuming the server-owned `clay:git` discovery facade (Phase 18.13).
 
 ### Phase 18.2 shell/layout runtime and Phase 18.3 slot-aware package UI
 
@@ -130,6 +131,8 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.6/Plan 035 | Document the shipped one-line `loadPackage("@clay/markdown")` loader, source-aware package loading, and `PackageLoadEntryAllowlist` package-root boundary. |
 | Phase 18.7 | Document persistent-runtime parse-handler registration, generic open-time mode activation, no-client-JS/no-hot-path-JS invariants, parse budgets, and forbidden per-mode/per-open shortcuts. |
 | Phase 18.8 | Document the command execution lifecycle, inert action intents, transient menu sessions, and the difference between fixed panels, transient overlays, and bottom-pane transient menus. Update anti-patterns to reject client-side command execution, raw callbacks, and command-permission bypass. |
+| Phase 18.12 | Document the file-browser-era shell contract: Clay owns workspace discovery, bounded listing, the left file tree, bottom fuzzy-open sessions, and workspace command routing; packages may reuse generic panel/overlay/action primitives but cannot add roots, markers, ignore rules, raw file listing, native widgets, or direct filesystem authority. |
+| Phase 18.13 | Document the read-only Git package contract: `@clay/git` consumes the server-owned `clay:git` discovery facade, declares no permissions, publishes a sanitized status panel, and receives no shell/network/filesystem/mutating Git authority. Branch/status commands are server-owned built-ins (`clay.git.listStatuses`, `clay.git.refreshStatus`); the package only composes read-only display state. Mutating Git operations remain deferred. |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
@@ -761,6 +764,21 @@ Phase 18.4 component-scoped action routing composes this command contract with `
 
 Phase 18.8 adds a server-owned `CommandExecution` boundary. SDUI actions, package UI action intents, behavior-manifest keybindings, and transient-menu selections all normalize to the same `CommandExecutionRequest`. The server validates command ID, routing policy, package provenance, declared permissions, target context, and bounded arguments before any side effect. Packages may declare commands and expose them in transient menus; they cannot execute commands directly from UI callbacks, bypass permission checks, or run command handlers in the Rust client.
 
+### Read-only server-facade packages (Phase 18.13)
+
+Not every package owns a mode, parser, or command. A read-only package can compose display UI from a server-owned typed facade while declaring **no permissions at all**. The first-party `@clay/git` package is the reference shape:
+
+```js
+// ~/.config/clay/init.js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/git");
+```
+
+The package's `loadEntry` consumes the server-owned `clay:git` facade (`serverListGitStatuses`) and publishes an inert SDUI status tree (branch/dirty/refresh labels). The actual Git work — closed read-only command table, workspace-root confinement, bounded timeouts/output — stays in the server's `GitDiscoveryService` / `GitStatusCache`. The package declares `permissions: []`, lists no modes, registers no commands, and receives no shell, network, filesystem, or mutating Git authority. Branch/status commands (`clay.git.listStatuses`, `clay.git.refreshStatus`) are server-owned built-ins available regardless of package load; the package only adds the read-only status panel on top.
+
+This is the preferred shape for packages that surface server-owned data: consume the documented facade, publish sanitized inert UI, and let the server own every capability. Mutating Git operations (checkout, stage, commit, reset, rebase, stash, push, pull, fetch) are deferred to a later phase with their own command authority UX. They will require explicit server-owned command IDs added to a closed command table, a new user-approved permission grant (the package's `permissions: []` is the read-only ceiling), conflict/state handling, and network authority for remote operations — never arbitrary argv, never a generic shell escape hatch, and never silent authority on this package.
+
 ## Input
 
 Packages declare input interests. They do not receive raw arbitrary client input by default.
@@ -1161,6 +1179,51 @@ Packages may request transient UI and declare action intents, but they cannot:
 
 Command execution authority is validated per request. Registration or inclusion in a menu does not grant execution authority; the server re-checks permissions, provenance, routing policy, and target context on every activation.
 
+## Phase 18.12 authoring contract: Clay-owned file browser and workspace authority
+
+Phase 18.12 makes the file browser the first real consumer of Clay shell slots and transient picker primitives. It is **Clay-owned**, not a package contribution. The left file tree, bottom fuzzy-open session, workspace-root discovery, bounded directory listing, and file open/reveal commands are first-party compositions of generic primitives so later packages can reuse the same shell concepts without owning workspace authority.
+
+### Slot ownership and UI composition
+
+Clay owns the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token mapping, and native Masonry widget implementation. For the file browser specifically:
+
+- The left file tree is a Clay-owned fixed panel composed from inert SDUI/component data (`Panel`, `Stack`, `Label`, `List`, and `EditorView`) and installed into the `left` shell region. It demonstrates the fixed-panel contract but does not make the workspace tree package-owned.
+- The fuzzy-open picker is a Clay-owned bottom transient menu session. It uses bounded installed listing metadata and local query filtering; it is not a fixed bottom panel and not a package `TransientOverlayContribution` that owns dynamic query state.
+- File entries emit inert command intents such as `clay.workspace.openFile` and `clay.workspace.revealInTree` with bounded primitive arguments. They never carry JavaScript callbacks, raw op names, native handles, or package-owned filesystem authority.
+- Native layout, focus, accessibility, theme token resolution, and Masonry rendering remain client/Rust implementation details hidden behind Clay primitives.
+
+Packages can still declare their own fixed panels and transient overlays through the documented `clay:ui` APIs, but those contributions compose around Clay-owned workspace chrome. A package may request `left`, `right`, `top`, or `bottom` slots for package UI; Clay validates slot conflicts, visibility, component IDs, actions, input policies, and theme tokens, and user configuration may override defaults where documented. Packages must tolerate Clay-owned panels such as the file browser occupying preferred slots.
+
+### Workspace/file authority boundary
+
+File browser authority stays server-owned:
+
+- Workspace roots come from server startup/cwd discovery, opened-file ancestry, explicit user grants, and Clay's closed marker set. Packages cannot add roots, marker names, root discovery rules, or root precedence.
+- Directory listing runs through the bounded server listing service with Clay-defined ignore rules, depth/count limits, cancellation, refresh, and diagnostics. Packages cannot list arbitrary filesystem paths, bypass limits, or run directory scans from paint/layout/input handlers.
+- In-root opens route through `WorkspaceState::open_existing_file`; out-of-root selected files route through `WorkspaceState::open_selected_file`, which creates a single-file grant. Packages cannot turn a selected-file grant into directory authority.
+- `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser` are built-in server-first commands. Save/save-as/rename/delete are not registered file-browser commands in this phase.
+
+Package UI may reference workspace-backed actions only through documented command/API surfaces. It must not pass raw client-chosen paths, call raw `Deno.core.ops`, execute client-side JavaScript, or read files directly from the Rust client.
+
+### Performance contract
+
+The file browser reinforces the shell hot-path rule:
+
+- Fixed-panel rendering and transient menu rendering read already-installed inert state.
+- Workspace discovery, directory listing, refresh, fuzzy snapshot creation, command validation, and file open/reveal handling happen at startup, explicit refresh, explicit command/action time, or server-side background work — never inside Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+- Fuzzy-open query movement filters bounded installed metadata locally. If a package needs broader search, it needs a separate bounded/cancellable server primitive rather than ad hoc paint-time filesystem work.
+
+### Package-facing guidance
+
+Use the file browser as a model for **composition**, not authority:
+
+- Good: declare a package-prefixed preview/outline/diagnostics panel with inert components, registered action intents, documented theme tokens, and hidden-by-default layout defaults.
+- Good: declare a transient overlay for package quick actions whose items activate registered package commands.
+- Bad: declare a package file tree that scans paths directly, adds workspace roots/markers, claims the file browser's left slot by load order, passes raw paths in UI callbacks, or ships a custom Masonry widget.
+- Bad: implement fuzzy search by running package JavaScript, filesystem scans, parse work, blocking IPC, or package command handlers in paint/layout/input hot paths.
+
+Testing for package UI that coexists with the file browser should assert slot conflict diagnostics, fixed-vs-transient behavior, inert command arguments, no raw-op/native-widget/CSS usage, and no workspace authority beyond documented root/grant APIs.
+
 ## Phase 18.9 authoring contract: generic text/code fallback modes and generic key behavior
 
 Phase 18.9 makes every document editable even when no language package is installed, disabled, or invalid, by registering always-on Clay-owned fallback major modes (`core.text`, `core.code`) at server startup. Language packages do **not** replace these fallbacks; they **extend** `core.code`/`core.text` by declaring modes, classification patterns, and behavior manifests through the same generic primitives every other mode uses: `DocumentClassification`, `MajorModeActivation`, `TextTransform`, `KeyRoutingOverride`, and `CommandDeclaration`. The canonical primitive detail lives in [Primitive Registry Schema](../primitives/registry.md); this section is the package-author contract.
@@ -1403,12 +1466,12 @@ Recommended test categories:
 3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage(specifier)` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the module loader only accepts resolver-validated package load entries.
 4. **Mode tests** — classification, activation, behavior manifest composition. For Phase 18.9: assert unknown/plain-text files fall back to `core.text` and code-like extensions/shebangs to `core.code`; assert a package-declared pattern wins precedence over built-ins; assert electric/pair/comment transforms execute client-side from the manifest without IPC; assert `core.*`/`clay.*` mode IDs are rejected at registration; assert oversize behavior manifests are rejected at the payload budget.
 5. **Input tests** — key routing, command routing, mouse/component actions.
-6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy.
+6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy. Phase 18.12 package UI tests should also cover Clay-owned file-browser coexistence.
 7. **Theme/style tests** — token validation, same-type fallback mapping, typed style variables, and raw CSS/color rejection.
 8. **Package metadata tests** — `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, `themeTokens`, duplicate fixed slot claims, and bounded payload diagnostics.
 9. **Parse/render tests** — bounded snapshots, stale result rejection, decoration payload budgets.
 10. **Docs tests** — package docs, primitive docs, and master index links stay current.
-11. **Manual smoke tests** — actual GUI package loading and user workflow checks. For Phase 18.9, the smoke path in [Launch and GUI Smoke](../../development/launch-and-gui-smoke.md) opens files with no language package and confirms editable `core.text`/`core.code` fallback modes.
+11. **Manual smoke tests** — actual GUI package loading and user workflow checks. For Phase 18.9, the smoke path in [Launch and GUI Smoke](../../development/launch-and-gui-smoke.md) opens files with no language package and confirms editable `core.text`/`core.code` fallback modes. For Phase 18.12, smoke the left file browser and bottom fuzzy-open against a bounded workspace and confirm opens/reveals route through server commands, not package callbacks.
 
 ## Minimal Package Checklist
 
@@ -1426,6 +1489,7 @@ For a simple package:
 - [ ] Commands/actions are registered before UI targets them.
 - [ ] UI contributions are inert and slot-aware when shell APIs are available.
 - [ ] Command action intents are inert and transient menu items are bounded; no callbacks or client-side handlers.
+- [ ] Package UI coexists with Clay-owned file browser chrome and does not add roots, markers, ignore rules, raw listings, or file-browser-specific native widgets.
 - [ ] Style uses tokens/typed variables, not CSS.
 - [ ] Tests cover validation, loading, runtime behavior, and docs.
 
@@ -1450,6 +1514,8 @@ Do not:
 - Execute commands from UI callbacks or transient menu items without routing through the server-owned `CommandExecution` path.
 - Bypass command permission/provenance validation from package code.
 - Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
+- Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom Masonry widget.
+- Pass raw client-chosen filesystem paths through package UI actions instead of using documented workspace root/grant command APIs.
 - Treat `serverLoadPackage` as ordinary end-user package installation, enablement, or execution authority.
 
 ## Example: Markdown as a Package

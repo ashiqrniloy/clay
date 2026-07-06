@@ -7,14 +7,20 @@
 )]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
     fmt, fs, io,
     path::{Path, PathBuf},
     string::FromUtf8Error,
-    sync::Arc,
+    sync::{
+        Arc, LazyLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::SystemTime,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use tokio::{fs as tokio_fs, io::AsyncWriteExt, sync::Mutex};
 
@@ -26,6 +32,41 @@ use crate::protocol::{
 use super::document::DocumentState;
 
 pub(crate) type WorkspaceRootId = u64;
+
+/// Closed set of project marker files/directories used for workspace-root
+/// discovery. These are checked by presence/metadata only and are never
+/// executed or parsed for arbitrary content.
+pub(crate) const KNOWN_PROJECT_MARKERS: &[&str] = &[".git", "Cargo.toml", "package.json"];
+
+/// Maximum number of ancestors to walk when discovering a workspace root from
+/// an opened file path. Bounded to avoid expensive traversal on deep paths.
+const MAX_DISCOVERY_ANCESTRY_DEPTH: usize = 32;
+
+/// Maximum number of workspace roots (directory + single-file grants) the
+/// server will hold. Bounded to keep root metadata and authority checks cheap.
+const MAX_WORKSPACE_ROOTS: usize = 64;
+
+/// Default names ignored by the file listing service. These are directories
+/// or files that are commonly large, generated, or repository-internal and
+/// are not useful to show in a general-purpose file browser. Packages cannot
+/// extend this set.
+pub(crate) const DEFAULT_IGNORED_NAMES: &[&str] = &[".git", "node_modules", "target"];
+
+/// Maximum directory depth for a single listing request. Bounded to prevent
+/// deep recursion and keep response sizes predictable.
+const MAX_LIST_DIRECTORY_DEPTH: usize = 8;
+
+/// Maximum number of entries returned by a single listing request. Bounded to
+/// keep response serialization and UI rendering cheap.
+const MAX_LIST_DIRECTORY_ENTRIES: usize = 1000;
+
+/// Maximum number of immediate children to scan when computing
+/// `child_count` for a directory entry. Larger directories report the cap.
+const MAX_CHILD_COUNT_SCAN: usize = 100;
+
+/// Cancellation token for in-flight directory listings. The bool is set to
+/// `true` by `op_clay_workspace_cancel_listing` to request early termination.
+pub(crate) type ListingCancelToken = Arc<AtomicBool>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceRoot {
@@ -44,6 +85,12 @@ pub(crate) struct WorkspaceRootMetadata {
     pub(crate) workspace_root_id: WorkspaceRootId,
     pub(crate) display_name: String,
     pub(crate) display_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkspaceDirectoryRoot {
+    pub(crate) workspace_root_id: WorkspaceRootId,
+    pub(crate) canonical_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +148,65 @@ impl fmt::Display for WorkspaceDiagnostic {
     }
 }
 
+/// Kind of a file-system entry returned by the bounded listing service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileListEntryKind {
+    Directory,
+    File,
+    Symlink,
+    Other,
+}
+
+/// Per-entry diagnostic reported by the bounded listing service. A single
+/// unreadable directory does not fail the whole request; it is reported as
+/// an entry-level diagnostic and listing continues.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileListEntryDiagnostic {
+    pub(crate) code: FileErrorCode,
+    pub(crate) message: String,
+}
+
+/// One entry in a bounded directory listing result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileListEntry {
+    pub(crate) name: String,
+    pub(crate) kind: FileListEntryKind,
+    pub(crate) relative_path: PathBuf,
+    pub(crate) size_hint: Option<u64>,
+    pub(crate) child_count: Option<usize>,
+    pub(crate) diagnostic: Option<FileListEntryDiagnostic>,
+}
+
+/// Result page returned by the bounded directory listing service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileListPage {
+    pub(crate) root_id: WorkspaceRootId,
+    pub(crate) entries: Vec<FileListEntry>,
+    pub(crate) truncated: bool,
+    pub(crate) cancelled: bool,
+    pub(crate) diagnostics: Vec<WorkspaceDiagnostic>,
+}
+
+/// Request for the bounded directory listing service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileListRequest {
+    pub(crate) root_id: WorkspaceRootId,
+    pub(crate) relative_path: PathBuf,
+    pub(crate) max_depth: usize,
+    pub(crate) max_entries: usize,
+}
+
+impl Default for FileListRequest {
+    fn default() -> Self {
+        Self {
+            root_id: 0,
+            relative_path: PathBuf::new(),
+            max_depth: MAX_LIST_DIRECTORY_DEPTH,
+            max_entries: MAX_LIST_DIRECTORY_ENTRIES,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct OpenDocument {
     file_state: FileDocumentState,
@@ -115,8 +221,29 @@ pub(crate) struct OpenDocumentLease {
     pub(crate) document: Arc<Mutex<DocumentState>>,
 }
 
+impl OpenDocumentLease {
+    pub(crate) async fn snapshot(&self, _client_id: ClientId) -> OpenDocumentSnapshot {
+        let document = self.document.lock().await;
+        let metadata = DocumentMetadata {
+            document_id: self.document_id,
+            version: document.version(),
+            access: self.access.clone(),
+            lease_id: self.access.lease_id(),
+            dirty: document.is_dirty(),
+            workspace_root_id: self.file_state.workspace_root_id,
+            path: self
+                .file_state
+                .workspace_relative_path
+                .to_string_lossy()
+                .to_string(),
+        };
+        let text = document.text();
+        OpenDocumentSnapshot { metadata, text }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OpenDocumentSnapshot {
+pub struct OpenDocumentSnapshot {
     pub(crate) metadata: DocumentMetadata,
     pub(crate) text: String,
 }
@@ -233,6 +360,20 @@ impl WorkspaceState {
             });
         }
 
+        // Deduplicate directory roots by canonical path.
+        if let Some(existing) = self.roots.values().find(|root| {
+            matches!(
+                &root.authority,
+                WorkspaceAuthority::Directory { canonical_path: path } if path == &canonical_path
+            )
+        }) {
+            return Ok(existing.id);
+        }
+
+        if self.roots.len() >= MAX_WORKSPACE_ROOTS {
+            return Err(WorkspaceError::RootLimitExceeded);
+        }
+
         let id = self.next_root_id;
         self.next_root_id = self.next_root_id.saturating_add(1);
         self.roots.insert(
@@ -247,24 +388,423 @@ impl WorkspaceState {
 
     pub(crate) fn list_root_metadata(&self) -> Vec<WorkspaceRootMetadata> {
         let mut roots = self
+            .directory_roots()
+            .into_iter()
+            .map(|root| WorkspaceRootMetadata {
+                workspace_root_id: root.workspace_root_id,
+                display_name: root
+                    .canonical_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| root.canonical_path.to_string_lossy().into_owned()),
+                display_path: display_authorized_path(&root.canonical_path),
+            })
+            .collect::<Vec<_>>();
+        roots.sort_by_key(|root| root.workspace_root_id);
+        roots
+    }
+
+    pub(crate) fn directory_roots(&self) -> Vec<WorkspaceDirectoryRoot> {
+        let mut roots = self
             .roots
             .values()
             .filter_map(|root| {
                 let WorkspaceAuthority::Directory { canonical_path } = &root.authority else {
                     return None;
                 };
-                Some(WorkspaceRootMetadata {
+                Some(WorkspaceDirectoryRoot {
                     workspace_root_id: root.id,
-                    display_name: canonical_path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| canonical_path.to_string_lossy().into_owned()),
-                    display_path: display_authorized_path(canonical_path),
+                    canonical_path: canonical_path.clone(),
                 })
             })
             .collect::<Vec<_>>();
         roots.sort_by_key(|root| root.workspace_root_id);
         roots
+    }
+
+    /// Add the current working directory as a workspace root when no explicit
+    /// roots have been configured. This is the startup cwd/CLI fallback.
+    pub(crate) fn add_root_from_cwd(&mut self) -> Result<Option<WorkspaceRootId>, WorkspaceError> {
+        if !self.roots.is_empty() {
+            return Ok(None);
+        }
+        let cwd = std::env::current_dir().map_err(|source| WorkspaceError::RootUnavailable {
+            path: PathBuf::from("."),
+            source,
+        })?;
+        self.add_root(&cwd).map(Some)
+    }
+
+    /// Discover a workspace root for an opened file. If the file is already
+    /// covered by an existing directory root, return that root. Otherwise walk
+    /// up the file's ancestry looking for a known project marker. If a marker
+    /// is found, add that directory as a root. If no marker is found within the
+    /// bounded depth, return `None`; the caller should fall back to a
+    /// single-file selected-file grant.
+    pub(crate) fn discover_root_for_path(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<Option<WorkspaceRootId>, WorkspaceError> {
+        let canonical_path =
+            fs::canonicalize(path.as_ref()).map_err(|source| WorkspaceError::FileUnavailable {
+                path: path.as_ref().to_path_buf(),
+                source,
+            })?;
+        let metadata =
+            fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
+                path: path.as_ref().to_path_buf(),
+                source,
+            })?;
+        if !metadata.is_file() {
+            return Err(WorkspaceError::DirectoryOpen);
+        }
+
+        if let Some(root_id) = self.find_covering_directory_root(&canonical_path) {
+            return Ok(Some(root_id));
+        }
+
+        let mut current = canonical_path.parent();
+        let mut depth = 0;
+        while let Some(dir) = current {
+            if depth >= MAX_DISCOVERY_ANCESTRY_DEPTH {
+                break;
+            }
+            for marker in KNOWN_PROJECT_MARKERS {
+                if dir.join(marker).exists() {
+                    return self.add_root(dir).map(Some);
+                }
+            }
+            current = dir.parent();
+            depth += 1;
+        }
+
+        Ok(None)
+    }
+
+    /// Add an explicit user grant as a workspace root. Directories become
+    /// directory roots; files become single-file grants. Deduplicated by
+    /// canonical path.
+    pub(crate) fn add_explicit_user_grant(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<WorkspaceRootId, WorkspaceError> {
+        let canonical_path =
+            fs::canonicalize(path.as_ref()).map_err(|source| WorkspaceError::RootUnavailable {
+                path: path.as_ref().to_path_buf(),
+                source,
+            })?;
+        let metadata =
+            fs::metadata(&canonical_path).map_err(|source| WorkspaceError::RootUnavailable {
+                path: path.as_ref().to_path_buf(),
+                source,
+            })?;
+
+        if metadata.is_dir() {
+            return self.add_root(canonical_path);
+        }
+
+        if metadata.is_file() {
+            // Deduplicate single-file grants by canonical path.
+            if let Some(existing) = self.roots.values().find(|root| {
+                matches!(
+                    &root.authority,
+                    WorkspaceAuthority::SingleFile { canonical_path: path } if path == &canonical_path
+                )
+            }) {
+                return Ok(existing.id);
+            }
+            if self.roots.len() >= MAX_WORKSPACE_ROOTS {
+                return Err(WorkspaceError::RootLimitExceeded);
+            }
+            return self.add_single_file_grant(canonical_path);
+        }
+
+        Err(WorkspaceError::UnsupportedFileType)
+    }
+
+    fn find_covering_directory_root(&self, canonical_path: &Path) -> Option<WorkspaceRootId> {
+        self.roots.values().find_map(|root| {
+            let WorkspaceAuthority::Directory {
+                canonical_path: root_path,
+            } = &root.authority
+            else {
+                return None;
+            };
+            if canonical_path.starts_with(root_path) {
+                Some(root.id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// List directory entries under a known workspace root.
+    ///
+    /// The listing is bounded by `request.max_depth` and `request.max_entries`.
+    /// It ignores a closed default set of generated directories and a single-
+    /// level `.gitignore` at the workspace root. Permission-denied directories
+    /// are reported as per-entry diagnostics without failing the whole request.
+    /// If `cancel` is supplied and becomes true, listing stops early and sets
+    /// `cancelled` on the result page.
+    pub(crate) fn list_directory(
+        &self,
+        request: FileListRequest,
+        cancel: Option<&ListingCancelToken>,
+    ) -> Result<FileListPage, WorkspaceError> {
+        let root = self
+            .roots
+            .get(&request.root_id)
+            .ok_or(WorkspaceError::UnknownRoot {
+                root_id: request.root_id,
+            })?;
+        let WorkspaceAuthority::Directory {
+            canonical_path: root_path,
+        } = &root.authority
+        else {
+            return Err(WorkspaceError::DirectoryOpen);
+        };
+
+        let target = root_path.join(&request.relative_path);
+        let canonical_target =
+            fs::canonicalize(&target).map_err(|source| WorkspaceError::FileUnavailable {
+                path: request.relative_path.clone(),
+                source,
+            })?;
+        if !canonical_target.starts_with(root_path) {
+            return Err(WorkspaceError::OutsideRoot);
+        }
+        let metadata =
+            fs::metadata(&canonical_target).map_err(|source| WorkspaceError::FileUnavailable {
+                path: request.relative_path.clone(),
+                source,
+            })?;
+        if !metadata.is_dir() {
+            return Err(WorkspaceError::DirectoryOpen);
+        }
+
+        let max_depth = request.max_depth.min(MAX_LIST_DIRECTORY_DEPTH);
+        let max_entries = request.max_entries.min(MAX_LIST_DIRECTORY_ENTRIES);
+        let gitignore_patterns = read_root_gitignore_patterns(root_path);
+        let ignore_set = build_ignore_set(&gitignore_patterns);
+
+        let mut entries = Vec::new();
+        let mut diagnostics = Vec::new();
+        let mut truncated = false;
+        let mut cancelled = false;
+
+        self.list_directory_recursive(
+            &canonical_target,
+            &request.relative_path,
+            0,
+            max_depth,
+            max_entries,
+            &ignore_set,
+            cancel,
+            &mut entries,
+            &mut diagnostics,
+            &mut truncated,
+            &mut cancelled,
+        );
+
+        entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        diagnostics.sort_by(|left, right| left.message.cmp(&right.message));
+
+        Ok(FileListPage {
+            root_id: request.root_id,
+            entries,
+            truncated,
+            cancelled,
+            diagnostics,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn list_directory_recursive(
+        &self,
+        dir_path: &Path,
+        dir_relative: &Path,
+        depth: usize,
+        max_depth: usize,
+        max_entries: usize,
+        ignore_set: &IgnoreSet,
+        cancel: Option<&ListingCancelToken>,
+        entries: &mut Vec<FileListEntry>,
+        diagnostics: &mut Vec<WorkspaceDiagnostic>,
+        truncated: &mut bool,
+        cancelled: &mut bool,
+    ) {
+        // `depth` is the depth of the directory being processed relative to the
+        // requested directory (target = 0). Entries emitted are at depth+1.
+        // Recursion stops when the next directory would be at max_depth.
+        if depth >= max_depth {
+            return;
+        }
+        if let Some(token) = cancel
+            && token.load(Ordering::Relaxed)
+        {
+            *cancelled = true;
+            return;
+        }
+
+        let read_dir = match fs::read_dir(dir_path) {
+            Ok(read_dir) => read_dir,
+            Err(source) => {
+                let code = io_error_code(&source);
+                diagnostics.push(WorkspaceDiagnostic::new(
+                    code.clone(),
+                    format!(
+                        "cannot read directory {}: {source}",
+                        display_authorized_path(dir_relative)
+                    ),
+                    Some(container_permission_hint()),
+                ));
+                let diagnostic = Some(FileListEntryDiagnostic {
+                    code,
+                    message: format!("cannot read directory: {source}"),
+                });
+                if let Some(entry) = entries
+                    .iter_mut()
+                    .find(|entry| entry.relative_path == dir_relative)
+                {
+                    entry.diagnostic = diagnostic;
+                } else {
+                    entries.push(FileListEntry {
+                        name: dir_relative
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| ".".to_string()),
+                        kind: FileListEntryKind::Directory,
+                        relative_path: dir_relative.to_path_buf(),
+                        size_hint: None,
+                        child_count: None,
+                        diagnostic,
+                    });
+                }
+                return;
+            }
+        };
+
+        let mut child_dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
+        for dir_entry in read_dir {
+            if entries.len() >= max_entries {
+                *truncated = true;
+                return;
+            }
+            if let Some(token) = cancel
+                && token.load(Ordering::Relaxed)
+            {
+                *cancelled = true;
+                return;
+            }
+
+            let dir_entry = match dir_entry {
+                Ok(entry) => entry,
+                Err(source) => {
+                    diagnostics.push(WorkspaceDiagnostic::new(
+                        io_error_code(&source),
+                        format!(
+                            "cannot read an entry in directory {}: {source}",
+                            display_authorized_path(dir_relative)
+                        ),
+                        Some(container_permission_hint()),
+                    ));
+                    continue;
+                }
+            };
+
+            let name = dir_entry.file_name();
+            let name_str = name.to_string_lossy();
+            if ignore_set.is_ignored(&name_str, None) {
+                continue;
+            }
+
+            let entry_path = dir_entry.path();
+            let relative_path = if dir_relative.as_os_str().is_empty() {
+                PathBuf::from(&name)
+            } else {
+                dir_relative.join(&name)
+            };
+
+            let metadata = match dir_entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(source) => {
+                    let code = io_error_code(&source);
+                    diagnostics.push(WorkspaceDiagnostic::new(
+                        code.clone(),
+                        format!(
+                            "cannot read metadata for {}: {source}",
+                            display_authorized_path(&relative_path)
+                        ),
+                        Some(container_permission_hint()),
+                    ));
+                    entries.push(FileListEntry {
+                        name: name_str.into_owned(),
+                        kind: FileListEntryKind::Other,
+                        relative_path,
+                        size_hint: None,
+                        child_count: None,
+                        diagnostic: Some(FileListEntryDiagnostic {
+                            code,
+                            message: format!("cannot read metadata: {source}"),
+                        }),
+                    });
+                    continue;
+                }
+            };
+
+            let (kind, child_count) = if metadata.is_dir() {
+                (
+                    FileListEntryKind::Directory,
+                    Some(count_visible_children(&entry_path, ignore_set)),
+                )
+            } else if metadata.is_file() {
+                (FileListEntryKind::File, None)
+            } else if metadata.file_type().is_symlink() {
+                (FileListEntryKind::Symlink, None)
+            } else {
+                (FileListEntryKind::Other, None)
+            };
+
+            if metadata.is_dir()
+                && depth + 1 < max_depth
+                && !ignore_set.is_ignored(&name_str, Some(true))
+            {
+                child_dirs.push((entry_path.clone(), relative_path.clone()));
+            }
+
+            entries.push(FileListEntry {
+                name: name_str.into_owned(),
+                kind,
+                relative_path,
+                size_hint: if metadata.is_file() {
+                    Some(metadata.len())
+                } else {
+                    None
+                },
+                child_count,
+                diagnostic: None,
+            });
+        }
+
+        for (child_path, child_relative) in child_dirs {
+            if entries.len() >= max_entries {
+                *truncated = true;
+                return;
+            }
+            self.list_directory_recursive(
+                &child_path,
+                &child_relative,
+                depth + 1,
+                max_depth,
+                max_entries,
+                ignore_set,
+                cancel,
+                entries,
+                diagnostics,
+                truncated,
+                cancelled,
+            );
+        }
     }
 
     pub(crate) async fn open_existing_file(
@@ -360,7 +900,7 @@ impl WorkspaceState {
         {
             return Ok(existing);
         }
-        let root_id = self.add_single_file_grant(plan.canonical_path.clone());
+        let root_id = self.add_single_file_grant(plan.canonical_path.clone())?;
         let file_state = FileDocumentState {
             workspace_root_id: root_id,
             canonical_path: plan.canonical_path,
@@ -606,7 +1146,13 @@ impl WorkspaceState {
         })
     }
 
-    fn add_single_file_grant(&mut self, canonical_path: PathBuf) -> WorkspaceRootId {
+    fn add_single_file_grant(
+        &mut self,
+        canonical_path: PathBuf,
+    ) -> Result<WorkspaceRootId, WorkspaceError> {
+        if self.roots.len() >= MAX_WORKSPACE_ROOTS {
+            return Err(WorkspaceError::RootLimitExceeded);
+        }
         let id = self.next_root_id;
         self.next_root_id = self.next_root_id.saturating_add(1);
         self.roots.insert(
@@ -616,7 +1162,7 @@ impl WorkspaceState {
                 authority: WorkspaceAuthority::SingleFile { canonical_path },
             },
         );
-        id
+        Ok(id)
     }
 
     async fn register_canonical_file(
@@ -931,6 +1477,17 @@ fn atomic_temp_path(target: &Path) -> PathBuf {
 async fn atomic_write_file(target: &Path, bytes: &[u8]) -> io::Result<FileMetadata> {
     let temp_path = atomic_temp_path(target);
 
+    #[cfg(unix)]
+    if fs::metadata(target)
+        .map(|metadata| metadata.permissions().mode() & 0o222 == 0)
+        .unwrap_or(false)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "target file is read-only",
+        ));
+    }
+
     // Preserve the original file's permissions where feasible (Unix mode).
     // Metadata of a missing target is ignored; the temp then keeps its default
     // mode, which is the best we can do for a brand-new file.
@@ -1157,6 +1714,7 @@ pub(crate) enum WorkspaceError {
         len: u64,
         max: usize,
     },
+    RootLimitExceeded,
 }
 
 impl fmt::Display for WorkspaceError {
@@ -1283,8 +1841,186 @@ impl WorkspaceError {
                     "Open files smaller than {max} bytes. Chunked/viewport-first loading for larger files is planned but not yet available."
                 )),
             ),
+            Self::RootLimitExceeded => WorkspaceDiagnostic::new(
+                FileErrorCode::WorkspaceLimitExceeded,
+                format!(
+                    "workspace root limit of {MAX_WORKSPACE_ROOTS} reached; cannot add another root or single-file grant"
+                ),
+                Some("Close unused roots or revoke single-file grants before adding more.".to_string()),
+            ),
         }
     }
+}
+
+/// Global registry of in-flight listing cancellation tokens. Tokens are
+/// removed when the listing finishes or is cancelled.
+static LISTING_CANCELLATIONS: LazyLock<std::sync::Mutex<HashMap<String, ListingCancelToken>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+/// Register a caller-supplied cancellation token id, returning the token.
+pub(crate) fn register_listing_cancel_token(id: String) -> ListingCancelToken {
+    let token = Arc::new(AtomicBool::new(false));
+    {
+        let mut map = LISTING_CANCELLATIONS.lock().unwrap();
+        map.insert(id, token.clone());
+    }
+    token
+}
+
+/// Return a new unique cancellation token id, registering the token.
+pub(crate) fn create_listing_cancel_token() -> (String, ListingCancelToken) {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string();
+    (id.clone(), register_listing_cancel_token(id))
+}
+
+/// Cancel a registered listing by token id. Returns true if the token existed.
+pub(crate) fn cancel_listing(token_id: &str) -> bool {
+    let map = LISTING_CANCELLATIONS.lock().unwrap();
+    if let Some(token) = map.get(token_id) {
+        token.store(true, Ordering::Relaxed);
+        true
+    } else {
+        false
+    }
+}
+
+/// Remove a registered cancellation token. Called when the listing ends.
+pub(crate) fn remove_listing_cancel_token(token_id: &str) {
+    let mut map = LISTING_CANCELLATIONS.lock().unwrap();
+    map.remove(token_id);
+}
+
+/// Closed set of names and patterns ignored by the bounded listing service.
+struct IgnoreSet {
+    names: HashSet<String>,
+    patterns: Vec<String>,
+}
+
+impl IgnoreSet {
+    fn is_ignored(&self, name: &str, force_directory: Option<bool>) -> bool {
+        if self.names.contains(name) {
+            return true;
+        }
+        for pattern in &self.patterns {
+            if gitignore_pattern_matches(name, pattern, force_directory) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn build_ignore_set(gitignore_patterns: &[String]) -> IgnoreSet {
+    let mut names: HashSet<String> = DEFAULT_IGNORED_NAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+    let mut patterns = Vec::new();
+    for pattern in gitignore_patterns {
+        let trimmed = pattern.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let without_dir_marker = trimmed.trim_end_matches('/');
+        if without_dir_marker.contains('/') {
+            // Single-level root .gitignore parse: path-specific patterns are
+            // not supported; only simple name patterns and globs.
+            continue;
+        }
+        if glob_pattern_is_name_only(trimmed) {
+            names.insert(without_dir_marker.to_string());
+        } else {
+            patterns.push(trimmed.to_string());
+        }
+    }
+    IgnoreSet { names, patterns }
+}
+
+fn glob_pattern_is_name_only(pattern: &str) -> bool {
+    let base = pattern.trim_end_matches('/');
+    !base.contains('*') && !base.contains('?') && !base.contains('[')
+}
+
+fn gitignore_pattern_matches(name: &str, pattern: &str, force_directory: Option<bool>) -> bool {
+    let directory_only = pattern.ends_with('/');
+    if directory_only {
+        if force_directory == Some(false) {
+            return false;
+        }
+        if force_directory.is_none() {
+            // Without metadata we cannot know; conservative: match anyway.
+        }
+    }
+    let pattern = pattern.trim_end_matches('/');
+    glob_matches(name, pattern)
+}
+
+fn glob_matches(text: &str, pattern: &str) -> bool {
+    let mut pattern_chars = pattern.chars().peekable();
+    let mut text_chars = text.chars().peekable();
+    while let Some(p) = pattern_chars.next() {
+        match p {
+            '*' => {
+                let Some(next) = pattern_chars.peek().copied() else {
+                    return true;
+                };
+                loop {
+                    match text_chars.peek().copied() {
+                        Some(t) if t == next => break,
+                        Some(_) => {
+                            text_chars.next();
+                        }
+                        None => return false,
+                    }
+                }
+            }
+            '?' => {
+                if text_chars.next().is_none() {
+                    return false;
+                }
+            }
+            c => {
+                if text_chars.next() != Some(c) {
+                    return false;
+                }
+            }
+        }
+    }
+    text_chars.next().is_none()
+}
+
+fn read_root_gitignore_patterns(root_path: &Path) -> Vec<String> {
+    let path = root_path.join(".gitignore");
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(_) => return Vec::new(),
+    };
+    contents.lines().map(|line| line.to_string()).collect()
+}
+
+fn count_visible_children(dir_path: &Path, ignore_set: &IgnoreSet) -> usize {
+    let read_dir = match fs::read_dir(dir_path) {
+        Ok(read_dir) => read_dir,
+        Err(_) => return 0,
+    };
+    let mut count = 0;
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if ignore_set.is_ignored(&name_str, None) {
+            continue;
+        }
+        count += 1;
+        if count >= MAX_CHILD_COUNT_SCAN {
+            return count;
+        }
+    }
+    count
 }
 
 fn io_error_code(error: &io::Error) -> FileErrorCode {
@@ -1330,7 +2066,8 @@ impl Error for WorkspaceError {
             | Self::UnsupportedFileType
             | Self::DirtyDocument { .. }
             | Self::StaleFileMetadata { .. }
-            | Self::FileTooLarge { .. } => None,
+            | Self::FileTooLarge { .. }
+            | Self::RootLimitExceeded => None,
         }
     }
 }
@@ -1339,16 +2076,22 @@ impl Error for WorkspaceError {
 mod tests {
     #[cfg(unix)]
     use std::os::unix::{fs::PermissionsExt, net::UnixListener};
-    use std::{fs, path::PathBuf, time::SystemTime};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Arc, LazyLock, Mutex as StdMutex, atomic::AtomicBool},
+        time::SystemTime,
+    };
 
     use crate::protocol::{DocumentAccess, EditOperation, FileErrorCode, ServerMessage};
 
     use super::{
-        FileMetadata, SaveIoOutcome, WorkspaceError, WorkspaceState, atomic_write_file,
-        open_existing_file_unlocked, save_document_unlocked,
+        FileListEntryKind, FileListRequest, FileMetadata, SaveIoOutcome, WorkspaceError,
+        WorkspaceState, atomic_write_file, open_existing_file_unlocked, save_document_unlocked,
     };
-    use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    static CWD_TEST_LOCK: LazyLock<StdMutex<()>> = LazyLock::new(|| StdMutex::new(()));
 
     fn temp_workspace(name: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -2416,5 +3159,479 @@ mod tests {
 
         let _ = fs::remove_dir(&blocker);
         let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn add_root_deduplicates_by_canonical_path() {
+        let root = temp_workspace("dedup-root");
+        let mut workspace = WorkspaceState::new();
+        let first = workspace.add_root(&root).unwrap();
+        let second = workspace.add_root(&root).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(workspace.list_root_metadata().len(), 1);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn add_root_from_cwd_adds_current_directory_when_no_roots_exist() {
+        let _guard = CWD_TEST_LOCK.lock().unwrap();
+        let root = temp_workspace("cwd-root");
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root_from_cwd().unwrap();
+        assert!(root_id.is_some());
+        assert_eq!(workspace.list_root_metadata().len(), 1);
+        std::env::set_current_dir(previous).unwrap();
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn add_root_from_cwd_is_noop_when_roots_already_configured() {
+        let _guard = CWD_TEST_LOCK.lock().unwrap();
+        let root = temp_workspace("cwd-root-noop");
+        let other = temp_workspace("cwd-root-noop-other");
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let configured = workspace.add_root(&other).unwrap();
+        let cwd = workspace.add_root_from_cwd().unwrap();
+        assert_eq!(cwd, None);
+        assert_eq!(workspace.list_root_metadata().len(), 1);
+        assert_eq!(
+            workspace.list_root_metadata()[0].workspace_root_id,
+            configured
+        );
+        std::env::set_current_dir(previous).unwrap();
+        let _ = fs::remove_dir(root);
+        let _ = fs::remove_dir(other);
+    }
+
+    #[test]
+    fn discover_root_for_path_finds_marker_ancestor() {
+        let root = temp_workspace("discover-marker");
+        fs::write(root.join("Cargo.toml"), "[package]").unwrap();
+        let nested = root.join("src").join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let file = nested.join("lib.rs");
+        fs::write(&file, "fn main() {}").unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.discover_root_for_path(&file).unwrap();
+        assert!(root_id.is_some());
+        assert_eq!(workspace.list_root_metadata().len(), 1);
+        assert!(
+            workspace.list_root_metadata()[0]
+                .display_name
+                .contains("discover-marker")
+        );
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn discover_root_for_path_returns_existing_root_when_already_covered() {
+        let root = temp_workspace("discover-covered");
+        let nested = root.join("deep");
+        fs::create_dir_all(&nested).unwrap();
+        let file = nested.join("note.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let existing = workspace.add_root(&root).unwrap();
+        let discovered = workspace.discover_root_for_path(&file).unwrap();
+        assert_eq!(discovered, Some(existing));
+        assert_eq!(workspace.list_root_metadata().len(), 1);
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn discover_root_for_path_without_marker_returns_none() {
+        let root = temp_workspace("discover-no-marker");
+        let file = root.join("note.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let discovered = workspace.discover_root_for_path(&file).unwrap();
+        assert_eq!(discovered, None);
+        assert!(workspace.list_root_metadata().is_empty());
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn discover_root_for_path_ignores_unknown_marker() {
+        let root = temp_workspace("discover-unknown-marker");
+        fs::write(root.join("myproject.marker"), "").unwrap();
+        let file = root.join("note.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let discovered = workspace.discover_root_for_path(&file).unwrap();
+        assert_eq!(discovered, None);
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_file(root.join("myproject.marker"));
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn explicit_user_grant_adds_directory_root() {
+        let root = temp_workspace("grant-dir");
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_explicit_user_grant(&root).unwrap();
+        assert_eq!(workspace.list_root_metadata().len(), 1);
+        assert_eq!(workspace.list_root_metadata()[0].workspace_root_id, root_id);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn explicit_user_grant_adds_file_as_single_file_grant() {
+        let root = temp_workspace("grant-file");
+        let file = root.join("note.md");
+        fs::write(&file, "# note").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_explicit_user_grant(&file).unwrap();
+        // Single-file grants are not listed by list_root_metadata.
+        assert!(workspace.list_root_metadata().is_empty());
+        assert_eq!(root_id, 1);
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn explicit_user_grant_deduplicates_single_file_grant() {
+        let root = temp_workspace("grant-file-dedup");
+        let file = root.join("note.md");
+        fs::write(&file, "# note").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let first = workspace.add_explicit_user_grant(&file).unwrap();
+        let second = workspace.add_explicit_user_grant(&file).unwrap();
+        assert_eq!(first, second);
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn explicit_user_grant_rejects_missing_path() {
+        let root = temp_workspace("grant-missing");
+        let missing = root.join("missing");
+        let mut workspace = WorkspaceState::new();
+        let error = workspace.add_explicit_user_grant(&missing).unwrap_err();
+        assert!(matches!(error, WorkspaceError::RootUnavailable { .. }));
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn discover_root_for_path_rejects_directory() {
+        let root = temp_workspace("discover-dir");
+        let mut workspace = WorkspaceState::new();
+        let error = workspace.discover_root_for_path(&root).unwrap_err();
+        assert!(matches!(error, WorkspaceError::DirectoryOpen));
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn list_directory_returns_immediate_children() {
+        let root = temp_workspace("list-children");
+        fs::write(root.join("a.txt"), "a").unwrap();
+        fs::write(root.join("b.md"), "b").unwrap();
+        fs::create_dir(root.join("dir")).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(page.root_id, root_id);
+        assert!(!page.truncated);
+        assert!(!page.cancelled);
+        let names: Vec<_> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"a.txt"));
+        assert!(names.contains(&"b.md"));
+        assert!(names.contains(&"dir"));
+        let dir = page.entries.iter().find(|e| e.name == "dir").unwrap();
+        assert_eq!(dir.kind, FileListEntryKind::Directory);
+        assert_eq!(dir.child_count, Some(0));
+        let file = page.entries.iter().find(|e| e.name == "a.txt").unwrap();
+        assert_eq!(file.kind, FileListEntryKind::File);
+        assert_eq!(file.size_hint, Some(1));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_respects_max_depth() {
+        let root = temp_workspace("list-depth");
+        fs::create_dir_all(root.join("d1").join("d2")).unwrap();
+        fs::write(root.join("d1").join("f.txt"), "x").unwrap();
+        fs::write(root.join("d1").join("d2").join("g.txt"), "y").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap();
+
+        let names: Vec<_> = page.entries.iter().map(|e| e.name.clone()).collect();
+        assert!(names.contains(&"d1".to_string()));
+        assert!(!names.iter().any(|n| n == "d2"));
+        assert!(!names.iter().any(|n| n == "f.txt"));
+        assert!(!names.iter().any(|n| n == "g.txt"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_truncates_at_max_entries() {
+        let root = temp_workspace("list-truncate");
+        for index in 0..5 {
+            fs::write(root.join(format!("{index}.txt")), "x").unwrap();
+        }
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 2,
+                },
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(page.entries.len(), 2);
+        assert!(page.truncated);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_ignores_default_ignored_names() {
+        let root = temp_workspace("list-ignore");
+        fs::create_dir(root.join(".git")).unwrap();
+        fs::create_dir(root.join("node_modules")).unwrap();
+        fs::create_dir(root.join("target")).unwrap();
+        fs::create_dir(root.join("src")).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap();
+
+        let names: Vec<_> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"src"));
+        assert!(!names.contains(&".git"));
+        assert!(!names.contains(&"node_modules"));
+        assert!(!names.contains(&"target"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_reads_root_gitignore() {
+        let root = temp_workspace("list-gitignore");
+        fs::write(root.join(".gitignore"), "*.log\nbuild/\n").unwrap();
+        fs::write(root.join("app.txt"), "x").unwrap();
+        fs::write(root.join("debug.log"), "x").unwrap();
+        fs::create_dir(root.join("build")).unwrap();
+        fs::write(root.join("build").join("out.txt"), "x").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 2,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap();
+
+        let names: Vec<_> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"app.txt"));
+        assert!(!names.contains(&"debug.log"));
+        assert!(!names.contains(&"build"));
+        assert!(!names.contains(&"out.txt"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_rejects_unknown_root() {
+        let workspace = WorkspaceState::new();
+        let error = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id: 42,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap_err();
+        assert!(matches!(error, WorkspaceError::UnknownRoot { root_id } if root_id == 42));
+    }
+
+    #[test]
+    fn list_directory_rejects_traversal_escape() {
+        let root = temp_workspace("list-escape");
+        fs::create_dir(root.join("sub")).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let error = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::from("sub/../../.."),
+                    max_depth: 1,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap_err();
+        assert!(matches!(error, WorkspaceError::OutsideRoot));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn list_directory_reports_permission_denied_as_entry_diagnostic() {
+        let root = temp_workspace("list-perm");
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::write(root.join("locked").join("secret.txt"), "x").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let mut permissions = fs::metadata(root.join("locked")).unwrap().permissions();
+        let original_mode = permissions.mode();
+        permissions.set_mode(0o000);
+        fs::set_permissions(root.join("locked"), permissions).unwrap();
+
+        // Some test environments (e.g. root, permissive containers) do not
+        // enforce filesystem permissions. Only assert the diagnostic when the
+        // underlying read_dir actually fails, otherwise the test documents the
+        // code path without failing on the environment.
+        let permission_enforced = fs::read_dir(root.join("locked")).is_err();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 2,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap();
+
+        let locked = page.entries.iter().find(|e| e.name == "locked").unwrap();
+        if permission_enforced {
+            assert!(locked.diagnostic.is_some());
+            assert_eq!(
+                locked.diagnostic.as_ref().unwrap().code,
+                FileErrorCode::PermissionDenied
+            );
+        }
+
+        let mut permissions = fs::metadata(root.join("locked")).unwrap().permissions();
+        permissions.set_mode(original_mode);
+        fs::set_permissions(root.join("locked"), permissions).unwrap();
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_cancellation_stops_early() {
+        let root = temp_workspace("list-cancel");
+        for index in 0..100 {
+            fs::write(root.join(format!("{index}.txt")), "x").unwrap();
+        }
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let token = Arc::new(AtomicBool::new(true));
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 1000,
+                },
+                Some(&token),
+            )
+            .unwrap();
+
+        assert!(page.cancelled);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directory_counts_children_for_directories() {
+        let root = temp_workspace("list-count");
+        fs::create_dir(root.join("parent")).unwrap();
+        fs::write(root.join("parent").join("a.txt"), "x").unwrap();
+        fs::write(root.join("parent").join("b.txt"), "x").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let page = workspace
+            .list_directory(
+                FileListRequest {
+                    root_id,
+                    relative_path: PathBuf::new(),
+                    max_depth: 1,
+                    max_entries: 100,
+                },
+                None,
+            )
+            .unwrap();
+
+        let parent = page.entries.iter().find(|e| e.name == "parent").unwrap();
+        assert_eq!(parent.child_count, Some(2));
+
+        let _ = fs::remove_dir_all(root);
     }
 }

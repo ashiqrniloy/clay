@@ -46,6 +46,7 @@ pub enum FileErrorCode {
     DirtyDocument,
     StaleFileMetadata,
     FileTooLarge,
+    WorkspaceLimitExceeded,
     InternalError,
 }
 

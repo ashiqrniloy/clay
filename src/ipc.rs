@@ -128,7 +128,7 @@ pub fn smoke_endpoint(label: &str) -> IpcEndpoint {
     let suffix = unique_endpoint_suffix(label);
     #[cfg(unix)]
     {
-        IpcEndpoint::UnixSocket(std::env::temp_dir().join(format!("clay-{suffix}.sock")))
+        IpcEndpoint::UnixSocket(runtime_socket_dir().join(format!("clay-{suffix}.sock")))
     }
     #[cfg(windows)]
     {
@@ -155,7 +155,14 @@ pub fn default_socket_path() -> PathBuf {
         return PathBuf::from(runtime_dir).join("clay.sock");
     }
 
-    std::env::temp_dir().join(format!("clay-{}.sock", current_user_suffix()))
+    runtime_socket_dir().join("clay.sock")
+}
+
+#[cfg(unix)]
+fn runtime_socket_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("clay-{}", current_user_suffix()));
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
 #[cfg(windows)]

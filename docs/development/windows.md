@@ -1,6 +1,6 @@
 # Windows MSVC Development
 
-This guide describes the supported Windows development setup for Clay and the validation commands used by the Windows platform support plan. For the cross-platform command-first launch checklist, see [Launch and GUI Smoke Validation](launch-and-gui-smoke.md).
+This guide describes the supported Windows development setup for Clay and the validation commands used by Windows-targeted work. Linux is the primary required development/CI host; Windows is a long-term target, not a blocking validation gate for ordinary Linux-host tasks unless a plan explicitly targets Windows. For the cross-platform command-first launch checklist, see [Launch and GUI Smoke Validation](launch-and-gui-smoke.md).
 
 ## Supported Toolchain
 
@@ -51,7 +51,7 @@ Implementation details are documented in:
 
 ## Validation Commands
 
-Run these commands from the repository root in PowerShell or a Visual Studio Developer PowerShell:
+Run these commands from the repository root in PowerShell or a Visual Studio Developer PowerShell when the task targets Windows or when doing optional Windows regression checks:
 
 ```powershell
 cargo fmt --check
@@ -63,13 +63,15 @@ cargo test --lib windows_second_client_is_read_only --quiet
 cargo test --test rust_visibility_api_mapping --quiet
 ```
 
-For a broader native-target pass, run:
+For a broader native-target pass on Windows, run:
 
 ```powershell
 cargo test --all-targets
 ```
 
 If a broad test command tries to execute a helper binary and Windows reports `os error 740` because elevation is required, rerun the targeted test command listed above for that validation area.
+
+Do not use Linux-host cross-compilation as the required Windows gate for normal work. Some dependencies build C code and need Windows/MSVC headers; from Linux, `cargo check --target x86_64-pc-windows-msvc --all-targets` can fail before Clay code is checked because headers such as `stdio.h` are unavailable.
 
 ## Manual Smoke Test
 

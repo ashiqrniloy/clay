@@ -598,6 +598,12 @@ fn validate_api_dependency_permissions(
             "clay.ui.serverSetLayoutOverride" | "clay.configuration.setPackageOption" => {
                 Some(PackagePermission::PackageConfiguration)
             }
+            // Read-only Git discovery and inert SDUI publication are
+            // server-owned: they require no package permission because Git
+            // authority never reaches package code.
+            "clay.git.serverListGitStatuses"
+            | "clay.git.serverRefreshGitStatus"
+            | "clay.sdui.publishTree" => None,
             _ => {
                 return Err(ctx.error(
                     PackageRecordRule::InvalidApiDependency,

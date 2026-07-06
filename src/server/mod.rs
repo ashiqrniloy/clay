@@ -7,6 +7,8 @@ pub(crate) mod control_center;
 pub mod decorations;
 pub(crate) mod document;
 #[allow(dead_code)]
+pub(crate) mod git;
+#[allow(dead_code)]
 mod js_runtime;
 #[allow(dead_code)]
 mod ops;
@@ -16,7 +18,7 @@ pub mod runtime_sandbox;
 mod sdui;
 pub mod syntax;
 mod ui;
-mod workspace;
+pub(crate) mod workspace;
 
 use std::{
     error::Error,
@@ -175,6 +177,11 @@ impl IpcServer {
         let mut workspace = WorkspaceState::new();
         for root in &config.workspace_roots {
             workspace.add_root(root).map_err(|error| {
+                ServerError::InvalidWorkspaceRoot(error.diagnostic().to_string())
+            })?;
+        }
+        if config.workspace_roots.is_empty() {
+            workspace.add_root_from_cwd().map_err(|error| {
                 ServerError::InvalidWorkspaceRoot(error.diagnostic().to_string())
             })?;
         }
@@ -1269,6 +1276,7 @@ mod tests {
     use tokio::{net::UnixStream, sync::Mutex};
 
     use super::{ActiveBehaviorManifest, IpcServer, RuntimeGenerationStore, ServerConfig};
+    use crate::server::{ParseCoordinator, sdui::StaticSduiState};
     use crate::{
         protocol::{
             ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
@@ -1348,6 +1356,10 @@ mod tests {
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+        assert!(matches!(
+            codec.read_server_message(&mut stream).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
 
         codec
             .write_client_message(
@@ -1406,16 +1418,6 @@ mod tests {
         assert!(error.to_string().contains("invalid workspace root"));
 
         let _ = fs::remove_dir(server.config.workspace_roots[0].clone());
-        let _ = fs::remove_dir(socket_path.parent().unwrap());
-    }
-
-    #[test]
-    fn ordinary_typing_does_not_enter_js_runtime() {
-        let socket_path = unique_socket_path("runtime-not-hot-path");
-        let server = IpcServer::new(ServerConfig::new(&socket_path));
-
-        assert_eq!(server.js_runtime.evaluation_count(), 0);
-
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 

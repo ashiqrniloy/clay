@@ -1,0 +1,54 @@
+// @clay/git runtime entry. Owns the package manifest factory consumed by the
+// load entry and re-exports the package contract. The authoritative manifest
+// is `packages/git/package.json`; this factory mirrors it for explicit/per-load
+// validation through `clay.packages.serverLoadPackage`.
+
+export const packageName = "@clay/git";
+export const apiPrefix = "git";
+
+export function gitPackageManifest() {
+  return {
+    name: packageName,
+    version: "0.1.0",
+    type: "module",
+    exports: {
+      ".": "./dist/index.js",
+      "./load": "./dist/load.js",
+      "./status": "./dist/status.js"
+    },
+    clay: {
+      apiPrefix,
+      entry: "./dist/index.js",
+      loadEntry: "./dist/load.js",
+      permissions: [],
+      modes: [],
+      docs: "./docs/index.md",
+      apiDependencies: [
+        "clay.git.serverListGitStatuses",
+        "clay.sdui.publishTree"
+      ],
+      performance: {
+        estimatedManifestBytes: 1500,
+        hotPathPolicy: "no hot-path JS; status reads cached Git state at load/update time only"
+      },
+      contributions: {
+        commands: [],
+        configuration: [],
+        keyRouting: [],
+        textTransforms: [],
+        sdui: [
+          {
+            regionId: "git.status",
+            displayName: "Git Status",
+            adapter: "./dist/status.js",
+            estimatedSnapshotBytes: 1024,
+            estimatedUpdateBytes: 256
+          }
+        ],
+        decorations: []
+      }
+    }
+  };
+}
+
+export { gitPackageContract, loadGitPackage } from "./load.js";

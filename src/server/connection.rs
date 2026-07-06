@@ -34,6 +34,7 @@ use super::{
         reload_document_unlocked, save_document_unlocked,
     },
 };
+use crate::shell::file_browser::FileBrowserState;
 
 #[allow(
     clippy::too_many_arguments,
@@ -65,6 +66,7 @@ where
                 client_id,
                 &document,
                 &behavior,
+                &workspace,
                 &sdui,
                 &runtime_diagnostics,
                 codec,
@@ -321,8 +323,10 @@ where
                     let state = sdui.lock().await;
                     sdui_action_response(&state, &intent)
                 };
-                let response =
-                    command_intent_response(sdui_command_request(&intent)).or(validation_response);
+                let execution_response =
+                    execute_command_intent(sdui_command_request(&intent), Arc::clone(&workspace))
+                        .await;
+                let response = execution_response.or(validation_response);
                 if let Some(response) = response {
                     codec.write_server_message(&mut stream, &response).await?;
                 }
@@ -345,13 +349,18 @@ where
                         .await?;
                     continue;
                 }
-                if let Some(response) = command_intent_response(CommandExecutionRequest {
-                    command_id,
-                    arguments: serde_json::Value::Null,
-                    target: CommandExecutionTarget::ActiveDocument { document_id },
-                    provenance: None,
-                    expected_permissions: Vec::new(),
-                }) {
+                let response = execute_command_intent(
+                    CommandExecutionRequest {
+                        command_id,
+                        arguments: serde_json::Value::Null,
+                        target: CommandExecutionTarget::ActiveDocument { document_id },
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                    Arc::clone(&workspace),
+                )
+                .await;
+                if let Some(response) = response {
                     codec.write_server_message(&mut stream, &response).await?;
                 }
             }
@@ -408,17 +417,55 @@ where
     }
 }
 
-fn command_intent_response(request: CommandExecutionRequest) -> Option<ServerMessage> {
-    CommandExecutor::new()
-        .execute(&CommandRegistry::new(), request)
-        .err()
-        .map(|error| ServerMessage::Error {
-            code: ProtocolErrorCode::InvalidMessage,
-            message: format!(
-                "command execution rejected: {:?}: {}",
-                error.rule, error.message
-            ),
-        })
+async fn execute_command_intent(
+    request: CommandExecutionRequest,
+    workspace: Arc<Mutex<WorkspaceState>>,
+) -> Option<ServerMessage> {
+    let executor = CommandExecutor::new();
+    let registry = CommandRegistry::new();
+
+    if crate::server::command_execution::is_workspace_command(&request.command_id) {
+        let mut workspace = workspace.lock().await;
+        match executor
+            .execute_workspace(&registry, &mut workspace, request)
+            .await
+        {
+            Ok(result) => workspace_command_result_message(result),
+            Err(error) => Some(ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                message: format!(
+                    "command execution rejected: {:?}: {}",
+                    error.rule, error.message
+                ),
+            }),
+        }
+    } else {
+        executor
+            .execute(&registry, request)
+            .err()
+            .map(|error| ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                message: format!(
+                    "command execution rejected: {:?}: {}",
+                    error.rule, error.message
+                ),
+            })
+    }
+}
+
+fn workspace_command_result_message(
+    result: crate::server::command_execution::CommandExecutionResult,
+) -> Option<ServerMessage> {
+    use crate::server::command_execution::{CommandExecutionStatus, WorkspaceActionResult};
+    match result.status {
+        CommandExecutionStatus::Workspace(WorkspaceActionResult::Opened(snapshot)) => {
+            Some(ServerMessage::DocumentOpened {
+                metadata: snapshot.metadata,
+                text: snapshot.text,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn sdui_command_request(intent: &SduiActionIntent) -> CommandExecutionRequest {
@@ -451,11 +498,13 @@ fn sdui_action_value_json(value: &SduiActionValue) -> serde_json::Value {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_welcome_snapshot_and_manifest<S>(
     stream: &mut S,
     client_id: u64,
     document: &Arc<Mutex<DocumentState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
     runtime_diagnostics: &Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     codec: Codec,
@@ -487,9 +536,36 @@ where
         .write_server_message(stream, &manifest_message)
         .await?;
 
-    let sdui_snapshot = sdui.lock().await.snapshot_message(client_id);
-    if let Some(sdui_snapshot) = sdui_snapshot {
-        codec.write_server_message(stream, &sdui_snapshot).await?;
+    let (document_id, document_version) = match &initial_document {
+        ServerMessage::InitialDocument {
+            document_id,
+            version,
+            ..
+        } => (*document_id, *version),
+        _ => (0, 0),
+    };
+
+    let file_browser_tree = {
+        let workspace = workspace.lock().await;
+        let roots = workspace.list_root_metadata();
+        roots.first().and_then(|root| {
+            let browser =
+                FileBrowserState::from_workspace(&workspace, root.workspace_root_id).ok()?;
+            Some(browser.to_sdui_tree(document_id, document_version))
+        })
+    };
+
+    if let Some(tree) = file_browser_tree {
+        let mut state = sdui.lock().await;
+        let _ = state.replace_for_document_with_runtime_tree(document_id, tree.clone());
+        codec
+            .write_server_message(stream, &ServerMessage::SduiSnapshot { client_id, tree })
+            .await?;
+    } else {
+        let sdui_snapshot = sdui.lock().await.snapshot_message(client_id);
+        if let Some(sdui_snapshot) = sdui_snapshot {
+            codec.write_server_message(stream, &sdui_snapshot).await?;
+        }
     }
 
     let diagnostics = runtime_diagnostics.lock().await.clone();
@@ -859,7 +935,12 @@ async fn schedule_open_parse(
         .schedule_parse_with_windows(
             request,
             windows,
-            Some(ParsePolicy::new(64 * 1024, 4 * 1024, 30 * 1024 * 1024, 50)),
+            Some(ParsePolicy::new(
+                64 * 1024,
+                4 * 1024,
+                30 * 1024 * 1024,
+                5_000,
+            )),
         )
         .map_err(|error| {
             RuntimeDiagnostic::error(
@@ -868,7 +949,7 @@ async fn schedule_open_parse(
             )
         })?;
 
-    let deadline = tokio::time::Duration::from_millis(1000);
+    let deadline = tokio::time::Duration::from_millis(6_000);
     loop {
         let update = tokio::time::timeout(deadline, parse_coordinator.next_update())
             .await
@@ -914,7 +995,7 @@ mod tests {
         time::{Duration, timeout},
     };
 
-    use super::{command_intent_response, handle_connection, sdui_command_request};
+    use super::{execute_command_intent, handle_connection, sdui_command_request};
     use crate::server::command_execution::{CommandExecutionRequest, CommandExecutionTarget};
 
     fn workspace_state() -> Arc<Mutex<WorkspaceState>> {
@@ -1000,8 +1081,8 @@ await loadPackage("@clay/markdown");"#,
         },
     };
 
-    #[test]
-    fn sdui_actions_and_keybinding_intents_share_command_execution_path() {
+    #[tokio::test]
+    async fn sdui_actions_and_keybinding_intents_share_command_execution_path() {
         let sdui_request = sdui_command_request(&SduiActionIntent::command(
             "clay.controlCenter.open",
             SduiActionSource::Button {
@@ -1016,18 +1097,28 @@ await loadPackage("@clay/markdown");"#,
             expected_permissions: Vec::new(),
         };
 
-        assert_eq!(command_intent_response(sdui_request), None);
-        assert_eq!(command_intent_response(keybinding_request), None);
+        assert_eq!(
+            execute_command_intent(sdui_request, workspace_state()).await,
+            None
+        );
+        assert_eq!(
+            execute_command_intent(keybinding_request, workspace_state()).await,
+            None
+        );
     }
 
-    #[test]
-    fn package_ui_unregistered_action_is_rejected_by_command_execution() {
-        let response = command_intent_response(sdui_command_request(&SduiActionIntent::command(
-            "markdown.missingCommand",
-            SduiActionSource::Button {
-                node_id: SduiNodeId(5),
-            },
-        )))
+    #[tokio::test]
+    async fn package_ui_unregistered_action_is_rejected_by_command_execution() {
+        let response = execute_command_intent(
+            sdui_command_request(&SduiActionIntent::command(
+                "markdown.missingCommand",
+                SduiActionSource::Button {
+                    node_id: SduiNodeId(5),
+                },
+            )),
+            workspace_state(),
+        )
+        .await
         .expect("unknown package UI action returns protocol error");
 
         assert!(matches!(response, ServerMessage::Error { .. }));

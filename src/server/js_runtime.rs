@@ -42,6 +42,7 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
         "clay:ui" => Some(CLAY_FACADE_UI),
         "clay:documents" => Some(CLAY_FACADE_DOCUMENTS),
         "clay:workspace" => Some(CLAY_FACADE_WORKSPACE),
+        "clay:git" => Some(CLAY_FACADE_GIT),
         "clay:keybindings" => Some(CLAY_FACADE_KEYBINDINGS),
         "clay:behavior" => Some(CLAY_FACADE_BEHAVIOR),
         "clay:packages" => Some(CLAY_FACADE_PACKAGES),
@@ -141,7 +142,41 @@ export async function serverListDocuments() { return parse(await ops.op_clay_doc
 "#;
 
 const CLAY_FACADE_WORKSPACE: &str = r#"
-export async function serverListWorkspaceRoots() { return JSON.parse(await Deno.core.ops.op_clay_workspace_list_roots()); }
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+export async function serverListWorkspaceRoots() { return parse(await ops.op_clay_workspace_list_roots()); }
+export async function serverAddWorkspaceRoot(path) {
+  return parse(await ops.op_clay_workspace_add_root(path)).workspaceRootId;
+}
+export async function serverDiscoverWorkspaceRootForPath(path) {
+  return parse(await ops.op_clay_workspace_discover_root_for_path(path));
+}
+export async function serverListDirectory(options) {
+  const request = {
+    rootId: options?.rootId,
+    relativePath: options?.relativePath ?? "",
+    maxDepth: options?.maxDepth,
+    maxEntries: options?.maxEntries,
+  };
+  return parse(await ops.op_clay_workspace_list_directory(JSON.stringify(request), options?.cancelTokenId));
+}
+export async function serverCreateListingCancelToken() {
+  return await ops.op_clay_workspace_create_listing_cancel_token();
+}
+export async function serverCancelListing(tokenId) {
+  return await ops.op_clay_workspace_cancel_listing(tokenId);
+}
+"#;
+
+const CLAY_FACADE_GIT: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+export async function serverListGitStatuses() {
+  return parse(await ops.op_clay_git_list_statuses());
+}
+export async function serverRefreshGitStatus(options) {
+  return parse(await ops.op_clay_git_refresh_status(JSON.stringify(options ?? null)));
+}
 "#;
 
 const CLAY_FACADE_KEYBINDINGS: &str = r#"
@@ -268,6 +303,27 @@ export function serverRegisterCommand(packageManifest, declaration) {
 }
 export function serverListCommands() {
   return parse(ops.op_clay_commands_list_commands());
+}
+export async function serverExecuteCommand(commandId, args = {}, target = { global: {} }) {
+  return parse(await ops.op_clay_commands_execute_command(JSON.stringify({
+    commandId,
+    arguments: args ?? {},
+    target: target ?? { global: {} },
+    expectedPermissions: [],
+  })));
+}
+export async function serverOpenFile(args) {
+  const result = await serverExecuteCommand("clay.workspace.openFile", args ?? {});
+  if (result.status?.kind !== "workspace" || result.status?.action !== "opened") {
+    throw new Error(`clay.commands.open_failed: expected opened status, got ${JSON.stringify(result.status)}`);
+  }
+  return { documentId: String(result.status.documentId), version: Number(result.status.version), path: String(result.status.path ?? "") };
+}
+export async function serverRevealInTree(args) {
+  const result = await serverExecuteCommand("clay.workspace.revealInTree", args ?? {});
+  if (result.status?.kind !== "workspace" || result.status?.action !== "revealed") {
+    throw new Error(`clay.commands.reveal_failed: expected revealed status, got ${JSON.stringify(result.status)}`);
+  }
 }
 "#;
 
@@ -1583,6 +1639,24 @@ mod tests {
     use crate::server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest};
     use crate::server::workspace::WorkspaceState;
 
+    fn init_git_repo(root: &Path) {
+        git(root, ["init", "-b", "main"]);
+        git(root, ["config", "user.email", "clay@example.invalid"]);
+        git(root, ["config", "user.name", "Clay Test"]);
+    }
+
+    fn git<const N: usize>(cwd: &Path, args: [&str; N]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", "")
+            .env("SSH_ASKPASS", "")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git command failed: {args:?}");
+    }
+
     fn config_fixture(name: &str) -> PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1680,11 +1754,16 @@ mod tests {
             .schedule_parse_with_windows(
                 request,
                 windows,
-                Some(ParsePolicy::new(64 * 1024, 4 * 1024, 30 * 1024 * 1024, 50)),
+                Some(ParsePolicy::new(
+                    64 * 1024,
+                    4 * 1024,
+                    30 * 1024 * 1024,
+                    5_000,
+                )),
             )
             .unwrap();
 
-        let update = tokio::time::timeout(Duration::from_secs(2), coordinator.next_update())
+        let update = tokio::time::timeout(Duration::from_secs(6), coordinator.next_update())
             .await
             .unwrap()
             .unwrap();
@@ -2755,6 +2834,135 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.op_records, vec!["1:1:project"]);
+    }
+
+    #[tokio::test]
+    async fn git_facade_lists_refreshes_and_commands_statuses() {
+        let config_root = config_fixture("git-facade");
+        let repo_root = config_root.join("repo");
+        let plain_root = config_root.join("plain");
+        fs::create_dir(&repo_root).unwrap();
+        fs::create_dir(&plain_root).unwrap();
+        init_git_repo(&repo_root);
+        fs::write(repo_root.join("tracked.txt"), "base").unwrap();
+        git(&repo_root, ["add", "."]);
+        git(&repo_root, ["commit", "-m", "initial"]);
+        fs::write(repo_root.join("tracked.txt"), "changed").unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { serverListGitStatuses, serverRefreshGitStatus } from "clay:git";
+            import { serverExecuteCommand } from "clay:commands";
+            const cold = await serverListGitStatuses();
+            const repo = await serverRefreshGitStatus({ workspaceRootId: cold[0].workspaceRootId });
+            const plain = await serverRefreshGitStatus({ workspaceRootId: cold[1].workspaceRootId });
+            const listed = await serverExecuteCommand("clay.git.listStatuses");
+            const refreshed = await serverExecuteCommand("clay.git.refreshStatus", { workspaceRootId: cold[0].workspaceRootId });
+            Deno.core.ops.op_clay_runtime_record(`${cold.length}:${cold[0].refreshState.kind}:${repo.snapshot.head.kind}:${repo.snapshot.dirty}:${plain.snapshot.lastRefresh.kind}:${listed.status.kind}:${listed.status.statuses.length}:${refreshed.status.action}`);
+            "#,
+        )
+        .unwrap();
+        let mut workspace = WorkspaceState::new();
+        workspace.add_root(&repo_root).unwrap();
+        workspace.add_root(&plain_root).unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root_with_workspace(
+                config_root,
+                Arc::new(Mutex::new(workspace)),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.op_records,
+            vec!["2:idle:branch:true:non-repository:git:2:refreshed"]
+        );
+    }
+
+    #[tokio::test]
+    async fn git_package_loads_and_publishes_read_only_status() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let config_root = config_fixture("git-package-load");
+        let repo_root = config_root.join("repo");
+        let plain_root = config_root.join("plain");
+        fs::create_dir(&repo_root).unwrap();
+        fs::create_dir(&plain_root).unwrap();
+        init_git_repo(&repo_root);
+        fs::write(repo_root.join("tracked.txt"), "base").unwrap();
+        git(&repo_root, ["add", "."]);
+        git(&repo_root, ["commit", "-m", "initial"]);
+        fs::write(repo_root.join("tracked.txt"), "changed").unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            import { serverListGitStatuses, serverRefreshGitStatus } from "clay:git";
+
+            // Warm the cache first so the package status panel renders branch state.
+            const cold = await serverListGitStatuses();
+            await serverRefreshGitStatus({ workspaceRootId: cold[0].workspaceRootId });
+            // `loadPackage("@clay/git")` runs the load entry, which publishes a
+            // read-only status tree from cached clay:git data. No throw => the
+            // status data path works against a repo + plain root.
+            const summary = await loadPackage("@clay/git");
+            const warm = await serverListGitStatuses();
+            Deno.core.ops.op_clay_runtime_record(`${summary.name}:${summary.apiPrefix}:${summary.permissions.length}:${summary.contributions.sdui}:${warm.length}:${warm[0].snapshot.head.kind}:${warm[0].snapshot.dirty}`);
+            "#,
+        )
+        .unwrap();
+        let mut workspace = WorkspaceState::new();
+        workspace.add_root(&repo_root).unwrap();
+        workspace.add_root(&plain_root).unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root_with_workspace(
+                config_root,
+                Arc::new(Mutex::new(workspace)),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["@clay/git:git:0:1:2:branch:true"]);
+    }
+
+    #[tokio::test]
+    async fn git_package_declares_no_mutation_or_network_authority() {
+        // Phase 18.13: prove @clay/git is read-only. It declares no permissions
+        // (no network/shell/filesystem/mutation), registers no package commands,
+        // and exposes no configuration/package options (fixed safe defaults).
+        // Mutating Git operations and config knobs are intentionally out of scope.
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let config_root = config_fixture("git-package-authority");
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+
+            const summary = await loadPackage("@clay/git");
+            const perms = summary.permissions.join(",");
+            const mutating = ["filesystem", "network", "shell", "wasm", "ai-tools",
+              "workspace-mutation", "native-ui", "client-runtime", "raw-ops",
+              "package-control", "package-import"];
+            const leaked = mutating.filter((m) => perms.includes(m)).join(",");
+            Deno.core.ops.op_clay_runtime_record(
+              `${perms.length}:${summary.contributions.commands}:` +
+              `${summary.contributions.configuration}:${summary.contributions.packageOptions}:${leaked}`
+            );
+            "#,
+        )
+        .unwrap();
+        let workspace = WorkspaceState::new();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root_with_workspace(
+                config_root,
+                Arc::new(Mutex::new(workspace)),
+            )
+            .await
+            .unwrap();
+
+        // perms:commands:configuration:packageOptions:leaked — all zero/empty
+        assert_eq!(result.op_records, vec!["0:0:0:0:"]);
     }
 
     #[tokio::test]

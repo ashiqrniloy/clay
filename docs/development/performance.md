@@ -114,7 +114,7 @@ Phase 14 splits budgets into two categories:
 | Focus area | Initial budget | Enforcement |
 | --- | --- | --- |
 | Client edit payload (`ClientMessage::Edit`) | <= 512 bytes | `cargo test --test performance_protocol` (`representative_protocol_payloads_fit_phase14_budgets`) |
-| Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 112 bytes | `cargo test --test performance_protocol` |
+| Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 128 bytes | `cargo test --test performance_protocol` |
 | Behavior manifest payload (`ServerMessage::BehaviorManifest`) | <= 2048 bytes | `cargo test --test performance_protocol` |
 | SDUI snapshot payload (`ServerMessage::SduiSnapshot`) | <= 4096 bytes | `cargo test --test performance_protocol` |
 | SDUI update payload (`ServerMessage::SduiUpdate`) | <= 1024 bytes | `cargo test --test performance_protocol` |

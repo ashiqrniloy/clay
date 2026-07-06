@@ -18,3 +18,7 @@ For Rust libraries/crates used by the current project, also verify the version-e
 
 If a command fails with a quota error, inform the user and suggest `npx ctx7@latest login` or setting `CONTEXT7_API_KEY` env var for higher limits. Do not silently fall back to training data.
 <!-- context7 -->
+
+<!-- platform-validation -->
+Linux is Clay's primary required development and CI host. Treat Linux `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, and relevant Linux tests as blocking for normal work. Windows support is a long-term target, not a required pass condition unless the task explicitly targets Windows; do not mark work failed only because Windows cross-compilation or Windows-only smoke tests cannot run from a Linux host/toolchain. Keep Windows code/docs from regressing when practical, but never weaken Linux behavior/tests to satisfy speculative Windows compatibility.
+<!-- platform-validation -->

@@ -13,7 +13,7 @@ export const DEFAULT_WINDOWED_MARKDOWN_POLICY = Object.freeze({
   parseWindowBytes: 64 * 1024,
   guardBytes: 4 * 1024,
   memoryBudgetBytes: 30 * 1024 * 1024,
-  timeoutMs: 500
+  timeoutMs: 5000
 });
 
 const STYLE_TOKENS = Object.freeze({
@@ -361,9 +361,62 @@ function dedupeSortedSpans(spans) {
 }
 
 async function defaultMarkdownIt() {
-  const module = await import("markdown-it");
-  const MarkdownIt = module.default ?? module;
-  return new MarkdownIt(MARKDOWN_IT_OPTIONS);
+  try {
+    const module = await import("markdown-it");
+    const MarkdownIt = module.default ?? module;
+    return new MarkdownIt(MARKDOWN_IT_OPTIONS);
+  } catch {
+    return basicMarkdownIt();
+  }
+}
+
+function basicMarkdownIt() {
+  return {
+    parse(text) {
+      const tokens = [];
+      const lines = String(text ?? "").split("\n");
+      let inFence = false;
+      let fenceStart = 0;
+      let fenceMarker = "```";
+      for (let line = 0; line < lines.length; line += 1) {
+        const value = lines[line];
+        const fence = /^( {0,3})(`{3,}|~{3,})/.exec(value);
+        if (fence) {
+          if (!inFence) {
+            inFence = true;
+            fenceStart = line;
+            fenceMarker = fence[2];
+          } else if (value.trimStart().startsWith(fenceMarker)) {
+            tokens.push({ type: "fence", map: [fenceStart, line + 1], markup: fenceMarker });
+            inFence = false;
+          }
+          continue;
+        }
+        if (inFence) continue;
+        const heading = /^( {0,3})(#{1,6})(?:[ \t]+|$)/.exec(value);
+        if (heading) tokens.push(basicToken("heading_open", { tag: `h${heading[2].length}`, map: [line, line + 1] }));
+        if (/^[ \t]*(?:[-+*]|\d+[.)])(?=[ \t])/.test(value)) tokens.push(basicToken("list_item_open", { map: [line, line + 1] }));
+        tokens.push(basicToken("inline", { map: [line, line + 1], content: value, children: basicInlineChildren(value) }));
+      }
+      return tokens;
+    }
+  };
+}
+
+function basicToken(type, fields = {}) {
+  return { ...fields, type };
+}
+
+function basicInlineChildren(value) {
+  const children = [];
+  const pattern = /(\*\*[^*]+\*\*)|(\*[^*]+\*)|(`[^`]+`)/g;
+  let match;
+  while ((match = pattern.exec(value)) !== null) {
+    if (match[1]) children.push({ type: "strong_open", markup: "**" }, { type: "text", content: match[1].slice(2, -2) }, { type: "strong_close", markup: "**" });
+    if (match[2]) children.push({ type: "em_open", markup: "*" }, { type: "text", content: match[2].slice(1, -1) }, { type: "em_close", markup: "*" });
+    if (match[3]) children.push({ type: "code_inline", markup: "`", content: match[3].slice(1, -1) });
+  }
+  return children;
 }
 
 async function parseMarkdownItTokens(text, options) {

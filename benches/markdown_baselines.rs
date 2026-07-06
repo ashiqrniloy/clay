@@ -43,6 +43,8 @@ fn register_markdown_mode(record: &PackageRecord) -> ModeRegistry {
                 mime_types: vec!["text/markdown".to_string()],
                 file_names: vec![],
                 file_name_patterns: vec![],
+                shebang_patterns: vec![],
+                content_probes: vec![],
             },
         )
         .expect("markdown mode pattern must register");
@@ -187,6 +189,8 @@ fn markdown_activation_baselines(c: &mut Criterion) {
                     document_id: 7,
                     path: Some("notes.md".to_string()),
                     mime_type: None,
+                    shebang: None,
+                    leading_content: None,
                 })
                 .expect("markdown document must classify");
             let activation = registry
