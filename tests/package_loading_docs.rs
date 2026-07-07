@@ -967,21 +967,45 @@ fn grammar_package_reference_docs_cover_authoring_primitive_security_and_perform
         );
         for source in [&reference_doc, &package_doc] {
             for phrase in [
-                "grammar-only",
                 "loadPackage(\"@clay/",
                 "not auto-loaded",
                 "core.code",
                 "parse-document",
                 "render-decorations",
                 "punctuation.definition",
-                "no major mode",
-                "no commands",
                 "third-party/native grammar artifact loading",
                 "keypress, paint, layout, scroll, pointer, or text-event hot paths",
             ] {
                 assert!(
                     source.contains(phrase),
                     "{package} docs must mention `{phrase}`"
+                );
+            }
+        }
+    }
+
+    // Expanded language packages document Phase 18.14 surfaces.
+    for (package, mode_id, command_id, provider_id, status_id) in [
+        ("rust", "rust", "rust.toggleLineComment", "rust.keywords", "rust.status.mode"),
+        ("typescript", "typescript", "typescript.toggleLineComment", "typescript.keywords", "typescript.status.mode"),
+        ("javascript", "javascript", "javascript.toggleLineComment", "javascript.keywords", "javascript.status.mode"),
+    ] {
+        let reference_doc = read(&format!("docs/reference/packages/{package}.md"));
+        let package_doc = read(&format!("packages/{package}/docs/index.md"));
+        for source in [&reference_doc, &package_doc] {
+            for phrase in [
+                "Phase 18.14",
+                &format!("Major mode `{mode_id}`"),
+                "Behavior manifest",
+                &format!("Command `{command_id}`"),
+                &format!("Completion provider `{provider_id}`"),
+                &format!("Status item `{status_id}`"),
+                "Active syntax grammar remains selectable independently",
+                "LSP",
+            ] {
+                assert!(
+                    source.contains(phrase),
+                    "{package} docs must document Phase 18.14 expansion with `{phrase}`"
                 );
             }
         }
@@ -1123,6 +1147,150 @@ fn syntax_grammar_configuration_review_uses_only_documented_clay_js_apis() {
             !generated_registry.contains(forbidden_api),
             "generated registry must not promote hidden syntax config `{forbidden_api}`"
         );
+    }
+}
+
+#[test]
+fn phase18_14_language_package_default_init_js_loading_is_documented() {
+    // Phase 18.14 expands @clay/rust, @clay/typescript, and @clay/javascript
+    // into full language packages while keeping the same one-line explicit
+    // init.js default. This test pins the default-loading contract across
+    // package reference docs and the authoring guide.
+    let rust_ref = read("docs/reference/packages/rust.md");
+    let ts_ref = read("docs/reference/packages/typescript.md");
+    let js_ref = read("docs/reference/packages/javascript.md");
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+
+    for (name, source) in [
+        ("rust", &rust_ref),
+        ("typescript", &ts_ref),
+        ("javascript", &js_ref),
+    ] {
+        for phrase in [
+            "Default `~/.config/clay/init.js` loading is one explicit line",
+            "import { loadPackage } from \"clay:packages\";",
+            &format!("await loadPackage(\"@clay/{name}\");"),
+            "The package is explicit opt-in and is not auto-loaded",
+            "Optional customization is exposed through documented Clay/package JS APIs",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "{name}.md must document the Phase 18.14 default init.js loading contract with `{phrase}`"
+            );
+        }
+    }
+
+    for phrase in [
+        "Phase 18.14 authoring contract: upgrading grammar-only language packages to full language packages",
+        "End-user default remains one explicit line per package in `~/.config/clay/init.js`",
+        "await loadPackage(\"@clay/rust\");",
+        "await loadPackage(\"@clay/typescript\");",
+        "await loadPackage(\"@clay/javascript\");",
+        "Optional customization is exposed through documented Clay/package JS APIs, not by copying the package manifest into `init.js`",
+        "Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10",
+        "active syntax grammar remains selectable independently of its active major mode",
+        "Add `if mode == \"rust\"` or `if extension == \"ts\"` branches in the Rust client or server core.",
+        "LSP",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "creating-packages.md must document the Phase 18.14 language-package upgrade loading contract with `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_14_behavior_manifest_helper_is_documented() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+
+    for phrase in [
+        "clay.behavior.buildCodeEditingManifest",
+        "clay.completion.completionTriggerCharactersFromEditorRules",
+        "indentSize",
+        "lineComment",
+        "electricOutdentCharacters",
+        "autocompleteTriggers",
+        "C-family manifest",
+        "behavior manifest API",
+        "Derive `triggerCharacters` from the major-mode behavior manifest",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "creating-packages.md must document the generic behavior-manifest helper with `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_14_ui_layout_authoring_contract_is_documented() {
+    // Phase 18.14 language packages may contribute UI, but only through
+    // validated inert declarations. This test pins the package guide language
+    // that prevents drift toward Masonry widget creation, raw CSS, or client JS.
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+
+    for phrase in [
+        "UI/layout authoring contract for language packages",
+        "validated, inert declarations",
+        "Clay owns the working area",
+        "mandatory `main` editor slot",
+        "serverRegisterComponentContribution",
+        "kind: \"statusItem\"",
+        "serverRegisterPanelContribution",
+        "defaultVisibility: \"hidden\"",
+        "serverRegisterTransientOverlayContribution",
+        "serverRegisterThemeToken",
+        "Packages never create Masonry widgets",
+        "Packages must not",
+        "raw CSS",
+        "client-side JavaScript",
+        "raw `Deno.core.ops`",
+        "file-browser roots",
+        "Layout overrides and package options",
+        "clay.configuration.setPackageOption",
+        "clay.ui.serverSetLayoutOverride",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "creating-packages.md must document the Phase 18.14 UI/layout authoring contract with `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_14_configuration_contract_defers_user_tunable_keys() {
+    // Phase 18.14 language packages ship package-defined defaults and do not
+    // introduce new user-tunable configuration keys. This test pins that
+    // contract so future phases cannot silently add ad hoc config paths.
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let rust_doc = read("docs/reference/packages/rust.md");
+    let typescript_doc = read("docs/reference/packages/typescript.md");
+    let javascript_doc = read("docs/reference/packages/javascript.md");
+
+    for phrase in [
+        "Configuration contract for language packages",
+        "package-defined defaults",
+        "do not introduce new user-tunable configuration keys",
+        "clay.configuration.setPackageOption",
+        "clay.contributions.packageOptions",
+        "`setPackageOption` with ad hoc language-package keys is unsupported and will be rejected by validation.",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "creating-packages.md must document the Phase 18.14 configuration contract with `{phrase}`"
+        );
+    }
+
+    for (name, doc) in [
+        ("rust.md", rust_doc),
+        ("typescript.md", typescript_doc),
+        ("javascript.md", javascript_doc),
+    ] {
+        for phrase in ["## Configuration", "package-defined values", "No new user-tunable configuration keys", "clay.configuration.setPackageOption"] {
+            assert!(
+                doc.contains(phrase),
+                "{name} must document the Phase 18.14 configuration contract with `{phrase}`"
+            );
+        }
     }
 }
 

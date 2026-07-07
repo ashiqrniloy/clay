@@ -30,6 +30,76 @@
       "async": false
     },
     {
+      "id": "clay.behavior.buildCodeEditingManifest",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/behavior/build-code-editing-manifest.md",
+      "js_module": "clay:behavior",
+      "js_export": "buildCodeEditingManifest",
+      "js_facade": "runtime/js/behavior.ts::buildCodeEditingManifest",
+      "backing_rust": "src/server/ops/modes.rs::op_clay_modes_register_pattern",
+      "deno_op": "op_clay_modes_register_pattern",
+      "deno_op_path": "src/server/ops/modes.rs::op_clay_modes_register_pattern",
+      "name": "buildCodeEditingManifest",
+      "user_facing_name": "Build Code Editing Manifest",
+      "summary": "Build a generic C-family code-editing behavior manifest (editorRules) from language-specific parameters for use with major mode registration.",
+      "owner": "server",
+      "phase": "Phase 18.14",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "indentSize",
+          "type": "number",
+          "default": "required",
+          "description": "Number of spaces used for one indentation level."
+        },
+        {
+          "name": "lineComment",
+          "type": "string",
+          "default": "optional",
+          "description": "Line-comment token such as // or #; enables comment continuation."
+        },
+        {
+          "name": "blockCommentStart",
+          "type": "string",
+          "default": "optional",
+          "description": "Start token for block comments (reserved for future phases)."
+        },
+        {
+          "name": "blockCommentEnd",
+          "type": "string",
+          "default": "optional",
+          "description": "End token for block comments (reserved for future phases)."
+        },
+        {
+          "name": "pairs",
+          "type": "Array<{ open: string; close: string }>",
+          "default": "[{ \"(\" / \")\" }, { \"[\" / \"]\" }, { \"{\" / \"}\" }, { '\"' / '\"' }, { \"'\" / \"'\" }]",
+          "description": "Delimiter pairs for bracket matching and auto-insertion."
+        },
+        {
+          "name": "electricOutdentCharacters",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Characters that trigger electric indentation; \"}\" currently produces outdent-one-level."
+        },
+        {
+          "name": "autocompleteTriggers",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Trigger characters that may start autocomplete, e.g. [\".\", \"::\"]."
+        }
+      ],
+      "security": "Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use this helper when registering a C-family major mode instead of hand-rolling editorRules that may drift from the server validator.",
+      "lookup_tags": ["js-api", "behavior", "manifest", "editor-rules", "phase18.14"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.behavior.getActiveBehaviorManifest",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/behavior/get-active-behavior-manifest.md",
@@ -261,6 +331,74 @@
       "help_visible": true,
       "stability": "runtime-backed",
       "async": true
+    },
+    {
+      "id": "clay.completion.completionTriggerCharactersFromEditorRules",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md",
+      "js_module": "clay:completion",
+      "js_export": "completionTriggerCharactersFromEditorRules",
+      "js_facade": "runtime/js/completion.ts::completionTriggerCharactersFromEditorRules",
+      "backing_rust": "src/server/ops/modes.rs::op_clay_modes_register_pattern",
+      "deno_op": "op_clay_completion_register_completion_provider",
+      "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_register_completion_provider",
+      "name": "completionTriggerCharactersFromEditorRules",
+      "user_facing_name": "Completion Trigger Characters from Editor Rules",
+      "summary": "Extract trigger characters from behavior-manifest editorRules.autocompleteTriggers so completion provider triggerCharacters stay aligned with mode autocomplete triggers.",
+      "owner": "server",
+      "phase": "Phase 18.14",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "editorRules",
+          "type": "object",
+          "default": "required",
+          "description": "Editor rules object with an autocompleteTriggers array of { trigger: string } entries, such as the value returned by clay.behavior.buildCodeEditingManifest."
+        }
+      ],
+      "security": "Pure helper; returns inert strings only. Does not execute code, read files, access the network, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use this helper when registering a completion provider so its triggerCharacters match the mode's autocompleteTriggers.",
+      "lookup_tags": ["js-api", "completion", "helper", "trigger", "phase18.14"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.completion.serverListCompletionProvidersForTrigger",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md",
+      "js_module": "clay:completion",
+      "js_export": "serverListCompletionProvidersForTrigger",
+      "js_facade": "runtime/js/completion.ts::serverListCompletionProvidersForTrigger",
+      "backing_rust": "src/server/completion.rs::CompletionProviderRegistry::providers_for_trigger_character",
+      "deno_op": "op_clay_completion_providers_for_trigger",
+      "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_providers_for_trigger",
+      "name": "serverListCompletionProvidersForTrigger",
+      "user_facing_name": "List Completion Providers for Trigger",
+      "summary": "Query the registered completion providers that match a trigger character, sorted by priority descending then ID ascending.",
+      "owner": "server",
+      "phase": "Phase 18.14",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "trigger",
+          "type": "string",
+          "default": "required",
+          "description": "A single trigger character to match against provider triggerCharacters."
+        }
+      ],
+      "security": "Returns only inert provider metadata (id, provenance, priority, trigger characters, budgets). Does not execute providers, read files, access the network, run shell commands, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use this API to inspect which providers are registered for a trigger. Prefer loadPackage over manual provider construction.",
+      "lookup_tags": ["js-api", "completion", "provider", "query", "phase18.14"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
     },
     {
       "id": "clay.completion.serverRegisterCompletionProvider",

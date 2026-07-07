@@ -208,6 +208,39 @@ export function getActiveBehaviorManifest(documentId) {
 export function listBehaviorRoutes(documentId) {
   return parse(ops.op_clay_behavior_list_routes(JSON.stringify(documentId ?? null)));
 }
+export function buildCodeEditingManifest(options) {
+  const pairs = (options.pairs ?? [
+    { open: "(", close: ")" },
+    { open: "[", close: "]" },
+    { open: "{", close: "}" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" }
+  ]).filter((pair) => pair.open.length > 0 && pair.close.length > 0);
+  const comments = [];
+  if (options.lineComment && options.lineComment.length > 0) {
+    comments.push({ linePrefix: options.lineComment, continuePrefix: `${options.lineComment} ` });
+  }
+  const electricCharacters = [];
+  for (const character of options.electricOutdentCharacters ?? []) {
+    if (character === "}") {
+      electricCharacters.push({ trigger: character, effect: "outdent-one-level" });
+    }
+  }
+  const autocompleteTriggers = [];
+  for (const trigger of options.autocompleteTriggers ?? []) {
+    if (trigger.length > 0) {
+      autocompleteTriggers.push({ trigger });
+    }
+  }
+  return {
+    enter: { kind: "preserveLeadingWhitespace" },
+    pairs,
+    comments,
+    tabSpaces: options.indentSize,
+    electricCharacters,
+    autocompleteTriggers
+  };
+}
 "#;
 
 const CLAY_FACADE_PACKAGES: &str = r#"
@@ -381,6 +414,24 @@ export function serverRegisterCompletionProvider(options) {
     }
   }
   return parse(ops.op_clay_completion_register_completion_provider(JSON.stringify(options ?? null)));
+}
+export function serverListCompletionProvidersForTrigger(options) {
+  const trigger = (options ?? {}).trigger;
+  if (typeof trigger !== "string" || trigger.length === 0) {
+    throw new Error("clay.completion.invalid_trigger: trigger must be a non-empty string");
+  }
+  return parse(ops.op_clay_completion_providers_for_trigger(trigger));
+}
+export function completionTriggerCharactersFromEditorRules(editorRules) {
+  const triggers = editorRules?.autocompleteTriggers ?? [];
+  const characters = [];
+  for (const trigger of triggers) {
+    const value = trigger?.trigger;
+    if (typeof value === "string" && value.length > 0) {
+      characters.push(value);
+    }
+  }
+  return characters;
 }
 "#;
 
@@ -1976,6 +2027,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn language_package_completion_trigger_metadata_is_queryable() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverListCompletionProvidersForTrigger } from "clay:completion";
+
+                await loadPackage("@clay/rust");
+                await loadPackage("@clay/typescript");
+                await loadPackage("@clay/javascript");
+
+                const dotProviders = serverListCompletionProvidersForTrigger({ trigger: "." });
+                const rustScopeProviders = serverListCompletionProvidersForTrigger({ trigger: "::" });
+                const noProviders = serverListCompletionProvidersForTrigger({ trigger: "?" });
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                  dotIds: dotProviders.providers.map((p) => p.id).sort(),
+                  rustScopeIds: rustScopeProviders.providers.map((p) => p.id).sort(),
+                  noCount: noProviders.providers.length,
+                  rustTriggerCharacters: dotProviders.providers.find((p) => p.id === "rust.keywords")?.triggerCharacters ?? [],
+                  typescriptTriggerCharacters: dotProviders.providers.find((p) => p.id === "typescript.keywords")?.triggerCharacters ?? [],
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = evaluation.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+        assert_eq!(
+            parsed["dotIds"],
+            serde_json::json!(["javascript.keywords", "rust.keywords", "typescript.keywords"])
+        );
+        assert_eq!(parsed["rustScopeIds"], serde_json::json!(["rust.keywords"]));
+        assert_eq!(parsed["noCount"], 0);
+        assert_eq!(parsed["rustTriggerCharacters"], serde_json::json!([".", "::"]));
+        assert_eq!(parsed["typescriptTriggerCharacters"], serde_json::json!(["."]));
+    }
+
+    #[tokio::test]
     async fn load_package_registers_first_party_syntax_grammars() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let service = ClayJsRuntimeService::default();
@@ -2660,6 +2753,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn language_packages_config_fixture_loads_and_registers_all_contributions() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("configuration")
+            .join("language-packages");
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        let provider_ids: Vec<_> = result
+            .completion_providers
+            .iter()
+            .map(|provider| provider.id.clone())
+            .collect();
+        assert!(
+            provider_ids.iter().any(|id| id == "rust.keywords"),
+            "fixture must register rust.keywords completion provider"
+        );
+        assert!(
+            provider_ids.iter().any(|id| id == "typescript.keywords"),
+            "fixture must register typescript.keywords completion provider"
+        );
+        assert!(
+            provider_ids.iter().any(|id| id == "javascript.keywords"),
+            "fixture must register javascript.keywords completion provider"
+        );
+
+        let component_ids: Vec<_> = result
+            .ui_contributions
+            .components
+            .iter()
+            .map(|component| component.id.clone())
+            .collect();
+        assert!(
+            component_ids.iter().any(|id| id == "rust.status.mode"),
+            "fixture must register rust.status.mode status item"
+        );
+        assert!(
+            component_ids.iter().any(|id| id == "typescript.status.mode"),
+            "fixture must register typescript.status.mode status item"
+        );
+        assert!(
+            component_ids.iter().any(|id| id == "javascript.status.mode"),
+            "fixture must register javascript.status.mode status item"
+        );
+
+        let grammar_ids: Vec<_> = result
+            .syntax_grammars
+            .iter()
+            .map(|grammar| grammar.language_id.clone())
+            .collect();
+        assert!(
+            grammar_ids.iter().any(|id| id == "rust"),
+            "fixture must register rust syntax grammar"
+        );
+        assert!(
+            grammar_ids.iter().any(|id| id == "typescript"),
+            "fixture must register typescript syntax grammar"
+        );
+        assert!(
+            grammar_ids.iter().any(|id| id == "javascript"),
+            "fixture must register javascript syntax grammar"
+        );
+    }
+
+    #[tokio::test]
     async fn configuration_can_publish_sdui_snapshot() {
         let root = config_fixture("sdui-publish");
         fs::write(
@@ -3231,8 +3393,321 @@ mod tests {
         assert_eq!(
             result.op_records,
             vec![
-                "@clay/rust:rust:0:parse-document+render-decorations:1|@clay/typescript:typescript:0:parse-document+render-decorations:1|@clay/javascript:javascript:0:parse-document+render-decorations:1"
+                "@clay/rust:rust:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/typescript:typescript:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/javascript:javascript:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1"
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn rust_package_expansion_registers_mode_command_completion_and_status() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverClassifyDocument } from "clay:modes";
+                import { serverListCommands } from "clay:commands";
+
+                const summary = await loadPackage("@clay/rust");
+                const classification = serverClassifyDocument({ documentId: 42, path: "src/main.rs" });
+                const commands = serverListCommands();
+                const rustCommand = commands.find((command) => command.commandId === "rust.toggleLineComment");
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                    apiPrefix: summary.apiPrefix,
+                    modes: summary.modes,
+                    commands: summary.contributions.commands,
+                    uiComponents: summary.contributions.uiComponents,
+                    classification,
+                    rustCommandRegistered: Boolean(rustCommand)
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = result.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+        assert_eq!(parsed["apiPrefix"], "rust");
+        assert_eq!(parsed["modes"], serde_json::json!(["rust"]));
+        assert_eq!(parsed["classification"]["modeId"], "rust");
+        assert_eq!(parsed["classification"]["apiPrefix"], "rust");
+        assert!(parsed["rustCommandRegistered"].as_bool().unwrap());
+        assert_eq!(parsed["commands"], 1);
+        assert_eq!(parsed["uiComponents"], 1);
+    }
+
+    #[tokio::test]
+    async fn typescript_package_expansion_registers_mode_command_completion_and_status() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverClassifyDocument } from "clay:modes";
+                import { serverListCommands } from "clay:commands";
+
+                const summary = await loadPackage("@clay/typescript");
+                const classification = serverClassifyDocument({ documentId: 42, path: "src/index.ts" });
+                const commands = serverListCommands();
+                const tsCommand = commands.find((command) => command.commandId === "typescript.toggleLineComment");
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                    apiPrefix: summary.apiPrefix,
+                    modes: summary.modes,
+                    commands: summary.contributions.commands,
+                    uiComponents: summary.contributions.uiComponents,
+                    classification,
+                    tsCommandRegistered: Boolean(tsCommand)
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = result.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+        assert_eq!(parsed["apiPrefix"], "typescript");
+        assert_eq!(parsed["modes"], serde_json::json!(["typescript"]));
+        assert_eq!(parsed["classification"]["modeId"], "typescript");
+        assert_eq!(parsed["classification"]["apiPrefix"], "typescript");
+        assert!(parsed["tsCommandRegistered"].as_bool().unwrap());
+        assert_eq!(parsed["commands"], 1);
+        assert_eq!(parsed["uiComponents"], 1);
+    }
+
+    #[tokio::test]
+    async fn javascript_package_expansion_registers_mode_command_completion_and_status() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverClassifyDocument } from "clay:modes";
+                import { serverListCommands } from "clay:commands";
+
+                const summary = await loadPackage("@clay/javascript");
+                const classification = serverClassifyDocument({ documentId: 42, path: "src/index.js" });
+                const commands = serverListCommands();
+                const jsCommand = commands.find((command) => command.commandId === "javascript.toggleLineComment");
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                    apiPrefix: summary.apiPrefix,
+                    modes: summary.modes,
+                    commands: summary.contributions.commands,
+                    uiComponents: summary.contributions.uiComponents,
+                    classification,
+                    jsCommandRegistered: Boolean(jsCommand)
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = result.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+        assert_eq!(parsed["apiPrefix"], "javascript");
+        assert_eq!(parsed["modes"], serde_json::json!(["javascript"]));
+        assert_eq!(parsed["classification"]["modeId"], "javascript");
+        assert_eq!(parsed["classification"]["apiPrefix"], "javascript");
+        assert!(parsed["jsCommandRegistered"].as_bool().unwrap());
+        assert_eq!(parsed["commands"], 1);
+        assert_eq!(parsed["uiComponents"], 1);
+    }
+
+    #[tokio::test]
+    async fn build_code_editing_manifest_produces_valid_editor_rules() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { buildCodeEditingManifest } from "clay:behavior";
+                import { loadPackage } from "clay:packages";
+                import { serverClassifyDocument } from "clay:modes";
+
+                // @clay/javascript now uses buildCodeEditingManifest for its editor rules.
+                // Loading the package exercises the manifest validator; classifying a
+                // matching document proves the mode pattern (built from helper output)
+                // was registered successfully.
+                const summary = await loadPackage("@clay/javascript");
+                const classification = serverClassifyDocument({ documentId: 7, path: "src/index.js" });
+
+                const rules = buildCodeEditingManifest({
+                  indentSize: 4,
+                  lineComment: "//",
+                  pairs: [{ open: "(", close: ")" }],
+                  electricOutdentCharacters: ["}"],
+                  autocompleteTriggers: [".", "::"]
+                });
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                  modeId: classification.modeId,
+                  apiPrefix: classification.apiPrefix,
+                  packageName: classification.packageName,
+                  packageVersion: classification.packageVersion,
+                  summaryModes: summary.modes,
+                  rulesEnterKind: rules.enter.kind,
+                  rulesTabSpaces: rules.tabSpaces,
+                  rulesPairCount: rules.pairs.length,
+                  rulesCommentCount: rules.comments.length,
+                  rulesElectricCount: rules.electricCharacters.length,
+                  rulesAutocompleteCount: rules.autocompleteTriggers.length
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = result.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+        assert_eq!(parsed["modeId"], "javascript");
+        assert_eq!(parsed["apiPrefix"], "javascript");
+        assert_eq!(parsed["packageName"], "@clay/javascript");
+        assert_eq!(parsed["packageVersion"], "0.1.0");
+        assert_eq!(parsed["rulesEnterKind"], "preserveLeadingWhitespace");
+        assert_eq!(parsed["rulesTabSpaces"], 4);
+        assert_eq!(parsed["rulesPairCount"], 1);
+        assert_eq!(parsed["rulesCommentCount"], 1);
+        assert_eq!(parsed["rulesElectricCount"], 1);
+        assert_eq!(parsed["rulesAutocompleteCount"], 2);
+    }
+
+    #[tokio::test]
+    async fn language_packages_classify_with_core_fallbacks_and_no_conflicts() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverClassifyDocument } from "clay:modes";
+                import { serverListCommands } from "clay:commands";
+                import { serverListCompletionProvidersForTrigger } from "clay:completion";
+
+                await loadPackage("@clay/rust");
+                await loadPackage("@clay/typescript");
+                await loadPackage("@clay/javascript");
+
+                const classifications = {
+                  rust: serverClassifyDocument({ documentId: 1, path: "src/main.rs" }),
+                  typescript: serverClassifyDocument({ documentId: 2, path: "src/index.ts" }),
+                  javascript: serverClassifyDocument({ documentId: 3, path: "src/index.js" }),
+                  plainText: serverClassifyDocument({ documentId: 4, path: "README.txt" }),
+                  unknownCode: serverClassifyDocument({ documentId: 5, path: "prog.py" }),
+                };
+
+                const commands = serverListCommands();
+                const commandIds = commands.map((command) => command.commandId).sort();
+                const dotProviders = serverListCompletionProvidersForTrigger({ trigger: "." });
+                const providerIds = dotProviders.providers.map((provider) => provider.id).sort();
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                  classifications,
+                  commandIds,
+                  providerIds,
+                  commandCount: commands.length,
+                  providerCount: dotProviders.providers.length
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = result.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+
+        // Package-declared modes win over core.code for known extensions.
+        assert_eq!(parsed["classifications"]["rust"]["modeId"], "rust");
+        assert_eq!(parsed["classifications"]["typescript"]["modeId"], "typescript");
+        assert_eq!(parsed["classifications"]["javascript"]["modeId"], "javascript");
+
+        // Plain text falls back to core.text; unmatched code-like extension falls back to core.code.
+        assert_eq!(parsed["classifications"]["plainText"]["modeId"], "core.text");
+        assert_eq!(parsed["classifications"]["unknownCode"]["modeId"], "core.code");
+
+        // No duplicate command or provider IDs across packages.
+        assert_eq!(parsed["commandCount"], 3);
+        assert_eq!(parsed["commandIds"], serde_json::json!([
+            "javascript.toggleLineComment",
+            "rust.toggleLineComment",
+            "typescript.toggleLineComment"
+        ]));
+        assert_eq!(parsed["providerCount"], 3);
+        assert_eq!(parsed["providerIds"], serde_json::json!([
+            "javascript.keywords",
+            "rust.keywords",
+            "typescript.keywords"
+        ]));
+    }
+
+    #[tokio::test]
+    async fn language_package_classification_is_deterministic_across_load_orders() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+
+        for (first, second, third) in [
+            ("@clay/rust", "@clay/typescript", "@clay/javascript"),
+            ("@clay/javascript", "@clay/rust", "@clay/typescript"),
+            ("@clay/typescript", "@clay/javascript", "@clay/rust"),
+        ] {
+            let source = format!(
+                r#"
+                import {{ loadPackage }} from "clay:packages";
+                import {{ serverClassifyDocument }} from "clay:modes";
+
+                await loadPackage("{}");
+                await loadPackage("{}");
+                await loadPackage("{}");
+
+                const rust = serverClassifyDocument({{ documentId: 10, path: "lib.rs" }});
+                const ts = serverClassifyDocument({{ documentId: 11, path: "app.ts" }});
+                const js = serverClassifyDocument({{ documentId: 12, path: "app.js" }});
+
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({{
+                  rust: rust.modeId,
+                  typescript: ts.modeId,
+                  javascript: js.modeId
+                }}));
+                "#,
+                first, second, third
+            );
+            let result = ClayJsRuntimeService::default()
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap();
+
+            let record = result.op_records.into_iter().next().expect("one record");
+            let parsed: serde_json::Value =
+                serde_json::from_str(&record).expect("valid JSON record");
+            assert_eq!(parsed["rust"], "rust");
+            assert_eq!(parsed["typescript"], "typescript");
+            assert_eq!(parsed["javascript"], "javascript");
+        }
+    }
+
+    #[tokio::test]
+    async fn language_package_rejects_unauthorized_completion_provider() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let error = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+
+                serverRegisterCompletionProvider({
+                  packageName: "@evil/lang",
+                  packageVersion: "0.0.0",
+                  packagePrefix: "evil",
+                  permissions: ["parse-document"],
+                  providerId: "evil.keywords",
+                  triggerCharacters: ["."]
+                });
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        let message = error.to_string();
+        assert!(
+            message.contains("completion-provider"),
+            "expected missing completion-provider permission error, got: {message}"
         );
     }
 

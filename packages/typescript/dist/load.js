@@ -1,8 +1,14 @@
-// @clay/typescript load entry. Grammar-only package: no modes, commands, completions,
-// UI, key behavior, or language-specific Rust branches. Syntax highlighting
-// metadata lives in package.json under clay.contributions.syntaxGrammars and is
-// validated/registered through clay:syntax at package load time.
+// @clay/typescript load entry. Phase 18.14 full language package:
+// keeps the Phase 18.10 grammar contribution, adds a TypeScript major mode
+// with editor behavior rules, one server-first command, a keyword completion
+// provider, and an optional status-item UI contribution.
+
 import { serverRegisterSyntaxGrammar } from "clay:syntax";
+import { serverRegisterModePattern } from "clay:modes";
+import { serverRegisterCommand } from "clay:commands";
+import { serverRegisterCompletionProvider, completionTriggerCharactersFromEditorRules } from "clay:completion";
+import { serverRegisterComponentContribution } from "clay:ui";
+import { buildCodeEditingManifest } from "clay:behavior";
 
 export function typescriptGrammarContract() {
   return {
@@ -26,6 +32,99 @@ export function typescriptGrammarContract() {
   };
 }
 
-export default async function loadTypescriptGrammar() {
-  return serverRegisterSyntaxGrammar(typescriptGrammarContract());
+const typescriptEditorRules = buildCodeEditingManifest({
+  indentSize: 2,
+  lineComment: "//",
+  electricOutdentCharacters: ["}"],
+  autocompleteTriggers: ["."]
+});
+
+const typescriptPackageManifest = () => ({
+  name: "@clay/typescript",
+  version: "0.1.0",
+  type: "module",
+  exports: {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js"
+  },
+  clay: {
+    apiPrefix: "typescript",
+    permissions: [
+      "mode-registration",
+      "mode-activation",
+      "command-registration",
+      "completion-provider",
+      "parse-document",
+      "render-decorations"
+    ],
+    modes: ["typescript"],
+    entry: "./dist/index.js",
+    loadEntry: "./dist/load.js",
+    docs: "./docs/index.md",
+    contributions: {
+      syntaxGrammars: [typescriptGrammarContract().syntaxGrammar],
+      modePatterns: [
+        {
+          mode: "typescript",
+          displayName: "TypeScript",
+          extensions: ["ts", "tsx", "mts", "cts"]
+        }
+      ],
+      commands: [
+        {
+          id: "typescript.toggleLineComment",
+          displayName: "Toggle TypeScript Line Comment",
+          routingPolicy: "server-first"
+        }
+      ],
+      completionProviders: [
+        {
+          id: "typescript.keywords",
+          priority: 20,
+          triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
+          wordBoundaryChars: [".", ";", ","],
+          budgets: { timeoutMs: 300, maxItems: 32 }
+        }
+      ],
+      ui: {
+        components: [
+          {
+            kind: "statusItem",
+            id: "typescript.status.mode",
+            style: { variant: "muted" }
+          }
+        ]
+      }
+    }
+  }
+});
+
+export default async function loadTypescriptPackage() {
+  await serverRegisterSyntaxGrammar(typescriptGrammarContract());
+  await serverRegisterModePattern(typescriptPackageManifest(), {
+    modeId: "typescript",
+    displayName: "TypeScript",
+    extensions: ["ts", "tsx", "mts", "cts"],
+    editorRules: typescriptEditorRules
+  });
+  await serverRegisterCommand(typescriptPackageManifest(), {
+    commandId: "typescript.toggleLineComment",
+    displayName: "Toggle TypeScript Line Comment",
+    routingPolicy: "server-first",
+    permissions: []
+  });
+  await serverRegisterCompletionProvider({
+    packageManifest: typescriptPackageManifest(),
+    providerId: "typescript.keywords",
+    priority: 20,
+    triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
+    wordBoundaryChars: [".", ";", ","],
+    budgets: { timeoutMs: 300, maxItems: 32 }
+  });
+  await serverRegisterComponentContribution(typescriptPackageManifest(), {
+    kind: "statusItem",
+    id: "typescript.status.mode",
+    style: { variant: "muted" },
+    children: [{ kind: "label", id: "typescript.status.mode.label" }]
+  });
 }

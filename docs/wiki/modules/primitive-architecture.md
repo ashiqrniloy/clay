@@ -125,6 +125,7 @@ By default, package primitives cannot claim filesystem access outside already-op
 - [Phase 18.11 Completion Provider Framework Primitive Review](phase18.11-completion-provider-primitive-review.md)
 - [Phase 18.12 Workspace Discovery and File Browser Foundation Primitive Review](phase18.12-workspace-discovery-primitive-review.md)
 - [Phase 18.13 Git Discovery Service Primitive Review](phase18.13-git-discovery-primitive-review.md)
+- [Phase 18.14 First-Party Rust, TypeScript, and JavaScript Language Package Expansion Primitive Review](phase18.14-language-package-expansion-primitive-review.md)
 - [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
 - [Slot-Aware Package UI](slot-aware-package-ui.md)
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)

@@ -52,3 +52,31 @@ export function serverRegisterCompletionProvider(options: ServerRegisterCompleti
   }
   return parseResult(requireOps()["op_clay_completion_register_completion_provider"](JSON.stringify(options ?? null)));
 }
+
+export type ServerListCompletionProvidersForTriggerOptions = {
+  trigger: string;
+};
+
+export function serverListCompletionProvidersForTrigger(options: ServerListCompletionProvidersForTriggerOptions): unknown {
+  const trigger = (options ?? {}).trigger;
+  if (typeof trigger !== "string" || trigger.length === 0) {
+    throw new Error("clay.completion.invalid_trigger: trigger must be a non-empty string");
+  }
+  return parseResult(requireOps()["op_clay_completion_providers_for_trigger"](trigger));
+}
+
+export type EditorRulesLike = {
+  autocompleteTriggers?: Array<{ trigger?: string }>;
+};
+
+export function completionTriggerCharactersFromEditorRules(editorRules: EditorRulesLike): string[] {
+  const triggers = editorRules?.autocompleteTriggers ?? [];
+  const characters: string[] = [];
+  for (const trigger of triggers) {
+    const value = trigger?.trigger;
+    if (typeof value === "string" && value.length > 0) {
+      characters.push(value);
+    }
+  }
+  return characters;
+}

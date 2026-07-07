@@ -925,6 +925,13 @@ fn phase18_13_git_discovery_primitive_review() -> String {
     .expect("read Phase 18.13 Git discovery service primitive review")
 }
 
+fn phase18_14_language_package_expansion_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.14-language-package-expansion-primitive-review.md",
+    ))
+    .expect("read Phase 18.14 first-party Rust, TypeScript, and JavaScript language package expansion primitive review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -2104,6 +2111,115 @@ fn phase18_13_git_discovery_primitive_review_records_inventory_and_gaps() {
         assert!(
             review.contains(required),
             "Phase 18.13 primitive review must record security boundary: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_14_language_package_expansion_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_14_language_package_expansion_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.14-language-package-expansion-primitive-review.md"),
+        "wiki index must link the Phase 18.14 language package expansion primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.14-language-package-expansion-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.14 language package expansion primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Document classification and major-mode activation",
+        "Behavior manifests and text transforms",
+        "Command declaration and execution",
+        "Syntax grammar contribution",
+        "Completion trigger and result providers",
+        "Parse handler bridge and incremental parse updates",
+        "Decoration transport",
+        "Package UI contributions",
+        "Package configuration and layout overrides",
+        "Package loading and provenance",
+        "Workspace discovery and Git status",
+        "`src/packages/modes.rs::ModeRegistry`",
+        "`runtime/js/modes.ts`",
+        "`runtime/js/commands.ts`",
+        "`runtime/js/completion.ts`",
+        "`runtime/js/syntax.ts`",
+        "`runtime/js/parse.ts`",
+        "`runtime/js/decorations.ts`",
+        "`runtime/js/ui.ts`",
+        "`runtime/js/configuration.ts`",
+        "`runtime/js/packages.ts`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.14 primitive review must record existing inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.14 Primitive Gaps",
+        "### Mode-scoped command/action metadata helper",
+        "### Language-package behavior-manifest presets",
+        "### Parse-handler lifecycle for language modes",
+        "### Completion provider for language keywords/snippets",
+        "### Symbol/outline panel contribution",
+        "### Status-item contribution",
+        "active syntax grammar separate from active major mode",
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "grammar-only packages",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.14 primitive review must map generic language-package gaps: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Package load / mode registration",
+        "Document open / reload / reclassification",
+        "Background parse / completion work",
+        "Command execution",
+        "Configuration / layout override evaluation",
+        "Paint/text-event/key hot path",
+        "No package JavaScript",
+        "synchronous IPC in Masonry",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.14 primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "No language-specific Rust branches",
+        "No arbitrary file IO",
+        "No client-side JavaScript",
+        "No direct Masonry/native widget access",
+        "LSP",
+        "full language-server protocol integration",
+        "workspace-wide symbol indexes",
+        "Rejected Implementation Shapes",
+        "Do not add Rust server/client branches",
+        "Do not implement language-specific parser branches",
+        "Do not create language-specific native widgets",
+        "Do not run language package JavaScript in Masonry paint",
+        "Do not auto-load language packages",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.14 primitive review must reject unsafe/language-specific shape: {required}"
         );
     }
 }
@@ -4502,6 +4618,89 @@ fn phase18_5_markdown_wiki_documents_default_load_and_no_default_panel() {
         index.contains("markdownLoadMode") && index.contains("no-default-panel"),
         "wiki index description for the Markdown package page must mention the Phase 18.5 fallback and no-default-panel contract"
     );
+}
+
+#[test]
+fn phase18_14_language_package_expansion_wiki_documents_implementation() {
+    // Phase 18.14 (plans/042 Task 11) updates the code wiki with the actual
+    // implementation of the first-party Rust/TypeScript/JavaScript language
+    // package expansion so the work cannot be orphaned from the wiki index.
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let language_packages = fs::read_to_string(repository_path(
+        "docs/wiki/modules/first-party-language-packages.md",
+    ))
+    .expect("read first-party-language-packages wiki");
+    // The implementation wiki links the Phase 18.14 primitive review.
+    assert!(
+        language_packages.contains("phase18.14-language-package-expansion-primitive-review.md"),
+        "first-party-language-packages wiki must link the Phase 18.14 primitive review"
+    );
+
+    // The implementation wiki documents the three expanded packages and their
+    // generic primitive reuse.
+    for required in [
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "buildCodeEditingManifest",
+        "completionTriggerCharactersFromEditorRules",
+        "serverListCompletionProvidersForTrigger",
+        "serverRegisterModePattern",
+        "serverRegisterCommand",
+        "serverRegisterCompletionProvider",
+        "serverRegisterComponentContribution",
+        "statusItem",
+        "toggleLineComment",
+        "core.code",
+        "core.text",
+    ] {
+        assert!(
+            language_packages.contains(required),
+            "first-party-language-packages wiki must document `{required}`"
+        );
+    }
+
+    // The implementation wiki records source paths, tests, and security boundaries.
+    for required in [
+        "packages/rust/dist/load.js",
+        "packages/typescript/dist/load.js",
+        "packages/javascript/dist/load.js",
+        "src/server/ops/modes.rs",
+        "src/server/ops/completion.rs",
+        "src/packages/record.rs",
+        "mode-registration",
+        "command-registration",
+        "completion-provider",
+        "parse-document",
+        "render-decorations",
+        "No LSP",
+        "workspace-wide symbol indexes",
+        "No client-side JavaScript",
+        "tests/fixtures/configuration/language-packages/init.js",
+        "rust_package_expansion_registers_mode_command_completion_and_status",
+        "typescript_package_expansion_registers_mode_command_completion_and_status",
+        "javascript_package_expansion_registers_mode_command_completion_and_status",
+        "language_package_classification_is_deterministic_across_load_orders",
+    ] {
+        assert!(
+            language_packages.contains(required),
+            "first-party-language-packages wiki must document implementation detail `{required}`"
+        );
+    }
+
+    // The master index links the implementation page.
+    assert!(
+        index.contains("modules/first-party-language-packages.md"),
+        "wiki index must link the Phase 18.14 language package implementation page"
+    );
+
+    // The primitive review and implementation page are cross-linked from the index.
+    assert!(
+        index.contains("phase18.14-language-package-expansion-primitive-review.md")
+            && index.contains("first-party-language-packages.md"),
+        "wiki index must link both Phase 18.14 primitive review and implementation pages"
+    );
+
 }
 
 #[test]

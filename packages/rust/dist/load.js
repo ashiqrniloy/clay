@@ -1,31 +1,92 @@
-// @clay/rust load entry. Grammar-only package: no modes, commands, completions,
-// UI, key behavior, or language-specific Rust branches. Syntax highlighting
-// metadata lives in package.json under clay.contributions.syntaxGrammars and is
-// validated/registered through clay:syntax at package load time.
+// @clay/rust load entry. Phase 18.14 expansion: keeps the Phase 18.10
+// grammar contribution unchanged and adds a `rust` major mode, behavior
+// manifest, package-prefixed command, keyword completion provider, and an
+// optional status-item UI contribution through generic Clay primitives.
+// No language-specific Rust branches, native widgets, or hot-path JS.
+import { serverRegisterCommand } from "clay:commands";
+import { serverRegisterCompletionProvider } from "clay:completion";
+import { serverRegisterModePattern } from "clay:modes";
 import { serverRegisterSyntaxGrammar } from "clay:syntax";
+import { serverRegisterComponentContribution } from "clay:ui";
+
+import {
+  apiPrefix,
+  modeId,
+  packageName,
+  packageVersion,
+  rustCommands,
+  rustCompletionProvider,
+  rustEditorRules,
+  rustPackageManifest,
+  rustStatusItem,
+  rustSyntaxGrammar,
+  supportedExtensions,
+  supportedFileNames
+} from "./index.js";
 
 export function rustGrammarContract() {
   return {
-    packageName: "@clay/rust",
-    packageVersion: "0.1.0",
-    packagePrefix: "rust",
+    packageName,
+    packageVersion,
+    packagePrefix: apiPrefix,
     permissions: ["parse-document", "render-decorations"],
-    syntaxGrammar: {
-      languageId: "rust",
-      filePatterns: { extensions: ["rs"] },
-      grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm", source: "tree-sitter-rust" },
-      queries: { highlights: "./queries/highlights.scm" },
-      styleMap: {
-        keyword: "keyword.control",
-        string: "string.quoted",
-        comment: "comment.line",
-        punctuation: "punctuation.definition"
-      },
-      budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
-    }
+    syntaxGrammar: rustSyntaxGrammar
   };
 }
 
-export default async function loadRustGrammar() {
-  return serverRegisterSyntaxGrammar(rustGrammarContract());
+export async function loadRustPackage() {
+  const manifest = rustPackageManifest();
+
+  // Register the Tree-sitter grammar contribution first; this is the same
+  // Phase 18.10 path and remains independent of active major mode.
+  await serverRegisterSyntaxGrammar(rustGrammarContract());
+
+  // Register the Rust major-mode pattern. Documents opened with matching
+  // extensions or file names will classify as `rust` and activate with the
+  // package-supplied editor rules below.
+  await serverRegisterModePattern(manifest, {
+    modeId,
+    displayName: "Rust",
+    extensions: supportedExtensions,
+    fileNames: supportedFileNames,
+    editorRules: rustEditorRules
+  });
+
+  // Register the package-prefixed command metadata so it appears in help,
+  // command palettes, and validated action intents.
+  for (const command of rustCommands) {
+    await serverRegisterCommand(manifest, {
+      commandId: command.id,
+      displayName: command.userFacingName,
+      routingPolicy: command.routingPolicy,
+      permissions: command.permissions
+    });
+  }
+
+  // Register a lightweight keyword/snippet completion provider.
+  await serverRegisterCompletionProvider({
+    packageManifest: manifest,
+    packageName,
+    packageVersion,
+    packagePrefix: apiPrefix,
+    apiPrefix,
+    permissions: ["completion-provider"],
+    completionProvider: rustCompletionProvider,
+    contribution: rustCompletionProvider,
+    providerId: rustCompletionProvider.id,
+    triggerCharacters: rustCompletionProvider.triggerCharacters,
+    wordBoundaryChars: rustCompletionProvider.wordBoundaryChars,
+    priority: rustCompletionProvider.priority,
+    timeoutMs: rustCompletionProvider.budgets.timeoutMs,
+    maxItems: rustCompletionProvider.budgets.maxItems
+  });
+
+  // Register an optional status-item contribution. The item is inert metadata
+  // validated by Clay before any client publication.
+  await serverRegisterComponentContribution(manifest, rustStatusItem);
+
+  return manifest;
 }
+
+// Default activation entry invoked by `loadPackage("@clay/rust")`.
+export default loadRustPackage;

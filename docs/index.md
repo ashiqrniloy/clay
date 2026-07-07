@@ -35,6 +35,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 The generated documentation registry must read this section as the explicit inclusion list for public Clay JS API documentation. Add every public API Markdown file here before updating the generated registry.
 
 - [quit](reference/clay-js-api/application/quit.md) — `clay.application.quit`
+- [buildCodeEditingManifest](reference/clay-js-api/behavior/build-code-editing-manifest.md) — `clay.behavior.buildCodeEditingManifest`
 - [getActiveBehaviorManifest](reference/clay-js-api/behavior/get-active-behavior-manifest.md) — `clay.behavior.getActiveBehaviorManifest`
 - [listBehaviorRoutes](reference/clay-js-api/behavior/list-behavior-routes.md) — `clay.behavior.listBehaviorRoutes`
 - [serverExecuteCommand](reference/clay-js-api/commands/server-execute-command.md) — `clay.commands.serverExecuteCommand`
@@ -73,6 +74,8 @@ The generated documentation registry must read this section as the explicit incl
 - [loadPackage](reference/clay-js-api/packages/load-package.md) — `clay.packages.loadPackage`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `clay.parse.serverRegisterParseHandler`
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `clay.syntax.serverRegisterSyntaxGrammar`
+- [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `clay.completion.completionTriggerCharactersFromEditorRules`
+- [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `clay.completion.serverListCompletionProvidersForTrigger`
 - [serverRegisterCompletionProvider](reference/clay-js-api/completion/server-register-completion-provider.md) — `clay.completion.serverRegisterCompletionProvider`
 - [serverValidatePackageManifest](reference/clay-js-api/packages/server-validate-package-manifest.md) — `clay.packages.serverValidatePackageManifest`
 - [serverValidatePackagePermissions](reference/clay-js-api/packages/server-validate-package-permissions.md) — `clay.packages.serverValidatePackagePermissions`

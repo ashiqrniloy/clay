@@ -15,6 +15,10 @@ use super::{
     decorations::{clay_error, optional_u64, parse_json, required_str},
 };
 
+fn serialize_error(prefix: &'static str) -> impl Fn(serde_json::Error) -> JsErrorBox {
+    move |error| clay_error(format!("{prefix}: failed to serialize result ({error})"))
+}
+
 #[op2]
 #[string]
 pub(super) fn op_clay_completion_register_completion_provider(
@@ -157,6 +161,32 @@ fn completion_provider_metas(package: &PackageRecord) -> Vec<CompletionProviderM
             generation: CompletionProviderGeneration::default(),
         })
         .collect()
+}
+
+#[op2]
+#[string]
+pub(super) fn op_clay_completion_providers_for_trigger(
+    state: &mut OpState,
+    #[string] trigger: String,
+) -> Result<String, JsErrorBox> {
+    let providers = state
+        .borrow::<Arc<ClayOpState>>()
+        .completion_providers_for_trigger(&trigger);
+    serde_json::to_string(&json!({
+        "trigger": trigger,
+        "providers": providers.iter().map(|meta| json!({
+            "id": meta.id,
+            "packageName": meta.provenance.package_name,
+            "packageVersion": meta.provenance.package_version,
+            "packagePrefix": meta.provenance.package_prefix,
+            "priority": meta.priority,
+            "triggerCharacters": meta.trigger_metadata.trigger_characters,
+            "wordBoundaryChars": meta.word_boundary.boundary_chars,
+            "timeoutMs": meta.timeout_ms,
+            "maxItems": meta.max_items,
+        })).collect::<Vec<_>>(),
+    }))
+    .map_err(serialize_error("clay.completion.list_failed"))
 }
 
 fn reject_prohibited_authority(options: &Map<String, Value>) -> Result<(), JsErrorBox> {

@@ -1473,6 +1473,96 @@ Recommended test categories:
 10. **Docs tests** — package docs, primitive docs, and master index links stay current.
 11. **Manual smoke tests** — actual GUI package loading and user workflow checks. For Phase 18.9, the smoke path in [Launch and GUI Smoke](../../development/launch-and-gui-smoke.md) opens files with no language package and confirms editable `core.text`/`core.code` fallback modes. For Phase 18.12, smoke the left file browser and bottom fuzzy-open against a bounded workspace and confirm opens/reveals route through server commands, not package callbacks.
 
+## Phase 18.14 authoring contract: upgrading grammar-only language packages to full language packages
+
+Phase 18.14 expands `@clay/rust`, `@clay/typescript`, and `@clay/javascript` from grammar-only syntax packages into full first-party language packages. The upgrade path keeps the existing `clay.contributions.syntaxGrammars` contribution unchanged, adds a `clay.modes` entry and mode-specific metadata, and registers additional surfaces from the package `loadEntry` using generic Clay primitives. A document's active syntax grammar remains selectable independently of its active major mode; loading the language package must not silently change the mode of already-open fallback documents.
+
+End-user default remains one explicit line per package in `~/.config/clay/init.js`:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+```
+
+Optional customization is exposed through documented Clay/package JS APIs, not by copying the package manifest into `init.js`. Examples include binding a language command to a key, toggling a package option, or changing the default panel visibility.
+
+### Declarative additions beyond grammar-only
+
+Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. Add the following surfaces through generic primitives:
+
+- **Major mode**: declare `clay.modes` and register a mode pattern with `clay.modes.serverRegisterModePattern`. The pattern uses generic file-extension, MIME-type, and bounded shebang/leading-content probes; do not add language-specific Rust classification branches.
+- **Behavior manifest**: declare editor rules (indentation, tab, enter, delimiter pairs, comment continuation, electric characters) through the behavior manifest API. Use `clay.behavior.buildCodeEditingManifest({ indentSize, lineComment, electricOutdentCharacters, autocompleteTriggers })` to produce a validated C-family manifest; do not add a Rust-specific behavior manifest branch in core.
+- **Commands**: register package-prefixed commands with `clay.commands.serverRegisterCommand`. Commands must route through the server-owned `CommandExecution` path, declare permissions, and avoid shell/network/filesystem authority unless explicitly approved.
+- **Completion providers**: register keyword/snippet providers with `clay.completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `clay.completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
+- **Parse handlers**: register a mode-scoped parse handler with `clay.parse.serverRegisterParseHandler` to derive decorations, folding ranges, diagnostics, or outline data. The handler runs as `Background`, cancellable, viewport-prioritized server work and never in paint/typing hot paths.
+- **UI contributions**: declare optional components, status items, transient overlays, panels, and theme tokens through the `clay:ui` contribution APIs. All UI contributions are inert declarations that Clay validates, composes, and renders through Clay-owned Masonry widgets. Packages never create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- **Configuration**: Phase 18.14 language packages keep indent size, comment token, delimiter pairs, and autocomplete triggers as package-defined defaults. They do not introduce new user-tunable configuration keys in this phase. When user customization is justified in a later phase, expose package-prefixed options through the documented `clay.configuration.setPackageOption` API and layout defaults through `clay.ui.serverSetLayoutOverride`. Do not invent hidden JSON/TOML keys or undocumented config paths in `init.js`.
+
+### Configuration contract for language packages
+
+Language packages in Phase 18.14 ship opinionated defaults and do not expose per-language tuning knobs. The authoring contract is:
+
+- Defaults (indent size, line comment token, delimiter pairs, electric outdent, autocomplete triggers) are declared in the package `editorRules` and validated at load time.
+- No new `clay.contributions.packageOptions` entries are required for Phase 18.14 first-party language packages.
+- End-user customization is intentionally deferred; users who need different defaults should wait for a documented `setPackageOption` option or override behavior at the workspace/command layer, not by editing the package manifest.
+- When a future phase adds options, they must be package-prefixed (e.g., `rust.indentSize`), declared in `clay.contributions.packageOptions`, and read through the documented configuration API. Until then, `setPackageOption` with ad hoc language-package keys is unsupported and will be rejected by validation.
+
+### Rejected shapes
+
+Do not:
+
+- Add `if mode == "rust"` or `if extension == "ts"` branches in the Rust client or server core.
+- Implement language-specific native widgets, status bars, sidebars, or overlays.
+- Run package JavaScript in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+- Bypass `loadPackage` by pasting the package manifest into `init.js`.
+- Promote LSP, full language-server protocol integration, workspace-wide symbol indexes, AI completions, network-backed completions, or mutating package-manager/toolchain execution in Phase 18.14.
+
+### UI/layout authoring contract for language packages
+
+Language packages may contribute UI, but the package author API is limited to validated, inert declarations. The Rust client owns the working area, pane/split tree, fixed slots (`left`, `right`, `top`, `bottom`), the mandatory `main` editor slot, the component catalog, theme token resolution, and transient overlay rendering. Packages declare contributions and command/action targets; Clay composes them.
+
+Allowed `clay:ui` surfaces for language packages in Phase 18.14:
+
+- **Status items** (`serverRegisterComponentContribution` with `kind: "statusItem"`): lightweight, read-only labels or indicators that read package/component state. Example: a `rust.status.mode` label that shows the active mode name.
+- **Transient overlays** (`serverRegisterTransientOverlayContribution`): dismissible panels anchored to the working area, active pane, main slot, or pointer. Use for transient language actions such as a quick-help overlay; default focus/dismissal policies keep them out of the editor hot path.
+- **Theme tokens** (`serverRegisterThemeToken`): package-prefixed semantic tokens with a Clay core fallback of the same type (`color-role`, `spacing`, `radius`, `typography`, `opacity`).
+- **Input/state scopes** (`serverRegisterInputContribution`, `serverRegisterUiStateScope`): declare bounded input interests and durable state schemas when a language package owns a panel or overlay.
+- **Fixed panels** (`serverRegisterPanelContribution`): only when the language package genuinely owns persistent auxiliary UI. Fixed panels default to `defaultVisibility: "hidden"`; packages must not open a visible panel from `loadEntry` without explicit user opt-in through configuration.
+
+Packages must not:
+
+- Create or mutate Masonry widgets directly.
+- Provide raw CSS strings, HTML, renderer callbacks, native handles, or client-side JavaScript hooks.
+- Add fixed panels that consume permanent chrome by default.
+- Add file-browser roots, workspace markers, ignore rules, or raw directory listings.
+- Use `Deno.core.ops` directly or bypass `clay:ui` APIs.
+
+Example status-item contribution from a language package `loadEntry`:
+
+```js
+import { serverRegisterComponentContribution } from "clay:ui";
+
+await serverRegisterComponentContribution(rustPackageManifest(), {
+  kind: "statusItem",
+  id: "rust.status.mode",
+  style: { variant: "muted" },
+  children: [{ kind: "label", id: "rust.status.mode.label" }]
+});
+```
+
+The same declaration must also be listed in `clay.contributions.ui.components` inside the package manifest so Clay can validate provenance, budgets, and duplicate IDs at load time.
+
+Layout overrides and package options are declared through `clay.ui.serverSetLayoutOverride` and `clay.configuration.setPackageOption`, but only after the package has registered the referenced panels, inputs, actions, and tokens. Package defaults never override explicit user configuration.
+
+Shipped first-party language package docs:
+
+- [`@clay/rust`](rust.md)
+- [`@clay/typescript`](typescript.md)
+- [`@clay/javascript`](javascript.md)
+
 ## Minimal Package Checklist
 
 For a simple package:

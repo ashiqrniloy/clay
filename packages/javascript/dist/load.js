@@ -1,8 +1,14 @@
-// @clay/javascript load entry. Grammar-only package: no modes, commands, completions,
-// UI, key behavior, or language-specific Rust branches. Syntax highlighting
-// metadata lives in package.json under clay.contributions.syntaxGrammars and is
-// validated/registered through clay:syntax at package load time.
+// @clay/javascript load entry. Phase 18.14 full language package:
+// keeps the Phase 18.10 grammar contribution, adds a JavaScript major mode
+// with editor behavior rules, one server-first command, a keyword completion
+// provider, and an optional status-item UI contribution.
+
 import { serverRegisterSyntaxGrammar } from "clay:syntax";
+import { serverRegisterModePattern } from "clay:modes";
+import { serverRegisterCommand } from "clay:commands";
+import { serverRegisterCompletionProvider, completionTriggerCharactersFromEditorRules } from "clay:completion";
+import { serverRegisterComponentContribution } from "clay:ui";
+import { buildCodeEditingManifest } from "clay:behavior";
 
 export function javascriptGrammarContract() {
   return {
@@ -26,6 +32,99 @@ export function javascriptGrammarContract() {
   };
 }
 
-export default async function loadJavaScriptGrammar() {
-  return serverRegisterSyntaxGrammar(javascriptGrammarContract());
+const javascriptEditorRules = buildCodeEditingManifest({
+  indentSize: 2,
+  lineComment: "//",
+  electricOutdentCharacters: ["}"],
+  autocompleteTriggers: ["."]
+});
+
+const javascriptPackageManifest = () => ({
+  name: "@clay/javascript",
+  version: "0.1.0",
+  type: "module",
+  exports: {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js"
+  },
+  clay: {
+    apiPrefix: "javascript",
+    permissions: [
+      "mode-registration",
+      "mode-activation",
+      "command-registration",
+      "completion-provider",
+      "parse-document",
+      "render-decorations"
+    ],
+    modes: ["javascript"],
+    entry: "./dist/index.js",
+    loadEntry: "./dist/load.js",
+    docs: "./docs/index.md",
+    contributions: {
+      syntaxGrammars: [javascriptGrammarContract().syntaxGrammar],
+      modePatterns: [
+        {
+          mode: "javascript",
+          displayName: "JavaScript",
+          extensions: ["js", "jsx", "mjs", "cjs"]
+        }
+      ],
+      commands: [
+        {
+          id: "javascript.toggleLineComment",
+          displayName: "Toggle JavaScript Line Comment",
+          routingPolicy: "server-first"
+        }
+      ],
+      completionProviders: [
+        {
+          id: "javascript.keywords",
+          priority: 20,
+          triggerCharacters: completionTriggerCharactersFromEditorRules(javascriptEditorRules),
+          wordBoundaryChars: [".", ";", ","],
+          budgets: { timeoutMs: 300, maxItems: 32 }
+        }
+      ],
+      ui: {
+        components: [
+          {
+            kind: "statusItem",
+            id: "javascript.status.mode",
+            style: { variant: "muted" }
+          }
+        ]
+      }
+    }
+  }
+});
+
+export default async function loadJavaScriptPackage() {
+  await serverRegisterSyntaxGrammar(javascriptGrammarContract());
+  await serverRegisterModePattern(javascriptPackageManifest(), {
+    modeId: "javascript",
+    displayName: "JavaScript",
+    extensions: ["js", "jsx", "mjs", "cjs"],
+    editorRules: javascriptEditorRules
+  });
+  await serverRegisterCommand(javascriptPackageManifest(), {
+    commandId: "javascript.toggleLineComment",
+    displayName: "Toggle JavaScript Line Comment",
+    routingPolicy: "server-first",
+    permissions: []
+  });
+  await serverRegisterCompletionProvider({
+    packageManifest: javascriptPackageManifest(),
+    providerId: "javascript.keywords",
+    priority: 20,
+    triggerCharacters: completionTriggerCharactersFromEditorRules(javascriptEditorRules),
+    wordBoundaryChars: [".", ";", ","],
+    budgets: { timeoutMs: 300, maxItems: 32 }
+  });
+  await serverRegisterComponentContribution(javascriptPackageManifest(), {
+    kind: "statusItem",
+    id: "javascript.status.mode",
+    style: { variant: "muted" },
+    children: [{ kind: "label", id: "javascript.status.mode.label" }]
+  });
 }

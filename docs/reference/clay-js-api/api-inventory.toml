@@ -351,6 +351,29 @@ current_rust_owner = "src/protocol/mod.rs::RoutingPolicy; src/client/behavior.rs
 registry_public = true
 
 [[api]]
+id = "clay.behavior.buildCodeEditingManifest"
+category = "behavior-manifest-construction"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:behavior"
+js_export = "buildCodeEditingManifest"
+user_facing_name = "Build Code Editing Manifest"
+authority = "pure-helper"
+runtime_path = "client-local-computation"
+hot_path_policy = "Pure synchronous computation on inert language parameters; emits declarative editorRules consumed by server-side mode registration. No IPC, no paint-path work."
+facade_path = "runtime/js/behavior.ts::buildCodeEditingManifest"
+backing_rust = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
+deno_op = "op_clay_modes_register_pattern"
+deno_op_path = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
+documentation_path = "docs/reference/clay-js-api/behavior/build-code-editing-manifest.md"
+key_bindings = []
+custom_properties = ["indentSize:number=required", "lineComment:string=optional", "blockCommentStart:string=optional", "blockCommentEnd:string=optional", "pairs:object[]=default-delimiters", "electricOutdentCharacters:string[]=optional", "autocompleteTriggers:string[]=optional"]
+permissions = []
+security_notes = "Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "runtime/js/behavior.ts"
+registry_public = true
+
+[[api]]
 id = "clay.documents.serverGetDocumentSnapshot"
 category = "lease-read-only-state"
 visibility = "public"
@@ -1135,6 +1158,52 @@ custom_properties = ["packageManifest:object=optional", "packageName:string=requ
 permissions = ["completion-provider"]
 security_notes = "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
 current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::CompletionProviderMeta"
+registry_public = true
+
+[[api]]
+id = "clay.completion.serverListCompletionProvidersForTrigger"
+category = "completion-provider-query"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:completion"
+js_export = "serverListCompletionProvidersForTrigger"
+user_facing_name = "List Completion Providers for Trigger"
+authority = "server-owned-completion-metadata-query"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Provider metadata is registered at package load time; queries are inert metadata lookups and never run provider handlers on paint, layout, scroll, pointer, text-event, or keypress paths."
+facade_path = "runtime/js/completion.ts::serverListCompletionProvidersForTrigger"
+backing_rust = "src/server/completion.rs::CompletionProviderRegistry::providers_for_trigger_character"
+deno_op = "op_clay_completion_providers_for_trigger"
+deno_op_path = "src/server/ops/completion.rs::op_clay_completion_providers_for_trigger"
+documentation_path = "docs/reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md"
+key_bindings = []
+custom_properties = ["trigger:string=required"]
+permissions = []
+security_notes = "Returns only inert provider metadata (id, provenance, priority, trigger characters, word-boundary metadata, timeout, item cap). Does not execute provider handlers, read files, access the network, run shell commands, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::CompletionProviderRegistry"
+registry_public = true
+
+[[api]]
+id = "clay.completion.completionTriggerCharactersFromEditorRules"
+category = "completion-helper"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:completion"
+js_export = "completionTriggerCharactersFromEditorRules"
+user_facing_name = "Completion Trigger Characters from Editor Rules"
+authority = "pure-helper"
+runtime_path = "client-local-computation"
+hot_path_policy = "Pure synchronous computation on inert editorRules objects; no IPC, no paint-path work."
+facade_path = "runtime/js/completion.ts::completionTriggerCharactersFromEditorRules"
+backing_rust = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
+deno_op = "op_clay_completion_register_completion_provider"
+deno_op_path = "src/server/ops/completion.rs::op_clay_completion_register_completion_provider"
+documentation_path = "docs/reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md"
+key_bindings = []
+custom_properties = ["editorRules:object=required"]
+permissions = []
+security_notes = "Pure helper returning inert strings. Does not execute code, read files, access the network, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "runtime/js/completion.ts"
 registry_public = true
 
 [[api]]

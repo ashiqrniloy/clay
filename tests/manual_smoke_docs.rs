@@ -69,6 +69,53 @@ fn phase18_10_manual_syntax_smoke_has_runnable_fixture_contract() {
 }
 
 #[test]
+fn phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract() {
+    let launch_doc = launch_smoke_doc();
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/configuration/language-packages/init.js"
+    ))
+    .expect("read language-packages smoke fixture");
+
+    for expected in [
+        "Phase 18.14 language package expansion smoke",
+        "cargo run -- smoke-gui --config-fixture language-packages",
+        "loadPackage(\"@clay/rust\")",
+        "loadPackage(\"@clay/typescript\")",
+        "loadPackage(\"@clay/javascript\")",
+        "tests/fixtures/configuration/language-packages/workspace/main.rs",
+        "main.ts",
+        "main.js",
+        "classified into the package-declared major mode",
+        "rust.status.mode",
+        "typescript.status.mode",
+        "javascript.status.mode",
+        "bounded, metadata-only completion list",
+        "Remove the language package load lines and relaunch",
+        "Automated coverage (no manual execution needed)",
+        "language_packages_config_fixture_loads_and_registers_all_contributions",
+        "rust_package_expansion_registers_mode_command_completion_and_status",
+        "typescript_package_expansion_registers_mode_command_completion_and_status",
+        "javascript_package_expansion_registers_mode_command_completion_and_status",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Phase 18.14 language package smoke marker `{expected}`"
+        );
+    }
+
+    assert!(
+        fixture.contains("loadPackage(\"@clay/rust\")")
+            && fixture.contains("loadPackage(\"@clay/typescript\")")
+            && fixture.contains("loadPackage(\"@clay/javascript\")")
+            && !fixture.contains("serverRegisterSyntaxGrammar")
+            && !fixture.contains("serverRegisterModePattern")
+            && !fixture.contains("Deno.core.ops"),
+        "language-packages smoke fixture must use only end-user loadPackage calls"
+    );
+}
+
+#[test]
 fn phase19_manual_smoke_docs_define_open_dialog_scope() {
     let launch_doc = launch_smoke_doc();
     let windows_doc = windows_doc();

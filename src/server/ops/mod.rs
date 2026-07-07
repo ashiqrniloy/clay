@@ -35,7 +35,10 @@ use self::{
         op_clay_commands_execute_command, op_clay_commands_list_commands,
         op_clay_commands_register_command,
     },
-    completion::op_clay_completion_register_completion_provider,
+    completion::{
+        op_clay_completion_providers_for_trigger,
+        op_clay_completion_register_completion_provider,
+    },
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,
         op_clay_configuration_set_package_option,
@@ -555,6 +558,28 @@ impl ClayOpState {
             .clone()
     }
 
+    pub(crate) fn completion_providers_for_trigger(
+        &self,
+        trigger: &str,
+    ) -> Vec<crate::server::completion::CompletionProviderMeta> {
+        let providers = self
+            .completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        let mut matched: Vec<_> = providers
+            .iter()
+            .filter(|meta| {
+                meta.trigger_metadata
+                    .trigger_characters
+                    .iter()
+                    .any(|character| character == trigger)
+            })
+            .cloned()
+            .collect();
+        matched.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
+        matched
+    }
+
     pub(super) fn register_completion_provider_metadata(
         &self,
         metas: Vec<crate::server::completion::CompletionProviderMeta>,
@@ -760,6 +785,7 @@ extension!(
         op_clay_parse_store_update,
         op_clay_syntax_register_syntax_grammar,
         op_clay_completion_register_completion_provider,
+        op_clay_completion_providers_for_trigger,
         op_clay_runtime_unavailable,
     ],
 );
