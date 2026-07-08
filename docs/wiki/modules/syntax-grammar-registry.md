@@ -89,19 +89,20 @@ await loadPackage("@clay/javascript");
 `TreeSitterSyntaxHandler` in `src/server/syntax.rs` is the server-side parse handler for validated grammar contributions. It is generic: callers provide the validated `SyntaxGrammarContribution`, a resolved `tree_sitter::Language`, and the package highlight query text. The handler:
 
 1. compiles the highlight `Query` once at handler construction
-2. fails closed if a query capture is not present in the package `styleMap`
-3. runs from `ParseCoordinator` as a `ParseHandler`
-4. selects the viewport-intersecting `ParseWindowSnapshot`
-5. enforces the contribution `maxWindowBytes` before parsing
-6. sets parser/query timeouts from `timeoutMs`
-7. reuses a cached prior `Tree` for later document versions on the same window
-8. extracts query captures with `QueryCursor::set_byte_range`
-9. maps captures to inert `DecorationSpan` values with package provenance
-10. rejects per-viewport capture output above the syntax span cap instead of silently truncating query output
-11. validates the resulting `DecorationSet` with the existing decoration validator
-12. enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion or publication
-13. inserts the validated set into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
-14. returns an `IncrementalParseUpdate`
+2. creates and configures one `tree_sitter::Parser` per handler, reused across all parses for that grammar instead of recreating it per document open (avoids repeated wasm language instantiation in debug builds)
+3. fails closed if a query capture is not present in the package `styleMap`
+4. runs from `ParseCoordinator` as a `ParseHandler`
+5. selects the viewport-intersecting `ParseWindowSnapshot`
+6. enforces the contribution `maxWindowBytes` before parsing
+7. sets parser/query timeouts from `timeoutMs`
+8. reuses a cached prior `Tree` for later document versions on the same window
+9. extracts query captures with `QueryCursor::set_byte_range`
+10. maps captures to inert `DecorationSpan` values with package provenance
+11. rejects per-viewport capture output above the syntax span cap instead of silently truncating query output
+12. validates the resulting `DecorationSet` with the existing decoration validator
+13. enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion or publication
+14. inserts the validated set into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
+15. returns an `IncrementalParseUpdate`
 
 The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. The client still receives the normal decoration transport message path; no package code runs in the Rust client.
 

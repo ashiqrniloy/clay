@@ -89,6 +89,7 @@ impl LayoutState {
         selection_color: Color,
         decoration_visible_byte_ranges: &[(Range<usize>, Color)],
         origin: (f64, f64),
+        pin_caret_visible: bool,
     ) -> VisualLayoutMetrics {
         let recorder = global_recorder();
         let _scope = recorder.scope("editor.layout.paint_text");
@@ -112,6 +113,7 @@ impl LayoutState {
             *scroll_y = scroll_y.clamp(0.0, max_scroll_y);
         }
         if let Some(caret_offset) = caret_visible_byte_offset
+            && pin_caret_visible
             && let Some(caret) =
                 Self::caret_geometry_in_layout(&cached.layout, cached.text_len, caret_offset)
         {

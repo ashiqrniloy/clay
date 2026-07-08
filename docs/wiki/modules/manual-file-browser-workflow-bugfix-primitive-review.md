@@ -62,7 +62,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 - Primitive: client-native SDUI reconciliation/action-region rendering.
 - Owner: client owns native rendering, action hit regions, local viewport/scroll state, and pointer routing for already-published inert SDUI.
 - Code: `src/masonry_sdui.rs`, `src/masonry_editor.rs`.
-- Bug boundary: file-browser scroll belongs in `SduiNativeState` local state plus pointer scroll routing, not in server listing or package JavaScript. Scrolled hit testing must use the same row-height/offset math as paint.
+- Bug boundary: file-browser scroll belongs in `SduiNativeState` local state plus pointer scroll routing, not in server listing or package JavaScript. Scrolled hit testing must use the same row-height/offset math as paint. `SduiNativeState::scroll_vertical_pixels` treats positive deltas as scrolling down (revealing later rows), matching the editor scroll convention so wheel/trackpad routing does not invert direction.
 
 ### PaneSlotLayout and editor region computation
 
@@ -76,7 +76,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 - Primitive: client-owned editor viewport/visual scroll and native paint chrome.
 - Owner: `EditorSurface` owns text viewport, caret, selection, visual scroll state, and editor paint inside the shell-provided main rect.
 - Code: `src/editor/surface.rs`, `src/editor/viewport.rs`, `src/masonry_editor.rs`.
-- Bug boundary: remove the permanent purple decorative circle and visible inset editor card/padding as paint-chrome changes. Add main text-area scrollbar using existing `visual_scroll_y` / `last_visual_max_scroll_y` rather than a second scroll model.
+- Bug boundary: remove the permanent purple decorative circle and visible inset editor card/padding as paint-chrome changes. Add main text-area scrollbar using existing `visual_scroll_y` / `last_visual_max_scroll_y` rather than a second scroll model. The sub-line caret-keep-visible helper must be gated by a one-shot caret-pin flag so explicit scrolling can move the view away from the caret instead of snapping back on every paint.
 
 ### Open-document follow-ups
 

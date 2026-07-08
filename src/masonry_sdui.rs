@@ -246,7 +246,7 @@ impl SduiNativeState {
         let viewport = sdui_panel_left_slot_rect(size, self).map_or(0.0, |r| r.height());
         self.viewport_height = viewport;
         let max_scroll = (self.content_height - self.viewport_height).max(0.0);
-        let next = (self.scroll_offset - delta).clamp(0.0, max_scroll);
+        let next = (self.scroll_offset + delta).clamp(0.0, max_scroll);
         if next == self.scroll_offset {
             return false;
         }
@@ -1725,12 +1725,17 @@ mod tests {
         assert!(state.scroll_offset() == 0.0);
         assert!(state.content_height > state.viewport_height);
 
-        // Scroll "down" (delta < 0 reveals later rows): offset increases.
-        assert!(state.scroll_vertical_pixels(size, -72.0));
+        // Positive delta scrolls down (reveals later rows): offset increases.
+        assert!(state.scroll_vertical_pixels(size, 72.0));
         assert_eq!(state.scroll_offset(), 72.0);
-        // No server round-trip exists on this type; the method is pure paint
-        // math. Clamping at the top edge keeps non-positive deltas inert.
-        assert!(!state.scroll_vertical_pixels(size, 10.0_f64) || state.scroll_offset() < 72.0);
+        // Scrolling back up decreases the offset.
+        assert!(state.scroll_vertical_pixels(size, -30.0));
+        assert_eq!(state.scroll_offset(), 42.0);
+        // Scrolling far past the bottom clamps to the max scroll, then stays.
+        let max_scroll = (state.content_height - state.viewport_height).max(0.0);
+        assert!(state.scroll_vertical_pixels(size, 100_000.0));
+        assert_eq!(state.scroll_offset(), max_scroll);
+        assert!(!state.scroll_vertical_pixels(size, 100_000.0));
     }
 
     #[test]
@@ -1759,7 +1764,7 @@ mod tests {
 
         // Scroll down ~2 rows. The pixel that showed item-0 now shows item-2.
         let row_pitch = sdui_theme_style().row_height + 10.0;
-        assert!(state.scroll_vertical_pixels(size, -(row_pitch * 2.0)));
+        assert!(state.scroll_vertical_pixels(size, row_pitch * 2.0));
         state.rebuild_action_regions_for_test(size);
 
         let after = state

@@ -31,7 +31,15 @@ const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const TEXT_COLOR: Color = Color::from_rgb8(0xf4, 0xf1, 0xff);
 const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
 const SELECTION_COLOR: Color = Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66);
-const SYNTAX_DECORATION_COLOR: Color = Color::from_rgba8(0x3f, 0x66, 0xff, 0x33);
+// Syntax decorations are drawn as background tints behind text. Distinct,
+// saturated colors per token family make the highlighting visible against the
+// dark editor panel; without this the previous single faint blue tint was
+// essentially invisible.
+const SYNTAX_KEYWORD_COLOR: Color = Color::from_rgba8(0xc7, 0x92, 0xea, 0x55);
+const SYNTAX_STRING_COLOR: Color = Color::from_rgba8(0xc3, 0xe8, 0x8d, 0x55);
+const SYNTAX_COMMENT_COLOR: Color = Color::from_rgba8(0x7f, 0x84, 0x8e, 0x55);
+const SYNTAX_PUNCTUATION_COLOR: Color = Color::from_rgba8(0xab, 0xb2, 0xbf, 0x55);
+const SYNTAX_DEFAULT_COLOR: Color = Color::from_rgba8(0x61, 0xaf, 0xef, 0x55);
 const SEMANTIC_DECORATION_COLOR: Color = Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f);
 const DIAGNOSTIC_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f);
 const SEARCH_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0xd1, 0x66, 0x45);
@@ -53,7 +61,13 @@ fn decoration_color(kind: DecorationKind, style_token: &str) -> Color {
         DecorationKind::SearchMatch => SEARCH_DECORATION_COLOR,
         DecorationKind::Semantic => SEMANTIC_DECORATION_COLOR,
         DecorationKind::Syntax if style_token.starts_with("markup.") => SEMANTIC_DECORATION_COLOR,
-        DecorationKind::Syntax => SYNTAX_DECORATION_COLOR,
+        DecorationKind::Syntax if style_token.starts_with("keyword.") => SYNTAX_KEYWORD_COLOR,
+        DecorationKind::Syntax if style_token.starts_with("string.") => SYNTAX_STRING_COLOR,
+        DecorationKind::Syntax if style_token.starts_with("comment.") => SYNTAX_COMMENT_COLOR,
+        DecorationKind::Syntax if style_token.starts_with("punctuation.") => {
+            SYNTAX_PUNCTUATION_COLOR
+        }
+        DecorationKind::Syntax => SYNTAX_DEFAULT_COLOR,
     }
 }
 
@@ -341,6 +355,11 @@ pub struct EditorSurface {
     visual_scroll_y: f64,
     last_visual_max_scroll_y: f64,
     follow_visual_end: bool,
+    /// One-shot flag: keep the caret sub-line visible on the next paint after a
+    /// caret move. Explicit scrolling clears it so the view can move away from
+    /// the caret instead of snapping back (the caret-keep-visible logic must
+    /// not fight user scrolling).
+    pin_caret_visible: bool,
     perf: PerfRecorder,
 }
 
@@ -364,6 +383,7 @@ impl EditorSurface {
         self.visual_scroll_y = 0.0;
         self.last_visual_max_scroll_y = 0.0;
         self.follow_visual_end = false;
+        self.pin_caret_visible = false;
     }
 
     pub fn install_behavior_manifest(&mut self, manifest: BehaviorManifest) {
@@ -736,17 +756,13 @@ impl EditorSurface {
     }
 
     pub fn scroll_lines(&mut self, delta_lines: isize) -> bool {
-        if delta_lines != 0 {
-            let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
-            if self.scroll_visual_pixels(delta_lines as f64 * line_height) {
-                return true;
-            }
-        }
-
+        self.pin_caret_visible = false;
         let changed = self
             .viewport
             .scroll_lines(delta_lines, self.buffer.line_len());
         if changed {
+            // Line/page deltas snap to whole lines; drop the sub-line visual
+            // offset so the next paint aligns to the new first visible line.
             self.visual_scroll_y = 0.0;
             self.follow_visual_end = false;
         }
@@ -754,18 +770,47 @@ impl EditorSurface {
     }
 
     pub fn scroll_vertical_pixels(&mut self, delta_pixels: f64) -> bool {
+        self.pin_caret_visible = false;
         let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
-        let magnitude = (delta_pixels.abs() / line_height).ceil().max(1.0) as isize;
-        let delta_lines = if delta_pixels.is_sign_negative() {
-            -magnitude
-        } else {
-            magnitude
-        };
-        if self.scroll_visual_pixels(delta_pixels) {
-            true
-        } else {
-            self.scroll_lines(delta_lines)
+        let document_lines = self.buffer.line_len();
+        let previous_line = self.viewport.first_visible_line();
+        let previous_visual = self.visual_scroll_y;
+
+        // Accumulate into the sub-line visual offset and advance the logical
+        // first visible line by one each time a full line_height is crossed.
+        // Advancing and subtracting (rather than exhausting an overscan budget
+        // and resetting to zero) keeps pixel scrolling continuous with no
+        // backward jump when the visual budget is exhausted.
+        self.visual_scroll_y += delta_pixels;
+        while self.visual_scroll_y >= line_height {
+            if !self.viewport.scroll_lines(1, document_lines) {
+                let budget = self.last_visual_max_scroll_y.max(0.0);
+                self.visual_scroll_y = self.visual_scroll_y.min(budget);
+                break;
+            }
+            self.visual_scroll_y -= line_height;
         }
+        while self.visual_scroll_y < 0.0 {
+            if !self.viewport.scroll_lines(-1, document_lines) {
+                self.visual_scroll_y = 0.0;
+                break;
+            }
+            self.visual_scroll_y += line_height;
+        }
+        // Keep the visual offset within one line when logical lines can
+        // advance (multi-line documents); for single-page content taller than
+        // the viewport (wrapped lines / test-faked budgets) allow the full
+        // visual budget since there is no first visible line to advance.
+        let max_first = document_lines.saturating_sub(self.viewport.visible_line_count());
+        let visual_cap = if max_first > 0 {
+            line_height.min(self.last_visual_max_scroll_y.max(0.0))
+        } else {
+            self.last_visual_max_scroll_y.max(0.0)
+        };
+        self.visual_scroll_y = self.visual_scroll_y.clamp(0.0, visual_cap);
+        self.follow_visual_end = false;
+        previous_line != self.viewport.first_visible_line()
+            || previous_visual != self.visual_scroll_y
     }
 
     pub fn update_visible_line_count_for_height(&mut self, height: f64) -> bool {
@@ -816,15 +861,38 @@ impl EditorSurface {
     /// paint and tests so the thumb position is deterministic and never depends
     /// on rendered pixels.
     pub(crate) fn scrollbar_thumb_rect(&self, rect: Rect) -> Option<Rect> {
-        let max_scroll = self.last_visual_max_scroll_y;
-        if !max_scroll.is_finite() || max_scroll <= 0.0 {
-            return None;
-        }
+        let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
+        let document_lines = self.buffer.line_len();
+        let visible = self.viewport.visible_line_count();
+        let max_first = document_lines.saturating_sub(visible);
         let available_height = (rect.height() - (TEXT_INSET * 2.0)).max(0.0);
         let track_y0 = rect.y0 + TEXT_INSET;
         let track_y1 = rect.y0 + TEXT_INSET + available_height;
         let track_height = (track_y1 - track_y0).max(0.0);
-        let content = available_height + max_scroll;
+
+        // The thumb tracks total document progress: logical lines plus the
+        // sub-line visual offset. For single-page content taller than the
+        // viewport (e.g. one heavily wrapped line, or a test-faked budget),
+        // fall back to the visual-only progress against `last_visual_max_scroll_y`.
+        let (total_scrollable, scrolled, content) = if max_first > 0 {
+            let total = max_first as f64 * line_height;
+            let s = self.viewport.first_visible_line() as f64 * line_height
+                + self.visual_scroll_y.clamp(0.0, line_height);
+            (total, s, total + available_height)
+        } else if self.last_visual_max_scroll_y > 0.0 {
+            (
+                self.last_visual_max_scroll_y,
+                self.visual_scroll_y,
+                self.last_visual_max_scroll_y + available_height,
+            )
+        } else {
+            return None;
+        };
+        let frac = if total_scrollable > 0.0 {
+            (scrolled / total_scrollable).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let ratio = if content > 0.0 {
             (available_height / content).clamp(0.0, 1.0)
         } else {
@@ -832,7 +900,6 @@ impl EditorSurface {
         };
         let thumb_height = (ratio * track_height).max(SCROLLBAR_MIN_THUMB.min(track_height));
         let scrollable_track = (track_height - thumb_height).max(0.0);
-        let frac = (self.visual_scroll_y / max_scroll).clamp(0.0, 1.0);
         let thumb_y0 = track_y0 + frac * scrollable_track;
         let x1 = rect.x1 - SCROLLBAR_MARGIN;
         let x0 = x1 - SCROLLBAR_WIDTH;
@@ -889,6 +956,7 @@ impl EditorSurface {
         let selection_visible_range = self.visible_selection_range(&snapshot);
         let decoration_visible_ranges = self.visible_decoration_ranges(&snapshot);
         let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width);
+        let pin_caret_visible = std::mem::take(&mut self.pin_caret_visible);
         let metrics = self.layout.paint_text(
             ctx,
             scene,
@@ -904,6 +972,7 @@ impl EditorSurface {
             SELECTION_COLOR,
             &decoration_visible_ranges,
             origin,
+            pin_caret_visible,
         );
         if current_text.is_empty() {
             self.visual_scroll_y = 0.0;
@@ -997,7 +1066,7 @@ impl EditorSurface {
         let caret = self.cursor.caret();
         let visible_end = snapshot.start_byte_offset + snapshot.text.len();
         (caret >= snapshot.start_byte_offset && caret <= visible_end)
-            .then_some(caret - snapshot.start_byte_offset)
+            .then(|| caret - snapshot.start_byte_offset)
     }
 
     fn visible_selection_range(&self, snapshot: &VisibleSnapshot) -> Option<Range<usize>> {
@@ -1007,7 +1076,7 @@ impl EditorSurface {
         let visible_end = snapshot.start_byte_offset + snapshot.text.len();
         let start = range.start.max(visible_start);
         let end = range.end.min(visible_end);
-        (start < end).then_some((start - visible_start)..(end - visible_start))
+        (start < end).then(|| (start - visible_start)..(end - visible_start))
     }
 
     fn visible_decoration_ranges(&self, snapshot: &VisibleSnapshot) -> Vec<(Range<usize>, Color)> {
@@ -1023,10 +1092,12 @@ impl EditorSurface {
             .filter_map(|span| {
                 let start = (span.byte_start as usize).max(visible_start);
                 let end = (span.byte_end as usize).min(visible_end);
-                (start < end).then_some((
-                    (start - visible_start)..(end - visible_start),
-                    decoration_color(span.kind, &span.style_token),
-                ))
+                (start < end).then(|| {
+                    (
+                        (start - visible_start)..(end - visible_start),
+                        decoration_color(span.kind, &span.style_token),
+                    )
+                })
             })
             .collect()
     }
@@ -1324,8 +1395,13 @@ impl EditorSurface {
 
     fn ensure_caret_line_visible(&mut self) -> bool {
         let caret_line = self.buffer.line_of_byte(self.cursor.caret());
-        self.viewport
-            .ensure_line_visible(caret_line, self.buffer.line_len())
+        let changed = self
+            .viewport
+            .ensure_line_visible(caret_line, self.buffer.line_len());
+        // A caret move always wants the caret sub-line visible on the next
+        // paint; explicit scrolling clears this flag so the view can move away.
+        self.pin_caret_visible = true;
+        changed
     }
 
     fn move_cursor(
@@ -1364,18 +1440,6 @@ impl EditorSurface {
         self.ensure_caret_line_visible();
         self.follow_visual_end = false;
         true
-    }
-
-    fn scroll_visual_pixels(&mut self, delta_pixels: f64) -> bool {
-        if delta_pixels == 0.0 || self.last_visual_max_scroll_y <= 0.0 {
-            return false;
-        }
-
-        let previous = self.visual_scroll_y;
-        self.visual_scroll_y =
-            (self.visual_scroll_y + delta_pixels).clamp(0.0, self.last_visual_max_scroll_y);
-        self.follow_visual_end = false;
-        self.visual_scroll_y != previous
     }
 
     #[cfg(test)]
@@ -1478,8 +1542,8 @@ mod tests {
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
         BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration, CompletionTrigger,
-        DocumentAccess, EditOperation, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers,
-        KeyStroke, RoutingPolicy, TabMode,
+        DecorationKind, DocumentAccess, EditOperation, KeyBindingContext, KeyBindingRule, KeyCode,
+        KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
     };
     use crate::shell::CompletionMenuAcceptAction;
     use masonry::kurbo::Rect;
@@ -2509,6 +2573,107 @@ mod tests {
     }
 
     #[test]
+    fn scroll_after_caret_move_clears_caret_pin() {
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(&"line\n".repeat(20));
+        editor.set_caret_for_test(0);
+
+        editor.ensure_caret_line_visible();
+        assert!(editor.pin_caret_visible, "caret move sets pin flag");
+
+        editor.scroll_vertical_pixels(20.0);
+        assert!(
+            !editor.pin_caret_visible,
+            "explicit scroll clears caret pin so paint cannot snap back to caret"
+        );
+    }
+
+    #[test]
+    fn scroll_vertical_pixels_advances_viewport_after_visual_budget() {
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(&"line\n".repeat(100));
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 4.0 * 28.0);
+        editor.set_visual_scroll_bounds_for_test(80.0);
+
+        for _ in 0..10 {
+            editor.scroll_vertical_pixels(20.0);
+        }
+
+        assert!(
+            editor.viewport.first_visible_line() > 0,
+            "viewport must advance after visual overflow budget is consumed"
+        );
+    }
+
+    #[test]
+    fn pixel_scroll_never_jumps_backward_across_line_boundaries() {
+        // Continuity guard: as the user scrolls down, the visible snapshot's
+        // start byte offset must be non-decreasing. The old two-tier model
+        // exhausted an overscan visual budget then advanced one line and reset
+        // visual to zero, jumping content backward. The continuous model
+        // advances first_visible_line as each line_height is crossed.
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(
+            &"line
+"
+            .repeat(200),
+        );
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 4.0 * 28.0);
+        editor.set_caret_for_test(0);
+        editor.ensure_caret_line_visible();
+        editor.set_visual_scroll_bounds_for_test(120.0);
+
+        let mut previous_start = editor.visible_snapshot().start_byte_offset;
+        for _ in 0..120 {
+            let advanced = editor.scroll_vertical_pixels(20.0);
+            let start = editor.visible_snapshot().start_byte_offset;
+            assert!(
+                start >= previous_start,
+                "scrolling down must never move the visible start backward: {previous_start} -> {start}"
+            );
+            // Scrolling down must always make progress until the document end.
+            assert!(advanced, "scroll-down must keep advancing before the end");
+            previous_start = start;
+        }
+        assert!(
+            editor.viewport.first_visible_line() > 0,
+            "viewport must have advanced well into the document"
+        );
+    }
+
+    #[test]
+    fn visible_caret_offset_returns_none_when_caret_above_viewport() {
+        // Regression guard: when the user scrolls down and the caret stays
+        // above the visible snapshot, the offset subtraction must not overflow.
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(&"line\n".repeat(100));
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 4.0 * 28.0);
+        editor.set_caret_for_test(0);
+        editor.ensure_caret_line_visible();
+        // Simulate the visual budget the next paint would compute so scrolling
+        // can advance the viewport without a real paint in this unit test.
+        editor.set_visual_scroll_bounds_for_test(120.0);
+
+        // Scroll the viewport down far enough that byte offset 0 is no longer
+        // in the visible snapshot.
+        for _ in 0..20 {
+            editor.scroll_vertical_pixels(20.0);
+        }
+        assert!(editor.viewport.first_visible_line() > 0);
+
+        let snapshot = editor.visible_snapshot();
+        assert!(
+            snapshot.start_byte_offset > 0,
+            "visible snapshot must start after the caret for this regression"
+        );
+        assert_eq!(
+            editor.visible_caret_offset(&snapshot),
+            None,
+            "caret above visible snapshot must return None, not panic"
+        );
+    }
+
+    #[test]
     fn large_buffer_visible_extraction_remains_bounded_after_cursor_changes() {
         let text = generated_lines(10_000);
         let mut editor = EditorSurface::default();
@@ -2727,6 +2892,22 @@ mod tests {
                 byte_offset: 1,
                 text: "()".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn syntax_decoration_colors_are_distinct_by_token_family() {
+        assert_ne!(
+            super::decoration_color(DecorationKind::Syntax, "keyword.control"),
+            super::decoration_color(DecorationKind::Syntax, "string.quoted")
+        );
+        assert_ne!(
+            super::decoration_color(DecorationKind::Syntax, "comment.line"),
+            super::decoration_color(DecorationKind::Syntax, "punctuation.definition")
+        );
+        assert_eq!(
+            super::decoration_color(DecorationKind::Syntax, "markup.heading.1"),
+            super::SEMANTIC_DECORATION_COLOR
         );
     }
 }

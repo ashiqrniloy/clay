@@ -418,13 +418,26 @@ impl fmt::Display for TreeSitterSyntaxError {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TreeSitterSyntaxHandler {
     contribution: SyntaxGrammarContribution,
     language: Language,
+    parser: Arc<Mutex<Parser>>,
     highlights_query: Arc<Query>,
     trees: Arc<Mutex<HashMap<DocumentId, CachedSyntaxTree>>>,
     decoration_cache: Arc<Mutex<SyntaxChunkCache>>,
+}
+
+impl fmt::Debug for TreeSitterSyntaxHandler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TreeSitterSyntaxHandler")
+            .field("contribution", &self.contribution)
+            .field("language", &self.language)
+            .field("highlights_query", &self.highlights_query)
+            .field("trees", &self.trees)
+            .field("decoration_cache", &self.decoration_cache)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -452,9 +465,16 @@ impl TreeSitterSyntaxHandler {
                 });
             }
         }
+        let mut parser = Parser::new();
+        parser.set_language(&language).map_err(|error| {
+            TreeSitterSyntaxError::QueryCompileFailed {
+                message: error.to_string(),
+            }
+        })?;
         Ok(Self {
             contribution,
             language,
+            parser: Arc::new(Mutex::new(parser)),
             highlights_query: Arc::new(query),
             trees: Arc::new(Mutex::new(HashMap::new())),
             decoration_cache: Arc::new(Mutex::new(SyntaxChunkCache::default())),
@@ -494,12 +514,7 @@ impl TreeSitterSyntaxHandler {
             })
             .map(|cached| cached.tree.clone());
 
-        let mut parser = Parser::new();
-        parser.set_language(&self.language).map_err(|error| {
-            TreeSitterSyntaxError::QueryCompileFailed {
-                message: error.to_string(),
-            }
-        })?;
+        let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
         parser.set_timeout_micros(self.contribution.timeout_micros());
         let Some(tree) = parser.parse(&window.text, old_tree.as_ref()) else {
             return Err(TreeSitterSyntaxError::ParseTimedOut);

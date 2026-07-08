@@ -37,9 +37,12 @@ impl Viewport {
         }
     }
 
-    #[cfg(test)]
-    pub fn first_visible_line(&self) -> usize {
+    pub(crate) fn first_visible_line(&self) -> usize {
         self.first_visible_line
+    }
+
+    pub(crate) fn visible_line_count(&self) -> usize {
+        self.visible_line_count
     }
 
     pub fn revision(&self) -> u64 {
