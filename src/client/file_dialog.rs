@@ -35,6 +35,10 @@ pub fn open_markdown_file_dialog() -> FileDialogResult {
     platform::open_markdown_file_dialog()
 }
 
+pub fn open_folder_dialog() -> FileDialogResult {
+    platform::open_folder_dialog()
+}
+
 #[cfg(windows)]
 mod platform {
     use std::{ffi::c_void, path::PathBuf};
@@ -48,7 +52,8 @@ mod platform {
             },
             UI::Shell::{
                 Common::COMDLG_FILTERSPEC, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR,
-                FOS_PATHMUSTEXIST, FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH,
+                FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog,
+                SIGDN_FILESYSPATH,
             },
         },
         core::{Error, HRESULT, PCWSTR},
@@ -59,7 +64,7 @@ mod platform {
     const HRESULT_CANCELLED: HRESULT = HRESULT(0x800704C7_u32 as i32);
 
     pub(super) fn open_markdown_file_dialog() -> FileDialogResult {
-        match show_file_open_dialog() {
+        match show_file_open_dialog(false) {
             Ok(Some(path)) => FileDialogResult::Selected(path),
             Ok(None) => FileDialogResult::Cancelled,
             Err(error) if is_cancelled(&error) => FileDialogResult::Cancelled,
@@ -69,7 +74,18 @@ mod platform {
         }
     }
 
-    fn show_file_open_dialog() -> windows::core::Result<Option<PathBuf>> {
+    pub(super) fn open_folder_dialog() -> FileDialogResult {
+        match show_file_open_dialog(true) {
+            Ok(Some(path)) => FileDialogResult::Selected(path),
+            Ok(None) => FileDialogResult::Cancelled,
+            Err(error) if is_cancelled(&error) => FileDialogResult::Cancelled,
+            Err(error) => FileDialogResult::Failed {
+                message: format!("Windows folder dialog failed: {error}"),
+            },
+        }
+    }
+
+    fn show_file_open_dialog(pick_folder: bool) -> windows::core::Result<Option<PathBuf>> {
         let _com = ApartmentCom::initialize()?;
         // SAFETY: `CoCreateInstance` instantiates a fresh COM object on the
         // apartment initialized above; `FileOpenDialog` is a documented
@@ -79,20 +95,22 @@ mod platform {
         let dialog: IFileOpenDialog =
             unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)? };
 
-        set_markdown_filters(&dialog)?;
+        if !pick_folder {
+            set_markdown_filters(&dialog)?;
+        }
         // SAFETY: The dialog COM object was created by `CoCreateInstance` and is used on
         // the same initialized apartment for option reads/writes.
         let options = unsafe { dialog.GetOptions()? };
+        let mut options = options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR;
+        if pick_folder {
+            options |= FOS_PICKFOLDERS;
+        } else {
+            options |= FOS_FILEMUSTEXIST;
+        }
         // SAFETY: The options are the dialog's current flags OR-ed with documented
         // file-system-only constraints; no pointers or borrowed buffers are involved.
         unsafe {
-            dialog.SetOptions(
-                options
-                    | FOS_FORCEFILESYSTEM
-                    | FOS_FILEMUSTEXIST
-                    | FOS_PATHMUSTEXIST
-                    | FOS_NOCHANGEDIR,
-            )?;
+            dialog.SetOptions(options)?;
         }
 
         // SAFETY: `Show` runs a modal UI on the owning apartment; the dialog
@@ -188,7 +206,115 @@ mod platform {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+mod platform {
+    use std::{collections::HashMap, path::PathBuf};
+
+    use zbus::{
+        blocking::Connection,
+        proxy,
+        zvariant::{OwnedObjectPath, OwnedValue, Value},
+    };
+
+    use super::FileDialogResult;
+
+    #[proxy(
+        interface = "org.freedesktop.portal.FileChooser",
+        default_service = "org.freedesktop.portal.Desktop",
+        default_path = "/org/freedesktop/portal/desktop"
+    )]
+    trait FileChooser {
+        fn open_file(
+            &self,
+            parent_window: &str,
+            title: &str,
+            options: HashMap<&str, Value<'_>>,
+        ) -> zbus::Result<OwnedObjectPath>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.portal.Request",
+        default_service = "org.freedesktop.portal.Desktop"
+    )]
+    trait Request {
+        #[zbus(signal)]
+        fn response(&self, response: u32, results: HashMap<String, OwnedValue>)
+        -> zbus::Result<()>;
+    }
+
+    pub(super) fn open_markdown_file_dialog() -> FileDialogResult {
+        FileDialogResult::Unsupported {
+            message: "Clay native file-open dialog is supported on Windows only in Phase 19."
+                .to_string(),
+        }
+    }
+
+    pub(super) fn open_folder_dialog() -> FileDialogResult {
+        match open_folder_dialog_via_portal() {
+            Ok(Some(path)) => FileDialogResult::Selected(path),
+            Ok(None) => FileDialogResult::Cancelled,
+            Err(error) => FileDialogResult::Failed {
+                message: format!("Linux folder dialog failed: {error}"),
+            },
+        }
+    }
+
+    fn open_folder_dialog_via_portal() -> Result<Option<PathBuf>, String> {
+        let connection = Connection::session().map_err(|error| error.to_string())?;
+        let proxy =
+            FileChooserProxyBlocking::new(&connection).map_err(|error| error.to_string())?;
+        let mut options = HashMap::new();
+        options.insert("directory", Value::from(true));
+        options.insert("modal", Value::from(true));
+        let handle = proxy
+            .open_file("", "Open Folder", options)
+            .map_err(|error| error.to_string())?;
+        let request = RequestProxyBlocking::builder(&connection)
+            .path(handle)
+            .map_err(|error| error.to_string())?
+            .build()
+            .map_err(|error| error.to_string())?;
+        let mut responses = request
+            .receive_response()
+            .map_err(|error| error.to_string())?;
+        let signal = responses
+            .next()
+            .ok_or_else(|| "portal response stream ended".to_string())
+            .map_err(|error| error.to_string())?;
+        let args = signal.args().map_err(|error| error.to_string())?;
+        if *args.response() != 0 {
+            return Ok(None);
+        }
+        let uris = args
+            .results()
+            .get("uris")
+            .ok_or_else(|| "portal response did not include selected URI".to_string())?;
+        let uris = Vec::<String>::try_from(uris.clone())
+            .map_err(|error| format!("portal returned invalid URI list: {error}"))?;
+        let Some(uri) = uris.first() else {
+            return Ok(None);
+        };
+        file_uri_to_path(uri)
+    }
+
+    fn file_uri_to_path(uri: &str) -> Result<Option<PathBuf>, String> {
+        let parsed = url::Url::parse(uri).map_err(|error| format!("invalid URI: {error}"))?;
+        if parsed.scheme() != "file" {
+            return Err("portal returned a non-file URI".to_string());
+        }
+        parsed
+            .to_file_path()
+            .map(Some)
+            .map_err(|_| "portal returned an invalid file URI path".to_string())
+    }
+
+    #[cfg(test)]
+    pub(super) fn parse_file_uri_for_test(uri: &str) -> Result<Option<PathBuf>, String> {
+        file_uri_to_path(uri)
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod platform {
     use super::FileDialogResult;
 
@@ -196,6 +322,12 @@ mod platform {
         FileDialogResult::Unsupported {
             message: "Clay native file-open dialog is supported on Windows only in Phase 19."
                 .to_string(),
+        }
+    }
+
+    pub(super) fn open_folder_dialog() -> FileDialogResult {
+        FileDialogResult::Unsupported {
+            message: "Clay native folder dialog is not supported on this platform yet.".to_string(),
         }
     }
 }
@@ -224,6 +356,27 @@ mod tests {
             open_markdown_file_dialog(),
             FileDialogResult::Unsupported {
                 message: "Clay native file-open dialog is supported on Windows only in Phase 19."
+                    .to_string(),
+            }
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_file_uri_parser_accepts_file_paths() {
+        assert_eq!(
+            super::platform::parse_file_uri_for_test("file:///tmp/clay%20workspace").unwrap(),
+            Some(std::path::PathBuf::from("/tmp/clay workspace"))
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    #[test]
+    fn unsupported_platform_open_folder_dialog_reports_unsupported() {
+        assert_eq!(
+            super::open_folder_dialog(),
+            FileDialogResult::Unsupported {
+                message: "Clay native folder dialog is not supported on this platform yet."
                     .to_string(),
             }
         );

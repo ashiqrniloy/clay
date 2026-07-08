@@ -36,8 +36,7 @@ use self::{
         op_clay_commands_register_command,
     },
     completion::{
-        op_clay_completion_providers_for_trigger,
-        op_clay_completion_register_completion_provider,
+        op_clay_completion_providers_for_trigger, op_clay_completion_register_completion_provider,
     },
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,

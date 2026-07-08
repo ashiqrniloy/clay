@@ -246,6 +246,10 @@ impl DocumentState {
         self.dirty = false;
     }
 
+    pub(crate) fn document_id(&self) -> DocumentId {
+        self.document_id
+    }
+
     pub(crate) fn version(&self) -> DocumentVersion {
         self.version
     }

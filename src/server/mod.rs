@@ -383,8 +383,7 @@ impl IpcServer {
 
         let mut refreshed = Vec::with_capacity(snapshots.len());
         for snapshot in snapshots {
-            let messages = connection::selected_file_open_followup_messages(
-                0,
+            let messages = connection::open_document_followup_messages(
                 &snapshot.metadata,
                 &snapshot.text,
                 &self.behavior,
@@ -479,7 +478,7 @@ impl IpcServer {
 ///
 /// Built by [`apply_runtime_outputs`]; both the server-startup path
 /// (`IpcServer::apply_runtime_evaluation`) and the selected-file-open path
-/// (`connection::selected_file_open_followup_messages`) compose their
+/// (`connection::open_document_followup_messages`) compose their
 /// flow-specific client messages from this single result so that behavior and
 /// SDUI state mutation + validation live in exactly one place.
 #[derive(Default)]

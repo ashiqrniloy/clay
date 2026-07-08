@@ -38,6 +38,10 @@
 - `tests/fixtures/configuration/language-packages/workspace/main.rs`
 - `tests/fixtures/configuration/language-packages/workspace/main.ts`
 - `tests/fixtures/configuration/language-packages/workspace/main.js`
+- `tests/fixtures/configuration/file-browser-workflow/init.js`
+- `tests/fixtures/configuration/file-browser-workflow/workspace/main.rs`
+- `tests/fixtures/configuration/file-browser-workflow/workspace/main.ts`
+- `tests/fixtures/configuration/file-browser-workflow/workspace/main.js`
 - `tests/package_loading_docs.rs`
 - `tests/manual_smoke_docs.rs`
 - `tests/primitives_docs.rs`
@@ -114,6 +118,24 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
+```
+
+The file-browser workflow smoke fixture layers documented app commands on top of the same package loads:
+
+```js
+import { bindKey } from "clay:keybindings";
+import { clientCopySelection } from "clay:editor";
+import { loadPackage } from "clay:packages";
+import { clientOpenFolderDialog } from "clay:workspace";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+
+bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
+bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 ```
 
 Package load entry (excerpt from `packages/rust/dist/load.js`):
@@ -202,6 +224,8 @@ Hot-path policy: parse/highlight work and completion resolution run as backgroun
 - `tests/package_loading_docs.rs::phase18_14_behavior_manifest_helper_is_documented`
 - `tests/package_loading_docs.rs::phase18_14_configuration_contract_defers_user_tunable_keys`
 - `tests/manual_smoke_docs.rs::phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract`
+- `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract`
+- `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings`
 - `tests/primitives_docs.rs::phase18_14_language_package_expansion_primitive_review_records_inventory_and_gaps`
 
 Run the relevant suites:
@@ -228,3 +252,5 @@ CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs
 - `docs/reference/packages/javascript.md`
 - `docs/reference/packages/creating-packages.md`
 - `docs/development/launch-and-gui-smoke.md`
+- [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)
+- [Workspace Discovery and File Browser](workspace-file-browser.md)

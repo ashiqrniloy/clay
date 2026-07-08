@@ -918,6 +918,13 @@ fn phase18_12_workspace_discovery_primitive_review() -> String {
     .expect("read Phase 18.12 workspace discovery and file browser foundation primitive review")
 }
 
+fn end_to_end_file_browser_workflow_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/end-to-end-file-browser-workflow-primitive-review.md",
+    ))
+    .expect("read end-to-end file browser workflow primitive review")
+}
+
 fn phase18_13_git_discovery_primitive_review() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/phase18.13-git-discovery-primitive-review.md",
@@ -1999,6 +2006,119 @@ fn phase18_12_workspace_discovery_primitive_review_records_inventory_and_gaps() 
 }
 
 #[test]
+fn end_to_end_file_browser_workflow_primitive_review_records_inventory_and_gaps() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = end_to_end_file_browser_workflow_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/end-to-end-file-browser-workflow-primitive-review.md"),
+        "docs/wiki/index.md must link the end-to-end file browser workflow primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("end-to-end-file-browser-workflow-primitive-review.md"),
+        "primitive architecture wiki must link the end-to-end file browser workflow primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Workspace roots and bounded listing",
+        "File browser SDUI and command execution",
+        "Client UI prompts and selected-file authority",
+        "Language activation and package behavior",
+        "Editor selection state",
+        "`WorkspaceState`",
+        "`FileListRequest` / `FileListPage`",
+        "`FileBrowserState::to_sdui_tree`",
+        "`CommandExecutor::execute_workspace`",
+        "`TransientMenuSession`",
+        "`clay.documents.clientOpenFileDialog`",
+        "`FileOpenCapabilityPool`",
+        "`classify_open_document`",
+        "`@clay/rust`, `@clay/typescript`, and `@clay/javascript`",
+        "`SelectionState`",
+        "`EditorSurface`",
+        "`EditorBuffer::text_range`",
+    ] {
+        assert!(
+            review.contains(required),
+            "end-to-end primitive review must record inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Workflow Primitive Gaps",
+        "### Selected-folder client UI grant",
+        "### File-browser directory navigation",
+        "### Generic open-document follow-ups",
+        "### Client copy-selection clipboard write",
+        "clay.workspace.clientOpenFolderDialog",
+        "single-use selected-path capability",
+        "Directory rows must route to a directory-navigation command",
+        "reuse `WorkspaceState::list_directory`",
+        "Promote selected-file-only follow-ups into a generic open-document helper",
+        "No paste, cut, clipboard read, server clipboard op, package clipboard op, or arbitrary clipboard write",
+    ] {
+        assert!(
+            review.contains(required),
+            "end-to-end primitive review must map generic gaps: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Folder picker",
+        "Selected-folder grant",
+        "Directory listing/navigation",
+        "File opening",
+        "Language activation",
+        "Clipboard copy",
+        "Editor typing/paint/layout",
+        "No filesystem scans, native dialogs, IPC waits, JavaScript, full-document serialization, shell, network, AI, or clipboard work",
+    ] {
+        assert!(
+            review.contains(required),
+            "end-to-end primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Rejected Implementation Shapes",
+        "Do not add `FileBrowserWidget`",
+        "Do not implement client-side workspace scans or file listing",
+        "Do not let packages add workspace roots",
+        "Do not pass raw client-chosen paths directly",
+        "Do not shell out for native folder picking",
+        "Do not run package JavaScript, parser work, filesystem listing, modal UI, or clipboard work",
+        "Do not add paste/cut",
+    ] {
+        assert!(
+            review.contains(required),
+            "end-to-end primitive review must reject workflow-specific shapes: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "no broad client or package filesystem authority",
+        "Server owns workspace roots",
+        "Client owns native prompts",
+        "Selected folder/file paths are untrusted strings",
+        "Packages cannot list arbitrary paths",
+        "Clipboard support is write-only for the current editor selection",
+    ] {
+        assert!(
+            review.contains(required),
+            "end-to-end primitive review must record security boundary: {required}"
+        );
+    }
+}
+
+#[test]
 fn phase18_13_git_discovery_primitive_review_records_inventory_and_gaps() {
     let wiki_index =
         fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
@@ -2130,7 +2250,8 @@ fn phase18_14_language_package_expansion_primitive_review_records_inventory_and_
         "wiki index must link the Phase 18.14 language package expansion primitive review"
     );
     assert!(
-        primitive_architecture.contains("phase18.14-language-package-expansion-primitive-review.md"),
+        primitive_architecture
+            .contains("phase18.14-language-package-expansion-primitive-review.md"),
         "primitive architecture wiki must link the Phase 18.14 language package expansion primitive review"
     );
 
@@ -2375,7 +2496,7 @@ fn phase18_5_markdown_replan_primitive_review_records_existing_inventory() {
         "`serverLoadPackage(packageJson)`",
         "`loadPackage(\"@clay/*\")` (`clay.packages.loadPackage`)",
         "Implemented by Plan 029",
-        "Selected-file open activation (`clientOpenFileDialog` binding, `open_selected_file`, `selected_file_open_followup_messages`)",
+        "Open-document activation (`clientOpenFileDialog` binding, `open_selected_file`, `open_document_followup_messages`)",
         "`~/.config/clay/init.js` configuration runtime",
         "Package manifest, permissions, conflict, provenance validation",
         "Clay JS API inventory, docs registry, generated registry",
@@ -4700,7 +4821,6 @@ fn phase18_14_language_package_expansion_wiki_documents_implementation() {
             && index.contains("first-party-language-packages.md"),
         "wiki index must link both Phase 18.14 primitive review and implementation pages"
     );
-
 }
 
 #[test]

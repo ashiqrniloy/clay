@@ -677,6 +677,66 @@ fn generated_registry_contains_client_open_file_dialog_command_api() {
 }
 
 #[test]
+fn generated_registry_contains_file_browser_workflow_command_apis() {
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    for (id, module, export, tag, security_needles) in [
+        (
+            "clay.workspace.clientOpenFolderDialog",
+            "clay:workspace",
+            "clientOpenFolderDialog",
+            "open-folder",
+            [
+                "explicit user key routing",
+                "selected-path capability",
+                "raw Deno ops",
+            ],
+        ),
+        (
+            "clay.editor.clientCopySelection",
+            "clay:editor",
+            "clientCopySelection",
+            "clipboard",
+            [
+                "current non-empty native editor selection",
+                "clipboard read",
+                "raw Deno ops",
+            ],
+        ),
+        (
+            "clay.commands.serverOpenDirectory",
+            "clay:commands",
+            "serverOpenDirectory",
+            "open-directory",
+            ["root-relative", "known workspace root", "raw Deno ops"],
+        ),
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing {id}"));
+        assert_eq!(entry.js_module, module);
+        assert_eq!(entry.js_export, export);
+        assert!(entry.app_visible);
+        assert!(entry.help_visible);
+        assert!(entry.custom_properties.is_empty());
+        for required in security_needles {
+            assert!(
+                entry.security.contains(required),
+                "{id} security metadata must mention {required:?}"
+            );
+        }
+        assert!(registry.by_js_export(module, export).is_some());
+        assert!(
+            registry
+                .by_lookup_tag(tag)
+                .iter()
+                .any(|entry| entry.id == id),
+            "{tag} lookup should find {id}"
+        );
+    }
+}
+
+#[test]
 fn generated_registry_contains_primitive_gate_runtime_apis() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 

@@ -1,9 +1,14 @@
 pub(crate) mod behavior;
+pub mod clipboard;
 pub mod file_dialog;
 
 pub use behavior::ClientUiCommandRoute;
+pub use clipboard::{
+    ClipboardError, ClipboardSink, SystemClipboard, copy_text_to_system_clipboard,
+};
 pub use file_dialog::{
-    FileDialogFilter, FileDialogResult, markdown_file_dialog_filters, open_markdown_file_dialog,
+    FileDialogFilter, FileDialogResult, markdown_file_dialog_filters, open_folder_dialog,
+    open_markdown_file_dialog,
 };
 
 use std::{
@@ -310,20 +315,36 @@ impl ClientEditQueue {
         &self,
         selected_path: PathBuf,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        // Take the pending server-issued capability token (single-use). If none
-        // is available yet, send an empty capability; the server rejects it
-        // with a typed diagnostic and re-issues a token for retry.
-        let capability = self
-            .file_open_capability
-            .lock()
-            .expect("client file-open capability state poisoned")
-            .take()
-            .unwrap_or_default();
+        let capability = self.take_selected_path_capability();
         self.sender.try_send(ClientMessage::OpenSelectedFile {
             client_id: self.client_id,
             capability,
             selected_path: selected_path.to_string_lossy().into_owned(),
         })
+    }
+
+    pub fn enqueue_add_selected_workspace_root(
+        &self,
+        selected_path: PathBuf,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        let capability = self.take_selected_path_capability();
+        self.sender
+            .try_send(ClientMessage::AddSelectedWorkspaceRoot {
+                client_id: self.client_id,
+                capability,
+                selected_path: selected_path.to_string_lossy().into_owned(),
+            })
+    }
+
+    fn take_selected_path_capability(&self) -> String {
+        // Take the pending server-issued capability token (single-use). If none
+        // is available yet, send an empty capability; the server rejects it
+        // with a typed diagnostic and re-issues a token for retry.
+        self.file_open_capability
+            .lock()
+            .expect("client selected-path capability state poisoned")
+            .take()
+            .unwrap_or_default()
     }
 
     #[doc(hidden)]
@@ -1130,6 +1151,28 @@ mod tests {
             ClientMessage::OpenSelectedFile {
                 client_id: 42,
                 capability: "foc-test-token".to_string(),
+                selected_path: selected_path.to_string_lossy().into_owned(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn selected_folder_root_request_emits_non_edit_message() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue
+            .with_authority(42, &DocumentAccess::ReadOnly)
+            .with_file_open_capability("folder-token");
+        let selected_path = PathBuf::from("/home/test/project");
+
+        queue
+            .enqueue_add_selected_workspace_root(selected_path.clone())
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::AddSelectedWorkspaceRoot {
+                client_id: 42,
+                capability: "folder-token".to_string(),
                 selected_path: selected_path.to_string_lossy().into_owned(),
             }
         );

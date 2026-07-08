@@ -6,6 +6,7 @@
 // wrappers behind this stable facade.
 
 export type DocumentId = string;
+export type ClientCopySelectionCommandId = "clay.editor.clientCopySelection";
 
 export interface EditResult {
   accepted: boolean;
@@ -129,4 +130,8 @@ export function clientSetCursorStyle(options: ClientSetCursorStyleOptions): Curs
 export function clientSetViewport(options: ClientSetViewportOptions): { documentId: DocumentId; visibleLineCount: number } {
   void options;
   plannedApi("clay.editor.clientSetViewport");
+}
+
+export function clientCopySelection(): ClientCopySelectionCommandId {
+  return "clay.editor.clientCopySelection";
 }

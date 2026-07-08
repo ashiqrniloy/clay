@@ -209,6 +209,11 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/command_execution.rs::CommandExecutionRule",
         "src/server/command_execution.rs::CommandExecutionStatus",
         "src/server/command_execution.rs::CommandExecutionTarget",
+        // Git command result structs are server-internal command payloads;
+        // public Clay JS API docs cover the command facades, not these Rust
+        // transport helper types.
+        "src/server/command_execution.rs::GitCommandResult",
+        "src/server/git.rs::GitCachedStatus",
         "src/server/command_execution.rs::DiscoveryResult",
         "src/server/command_execution.rs::CommandExecutor::execute",
         "src/server/command_execution.rs::CommandExecutor::execute_discovery",

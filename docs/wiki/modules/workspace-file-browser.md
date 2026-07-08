@@ -24,8 +24,8 @@ The file browser is not a package widget. Packages may call documented Clay JS f
 - `WorkspaceState` owns root discovery, root deduplication, explicit user grants, single-file grants, bounded directory listing, ignore filtering, traversal checks, diagnostics, and cancellation token checks.
 - `src/server/ops/workspace.rs` exposes runtime ops behind `runtime/js/workspace.ts` facades: `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, `serverListDirectory`, `serverCreateListingCancelToken`, and `serverCancelListing`.
 - `src/shell/file_browser.rs` builds Clay-owned UI state from a `WorkspaceState` snapshot and converts it to an inert `SduiTree` plus `TransientMenuSession` data.
-- `src/server/connection.rs` sends the file-browser SDUI snapshot during welcome when a workspace root exists and routes file-browser SDUI actions through workspace command execution.
-- `src/server/command_execution.rs` owns built-in workspace commands: `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser`.
+- `src/server/connection.rs` sends the file-browser SDUI snapshot during welcome when a workspace root exists and routes file-browser SDUI actions through workspace command execution. Directory navigation results are converted into refreshed file-browser `SduiSnapshot` messages.
+- `src/server/command_execution.rs` owns built-in workspace commands: `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.openDirectory`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser`.
 
 ## How It Works
 
@@ -51,20 +51,22 @@ Cancellation uses server-owned token IDs backed by a process-local registry. `se
 
 ### Clay-owned UI composition
 
-`FileBrowserState::from_workspace` picks the first visible workspace root, asks `WorkspaceState::list_directory` for a bounded snapshot, and stores normalized `FileBrowserEntry` values with the actual `WorkspaceRootId`, relative path, display label, kind, size hint, child count, and diagnostics.
+`FileBrowserState::from_workspace` picks a visible workspace root at the root directory; `FileBrowserState::from_workspace_at` lists a root-relative current directory. Both ask `WorkspaceState::list_directory` for a bounded depth-1 snapshot and store normalized `FileBrowserEntry` values with the actual `WorkspaceRootId`, relative path, display label, kind, child count, and diagnostics.
 
-`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace label and `List` items, plus the normal `EditorView` in a row. It does not add a native `FileTreeWidget` or file-browser branch in Masonry. List item actions carry `workspaceRootId` and `relativePath` for `clay.workspace.openFile`.
+`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace/current-directory label and `List` items, plus the normal `EditorView` in a row. It does not add a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `clay.workspace.openFile`; directory rows carry the same bounded root-relative arguments for `clay.workspace.openDirectory`; non-root directories include a `../` parent row.
 
 `FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by filtering the same bounded entries locally. Items route to `clay.workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
 
-### Open/reveal command routing
+### Open/reveal/navigation command routing
 
-`CommandExecutor::execute_workspace` validates command ID, routing policy, provenance, permissions, target, and bounded arguments before side effects. Open commands accept either `{ workspaceRootId, relativePath }` or `{ absolutePath }`:
+`CommandExecutor::execute_workspace` validates command ID, routing policy, provenance, permissions, target, and bounded arguments before side effects. Directory navigation accepts `{ workspaceRootId, relativePath }`, validates the target by calling `WorkspaceState::list_directory` with tight depth/count bounds, then returns `WorkspaceActionResult::Navigated`. The connection handler rebuilds `FileBrowserState::from_workspace_at`, stores it in `StaticSduiState`, and sends one `ServerMessage::SduiSnapshot` for the explicit click.
+
+Open commands accept either `{ workspaceRootId, relativePath }` or `{ absolutePath }`:
 
 - In-root opens call `WorkspaceState::open_existing_file`.
 - Out-of-root explicit picks call `WorkspaceState::open_selected_file`, creating a single-file grant only after file/type/UTF-8 validation.
 
-The result is `WorkspaceActionResult::Opened(OpenDocumentSnapshot)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, text }`.
+The result is `WorkspaceActionResult::Opened(OpenDocumentSnapshot)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, text }`, then runs the same `open_document_followup_messages` path as `OpenDocument` and selected-file opens so behavior manifests, mode activation, and decoration sets are consistent across open origins.
 
 `clay.workspace.revealInTree` validates a real open `documentId` through `WorkspaceState::document_metadata` before returning `WorkspaceActionResult::Revealed`. `clay.workspace.toggleFileBrowser` currently returns `WorkspaceActionResult::Toggled`; persistence and user-facing visibility settings are deferred.
 
@@ -87,6 +89,8 @@ import { serverOpenFile } from "clay:commands";
 
 const page = await serverListDirectory({ rootId, relativePath: "src", maxDepth: 2 });
 await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].relativePath });
+// Directory rows use the inert command ID directly through SDUI actions:
+// { commandId: "clay.workspace.openDirectory", workspaceRootId: rootId, relativePath: "src" }
 ```
 
 ## Primitive Coverage
@@ -94,7 +98,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 - Primitive/category: `WorkspaceRootDiscovery`, `BoundedFileListService`, Clay-owned file-browser composition, workspace command execution.
 - Rust owners: `src/server/workspace.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
 - Ops/facades: `op_clay_workspace_*`, `op_clay_commands_execute_command`, `runtime/js/workspace.ts`, `runtime/js/commands.ts`.
-- Public docs: `docs/reference/clay-js-api/workspace/`, `docs/reference/clay-js-api/commands/server-execute-command.md`, `server-open-file.md`, `server-reveal-in-tree.md`.
+- Public docs: `docs/reference/clay-js-api/workspace/`, `docs/reference/clay-js-api/commands/server-execute-command.md`, `server-open-file.md`, `server-open-directory.md`, `server-reveal-in-tree.md`, and `docs/development/launch-and-gui-smoke.md#end-to-end-file-browser-workflow-smoke`.
 - Hot-path policy: discovery/listing/opening are server/runtime work; typing, local paint, layout, scroll, and package JavaScript hot paths do not list directories or scan workspaces.
 - Package rule: packages consume documented facades and inert commands; they do not contribute roots, marker tables, ignore rules, native widgets, or raw path passthrough.
 
@@ -111,9 +115,11 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 ## Tests
 
 - `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, ignore rules, traversal rejection, cancellation, child counts, and diagnostics.
-- `src/shell/file_browser.rs`: SDUI tree shape, fuzzy session filtering, command IDs, and list action opening through the workspace API.
-- `src/server/command_execution.rs`: workspace open/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
+- `src/shell/file_browser.rs`: SDUI tree shape, current-directory parent row, directory-row navigation command IDs, fuzzy session filtering, command IDs, and list action opening through the workspace API.
+- `src/server/command_execution.rs`: workspace open/directory-navigation/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
+- `src/server/connection.rs`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot` with parent and file rows.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`: public API docs/facades/registry coverage.
+- `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` and `tests/fixtures/configuration/file-browser-workflow/init.js`: Linux manual smoke documentation for launch, selected-folder grant, directory navigation, Rust/TypeScript/JavaScript package activation, and copy-selection clipboard behavior.
 - Focused commands:
 
 ```text

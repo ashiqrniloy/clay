@@ -106,6 +106,42 @@ impl AppDriver for Driver {
                             }
                         });
                 }
+                ClientUiCommandResult::SelectedFolder(path) => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let changed = editor
+                                    .widget
+                                    .request_selected_workspace_root(path)
+                                    .is_some_and(|event| {
+                                        editor.widget.apply_connection_event(event)
+                                    });
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
+                ClientUiCommandResult::CopySelection => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let changed = editor
+                                    .widget
+                                    .copy_selection_to_system_clipboard()
+                                    .is_some_and(|event| {
+                                        editor.widget.apply_connection_event(event)
+                                    });
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
             },
         }
     }
@@ -119,22 +155,40 @@ enum ClientUiCommandResult {
     None,
     ConnectionEvent(ClientConnectionEvent),
     SelectedFile(PathBuf),
+    SelectedFolder(PathBuf),
+    CopySelection,
 }
 
 fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
     match command.command_id.as_str() {
-        "clay.documents.clientOpenFileDialog" => client_open_file_dialog_result_to_command_result(
+        "clay.documents.clientOpenFileDialog" => client_dialog_result_to_command_result(
             clay::client::open_markdown_file_dialog(),
+            SelectedPathKind::File,
         ),
+        "clay.workspace.clientOpenFolderDialog" => client_dialog_result_to_command_result(
+            clay::client::open_folder_dialog(),
+            SelectedPathKind::Folder,
+        ),
+        "clay.editor.clientCopySelection" => ClientUiCommandResult::CopySelection,
         _ => ClientUiCommandResult::None,
     }
 }
 
-fn client_open_file_dialog_result_to_command_result(
+#[derive(Clone, Copy)]
+enum SelectedPathKind {
+    File,
+    Folder,
+}
+
+fn client_dialog_result_to_command_result(
     result: clay::client::FileDialogResult,
+    kind: SelectedPathKind,
 ) -> ClientUiCommandResult {
     match result {
-        clay::client::FileDialogResult::Selected(path) => ClientUiCommandResult::SelectedFile(path),
+        clay::client::FileDialogResult::Selected(path) => match kind {
+            SelectedPathKind::File => ClientUiCommandResult::SelectedFile(path),
+            SelectedPathKind::Folder => ClientUiCommandResult::SelectedFolder(path),
+        },
         clay::client::FileDialogResult::Cancelled => ClientUiCommandResult::None,
         clay::client::FileDialogResult::Unsupported { message } => {
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(
@@ -1126,10 +1180,10 @@ mod tests {
     use super::handle_client_ui_command;
     use super::{
         ClayCommand, ClientUiCommandResult, Driver, FixtureKind, LaunchDiagnostic,
-        LaunchReadinessFailure, background_server_command,
-        client_open_file_dialog_result_to_command_result, connect_with_retry,
-        connect_with_retry_while, connection_event_user_event, extract_profile_perf_flag,
-        managed_server_command, parse_command,
+        LaunchReadinessFailure, SelectedPathKind, background_server_command,
+        client_dialog_result_to_command_result, connect_with_retry, connect_with_retry_while,
+        connection_event_user_event, extract_profile_perf_flag, managed_server_command,
+        parse_command,
     };
     use clay::client::{ClientBootstrapError, ClientConnectionEvent};
     use clay::editor::{EditorSurface, is_printable_text};
@@ -1436,8 +1490,9 @@ mod tests {
 
     #[test]
     fn file_dialog_cancellation_is_a_no_op() {
-        let result = client_open_file_dialog_result_to_command_result(
+        let result = client_dialog_result_to_command_result(
             clay::client::FileDialogResult::Cancelled,
+            SelectedPathKind::File,
         );
 
         assert!(matches!(result, ClientUiCommandResult::None));
@@ -1446,17 +1501,26 @@ mod tests {
     #[test]
     fn file_dialog_result_conversion_reports_selected_and_sanitized_failures() {
         let selected_path = PathBuf::from(r"C:\Users\tester\note.md");
-        let selected = client_open_file_dialog_result_to_command_result(
+        let selected = client_dialog_result_to_command_result(
             clay::client::FileDialogResult::Selected(selected_path.clone()),
+            SelectedPathKind::File,
         );
         assert!(
             matches!(selected, ClientUiCommandResult::SelectedFile(path) if path == selected_path)
         );
+        let selected_folder = client_dialog_result_to_command_result(
+            clay::client::FileDialogResult::Selected(selected_path.clone()),
+            SelectedPathKind::Folder,
+        );
+        assert!(
+            matches!(selected_folder, ClientUiCommandResult::SelectedFolder(path) if path == selected_path)
+        );
 
-        let unsupported = client_open_file_dialog_result_to_command_result(
+        let unsupported = client_dialog_result_to_command_result(
             clay::client::FileDialogResult::Unsupported {
                 message: "Windows only".to_string(),
             },
+            SelectedPathKind::File,
         );
         assert!(matches!(
             unsupported,
@@ -1465,10 +1529,11 @@ mod tests {
                     && diagnostic.message == "Windows only"
         ));
 
-        let failed = client_open_file_dialog_result_to_command_result(
+        let failed = client_dialog_result_to_command_result(
             clay::client::FileDialogResult::Failed {
                 message: "dialog failed".to_string(),
             },
+            SelectedPathKind::File,
         );
         assert!(matches!(
             failed,
@@ -1476,6 +1541,16 @@ mod tests {
                 if diagnostic.code == "clay.client.file_dialog.failed"
                     && diagnostic.message == "dialog failed"
         ));
+    }
+
+    #[test]
+    fn client_copy_selection_command_routes_to_editor_widget() {
+        let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientCopySelection".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+
+        assert!(matches!(result, ClientUiCommandResult::CopySelection));
     }
 
     #[cfg(not(windows))]

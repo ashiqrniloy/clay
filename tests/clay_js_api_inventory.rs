@@ -2155,7 +2155,9 @@ fn clay_js_api_names_follow_project_conventions() {
         assert!(
             !js_export.contains("clay")
                 && !js_export.contains("Clay")
-                && (!js_export.contains("op") || js_export == "serverRegisterUiStateScope")
+                && (!js_export.contains("op")
+                    || js_export == "serverRegisterUiStateScope"
+                    || js_export == "clientCopySelection")
                 && !js_export.contains("Rust"),
             "{id} js_export {js_export} must not expose Clay/project, raw op, or Rust implementation names"
         );

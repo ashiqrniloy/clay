@@ -352,6 +352,8 @@ User-visible Phase 18.12 configuration surfaces:
 |---|---|---|---|
 | Fuzzy-open key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in server-first command `clay.workspace.openFuzzyFile`; no default chord exists in Rust, so fuzzy open is only reachable when `init.js` binds a key or another Clay-owned action opens it |
 | File-browser toggle key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to `clay.workspace.toggleFileBrowser`; the command is validated by `CommandExecutor`, not a hidden panel-visibility key |
+| Native folder picker binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.workspace.clientOpenFolderDialog` | Bind a key to the fixed client UI command id; native selection still goes through selected-path capability and server root validation |
+| Copy current selection binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCopySelection` | Bind an alternate key to copy the current native editor selection; no clipboard read, paste, cut, or arbitrary clipboard text API is exposed |
 | File open/reveal commands | runtime-backed command APIs | [`clay.commands.serverOpenFile`](commands/server-open-file.md), [`clay.commands.serverRevealInTree`](commands/server-reveal-in-tree.md), [`clay.commands.serverExecuteCommand`](commands/server-execute-command.md) | Open and reveal route through server workspace APIs, root-relative paths, selected-file grants, and open-document metadata validation |
 | Workspace roots and discovery | runtime-backed workspace APIs | [`clay.workspace.serverAddWorkspaceRoot`](workspace/server-add-workspace-root.md), [`clay.workspace.serverDiscoverWorkspaceRootForPath`](workspace/server-discover-workspace-root-for-path.md), [`clay.workspace.serverListWorkspaceRoots`](workspace/server-list-workspace-roots.md) | Roots and grants are explicit server-authoritative workspace APIs, not configuration keys |
 | Directory listing | runtime-backed workspace APIs | [`clay.workspace.serverListDirectory`](workspace/server-list-directory.md), [`clay.workspace.serverCreateListingCancelToken`](workspace/server-create-listing-cancel-token.md), [`clay.workspace.serverCancelListing`](workspace/server-cancel-listing.md) | Listing uses server validation, bounded depth/count, compiled ignore defaults, optional cancellation tokens, and diagnostics |
@@ -363,12 +365,16 @@ The expected end-user fuzzy-open configuration is a normal `~/.config/clay/init.
 
 ```js
 import { bindKey } from "clay:keybindings";
+import { clientCopySelection } from "clay:editor";
+import { clientOpenFolderDialog } from "clay:workspace";
 
+bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 ```
 
-`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for this phase. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, and listing budgets are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, or granted extra workspace authority through `init.js`.
+`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for Phase 18.12 fuzzy/toggle routes; no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut in Rust exists for folder/copy workflow routes. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, read clipboard data, or write arbitrary clipboard text through `init.js`.
 
 Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
 
@@ -378,6 +384,7 @@ Hidden/ad hoc configuration keys that are rejected by policy and are not valid u
 - `workspace.markers`, `workspace.markerFiles`, `workspace.rootMarkers`, `workspace.discoveryDepth`
 - `workspace.ignore`, `workspace.ignoreRules`, `fileBrowser.ignore`, `fileBrowser.exclude`
 - `fileBrowser.maxDepth`, `fileBrowser.maxEntries`, `fileBrowser.maxItems`, `fileBrowser.refreshInterval`
-- `workspace.rawPath`, `workspace.allowArbitraryPath`, `workspace.allowOutsideRoot`, ad hoc selected-file grant keys
+- `workspace.rawPath`, `workspace.allowArbitraryPath`, `workspace.allowOutsideRoot`, ad hoc selected-file/folder grant keys
+- `clipboard.text`, `clipboard.writeText`, `clipboard.readText`, `copySelection.text`, arbitrary clipboard strings, paste/cut/read keys
 
 File-browser listing/open/reveal authority is server-owned. Root discovery scans only bounded ancestry with a closed marker set; directory listing stays inside known roots and uses bounded ignore/depth/count limits; open file commands route through `WorkspaceState::open_existing_file` or selected-file grants through `WorkspaceState::open_selected_file`; reveal validates open document metadata. Configuration cannot grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native widget, direct Masonry widget, arbitrary root marker, arbitrary ignore-rule, arbitrary path passthrough, or client-side JavaScript authority.

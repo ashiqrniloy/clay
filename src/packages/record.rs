@@ -585,7 +585,9 @@ fn validate_api_dependency_permissions(
             "clay.modes.serverRegisterModePattern" => Some(PackagePermission::ModeRegistration),
             "clay.modes.serverActivateMajorMode" => Some(PackagePermission::ModeActivation),
             "clay.commands.serverRegisterCommand" => Some(PackagePermission::CommandRegistration),
-            "clay.completion.serverRegisterCompletionProvider" => Some(PackagePermission::CompletionProvider),
+            "clay.completion.serverRegisterCompletionProvider" => {
+                Some(PackagePermission::CompletionProvider)
+            }
             "clay.completion.completionTriggerCharactersFromEditorRules" => None,
             "clay.parse.serverRegisterParseHandler" => Some(PackagePermission::ParseDocument),
             "clay.decorations.serverPublishDecorations" => {

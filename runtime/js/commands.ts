@@ -68,6 +68,20 @@ export async function serverOpenFile(args: {
   };
 }
 
+export async function serverOpenDirectory(args: {
+  workspaceRootId: string;
+  relativePath?: string;
+}): Promise<{ workspaceRootId: string; relativePath: string }> {
+  const result = await serverExecuteCommand("clay.workspace.openDirectory", args as Record<string, unknown>);
+  if (result.status.kind !== "workspace" || result.status.action !== "navigated") {
+    throw new Error(`clay.commands.open_directory_failed: expected navigated status, got ${JSON.stringify(result.status)}`);
+  }
+  return {
+    workspaceRootId: String(result.status.workspaceRootId),
+    relativePath: String(result.status.relativePath ?? ""),
+  };
+}
+
 export async function serverRevealInTree(args: { documentId: string }): Promise<void> {
   const result = await serverExecuteCommand("clay.workspace.revealInTree", args as Record<string, unknown>);
   if (result.status.kind !== "workspace" || result.status.action !== "revealed") {

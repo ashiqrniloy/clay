@@ -801,7 +801,7 @@ fn first_party_grammar_package_record(package_dir: &str) -> (String, PackageReco
 }
 
 #[test]
-fn first_party_grammar_packages_are_grammar_only_and_load_with_required_assets() {
+fn first_party_language_packages_load_with_required_assets() {
     use clay::packages::permissions::PackagePermission;
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -812,87 +812,53 @@ fn first_party_grammar_packages_are_grammar_only_and_load_with_required_assets()
     ))
     .expect("read package guide");
 
-    for (package_dir, expected_name, language_id, extension) in [
-        ("rust", "@clay/rust", "rust", "rs"),
-        ("typescript", "@clay/typescript", "typescript", "ts"),
-        ("javascript", "@clay/javascript", "javascript", "js"),
+    for (package_dir, expected_name, language_id, extension, command_id, provider_id, status_id) in [
+        (
+            "rust",
+            "@clay/rust",
+            "rust",
+            "rs",
+            "rust.toggleLineComment",
+            "rust.keywords",
+            "rust.status.mode",
+        ),
+        (
+            "typescript",
+            "@clay/typescript",
+            "typescript",
+            "ts",
+            "typescript.toggleLineComment",
+            "typescript.keywords",
+            "typescript.status.mode",
+        ),
+        (
+            "javascript",
+            "@clay/javascript",
+            "javascript",
+            "js",
+            "javascript.toggleLineComment",
+            "javascript.keywords",
+            "javascript.status.mode",
+        ),
     ] {
         let (path, record) = first_party_grammar_package_record(package_dir);
 
         assert_eq!(record.manifest.name, expected_name);
-        assert!(
-            record.manifest.clay.modes.is_empty(),
-            "{expected_name} must declare no major mode"
-        );
+        assert_eq!(record.manifest.clay.modes, vec![language_id.to_string()]);
         assert_eq!(
             record.manifest.clay.permissions,
             vec![
+                PackagePermission::ModeRegistration,
+                PackagePermission::ModeActivation,
+                PackagePermission::CommandRegistration,
+                PackagePermission::CompletionProvider,
                 PackagePermission::ParseDocument,
-                PackagePermission::RenderDecorations
+                PackagePermission::RenderDecorations,
             ],
-            "{expected_name} must request only parse-document and render-decorations"
+            "{expected_name} must request only first-party language package permissions"
         );
 
-        // Grammar-only: no other contributions.
         let contributions = &record.contributions;
-        assert!(
-            contributions.commands.is_empty(),
-            "{expected_name} must declare no commands"
-        );
-        assert!(
-            contributions.configuration.is_empty(),
-            "{expected_name} must declare no configuration"
-        );
-        assert!(
-            contributions.key_routing.is_empty(),
-            "{expected_name} must declare no key routing"
-        );
-        assert!(
-            contributions.text_transforms.is_empty(),
-            "{expected_name} must declare no text transforms"
-        );
-        assert!(
-            contributions.sdui.is_empty(),
-            "{expected_name} must declare no SDUI"
-        );
-        assert!(
-            contributions.decorations.is_empty(),
-            "{expected_name} must declare no legacy decoration primitive"
-        );
-        assert!(
-            contributions.ui_panels.is_empty(),
-            "{expected_name} must declare no UI panels"
-        );
-        assert!(
-            contributions.ui_components.is_empty(),
-            "{expected_name} must declare no UI components"
-        );
-        assert!(
-            contributions.ui_overlays.is_empty(),
-            "{expected_name} must declare no UI overlays"
-        );
-        assert!(
-            contributions.theme_tokens.is_empty(),
-            "{expected_name} must declare no theme tokens"
-        );
-        assert!(
-            contributions.input_contributions.is_empty(),
-            "{expected_name} must declare no input contributions"
-        );
-        assert!(
-            contributions.ui_state_scopes.is_empty(),
-            "{expected_name} must declare no UI state scopes"
-        );
-        assert!(
-            contributions.layout_overrides.is_empty(),
-            "{expected_name} must declare no layout overrides"
-        );
-        assert!(
-            contributions.package_options.is_empty(),
-            "{expected_name} must declare no package options"
-        );
-
-        // Exactly one syntax grammar contribution with the expected metadata.
         assert_eq!(
             contributions.syntax_grammars.len(),
             1,
@@ -911,67 +877,63 @@ fn first_party_grammar_packages_are_grammar_only_and_load_with_required_assets()
                 | "text"
         )));
 
-        // API dependency on the generic syntax registration API.
-        assert!(
-            record
-                .api_dependencies
-                .iter()
-                .any(|dep| dep.api_id == "clay.syntax.serverRegisterSyntaxGrammar")
-        );
+        assert_eq!(contributions.commands.len(), 1);
+        assert_eq!(contributions.commands[0].id, command_id);
+        assert_eq!(contributions.completion_providers.len(), 1);
+        assert_eq!(contributions.completion_providers[0].id, provider_id);
+        assert_eq!(contributions.ui_components.len(), 1);
+        assert_eq!(contributions.ui_components[0].id, status_id);
 
-        // Required on-disk assets exist.
+        assert!(contributions.configuration.is_empty());
+        assert!(contributions.key_routing.is_empty());
+        assert!(contributions.text_transforms.is_empty());
+        assert!(contributions.sdui.is_empty());
+        assert!(contributions.decorations.is_empty());
+        assert!(contributions.ui_panels.is_empty());
+        assert!(contributions.ui_overlays.is_empty());
+        assert!(contributions.theme_tokens.is_empty());
+        assert!(contributions.input_contributions.is_empty());
+        assert!(contributions.ui_state_scopes.is_empty());
+        assert!(contributions.layout_overrides.is_empty());
+        assert!(contributions.package_options.is_empty());
+
+        for api_id in [
+            "clay.syntax.serverRegisterSyntaxGrammar",
+            "clay.modes.serverRegisterModePattern",
+            "clay.commands.serverRegisterCommand",
+            "clay.completion.serverRegisterCompletionProvider",
+        ] {
+            assert!(
+                record
+                    .api_dependencies
+                    .iter()
+                    .any(|dep| dep.api_id == api_id),
+                "{expected_name} must depend on {api_id}"
+            );
+        }
+
         let package_root = format!("{manifest_dir}/packages/{package_dir}");
-        assert!(
-            std::path::Path::new(&format!("{package_root}/dist/load.js")).exists(),
-            "{expected_name} loadEntry must exist"
-        );
-        assert!(
-            std::path::Path::new(&format!("{package_root}/dist/index.js")).exists(),
-            "{expected_name} entry must exist"
-        );
-        assert!(
-            std::path::Path::new(&format!("{package_root}/docs/index.md")).exists(),
-            "{expected_name} docs must exist"
-        );
-        assert!(
-            std::path::Path::new(&format!("{package_root}/queries/highlights.scm")).exists(),
-            "{expected_name} highlight query must exist"
-        );
+        assert!(std::path::Path::new(&format!("{package_root}/dist/load.js")).exists());
+        assert!(std::path::Path::new(&format!("{package_root}/dist/index.js")).exists());
+        assert!(std::path::Path::new(&format!("{package_root}/docs/index.md")).exists());
+        assert!(std::path::Path::new(&format!("{package_root}/queries/highlights.scm")).exists());
+        assert!(std::path::Path::new(&format!("{package_root}/grammars/README.md")).exists());
         let reference_doc = format!("docs/reference/packages/{package_dir}.md");
-        assert!(
-            std::path::Path::new(&format!("{manifest_dir}/{reference_doc}")).exists(),
-            "{expected_name} reference docs must exist"
-        );
-        assert!(
-            docs_index.contains(&format!("reference/packages/{package_dir}.md")),
-            "docs/index.md must link {expected_name} reference docs"
-        );
-        assert!(
-            package_guide.contains(&format!("({package_dir}.md)")),
-            "creating-packages guide must link {expected_name} docs"
-        );
+        assert!(std::path::Path::new(&format!("{manifest_dir}/{reference_doc}")).exists());
+        assert!(docs_index.contains(&format!("reference/packages/{package_dir}.md")));
+        assert!(package_guide.contains(&format!("({package_dir}.md)")));
 
-        // loadEntry exports a default function the resolver can invoke.
         let load_js = std::fs::read_to_string(format!("{package_root}/dist/load.js"))
             .unwrap_or_else(|error| panic!("read load.js: {error}"));
-        assert!(
-            load_js.contains("export default async function"),
-            "{expected_name} load entry must export a default async function"
-        );
+        assert!(load_js.contains("export default"));
 
-        // Docs document the one-line default load and grammar-only scope.
         let docs = std::fs::read_to_string(format!("{package_root}/docs/index.md"))
             .unwrap_or_else(|error| panic!("read docs: {error}"));
-        assert!(
-            docs.contains(&format!("loadPackage(\"{expected_name}\")")),
-            "{expected_name} docs must show the one-line load"
-        );
-        assert!(
-            docs.contains("grammar-only"),
-            "{expected_name} docs must state grammar-only scope"
-        );
+        assert!(docs.contains(&format!("loadPackage(\"{expected_name}\")")));
+        assert!(docs.contains(command_id));
+        assert!(docs.contains(provider_id));
+        assert!(docs.contains(status_id));
 
-        // Record the path so a dropped file fails the test.
         assert!(std::path::Path::new(&path).exists());
     }
 }

@@ -80,6 +80,12 @@ pub enum GitCommandResult {
 pub enum WorkspaceActionResult {
     /// A file was opened under a known root or via a selected-file grant.
     Opened(OpenDocumentSnapshot),
+    /// A directory navigation request was accepted; the connection handler
+    /// will publish a refreshed file-browser SDUI snapshot.
+    Navigated {
+        root_id: WorkspaceRootId,
+        relative_path: std::path::PathBuf,
+    },
     /// A reveal request was accepted; the server will update the focused tree
     /// state on the next SDUI snapshot.
     Revealed,
@@ -254,6 +260,25 @@ impl CommandExecutor {
             "clay.workspace.openFile" | "clay.workspace.openFuzzyFile" => {
                 execute_open(workspace, &request.arguments, &request.command_id).await?
             }
+            "clay.workspace.openDirectory" => {
+                let (root_id, relative_path) =
+                    navigate_directory_arguments(&request.arguments, &request.command_id)?;
+                workspace
+                    .list_directory(
+                        crate::server::workspace::FileListRequest {
+                            root_id,
+                            relative_path: relative_path.clone(),
+                            max_depth: 1,
+                            max_entries: 1,
+                        },
+                        None,
+                    )
+                    .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
+                CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
+                    root_id,
+                    relative_path,
+                })
+            }
             "clay.workspace.revealInTree" => {
                 let document_id = reveal_document_id(&request.arguments, &request.command_id)?;
                 workspace
@@ -352,6 +377,7 @@ pub(crate) const WORKSPACE_COMMAND_IDS: &[&str] = &[
     "clay.workspace.openFile",
     "clay.workspace.revealInTree",
     "clay.workspace.openFuzzyFile",
+    "clay.workspace.openDirectory",
     "clay.workspace.toggleFileBrowser",
 ];
 
@@ -455,6 +481,34 @@ impl OpenFileArguments {
     }
 }
 
+fn navigate_directory_arguments(
+    arguments: &Value,
+    command_id: &str,
+) -> Result<(WorkspaceRootId, std::path::PathBuf), CommandExecutionDiagnostic> {
+    let root_id = arguments
+        .get("workspaceRootId")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            diagnostic(
+                command_id,
+                CommandExecutionRule::InvalidArguments,
+                "directory command requires a non-negative integer `workspaceRootId` argument",
+            )
+        })?;
+    let relative_path = arguments
+        .get("relativePath")
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| {
+            diagnostic(
+                command_id,
+                CommandExecutionRule::InvalidArguments,
+                "directory command requires a string `relativePath` argument",
+            )
+        })?;
+    Ok((root_id, relative_path))
+}
+
 fn reveal_document_id(
     arguments: &Value,
     command_id: &str,
@@ -552,6 +606,7 @@ pub fn builtin_server_command_ids() -> &'static [&'static str] {
         "clay.workspace.openFile",
         "clay.workspace.revealInTree",
         "clay.workspace.openFuzzyFile",
+        "clay.workspace.openDirectory",
         "clay.workspace.toggleFileBrowser",
         "clay.git.listStatuses",
         "clay.git.refreshStatus",
@@ -569,6 +624,7 @@ pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
         | "clay.workspace.openFile"
         | "clay.workspace.revealInTree"
         | "clay.workspace.openFuzzyFile"
+        | "clay.workspace.openDirectory"
         | "clay.workspace.toggleFileBrowser"
         | "clay.git.listStatuses"
         | "clay.git.refreshStatus" => Some(RegisteredCommand {
@@ -597,6 +653,7 @@ fn builtin_display_name(command_id: &str) -> &'static str {
         "clay.workspace.openFile" => "Open File",
         "clay.workspace.revealInTree" => "Reveal in File Tree",
         "clay.workspace.openFuzzyFile" => "Open File by Name",
+        "clay.workspace.openDirectory" => "Open Directory",
         "clay.workspace.toggleFileBrowser" => "Toggle File Browser",
         "clay.git.listStatuses" => "List Git Statuses",
         "clay.git.refreshStatus" => "Refresh Git Status",

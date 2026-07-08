@@ -166,6 +166,9 @@ export async function serverCreateListingCancelToken() {
 export async function serverCancelListing(tokenId) {
   return await ops.op_clay_workspace_cancel_listing(tokenId);
 }
+export function clientOpenFolderDialog() {
+  return "clay.workspace.clientOpenFolderDialog";
+}
 "#;
 
 const CLAY_FACADE_GIT: &str = r#"
@@ -352,6 +355,13 @@ export async function serverOpenFile(args) {
   }
   return { documentId: String(result.status.documentId), version: Number(result.status.version), path: String(result.status.path ?? "") };
 }
+export async function serverOpenDirectory(args) {
+  const result = await serverExecuteCommand("clay.workspace.openDirectory", args ?? {});
+  if (result.status?.kind !== "workspace" || result.status?.action !== "navigated") {
+    throw new Error(`clay.commands.open_directory_failed: expected navigated status, got ${JSON.stringify(result.status)}`);
+  }
+  return { workspaceRootId: String(result.status.workspaceRootId), relativePath: String(result.status.relativePath ?? "") };
+}
 export async function serverRevealInTree(args) {
   const result = await serverExecuteCommand("clay.workspace.revealInTree", args ?? {});
   if (result.status?.kind !== "workspace" || result.status?.action !== "revealed") {
@@ -449,6 +459,7 @@ export function clientSetSelection(options) { void options; unavailable("clay.ed
 export function clientScrollTo(options) { void options; unavailable("clay.editor.clientScrollTo"); }
 export function clientSetCursorStyle(options) { void options; unavailable("clay.editor.clientSetCursorStyle"); }
 export function clientSetViewport(options) { void options; unavailable("clay.editor.clientSetViewport"); }
+export function clientCopySelection() { return "clay.editor.clientCopySelection"; }
 "#;
 
 /// Isolated server-side Clay JavaScript runtime boundary.
@@ -2056,16 +2067,30 @@ mod tests {
             .await
             .unwrap();
 
-        let record = evaluation.op_records.into_iter().next().expect("one record");
+        let record = evaluation
+            .op_records
+            .into_iter()
+            .next()
+            .expect("one record");
         let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
         assert_eq!(
             parsed["dotIds"],
-            serde_json::json!(["javascript.keywords", "rust.keywords", "typescript.keywords"])
+            serde_json::json!([
+                "javascript.keywords",
+                "rust.keywords",
+                "typescript.keywords"
+            ])
         );
         assert_eq!(parsed["rustScopeIds"], serde_json::json!(["rust.keywords"]));
         assert_eq!(parsed["noCount"], 0);
-        assert_eq!(parsed["rustTriggerCharacters"], serde_json::json!([".", "::"]));
-        assert_eq!(parsed["typescriptTriggerCharacters"], serde_json::json!(["."]));
+        assert_eq!(
+            parsed["rustTriggerCharacters"],
+            serde_json::json!([".", "::"])
+        );
+        assert_eq!(
+            parsed["typescriptTriggerCharacters"],
+            serde_json::json!(["."])
+        );
     }
 
     #[tokio::test]
@@ -2794,11 +2819,15 @@ mod tests {
             "fixture must register rust.status.mode status item"
         );
         assert!(
-            component_ids.iter().any(|id| id == "typescript.status.mode"),
+            component_ids
+                .iter()
+                .any(|id| id == "typescript.status.mode"),
             "fixture must register typescript.status.mode status item"
         );
         assert!(
-            component_ids.iter().any(|id| id == "javascript.status.mode"),
+            component_ids
+                .iter()
+                .any(|id| id == "javascript.status.mode"),
             "fixture must register javascript.status.mode status item"
         );
 
@@ -2819,6 +2848,60 @@ mod tests {
             grammar_ids.iter().any(|id| id == "javascript"),
             "fixture must register javascript syntax grammar"
         );
+    }
+
+    #[tokio::test]
+    async fn file_browser_workflow_config_fixture_loads_packages_and_bindings() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("configuration")
+            .join("file-browser-workflow");
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+        let manifest = result
+            .behavior_manifest
+            .expect("fixture must publish configured keybindings");
+
+        for provider_id in [
+            "rust.keywords",
+            "typescript.keywords",
+            "javascript.keywords",
+        ] {
+            assert!(
+                result
+                    .completion_providers
+                    .iter()
+                    .any(|provider| provider.id == provider_id),
+                "fixture must load completion provider {provider_id}"
+            );
+        }
+        for command_id in [
+            "clay.workspace.clientOpenFolderDialog",
+            "clay.workspace.openFuzzyFile",
+            "clay.workspace.toggleFileBrowser",
+            "clay.editor.clientCopySelection",
+        ] {
+            assert!(
+                manifest
+                    .keymaps
+                    .iter()
+                    .any(|rule| rule.command_id == command_id),
+                "fixture must bind {command_id}"
+            );
+        }
+        for command_id in [
+            "clay.workspace.clientOpenFolderDialog",
+            "clay.editor.clientCopySelection",
+        ] {
+            assert!(manifest.commands.iter().any(|command| {
+                command.command_id == command_id
+                    && command.authority == crate::protocol::CommandAuthority::ClientUi
+            }));
+        }
     }
 
     #[tokio::test]
@@ -3225,18 +3308,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn configuration_bind_ctrl_o_to_client_open_file_dialog() {
+    async fn configuration_binds_client_ui_file_folder_and_copy_commands() {
         let service = ClayJsRuntimeService::default();
         let result = service
             .evaluate_controlled_module(
                 r#"
                 import { bindKey, listKeyBindings } from "clay:keybindings";
                 import { listBehaviorRoutes } from "clay:behavior";
-                const bound = bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+                import { clientOpenFolderDialog } from "clay:workspace";
+                import { clientCopySelection } from "clay:editor";
+                const file = bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+                const folder = bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
+                const copy = bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
                 const bindings = listKeyBindings("editor");
                 const routes = await listBehaviorRoutes();
-                const route = routes.find((candidate) => candidate.apiId === "clay.documents.clientOpenFileDialog");
-                Deno.core.ops.op_clay_runtime_record(`${bound.key}:${bound.command}:${bindings.length}:${route.runtimePath}:${route.authority}`);
+                const fileRoute = routes.find((candidate) => candidate.apiId === "clay.documents.clientOpenFileDialog");
+                const folderRoute = routes.find((candidate) => candidate.apiId === "clay.workspace.clientOpenFolderDialog");
+                const copyRoute = routes.find((candidate) => candidate.apiId === "clay.editor.clientCopySelection");
+                Deno.core.ops.op_clay_runtime_record(`${file.key}:${file.command}:${folder.key}:${folder.command}:${copy.key}:${copy.command}:${bindings.length}:${fileRoute.runtimePath}:${fileRoute.authority}:${folderRoute.runtimePath}:${folderRoute.authority}:${copyRoute.runtimePath}:${copyRoute.authority}`);
                 "#,
             )
             .await
@@ -3247,16 +3336,24 @@ mod tests {
 
         assert_eq!(
             result.op_records,
-            vec!["Ctrl+O:clay.documents.clientOpenFileDialog:3:client-ui-command:client-ui"]
+            vec![
+                "Ctrl+O:clay.documents.clientOpenFileDialog:Ctrl+Shift+O:clay.workspace.clientOpenFolderDialog:Ctrl+Shift+C:clay.editor.clientCopySelection:5:client-ui-command:client-ui:client-ui-command:client-ui:client-ui-command:client-ui"
+            ]
         );
-        assert!(manifest.keymaps.iter().any(|rule| {
-            rule.command_id == "clay.documents.clientOpenFileDialog"
-                && rule.routing_policy == crate::protocol::RoutingPolicy::ClientUiCommand
-        }));
-        assert!(manifest.commands.iter().any(|command| {
-            command.command_id == "clay.documents.clientOpenFileDialog"
-                && command.authority == crate::protocol::CommandAuthority::ClientUi
-        }));
+        for command_id in [
+            "clay.documents.clientOpenFileDialog",
+            "clay.workspace.clientOpenFolderDialog",
+            "clay.editor.clientCopySelection",
+        ] {
+            assert!(manifest.keymaps.iter().any(|rule| {
+                rule.command_id == command_id
+                    && rule.routing_policy == crate::protocol::RoutingPolicy::ClientUiCommand
+            }));
+            assert!(manifest.commands.iter().any(|command| {
+                command.command_id == command_id
+                    && command.authority == crate::protocol::CommandAuthority::ClientUi
+            }));
+        }
     }
 
     #[tokio::test]
@@ -3304,6 +3401,34 @@ mod tests {
                 .to_string()
                 .contains("clay.keybindings.unknown_command")
         );
+    }
+
+    #[tokio::test]
+    async fn raw_clipboard_and_dialog_command_bindings_are_rejected() {
+        for command_id in [
+            "clay.clipboard.writeText",
+            "clay.dialog.openRawPath",
+            "Deno.core.ops.op_clipboard_write",
+        ] {
+            let source = format!(
+                r#"
+                import {{ bindKey }} from "clay:keybindings";
+                bindKey("Ctrl+Alt+C", {command_id:?});
+                "#
+            );
+            let error = ClayJsRuntimeService::default()
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(error, ClayRuntimeError::Runtime(_)));
+            assert!(
+                error
+                    .to_string()
+                    .contains("clay.keybindings.unknown_command"),
+                "{command_id} must stay rejected: {error}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -3617,26 +3742,44 @@ mod tests {
 
         // Package-declared modes win over core.code for known extensions.
         assert_eq!(parsed["classifications"]["rust"]["modeId"], "rust");
-        assert_eq!(parsed["classifications"]["typescript"]["modeId"], "typescript");
-        assert_eq!(parsed["classifications"]["javascript"]["modeId"], "javascript");
+        assert_eq!(
+            parsed["classifications"]["typescript"]["modeId"],
+            "typescript"
+        );
+        assert_eq!(
+            parsed["classifications"]["javascript"]["modeId"],
+            "javascript"
+        );
 
         // Plain text falls back to core.text; unmatched code-like extension falls back to core.code.
-        assert_eq!(parsed["classifications"]["plainText"]["modeId"], "core.text");
-        assert_eq!(parsed["classifications"]["unknownCode"]["modeId"], "core.code");
+        assert_eq!(
+            parsed["classifications"]["plainText"]["modeId"],
+            "core.text"
+        );
+        assert_eq!(
+            parsed["classifications"]["unknownCode"]["modeId"],
+            "core.code"
+        );
 
         // No duplicate command or provider IDs across packages.
         assert_eq!(parsed["commandCount"], 3);
-        assert_eq!(parsed["commandIds"], serde_json::json!([
-            "javascript.toggleLineComment",
-            "rust.toggleLineComment",
-            "typescript.toggleLineComment"
-        ]));
+        assert_eq!(
+            parsed["commandIds"],
+            serde_json::json!([
+                "javascript.toggleLineComment",
+                "rust.toggleLineComment",
+                "typescript.toggleLineComment"
+            ])
+        );
         assert_eq!(parsed["providerCount"], 3);
-        assert_eq!(parsed["providerIds"], serde_json::json!([
-            "javascript.keywords",
-            "rust.keywords",
-            "typescript.keywords"
-        ]));
+        assert_eq!(
+            parsed["providerIds"],
+            serde_json::json!([
+                "javascript.keywords",
+                "rust.keywords",
+                "typescript.keywords"
+            ])
+        );
     }
 
     #[tokio::test]

@@ -4,6 +4,7 @@
 // filesystem access.
 
 export type WorkspaceRootId = string;
+export type ClientOpenFolderDialogCommandId = "clay.workspace.clientOpenFolderDialog";
 
 export interface WorkspaceRootMetadata {
   workspaceRootId: WorkspaceRootId;
@@ -118,4 +119,8 @@ export async function serverCreateListingCancelToken(): Promise<string> {
 
 export async function serverCancelListing(tokenId: string): Promise<boolean> {
   return workspaceOps().op_clay_workspace_cancel_listing(tokenId);
+}
+
+export function clientOpenFolderDialog(): ClientOpenFolderDialogCommandId {
+  return "clay.workspace.clientOpenFolderDialog";
 }

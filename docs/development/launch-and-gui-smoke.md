@@ -23,6 +23,10 @@ cargo run -- smoke-gui --config-fixture markdown-mode
 # Windows Markdown open-dialog smoke: loads Markdown and binds Ctrl+O through init.js.
 cargo run -- smoke-gui --config-fixture windows-markdown-open
 
+# End-to-end file browser workflow smoke: loads Rust/TypeScript/JavaScript packages
+# and binds folder picker, fuzzy open, browser toggle, and copy-selection commands.
+cargo run -- smoke-gui --config-fixture file-browser-workflow
+
 # Foreground default server, useful for watching server diagnostics.
 cargo run -- server
 
@@ -52,7 +56,7 @@ This is the Markdown product baseline. It is deliberately distinct from the smok
 
 Markdown end-user baseline invariants:
 
-- **Editor-only main slot.** The Markdown editor occupies the mandatory `main` slot of `PaneSlotLayout`. No default `PanelContribution` (side panel, preview panel, or status panel) is published on load, and bare `cargo run` must not show the legacy `Workspace` SDUI side panel.
+- **Editor-only Markdown main slot.** The Markdown package occupies the mandatory `main` slot of `PaneSlotLayout` and does not publish a package-owned default `PanelContribution` (side panel, preview panel, or status panel) on load. This invariant is about package-published Markdown panels only; it does not forbid the Clay-owned Workspace file browser used by the app-level file-browser workflow.
 - **Fixed panels resize the editor.** Any accepted visible fixed panel in `left`, `right`, `top`, or `bottom` consumes `PaneSlotLayout` geometry and reduces/clips the editor `main` rect; transient overlays may cover content by design and do not consume fixed slot geometry.
 - **Optional preview only on demand.** An optional Markdown preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`; it appears only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
 - **Selected-file open is edit-only.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Saving a file picked through the dialog is out of scope until a later phase; close or discard the smoke document after editing.
@@ -75,7 +79,7 @@ The GUI status line and accessibility label should make the connection state vis
 
 Typing remains local and optimistic. Editor input must not wait for IPC acknowledgements, server work, runtime diagnostics, or full-document synchronization; acknowledgements, resyncs, and runtime diagnostic status updates arrive asynchronously and update status when available.
 
-Bare `cargo run` should show the editor-only default surface: no legacy `Workspace` SDUI sidebar is sent during bootstrap. Server-driven UI remains covered by the explicit `runtime-sdui` smoke fixture; that fixture should show more than one native region when connected: a server-generated workspace/sidebar panel with status/list/button content plus the document-bound editor view. Visible fixed panels should reduce the editor `main` rect instead of covering text/caret hit targets; transient overlays may cover content because they are overlay UI. Updating or interacting with side-panel controls must not replace the editor text, caret, document version, editable/read-only status, or runtime diagnostic status text.
+Bare `cargo run` should not show a package-published Markdown preview/status side panel by default. Clay-owned workspace chrome is separate: when a workspace root is available, the app-level Workspace file browser may appear or be toggled through documented workspace commands. Server-driven package/UI fixture behavior remains covered by the explicit `runtime-sdui` smoke fixture; that fixture should show more than one native region when connected: a server-generated workspace/sidebar panel with status/list/button content plus the document-bound editor view. Visible fixed panels should reduce the editor `main` rect instead of covering text/caret hit targets; transient overlays may cover content because they are overlay UI. Updating or interacting with side-panel controls must not replace the editor text, caret, document version, editable/read-only status, or runtime diagnostic status text.
 
 SDUI payload costs are validated by unit tests rather than default GUI smoke output. The representative explicit SDUI snapshot is expected to stay under 4 KiB, and a simple side-panel update is expected to stay under 1 KiB and below the equivalent snapshot size.
 
@@ -83,7 +87,7 @@ SDUI payload costs are validated by unit tests rather than default GUI smoke out
 
 ### Bare `cargo run`
 
-Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected. The expected default surface is editor-only: no left `Workspace` SDUI panel should appear.
+Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected. The Markdown package still publishes no default preview/status panel; Clay-owned Workspace file-browser chrome is controlled by workspace state and documented workspace commands, not by Markdown package loading.
 
 ### `cargo run -- smoke-gui`
 
@@ -205,6 +209,56 @@ Manual language package smoke:
 
 Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract` verifies the fixture and docs; `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions` loads the fixture deterministically and confirms all three syntax grammars, completion providers, and status-item UI components are registered; `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, `language_package_classification_is_deterministic_across_load_orders`, and `language_package_rejects_unauthorized_completion_provider` cover mode classification, command/completion/UI registration, fallback behavior, load-order determinism, and permission enforcement.
 
+### End-to-end file browser workflow smoke
+
+This smoke validates the six-step app workflow on Linux, Clay's primary development and CI host:
+
+1. Open the Clay app.
+2. See the Clay-owned Workspace file browser.
+3. Select a folder from the system.
+4. Navigate different folders and files.
+5. See file contents when the selected file is Rust, TypeScript, or JavaScript.
+6. Copy text snippets from opened files to the OS clipboard.
+
+Use the checked-in fixture:
+
+```bash
+cargo run -- smoke-gui --config-fixture file-browser-workflow
+```
+
+The fixture at `tests/fixtures/configuration/file-browser-workflow/init.js` is equivalent to this end-user configuration shape:
+
+```js
+import { bindKey } from "clay:keybindings";
+import { clientCopySelection } from "clay:editor";
+import { loadPackage } from "clay:packages";
+import { clientOpenFolderDialog } from "clay:workspace";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+
+bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
+bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
+```
+
+Manual Linux verification:
+
+1. Run `cargo run -- smoke-gui --config-fixture file-browser-workflow` from the repository root.
+2. Confirm the GUI connects and the Clay-owned Workspace file browser is visible or can be shown with `Ctrl+B`. The file browser is SDUI composed by Clay, not a package widget.
+3. Press `Ctrl+Shift+O` and choose a regular folder in the native folder picker. On Linux this uses xdg-desktop-portal with `directory=true`; cancellation is a non-error no-op.
+4. Confirm Clay adds only the selected folder as a server-validated workspace root and refreshes the Workspace browser. The selected-folder path is protected by the same selected-path capability family as selected-file opens.
+5. Click directory rows such as `workspace/` or `src/` and confirm the browser navigates with `clay.workspace.openDirectory`, shows a `../` parent row for non-root directories, and stays inside the selected workspace root.
+6. Open `tests/fixtures/configuration/file-browser-workflow/workspace/main.rs`, `main.ts`, and `main.js` (or equivalent files under the selected folder). The file opens through the generic open-document path, activates the Rust/TypeScript/JavaScript language package when matched, and decorations/status/completions may arrive asynchronously.
+7. Select text in an opened file and press the native copy shortcut (`Ctrl+C` on Linux/Windows, `Cmd+C` on macOS) or the configured `Ctrl+Shift+C` route. Confirm only the selected UTF-8 text is copied to the OS clipboard; a collapsed selection is a no-op.
+8. Type a small edit and scroll. Ordinary typing, paint, layout, pointer, and scroll must remain client-local/non-blocking; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling.
+
+Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, read the clipboard, paste/cut, or write arbitrary clipboard text. Copy selection is write-only and limited to the current native editor selection.
+
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/file-browser bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, and `copy_selection_failure_reports_runtime_diagnostic` cover clipboard copy behavior.
+
 ### Phase 19 Windows Markdown open-dialog smoke contract
 
 Phase 19 starts from this baseline:
@@ -229,11 +283,11 @@ The in-scope manual Windows 11 smoke scenario is edit-only:
 6. Type in the opened document and confirm local editing remains responsive while decoration refresh may arrive asynchronously.
 7. Do not test save for this phase; close or discard the smoke document after editing.
 
-Out of scope for Phase 19 smoke: saving the selected file, full HTML preview or browser/webview rendering, non-Windows native dialogs, Windows Explorer file associations, double-click-to-open behavior, drag-and-drop, recent-files lists, directory opens, package installation, network fetches, shell execution, workspace expansion to the selected file's parent directory, and client-side package JavaScript.
+Out of scope for the Phase 19 Windows Markdown open-dialog smoke only: saving the selected file, full HTML preview or browser/webview rendering, Windows Explorer file associations, double-click-to-open behavior, drag-and-drop, recent-files lists, package installation, network fetches, shell execution, workspace expansion to the selected file's parent directory, and client-side package JavaScript. Linux folder selection, directory navigation, and workspace-root expansion are covered separately by the end-to-end file browser workflow smoke.
 
 Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
 
-On non-Windows platforms during Phase 19, the command should report an unsupported diagnostic/status without panics; non-Windows native dialogs are intentionally not part of the smoke contract.
+On non-Windows platforms during the Phase 19 Windows Markdown file-dialog smoke, `clay.documents.clientOpenFileDialog` should report an unsupported diagnostic/status without panics. Linux native folder selection is validated by the separate `clay.workspace.clientOpenFolderDialog` workflow smoke.
 
 ### Phase 18.11 completion provider smoke
 

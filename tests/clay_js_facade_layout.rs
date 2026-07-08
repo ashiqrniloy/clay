@@ -13,6 +13,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "clientScrollTo",
             "clientSetCursorStyle",
             "clientSetViewport",
+            "clientCopySelection",
         ],
     ),
     (
@@ -52,6 +53,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverListDirectory",
             "serverCreateListingCancelToken",
             "serverCancelListing",
+            "clientOpenFolderDialog",
         ],
     ),
     (
@@ -111,6 +113,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverListCommands",
             "serverExecuteCommand",
             "serverOpenFile",
+            "serverOpenDirectory",
             "serverRevealInTree",
         ],
     ),

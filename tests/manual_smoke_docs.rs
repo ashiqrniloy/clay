@@ -116,6 +116,78 @@ fn phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract() {
 }
 
 #[test]
+fn end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract() {
+    let launch_doc = launch_smoke_doc();
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/configuration/file-browser-workflow/init.js"
+    ))
+    .expect("read file-browser-workflow smoke fixture");
+
+    for expected in [
+        "End-to-end file browser workflow smoke",
+        "cargo run -- smoke-gui --config-fixture file-browser-workflow",
+        "1. Open the Clay app.",
+        "2. See the Clay-owned Workspace file browser.",
+        "3. Select a folder from the system.",
+        "4. Navigate different folders and files.",
+        "5. See file contents when the selected file is Rust, TypeScript, or JavaScript.",
+        "6. Copy text snippets from opened files to the OS clipboard.",
+        "clientOpenFolderDialog()",
+        "clientCopySelection()",
+        "bindKey(\"Ctrl+Shift+O\", clientOpenFolderDialog(), { scope: \"editor\" });",
+        "bindKey(\"Ctrl+Shift+C\", clientCopySelection(), { scope: \"editor\" });",
+        "clay.workspace.openDirectory",
+        "../` parent row",
+        "tests/fixtures/configuration/file-browser-workflow/workspace/main.rs",
+        "main.ts",
+        "main.js",
+        "Rust/TypeScript/JavaScript language package",
+        "only the selected UTF-8 text is copied",
+        "Copy selection is write-only",
+        "Automated coverage (no manual execution needed)",
+        "file_browser_workflow_config_fixture_loads_packages_and_bindings",
+        "workspace_directory_action_sends_refreshed_file_browser_snapshot",
+        "file_browser_open_uses_generic_open_document_followups",
+        "copy_selection_writes_selected_text_without_edit_event",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define end-to-end file browser workflow marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "loadPackage(\"@clay/rust\")",
+        "loadPackage(\"@clay/typescript\")",
+        "loadPackage(\"@clay/javascript\")",
+        "clientOpenFolderDialog()",
+        "clientCopySelection()",
+        "clay.workspace.openFuzzyFile",
+        "clay.workspace.toggleFileBrowser",
+    ] {
+        assert!(
+            fixture.contains(expected),
+            "file-browser-workflow fixture must contain `{expected}`"
+        );
+    }
+
+    for forbidden in [
+        "Deno.core.ops",
+        "serverRegisterSyntaxGrammar",
+        "serverRegisterModePattern",
+        "serverPublishDecorations",
+        "clipboard.writeText",
+        "readText",
+    ] {
+        assert!(
+            !fixture.contains(forbidden),
+            "file-browser-workflow fixture must not use hidden/raw authority `{forbidden}`"
+        );
+    }
+}
+
+#[test]
 fn phase19_manual_smoke_docs_define_open_dialog_scope() {
     let launch_doc = launch_smoke_doc();
     let windows_doc = windows_doc();
@@ -210,10 +282,10 @@ fn phase19_manual_smoke_docs_reject_file_association_requirement() {
     let launch_doc = launch_smoke_doc();
 
     for expected in [
-        "Out of scope for Phase 19 smoke",
+        "Out of scope for the Phase 19 Windows Markdown open-dialog smoke only",
         "Windows Explorer file associations",
         "double-click-to-open behavior",
-        "non-Windows native dialogs",
+        "Linux folder selection, directory navigation, and workspace-root expansion are covered separately",
         "full HTML preview or browser/webview rendering",
     ] {
         assert!(
@@ -284,11 +356,11 @@ fn phase20_markdown_baseline_no_default_panel_and_edit_only_selected_file() {
     let markdown_ref = markdown_package_reference();
 
     for required in [
-        "Editor-only main slot",
+        "Editor-only Markdown main slot",
         "mandatory `main` slot of `PaneSlotLayout`",
-        "No default `PanelContribution`",
-        "bare `cargo run` must not show the legacy `Workspace` SDUI side panel",
-        "The expected default surface is editor-only: no left `Workspace` SDUI panel should appear.",
+        "package-owned default `PanelContribution`",
+        "does not forbid the Clay-owned Workspace file browser",
+        "Clay-owned workspace chrome is separate",
         "defaultVisibility: \"hidden\"",
         "Fixed panels resize the editor",
         "transient overlays may cover content by design",

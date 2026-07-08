@@ -14,6 +14,7 @@ use masonry::vello::Scene;
 
 use crate::client::{
     ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientUiCommandRoute,
+    ClipboardSink, SystemClipboard,
 };
 use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, background_color};
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
@@ -386,6 +387,44 @@ impl EditorWidget {
         })
     }
 
+    pub fn request_selected_workspace_root(&self, path: PathBuf) -> Option<ClientConnectionEvent> {
+        let Some(queue) = &self.edit_queue else {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.selected_folder_open.unavailable",
+                    "Cannot add the selected folder because this editor is not connected to a Clay server.",
+                ),
+            ));
+        };
+        queue
+            .enqueue_add_selected_workspace_root(path)
+            .err()
+            .map(|error| {
+                ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                    "clay.client.selected_folder_open.queue_failed",
+                    format!("Failed to send selected-folder request to the Clay server: {error}"),
+                ))
+            })
+    }
+
+    pub fn copy_selection_to_system_clipboard(&self) -> Option<ClientConnectionEvent> {
+        let mut clipboard = SystemClipboard;
+        self.copy_selection_to_clipboard_with(&mut clipboard)
+    }
+
+    fn copy_selection_to_clipboard_with(
+        &self,
+        clipboard: &mut impl ClipboardSink,
+    ) -> Option<ClientConnectionEvent> {
+        let text = self.editor.selected_text()?;
+        clipboard.set_text(text).err().map(|error| {
+            ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                "clay.client.clipboard.write_failed",
+                format!("Failed to copy selection to the system clipboard: {error}"),
+            ))
+        })
+    }
+
     fn set_status(&mut self, status: EditorStatus) -> bool {
         if self.status == status {
             return false;
@@ -604,6 +643,21 @@ impl EditorWidget {
     }
 }
 
+fn is_copy_shortcut(key_event: &KeyboardEvent) -> bool {
+    let Key::Character(text) = &key_event.key else {
+        return false;
+    };
+    if !text.eq_ignore_ascii_case("c") {
+        return false;
+    }
+
+    if cfg!(target_os = "macos") {
+        key_event.modifiers.meta()
+    } else {
+        key_event.modifiers.ctrl()
+    }
+}
+
 fn key_stroke(key: KeyCode, key_event: &KeyboardEvent) -> KeyStroke {
     KeyStroke {
         key,
@@ -752,6 +806,14 @@ impl Widget for EditorWidget {
                         };
                         self.local_command(ctx, command);
                     }
+                    Key::Character(_) if is_copy_shortcut(key_event) => {
+                        if let Some(event) = self.copy_selection_to_system_clipboard() {
+                            ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
+                                event,
+                            ));
+                        }
+                        ctx.set_handled();
+                    }
                     Key::Character(_) => {
                         if let Some(stroke) = character_key_stroke(key_event) {
                             self.local_key(ctx, stroke);
@@ -838,6 +900,7 @@ mod tests {
     use super::{EditorStatus, EditorWidget, SduiStatusObservation, character_key_stroke};
     use crate::client::{
         ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientResyncSnapshot,
+        ClipboardError, ClipboardSink,
     };
     use crate::editor::EditorCommand;
     use crate::protocol::{
@@ -892,6 +955,22 @@ mod tests {
             text: "server text".to_string(),
             access,
             behavior_manifest: BehaviorManifest::minimal_text_editing(3),
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeClipboard {
+        text: Option<String>,
+        fail: bool,
+    }
+
+    impl ClipboardSink for FakeClipboard {
+        fn set_text(&mut self, text: String) -> Result<(), ClipboardError> {
+            if self.fail {
+                return Err(ClipboardError::new("no display"));
+            }
+            self.text = Some(text);
+            Ok(())
         }
     }
 
@@ -953,6 +1032,81 @@ mod tests {
             ))
         );
         assert!(widget.sdui.active_menu().is_none());
+    }
+
+    #[test]
+    fn copy_selection_writes_selected_text_without_edit_event() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha 🦀 beta".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.command_with_event(EditorCommand::SelectRight);
+        widget.editor.command_with_event(EditorCommand::SelectRight);
+        let mut clipboard = FakeClipboard::default();
+
+        let event = widget.copy_selection_to_clipboard_with(&mut clipboard);
+
+        assert_eq!(event, None);
+        assert_eq!(clipboard.text.as_deref(), Some("al"));
+        assert_eq!(widget.editor.visible_text(), "alpha 🦀 beta");
+        assert_eq!(widget.next_transaction_id, 1);
+    }
+
+    #[test]
+    fn copy_selection_is_noop_when_selection_is_collapsed() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        let mut clipboard = FakeClipboard::default();
+
+        let event = widget.copy_selection_to_clipboard_with(&mut clipboard);
+
+        assert_eq!(event, None);
+        assert_eq!(clipboard.text, None);
+        assert_eq!(widget.editor.visible_text(), "alpha");
+    }
+
+    #[test]
+    fn copy_selection_failure_reports_runtime_diagnostic() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.command_with_event(EditorCommand::SelectRight);
+        let mut clipboard = FakeClipboard {
+            fail: true,
+            ..FakeClipboard::default()
+        };
+
+        let event = widget.copy_selection_to_clipboard_with(&mut clipboard);
+
+        match event {
+            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)) => {
+                assert_eq!(diagnostic.code, "clay.client.clipboard.write_failed");
+                assert!(diagnostic.message.contains("Failed to copy selection"));
+            }
+            message => panic!("expected clipboard runtime diagnostic, got {message:?}"),
+        }
+        assert_eq!(widget.editor.visible_text(), "alpha");
     }
 
     #[test]

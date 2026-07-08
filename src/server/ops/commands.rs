@@ -243,6 +243,15 @@ fn command_status_json(status: &crate::server::command_execution::CommandExecuti
             "version": snapshot.metadata.version,
             "path": snapshot.metadata.path,
         }),
+        CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
+            root_id,
+            relative_path,
+        }) => json!({
+            "kind": "workspace",
+            "action": "navigated",
+            "workspaceRootId": root_id,
+            "relativePath": relative_path,
+        }),
         CommandExecutionStatus::Workspace(WorkspaceActionResult::Revealed) => json!({
             "kind": "workspace",
             "action": "revealed",

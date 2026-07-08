@@ -32,6 +32,7 @@ const MAX_FUZZY_ITEMS: usize = 64;
 pub(crate) const OPEN_FILE_COMMAND_ID: &str = "clay.workspace.openFile";
 pub(crate) const REVEAL_IN_TREE_COMMAND_ID: &str = "clay.workspace.revealInTree";
 pub(crate) const OPEN_FUZZY_FILE_COMMAND_ID: &str = "clay.workspace.openFuzzyFile";
+pub(crate) const OPEN_DIRECTORY_COMMAND_ID: &str = "clay.workspace.openDirectory";
 pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "clay.workspace.toggleFileBrowser";
 
 /// Inert snapshot of file listing data used to render the file browser.
@@ -39,6 +40,7 @@ pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "clay.workspace.toggleFi
 pub(crate) struct FileBrowserState {
     root_id: WorkspaceRootId,
     root_path_display: String,
+    current_directory: PathBuf,
     entries: Vec<FileBrowserEntry>,
 }
 
@@ -78,11 +80,19 @@ impl FileBrowserState {
         workspace: &WorkspaceState,
         root_id: WorkspaceRootId,
     ) -> Result<Self, FileBrowserError> {
+        Self::from_workspace_at(workspace, root_id, PathBuf::new())
+    }
+
+    pub(crate) fn from_workspace_at(
+        workspace: &WorkspaceState,
+        root_id: WorkspaceRootId,
+        relative_path: PathBuf,
+    ) -> Result<Self, FileBrowserError> {
         let page = workspace.list_directory(
             crate::server::workspace::FileListRequest {
                 root_id,
-                relative_path: PathBuf::new(),
-                max_depth: 2,
+                relative_path: relative_path.clone(),
+                max_depth: 1,
                 max_entries: MAX_LEFT_PANEL_ENTRIES,
             },
             None,
@@ -109,6 +119,7 @@ impl FileBrowserState {
         Ok(Self {
             root_id,
             root_path_display: root_metadata.display_name,
+            current_directory: relative_path,
             entries,
         })
     }
@@ -135,14 +146,26 @@ impl FileBrowserState {
         let file_list_id = SduiNodeId(5);
         let editor_id = SduiNodeId(6);
 
-        let title = format!("Workspace · {}", self.root_path_display);
+        let title = if self.current_directory.as_os_str().is_empty() {
+            format!("Workspace · {}", self.root_path_display)
+        } else {
+            format!(
+                "Workspace · {} · {}",
+                self.root_path_display,
+                self.current_directory.display()
+            )
+        };
         let title_label = SduiNode::new(title_label_id, SduiNodeKind::Label { text: title });
 
-        let list_items: Vec<SduiListItem> = self
-            .entries
-            .iter()
-            .map(|entry| entry.to_sdui_list_item(file_list_id))
-            .collect();
+        let mut list_items: Vec<SduiListItem> = Vec::new();
+        if let Some(parent) = self.current_directory.parent() {
+            list_items.push(parent_directory_item(file_list_id, self.root_id, parent));
+        }
+        list_items.extend(
+            self.entries
+                .iter()
+                .map(|entry| entry.to_sdui_list_item(file_list_id)),
+        );
         let file_list = SduiNode::new(file_list_id, SduiNodeKind::List { items: list_items });
 
         let sidebar_stack = SduiNode::new(
@@ -238,8 +261,12 @@ impl FileBrowserEntry {
 
     fn to_sdui_list_item(&self, list_node_id: SduiNodeId) -> SduiListItem {
         let relative = self.relative_path.to_string_lossy().to_string();
+        let command_id = match self.kind {
+            FileBrowserEntryKind::Directory => OPEN_DIRECTORY_COMMAND_ID,
+            _ => OPEN_FILE_COMMAND_ID,
+        };
         let action = SduiActionIntent {
-            command_id: OPEN_FILE_COMMAND_ID.to_string(),
+            command_id: command_id.to_string(),
             source: SduiActionSource::ListItem {
                 node_id: list_node_id,
                 item_id: relative.clone(),
@@ -272,6 +299,36 @@ impl FileBrowserEntry {
 
     fn root_id_hint(&self) -> u64 {
         self.root_id
+    }
+}
+
+fn parent_directory_item(
+    list_node_id: SduiNodeId,
+    root_id: WorkspaceRootId,
+    parent: &std::path::Path,
+) -> SduiListItem {
+    let relative = parent.to_string_lossy().to_string();
+    SduiListItem {
+        id: "..".to_string(),
+        label: "../".to_string(),
+        detail: Some("parent".to_string()),
+        action: Some(SduiActionIntent {
+            command_id: OPEN_DIRECTORY_COMMAND_ID.to_string(),
+            source: SduiActionSource::ListItem {
+                node_id: list_node_id,
+                item_id: "..".to_string(),
+            },
+            arguments: vec![
+                SduiActionArgument {
+                    name: "workspaceRootId".to_string(),
+                    value: SduiActionValue::U64(root_id),
+                },
+                SduiActionArgument {
+                    name: "relativePath".to_string(),
+                    value: SduiActionValue::String(relative),
+                },
+            ],
+        }),
     }
 }
 
@@ -406,6 +463,32 @@ mod tests {
     }
 
     #[test]
+    fn file_browser_directory_rows_navigate_instead_of_opening_files() {
+        let root = temp_workspace("browser-directory-action");
+        fs::create_dir(root.join("src")).unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
+        let tree = browser.to_sdui_tree(1u64, 1u64);
+
+        let list = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let item = list.iter().find(|item| item.label == "src/").unwrap();
+        let action = item.action.as_ref().unwrap();
+
+        assert_eq!(action.command_id, OPEN_DIRECTORY_COMMAND_ID);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn file_browser_list_action_command_is_valid() {
         use crate::packages::commands::CommandRegistry;
         use crate::server::command_execution::{
@@ -463,7 +546,8 @@ mod tests {
 
         let mut workspace = WorkspaceState::new();
         let root_id = workspace.add_root(&root).unwrap();
-        let browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
+        let browser =
+            FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();
         let tree = browser.to_sdui_tree(1u64, 1u64);
 
         let list = tree
@@ -474,6 +558,7 @@ mod tests {
                 _ => None,
             })
             .unwrap();
+        assert!(list.iter().any(|item| item.label == "../"));
         let item = list
             .iter()
             .find(|item| item.label == "main.rs")

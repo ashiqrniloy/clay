@@ -565,8 +565,15 @@ pub enum ClientMessage {
     },
     OpenSelectedFile {
         client_id: ClientId,
-        /// Server-issued single-use file-open capability token. Required so the
-        /// server authorizes single-file opens rather than honoring raw paths.
+        /// Server-issued single-use selected-path capability token. Required so
+        /// the server authorizes selected-file opens rather than honoring raw paths.
+        capability: String,
+        selected_path: String,
+    },
+    AddSelectedWorkspaceRoot {
+        client_id: ClientId,
+        /// Server-issued single-use selected-path capability token. Required so
+        /// the server authorizes selected-folder roots rather than honoring raw paths.
         capability: String,
         selected_path: String,
     },
@@ -653,9 +660,10 @@ pub enum ServerMessage {
         tree: SduiTree,
     },
     /// Server-issued single-use capability token authorizing one subsequent
-    /// `OpenSelectedFile` request. Issued once after the Hello handshake and
-    /// re-issued after every `OpenSelectedFile` attempt so the client always
-    /// has one pending token. Structural authority gate for single-file opens.
+    /// selected-path request (`OpenSelectedFile` or `AddSelectedWorkspaceRoot`).
+    /// Issued once after the Hello handshake and re-issued after every attempt
+    /// so the client always has one pending token. Structural authority gate for
+    /// selected file/folder paths.
     FileOpenCapabilityIssued {
         token: String,
     },

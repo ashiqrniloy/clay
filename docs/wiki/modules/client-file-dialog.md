@@ -6,7 +6,9 @@
 - `src/client/mod.rs`
 - `src/main.rs`
 - `runtime/js/documents.ts`
+- `runtime/js/workspace.ts`
 - `docs/reference/clay-js-api/documents/client-open-file-dialog.md`
+- `docs/reference/clay-js-api/workspace/client-open-folder-dialog.md`
 - `docs/development/launch-and-gui-smoke.md`
 - `docs/development/windows.md`
 
@@ -14,7 +16,7 @@
 
 The client file dialog backend is the native UI half of Phase 19's file-open smoke path. A configured inert behavior route can produce `clay.documents.clientOpenFileDialog`; the native app driver handles that client UI command by calling `open_markdown_file_dialog()`. The authoritative public programmatic surface is the `clientOpenFileDialog()` command-ID facade documented in `docs/reference/clay-js-api/documents/client-open-file-dialog.md`; this wiki page explains the internal native dialog implementation behind that stable ID.
 
-The backend intentionally does only one thing: ask the user to pick a file and return the selected path, cancellation, unsupported platform status, or a dialog error. It does not read file contents, scan directories, execute shell commands, open network listeners, or broaden server workspace authority. When a path is selected, the app enqueues `ClientMessage::OpenSelectedFile`; the server canonicalizes and validates the path before creating a selected-file single-file grant and document snapshot.
+The backend intentionally does only native user-mediated path picking: ask the user to pick a file or folder and return the selected path, cancellation, unsupported platform status, or a dialog error. It does not read file contents, scan directories, execute shell commands, open network listeners, or broaden server workspace authority. When a file path is selected, the app enqueues `ClientMessage::OpenSelectedFile`; the server canonicalizes and validates the path before creating a selected-file single-file grant and document snapshot. When a folder path is selected through `clay.workspace.clientOpenFolderDialog`, the app enqueues `ClientMessage::AddSelectedWorkspaceRoot`; the server consumes the same single-use selected-path capability, canonicalizes the directory, records it as a workspace root, and sends a refreshed file-browser `SduiSnapshot`.
 
 ## How It Works
 
@@ -32,12 +34,12 @@ On Windows, the backend uses the `windows` crate and Shell COM APIs:
 5. Show the modal dialog and map `ERROR_CANCELLED` to `Cancelled`.
 6. Convert `GetResult().GetDisplayName(SIGDN_FILESYSPATH)` to `PathBuf` and free the COM-allocated string.
 
-On non-Windows platforms, the same API compiles and returns `Unsupported` so the app can report a status diagnostic without panicking.
+On Linux, `open_folder_dialog()` uses `xdg-desktop-portal` over the D-Bus session bus through `zbus` (`org.freedesktop.portal.FileChooser.OpenFile` with `directory=true`) and converts returned `file://` URI results to paths. On non-Windows platforms, `open_markdown_file_dialog()` still returns `Unsupported`; on non-Windows/non-Linux platforms, `open_folder_dialog()` returns `Unsupported` so the app can report a status diagnostic without panicking.
 
 ## Invariants and Constraints
 
 - Dialog invocation happens only from an explicit `ClientUiCommand` app-driver action, never during startup, typing, paint, scroll, layout, text events, background IPC reads, or JavaScript evaluation.
-- Windows-specific code is isolated behind `#[cfg(windows)]` in `src/client/file_dialog.rs`.
+- Windows-specific code is isolated behind `#[cfg(windows)]` in `src/client/file_dialog.rs`; Linux portal code is isolated behind `#[cfg(target_os = "linux")]`.
 - Cancellation is a non-error no-op.
 - Unsupported platforms report a diagnostic/status through the app command handler.
 - A selected path is not an authorization grant by itself; the server validates it through `WorkspaceState::open_selected_file` before granting only that canonical file.
@@ -51,12 +53,16 @@ On non-Windows platforms, the same API compiles and returns `Unsupported` so the
 - `src/main.rs::tests::file_dialog_result_conversion_reports_selected_and_sanitized_failures`
 - `src/main.rs::tests::non_windows_client_open_file_dialog_command_reports_status_diagnostic` on non-Windows targets
 - `src/client/mod.rs::tests::selected_file_open_request_emits_non_edit_message`
+- `src/client/mod.rs::tests::selected_folder_root_request_emits_non_edit_message`
+- `src/server/connection.rs::tests::connection_add_selected_workspace_root_sends_file_browser_snapshot`
+- `src/server/connection.rs::tests::connection_add_selected_workspace_root_rejects_stale_capability`
 - Commands used during implementation/verification:
   - `cargo test file_dialog --quiet`
   - `cargo test --test manual_smoke_docs --quiet`
   - `cargo test --all-targets`
   - `cargo check --all-targets`
-  - `cargo check --target x86_64-pc-windows-msvc --all-targets`
+  - `cargo check --all-targets`
+- `cargo clippy --all-targets -- -D warnings`
 
 ## Related
 
@@ -64,3 +70,5 @@ On non-Windows platforms, the same API compiles and returns `Unsupported` so the
 - [Phase 19 Windows File Open Primitive Review](phase19-windows-file-open-primitive-review.md)
 - [Server File Workspace Model](server-file-workspace.md)
 - [Client Open File Dialog Clay JS API](../../reference/clay-js-api/documents/client-open-file-dialog.md)
+- [Client Open Folder Dialog Clay JS API](../../reference/clay-js-api/workspace/client-open-folder-dialog.md)
+- [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)

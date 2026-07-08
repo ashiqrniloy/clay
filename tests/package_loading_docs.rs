@@ -986,9 +986,27 @@ fn grammar_package_reference_docs_cover_authoring_primitive_security_and_perform
 
     // Expanded language packages document Phase 18.14 surfaces.
     for (package, mode_id, command_id, provider_id, status_id) in [
-        ("rust", "rust", "rust.toggleLineComment", "rust.keywords", "rust.status.mode"),
-        ("typescript", "typescript", "typescript.toggleLineComment", "typescript.keywords", "typescript.status.mode"),
-        ("javascript", "javascript", "javascript.toggleLineComment", "javascript.keywords", "javascript.status.mode"),
+        (
+            "rust",
+            "rust",
+            "rust.toggleLineComment",
+            "rust.keywords",
+            "rust.status.mode",
+        ),
+        (
+            "typescript",
+            "typescript",
+            "typescript.toggleLineComment",
+            "typescript.keywords",
+            "typescript.status.mode",
+        ),
+        (
+            "javascript",
+            "javascript",
+            "javascript.toggleLineComment",
+            "javascript.keywords",
+            "javascript.status.mode",
+        ),
     ] {
         let reference_doc = read(&format!("docs/reference/packages/{package}.md"));
         let package_doc = read(&format!("packages/{package}/docs/index.md"));
@@ -1285,7 +1303,12 @@ fn phase18_14_configuration_contract_defers_user_tunable_keys() {
         ("typescript.md", typescript_doc),
         ("javascript.md", javascript_doc),
     ] {
-        for phrase in ["## Configuration", "package-defined values", "No new user-tunable configuration keys", "clay.configuration.setPackageOption"] {
+        for phrase in [
+            "## Configuration",
+            "package-defined values",
+            "No new user-tunable configuration keys",
+            "clay.configuration.setPackageOption",
+        ] {
             assert!(
                 doc.contains(phrase),
                 "{name} must document the Phase 18.14 configuration contract with `{phrase}`"

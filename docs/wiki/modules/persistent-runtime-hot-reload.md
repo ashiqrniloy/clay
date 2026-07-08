@@ -40,7 +40,7 @@ Non-responsibilities:
 3. Configuration reruns `~/.config/clay/init.js`; package authors normally call `await loadPackage("@clay/markdown")` there.
 4. `runtime/js/packages.ts` keeps `globalThis.__clayLoadedPackages` as a per-generation idempotence cache. A fresh service starts with an empty cache.
 5. Successful evaluation applies runtime outputs, registers parse handlers with the new generation ID, cancels old-generation parse work, and swaps the store.
-6. `refresh_open_documents_after_reload` enumerates `WorkspaceState::open_document_snapshots`, reruns `connection::selected_file_open_followup_messages`, and returns only behavior manifests, decoration sets, and diagnostics.
+6. `refresh_open_documents_after_reload` enumerates `WorkspaceState::open_document_snapshots`, reruns `connection::open_document_followup_messages`, and returns only behavior manifests, decoration sets, and diagnostics.
 7. Failed evaluation returns `RuntimeReloadOutcome { reloaded: false, ... }`, keeps the old generation active, and records a sanitized `RuntimeDiagnostic`.
 
 ## Primitive Coverage

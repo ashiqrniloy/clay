@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -230,11 +231,21 @@ where
                 let response =
                     open_document_response(&workspace, workspace_root_id, path, client_id).await;
                 codec.write_server_message(&mut stream, &response).await?;
-                if matches!(response, ServerMessage::DocumentOpened { .. }) {
-                    let manifest_message = behavior.lock().await.manifest_message();
-                    codec
-                        .write_server_message(&mut stream, &manifest_message)
-                        .await?;
+                if let ServerMessage::DocumentOpened { metadata, text } = &response {
+                    let runtime = runtime_generation.current().await;
+                    for message in open_document_followup_messages(
+                        metadata,
+                        text,
+                        &behavior,
+                        &sdui,
+                        runtime.id,
+                        &runtime.service,
+                        &parse_coordinator,
+                    )
+                    .await
+                    {
+                        codec.write_server_message(&mut stream, &message).await?;
+                    }
                 }
             }
             ClientMessage::OpenSelectedFile {
@@ -268,8 +279,7 @@ where
                 codec.write_server_message(&mut stream, &response).await?;
                 if let ServerMessage::DocumentOpened { metadata, text } = &response {
                     let runtime = runtime_generation.current().await;
-                    let messages = selected_file_open_followup_messages(
-                        client_id,
+                    let messages = open_document_followup_messages(
                         metadata,
                         text,
                         &behavior,
@@ -282,6 +292,41 @@ where
                     for message in messages {
                         codec.write_server_message(&mut stream, &message).await?;
                     }
+                }
+                codec.write_server_message(&mut stream, &replenish).await?;
+            }
+            ClientMessage::AddSelectedWorkspaceRoot {
+                client_id,
+                capability,
+                selected_path,
+            } => {
+                let authorized = file_open_capabilities.consume(&capability);
+                let replenish = ServerMessage::FileOpenCapabilityIssued {
+                    token: file_open_capabilities.issue(),
+                };
+                if !authorized {
+                    codec.write_server_message(&mut stream, &replenish).await?;
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                                "clay.client.selected_folder_open.unauthorized",
+                                "AddSelectedWorkspaceRoot requires a valid server-issued selected-path capability token.",
+                            )),
+                        )
+                        .await?;
+                    continue;
+                }
+                for message in add_selected_workspace_root_messages(
+                    &workspace,
+                    &document,
+                    &sdui,
+                    client_id,
+                    selected_path,
+                )
+                .await
+                {
+                    codec.write_server_message(&mut stream, &message).await?;
                 }
                 codec.write_server_message(&mut stream, &replenish).await?;
             }
@@ -315,7 +360,7 @@ where
                 codec.write_server_message(&mut stream, &response).await?;
             }
             ClientMessage::SduiAction {
-                client_id: _,
+                client_id,
                 ui_version: _,
                 intent,
             } => {
@@ -323,12 +368,36 @@ where
                     let state = sdui.lock().await;
                     sdui_action_response(&state, &intent)
                 };
-                let execution_response =
-                    execute_command_intent(sdui_command_request(&intent), Arc::clone(&workspace))
-                        .await;
-                let response = execution_response.or(validation_response);
+                if let Some(response) = validation_response {
+                    codec.write_server_message(&mut stream, &response).await?;
+                    continue;
+                }
+                let response = execute_command_intent(
+                    sdui_command_request(&intent),
+                    Arc::clone(&workspace),
+                    &document,
+                    &sdui,
+                    Some(client_id),
+                )
+                .await;
                 if let Some(response) = response {
                     codec.write_server_message(&mut stream, &response).await?;
+                    if let ServerMessage::DocumentOpened { metadata, text } = &response {
+                        let runtime = runtime_generation.current().await;
+                        for message in open_document_followup_messages(
+                            metadata,
+                            text,
+                            &behavior,
+                            &sdui,
+                            runtime.id,
+                            &runtime.service,
+                            &parse_coordinator,
+                        )
+                        .await
+                        {
+                            codec.write_server_message(&mut stream, &message).await?;
+                        }
+                    }
                 }
             }
             ClientMessage::CommandIntent {
@@ -358,6 +427,9 @@ where
                         expected_permissions: Vec::new(),
                     },
                     Arc::clone(&workspace),
+                    &document,
+                    &sdui,
+                    None,
                 )
                 .await;
                 if let Some(response) = response {
@@ -420,17 +492,25 @@ where
 async fn execute_command_intent(
     request: CommandExecutionRequest,
     workspace: Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    client_id: Option<ClientId>,
 ) -> Option<ServerMessage> {
     let executor = CommandExecutor::new();
     let registry = CommandRegistry::new();
 
     if crate::server::command_execution::is_workspace_command(&request.command_id) {
-        let mut workspace = workspace.lock().await;
-        match executor
-            .execute_workspace(&registry, &mut workspace, request)
-            .await
-        {
-            Ok(result) => workspace_command_result_message(result),
+        let result = {
+            let mut workspace_guard = workspace.lock().await;
+            executor
+                .execute_workspace(&registry, &mut workspace_guard, request)
+                .await
+        };
+        match result {
+            Ok(result) => {
+                workspace_command_result_message(result, &workspace, document, sdui, client_id)
+                    .await
+            }
             Err(error) => Some(ServerMessage::Error {
                 code: ProtocolErrorCode::InvalidMessage,
                 message: format!(
@@ -453,8 +533,12 @@ async fn execute_command_intent(
     }
 }
 
-fn workspace_command_result_message(
+async fn workspace_command_result_message(
     result: crate::server::command_execution::CommandExecutionResult,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    client_id: Option<ClientId>,
 ) -> Option<ServerMessage> {
     use crate::server::command_execution::{CommandExecutionStatus, WorkspaceActionResult};
     match result.status {
@@ -463,6 +547,23 @@ fn workspace_command_result_message(
                 metadata: snapshot.metadata,
                 text: snapshot.text,
             })
+        }
+        CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
+            root_id,
+            relative_path,
+        }) => {
+            let client_id = client_id?;
+            Some(
+                file_browser_snapshot_message(
+                    workspace,
+                    document,
+                    sdui,
+                    client_id,
+                    root_id,
+                    relative_path,
+                )
+                .await,
+            )
         }
         _ => None,
     }
@@ -674,6 +775,68 @@ async fn open_document_response(
     }
 }
 
+async fn add_selected_workspace_root_messages(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    client_id: ClientId,
+    selected_path: String,
+) -> Vec<ServerMessage> {
+    let root_id = {
+        let mut workspace = workspace.lock().await;
+        match workspace.add_root(PathBuf::from(&selected_path)) {
+            Ok(root_id) => root_id,
+            Err(error) => return vec![file_operation_failed(error, None, None)],
+        }
+    };
+    vec![
+        file_browser_snapshot_message(
+            workspace,
+            document,
+            sdui,
+            client_id,
+            root_id,
+            PathBuf::new(),
+        )
+        .await,
+    ]
+}
+
+async fn file_browser_snapshot_message(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    client_id: ClientId,
+    root_id: WorkspaceRootId,
+    relative_path: PathBuf,
+) -> ServerMessage {
+    let (document_id, document_version) = {
+        let document = document.lock().await;
+        (document.document_id(), document.version())
+    };
+    let tree = {
+        let workspace = workspace.lock().await;
+        match FileBrowserState::from_workspace_at(&workspace, root_id, relative_path) {
+            Ok(browser) => browser.to_sdui_tree(document_id, document_version),
+            Err(crate::shell::file_browser::FileBrowserError::Workspace(error)) => {
+                return file_operation_failed(error, Some(root_id), None);
+            }
+            Err(crate::shell::file_browser::FileBrowserError::UnknownRoot(root_id)) => {
+                return file_operation_failed(
+                    WorkspaceError::UnknownRoot { root_id },
+                    Some(root_id),
+                    None,
+                );
+            }
+        }
+    };
+    let _ = sdui
+        .lock()
+        .await
+        .replace_for_document_with_runtime_tree(document_id, tree.clone());
+    ServerMessage::SduiSnapshot { client_id, tree }
+}
+
 async fn open_selected_file_response(
     workspace: &Arc<Mutex<WorkspaceState>>,
     selected_path: String,
@@ -787,10 +950,9 @@ fn file_operation_failed(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "shared selected-file/reload follow-up primitive keeps server-owned state explicit"
+    reason = "shared open-document/reload follow-up primitive keeps server-owned state explicit"
 )]
-pub(crate) async fn selected_file_open_followup_messages(
-    _client_id: ClientId,
+pub(crate) async fn open_document_followup_messages(
     metadata: &DocumentMetadata,
     text: &str,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
@@ -1006,6 +1168,14 @@ mod tests {
         Arc::new(Mutex::new(StaticSduiState::for_document(1, 1)))
     }
 
+    fn document_state() -> Arc<Mutex<DocumentState>> {
+        Arc::new(Mutex::new(DocumentState::new(
+            1,
+            "".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )))
+    }
+
     fn empty_sdui_state() -> Arc<Mutex<StaticSduiState>> {
         Arc::new(Mutex::new(StaticSduiState::empty_for_document(1)))
     }
@@ -1071,8 +1241,8 @@ await loadPackage("@clay/markdown");"#,
         protocol::{
             BehaviorManifest, BehaviorScope, ClientMessage, DecorationKind, DocumentAccess,
             DocumentMetadata, EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION,
-            RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiNodeId, SduiNodeKind,
-            ServerMessage, codec::Codec,
+            RuntimeDiagnostic, SduiActionArgument, SduiActionIntent, SduiActionSource,
+            SduiActionValue, SduiNodeId, SduiNodeKind, ServerMessage, codec::Codec,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState,
@@ -1097,12 +1267,22 @@ await loadPackage("@clay/markdown");"#,
             expected_permissions: Vec::new(),
         };
 
+        let document = document_state();
+        let sdui = sdui_state();
         assert_eq!(
-            execute_command_intent(sdui_request, workspace_state()).await,
+            execute_command_intent(sdui_request, workspace_state(), &document, &sdui, Some(1))
+                .await,
             None
         );
         assert_eq!(
-            execute_command_intent(keybinding_request, workspace_state()).await,
+            execute_command_intent(
+                keybinding_request,
+                workspace_state(),
+                &document,
+                &sdui,
+                None
+            )
+            .await,
             None
         );
     }
@@ -1117,6 +1297,9 @@ await loadPackage("@clay/markdown");"#,
                 },
             )),
             workspace_state(),
+            &document_state(),
+            &sdui_state(),
+            Some(1),
         )
         .await
         .expect("unknown package UI action returns protocol error");
@@ -1125,6 +1308,64 @@ await loadPackage("@clay/markdown");"#,
         if let ServerMessage::Error { message, .. } = response {
             assert!(message.contains("UnknownCommand"));
         }
+    }
+
+    #[tokio::test]
+    async fn workspace_directory_action_sends_refreshed_file_browser_snapshot() {
+        let root = temp_workspace("navigate-snapshot");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+
+        let workspace = workspace_state();
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+        let document = document_state();
+        let sdui = sdui_state();
+        let mut intent = SduiActionIntent::command(
+            "clay.workspace.openDirectory",
+            SduiActionSource::ListItem {
+                node_id: SduiNodeId(5),
+                item_id: "src".to_string(),
+            },
+        );
+        intent.arguments = vec![
+            SduiActionArgument {
+                name: "workspaceRootId".to_string(),
+                value: SduiActionValue::U64(root_id),
+            },
+            SduiActionArgument {
+                name: "relativePath".to_string(),
+                value: SduiActionValue::String("src".to_string()),
+            },
+        ];
+
+        let response = execute_command_intent(
+            sdui_command_request(&intent),
+            workspace,
+            &document,
+            &sdui,
+            Some(42),
+        )
+        .await
+        .expect("directory navigation sends a snapshot");
+
+        let ServerMessage::SduiSnapshot { client_id, tree } = response else {
+            panic!("expected SduiSnapshot");
+        };
+        assert_eq!(client_id, 42);
+        let labels: Vec<String> = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => {
+                    Some(items.iter().map(|item| item.label.clone()).collect())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(labels.iter().any(|label| label == "../"));
+        assert!(labels.iter().any(|label| label == "main.rs"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -1804,6 +2045,120 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
+    async fn file_browser_open_uses_generic_open_document_followups() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let root = temp_workspace("file-browser-open-followups");
+        let selected = root.join("note.md");
+        fs::write(&selected, "# Browser note\n\n- item\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        workspace_state_value.reserve_document_ids_from(2);
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = sdui_state();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+
+        let (client, server) = duplex(16 * 1024 * 1024);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            Arc::clone(&sdui),
+            runtime_diagnostics(),
+            runtime_generation_from(runtime),
+            coordinator,
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let tree = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::SduiSnapshot { tree, .. } => tree,
+            message => panic!("expected file browser SduiSnapshot, got {message:?}"),
+        };
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
+        let action = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => items
+                    .iter()
+                    .find(|item| item.label == "note.md")
+                    .and_then(|item| item.action.clone()),
+                _ => None,
+            })
+            .expect("note.md file-browser action");
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::SduiAction {
+                    client_id: 99,
+                    ui_version: tree.ui_version,
+                    intent: action,
+                },
+            )
+            .await
+            .unwrap();
+
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::DocumentOpened { metadata, text } => {
+                assert_eq!(metadata.document_id, 2);
+                assert_eq!(metadata.workspace_root_id, root_id);
+                assert_eq!(metadata.path, "note.md");
+                assert_eq!(text, "# Browser note\n\n- item\n");
+            }
+            message => panic!("expected file-browser DocumentOpened, got {message:?}"),
+        }
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => {
+                assert_eq!(manifest.manifest_id, "markdown.markdown");
+                assert!(matches!(
+                    manifest.scope,
+                    BehaviorScope::Document { document_id: 2 }
+                ));
+            }
+            message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
+        }
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::DecorationSet(set) => {
+                assert_eq!(set.document_id, 2);
+                assert!(set.spans.iter().any(|span| {
+                    span.kind == DecorationKind::Syntax && span.style_token == "markup.heading.1"
+                }));
+            }
+            message => panic!("expected Markdown DecorationSet, got {message:?}"),
+        }
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(selected);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
     async fn selected_markdown_file_publishes_manifest_and_decorations() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let root = temp_workspace("selected-markdown-runtime");
@@ -1967,8 +2322,7 @@ await loadPackage("@clay/markdown");"#,
             workspace_root_id: 1,
             path: "note.md".to_string(),
         };
-        let messages = super::selected_file_open_followup_messages(
-            99,
+        let messages = super::open_document_followup_messages(
             &metadata,
             "# Loaded from init.js\n",
             &behavior,
@@ -2179,6 +2533,148 @@ await loadPackage("@clay/markdown");"#,
         server_task.await.unwrap().unwrap();
         let _ = fs::remove_file(selected);
         let _ = fs::remove_file(sibling);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn connection_add_selected_workspace_root_sends_file_browser_snapshot() {
+        let root = temp_workspace("selected-folder-dispatch");
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            Arc::clone(&document),
+            behavior,
+            Arc::clone(&workspace),
+            sdui_state(),
+            runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::FileOpenCapabilityIssued { token } => token,
+            message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
+        };
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::AddSelectedWorkspaceRoot {
+                    client_id: 99,
+                    capability: capability_token,
+                    selected_path: root.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::SduiSnapshot { client_id: 99, .. }
+        ));
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
+        assert_eq!(workspace.lock().await.list_root_metadata().len(), 1);
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(root.join("main.rs"));
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn connection_add_selected_workspace_root_rejects_stale_capability() {
+        let root = temp_workspace("selected-folder-stale");
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::default()));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            Arc::clone(&workspace),
+            sdui_state(),
+            runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::AddSelectedWorkspaceRoot {
+                    client_id: 99,
+                    capability: "stale".to_string(),
+                    selected_path: root.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::RuntimeDiagnostic(diagnostic)
+                if diagnostic.code == "clay.client.selected_folder_open.unauthorized"
+        ));
+        assert!(workspace.lock().await.list_root_metadata().is_empty());
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
         let _ = fs::remove_dir(root);
     }
 

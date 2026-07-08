@@ -987,6 +987,12 @@ impl EditorSurface {
         snapshot
     }
 
+    pub fn selected_text(&self) -> Option<String> {
+        self.selected_range()
+            .map(|range| self.buffer.text_range(range))
+            .filter(|text| !text.is_empty())
+    }
+
     fn selected_range(&self) -> Option<Range<usize>> {
         let selection = self.selection?.clamped(&self.buffer);
         let range = selection.normalized_range();
@@ -1921,6 +1927,40 @@ mod tests {
                 end: "a🦀".len() as u64
             }
         );
+    }
+
+    #[test]
+    fn selected_text_returns_forward_backward_unicode_ranges() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "alpha 🦀 beta".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+
+        editor.set_selection_for_test(0, "alpha".len());
+        assert_eq!(editor.selected_text().as_deref(), Some("alpha"));
+
+        let start = "alpha ".len();
+        let end = "alpha 🦀".len();
+        editor.set_selection_for_test(end, start);
+        assert_eq!(editor.selected_text().as_deref(), Some("🦀"));
+    }
+
+    #[test]
+    fn selected_text_returns_none_for_collapsed_selection() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "abc".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+
+        editor.set_selection_for_test(1, 1);
+
+        assert_eq!(editor.selected_text(), None);
     }
 
     #[test]

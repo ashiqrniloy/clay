@@ -197,6 +197,10 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "document.open_recent"
             | "clay.documents.serverOpenDocument"
             | "clay.documents.clientOpenFileDialog"
+            | "clay.workspace.clientOpenFolderDialog"
+            | "clay.workspace.openFuzzyFile"
+            | "clay.workspace.toggleFileBrowser"
+            | "clay.editor.clientCopySelection"
             | "clay.documents.serverSaveDocument"
             | "clay.documents.serverReloadDocument"
             | "clay.documents.serverGetDocumentStatus"
@@ -210,7 +214,12 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
         Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
     } else if command_id == "completion.trigger" {
         Ok(crate::protocol::RoutingPolicy::UiReactivePriority)
-    } else if command_id == "clay.documents.clientOpenFileDialog" {
+    } else if matches!(
+        command_id,
+        "clay.documents.clientOpenFileDialog"
+            | "clay.workspace.clientOpenFolderDialog"
+            | "clay.editor.clientCopySelection"
+    ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
         Ok(crate::protocol::RoutingPolicy::ServerFirst)

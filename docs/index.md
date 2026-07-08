@@ -41,6 +41,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverExecuteCommand](reference/clay-js-api/commands/server-execute-command.md) — `clay.commands.serverExecuteCommand`
 - [serverListCommands](reference/clay-js-api/commands/server-list-commands.md) — `clay.commands.serverListCommands`
 - [serverOpenFile](reference/clay-js-api/commands/server-open-file.md) — `clay.commands.serverOpenFile`
+- [serverOpenDirectory](reference/clay-js-api/commands/server-open-directory.md) — `clay.commands.serverOpenDirectory`
 - [serverRegisterCommand](reference/clay-js-api/commands/server-register-command.md) — `clay.commands.serverRegisterCommand`
 - [serverRevealInTree](reference/clay-js-api/commands/server-reveal-in-tree.md) — `clay.commands.serverRevealInTree`
 - [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `clay.decorations.serverPublishDecorations`
@@ -54,6 +55,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverOpenDocument](reference/clay-js-api/documents/server-open-document.md) — `clay.documents.serverOpenDocument`
 - [serverReloadDocument](reference/clay-js-api/documents/server-reload-document.md) — `clay.documents.serverReloadDocument`
 - [serverSaveDocument](reference/clay-js-api/documents/server-save-document.md) — `clay.documents.serverSaveDocument`
+- [clientCopySelection](reference/clay-js-api/editor/client-copy-selection.md) — `clay.editor.clientCopySelection`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `clay.editor.clientMoveCursor`
 - [clientScrollTo](reference/clay-js-api/editor/client-scroll-to.md) — `clay.editor.clientScrollTo`
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `clay.editor.clientSetCursorStyle`
@@ -95,6 +97,7 @@ The generated documentation registry must read this section as the explicit incl
 - [definePanel](reference/clay-js-api/sdui/define-panel.md) — `clay.sdui.definePanel`
 - [defineStack](reference/clay-js-api/sdui/define-stack.md) — `clay.sdui.defineStack`
 - [publishTree](reference/clay-js-api/sdui/publish-tree.md) — `clay.sdui.publishTree`
+- [clientOpenFolderDialog](reference/clay-js-api/workspace/client-open-folder-dialog.md) — `clay.workspace.clientOpenFolderDialog`
 - [serverAddWorkspaceRoot](reference/clay-js-api/workspace/server-add-workspace-root.md) — `clay.workspace.serverAddWorkspaceRoot`
 - [serverCancelListing](reference/clay-js-api/workspace/server-cancel-listing.md) — `clay.workspace.serverCancelListing`
 - [serverCreateListingCancelToken](reference/clay-js-api/workspace/server-create-listing-cancel-token.md) — `clay.workspace.serverCreateListingCancelToken`
