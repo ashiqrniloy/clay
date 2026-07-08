@@ -10,6 +10,8 @@
 - `src/shell/file_browser.rs`
 - `src/server/connection.rs`
 - `src/server/command_execution.rs`
+- `src/masonry_sdui.rs`
+- `src/masonry_editor.rs`
 - `docs/reference/clay-js-api/workspace/*.md`
 - `docs/reference/clay-js-api/commands/server-{execute-command,open-file,reveal-in-tree}.md`
 
@@ -53,7 +55,7 @@ Cancellation uses server-owned token IDs backed by a process-local registry. `se
 
 `FileBrowserState::from_workspace` picks a visible workspace root at the root directory; `FileBrowserState::from_workspace_at` lists a root-relative current directory. Both ask `WorkspaceState::list_directory` for a bounded depth-1 snapshot and store normalized `FileBrowserEntry` values with the actual `WorkspaceRootId`, relative path, display label, kind, child count, and diagnostics.
 
-`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace/current-directory label and `List` items, plus the normal `EditorView` in a row. It does not add a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `clay.workspace.openFile`; directory rows carry the same bounded root-relative arguments for `clay.workspace.openDirectory`; non-root directories include a `../` parent row.
+`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace/current-directory label and `List` items, plus the normal `EditorView` in a row. It does not add a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `clay.workspace.openFile`; directory rows carry the same bounded root-relative arguments for `clay.workspace.openDirectory`; non-root directories include a `../` parent row. A row's `SduiListItem.id` and `SduiActionSource::ListItem.item_id` are the same display-row identity (for example `main.rs` inside `src/`); the root-relative path (`src/main.rs`) lives only in the typed `relativePath` action argument and is revalidated by `WorkspaceState` on open.
 
 `FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by filtering the same bounded entries locally. Items route to `clay.workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
 
@@ -100,6 +102,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 - Ops/facades: `op_clay_workspace_*`, `op_clay_commands_execute_command`, `runtime/js/workspace.ts`, `runtime/js/commands.ts`.
 - Public docs: `docs/reference/clay-js-api/workspace/`, `docs/reference/clay-js-api/commands/server-execute-command.md`, `server-open-file.md`, `server-open-directory.md`, `server-reveal-in-tree.md`, and `docs/development/launch-and-gui-smoke.md#end-to-end-file-browser-workflow-smoke`.
 - Hot-path policy: discovery/listing/opening are server/runtime work; typing, local paint, layout, scroll, and package JavaScript hot paths do not list directories or scan workspaces.
+- Client-local scroll: `src/masonry_sdui.rs::SduiNativeState` keeps a vertical `scroll_offset` (pixels) for the Clay-owned left file-browser panel. `scrolls_point(size, point)` routes `PointerEvent::Scroll` to the file browser only when the pointer is inside the left panel; otherwise `src/masonry_editor.rs::on_pointer_event` scrolls the editor as before. `scroll_vertical_pixels`/`scroll_lines` clamp the offset to `[0, max_scroll]` where `max_scroll = (content_height - viewport_height).max(0)`, measured during paint with a `push_clip_layer` over the sidebar so scrolled-out rows never paint over the editor. Scrolling reveals only rows already present in the bounded snapshot and never relists directories, calls the server, runs package JavaScript, or enqueues workspace actions. The offset resets to zero whenever a new `SduiSnapshot` or `SduiTreeUpdate` is applied.
 - Package rule: packages consume documented facades and inert commands; they do not contribute roots, marker tables, ignore rules, native widgets, or raw path passthrough.
 
 ## Invariants and Constraints
@@ -115,9 +118,10 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 ## Tests
 
 - `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, ignore rules, traversal rejection, cancellation, child counts, and diagnostics.
-- `src/shell/file_browser.rs`: SDUI tree shape, current-directory parent row, directory-row navigation command IDs, fuzzy session filtering, command IDs, and list action opening through the workspace API.
+- `src/shell/file_browser.rs`: SDUI tree shape, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, fuzzy session filtering, command IDs, and list action opening through the workspace API.
 - `src/server/command_execution.rs`: workspace open/directory-navigation/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
 - `src/server/connection.rs`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot` with parent and file rows.
+- `src/masonry_sdui.rs`: `file_browser_scroll_reveals_later_rows_without_relisting`, `file_browser_scrolled_action_hits_visible_row`, and `scrolls_point_routes_scroll_to_file_browser_only_inside_left_pane` verify client-local file-browser scroll, scrolled action hit testing, and the scroll-routing boundary.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`: public API docs/facades/registry coverage.
 - `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` and `tests/fixtures/configuration/file-browser-workflow/init.js`: Linux manual smoke documentation for launch, selected-folder grant, directory navigation, Rust/TypeScript/JavaScript package activation, and copy-selection clipboard behavior.
 - Focused commands:

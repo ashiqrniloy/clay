@@ -61,7 +61,7 @@ impl ClientBehaviorState {
         let Some(rule) = self.active.keymaps.iter().find(|rule| {
             rule.context == KeyBindingContext::EditorTextFocus
                 && rule.sequence.len() == 1
-                && rule.sequence[0] == *key
+                && key_matches_binding(&rule.sequence[0], key)
         }) else {
             return self.route_unbound_key(key);
         };
@@ -146,6 +146,18 @@ impl ClientBehaviorState {
         }
 
         RoutedBehavior::Unhandled
+    }
+}
+
+fn key_matches_binding(binding: &KeyStroke, event: &KeyStroke) -> bool {
+    if binding.modifiers != event.modifiers {
+        return false;
+    }
+    match (&binding.key, &event.key) {
+        (KeyCode::Character(binding), KeyCode::Character(event)) => {
+            binding == event || binding.eq_ignore_ascii_case(event)
+        }
+        _ => binding.key == event.key,
     }
 }
 
@@ -258,6 +270,24 @@ mod tests {
         assert_eq!(
             routed,
             RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("A".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn shifted_printable_unbound_character_still_inserts_shifted_text() {
+        let state = ClientBehaviorState::new(BehaviorManifest::minimal_text_editing(1)).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("!".to_string()),
+            modifiers: KeyModifiers {
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("!".to_string()), None)
         );
     }
 
@@ -411,6 +441,92 @@ mod tests {
             routed,
             RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
                 command_id: "clay.documents.clientOpenFileDialog".to_string(),
+                routing_policy: RoutingPolicy::ClientUiCommand,
+            })
+        );
+    }
+
+    #[test]
+    fn shifted_character_key_binding_matches_lowercase_manifest_rule() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.commands.push(CommandDeclaration::client_ui(
+            "clay.workspace.clientOpenFolderDialog",
+            "Open Folder Dialog",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("o".to_string()),
+                modifiers: KeyModifiers {
+                    shift: true,
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("O".to_string()),
+            modifiers: KeyModifiers {
+                shift: true,
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
+                command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+                routing_policy: RoutingPolicy::ClientUiCommand,
+            })
+        );
+    }
+
+    #[test]
+    fn configuration_shifted_folder_binding_routes_on_linux_key_event() {
+        // Locks the end-to-end configuration contract for the file-browser
+        // workflow: configuration publishes `Ctrl+Shift+O` with a lowercase
+        // manifest chord, and a Linux/GNOME key event reporting uppercase `O`
+        // (because Shift is held) must still route to the folder picker. This
+        // mirrors the workflow fixture's `bindKey("Ctrl+Shift+O",
+        // clientOpenFolderDialog())` contract.
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.commands.push(CommandDeclaration::client_ui(
+            "clay.workspace.clientOpenFolderDialog",
+            "Open Folder Dialog",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("o".to_string()),
+                modifiers: KeyModifiers {
+                    shift: true,
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("O".to_string()),
+            modifiers: KeyModifiers {
+                shift: true,
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
+                command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
                 routing_policy: RoutingPolicy::ClientUiCommand,
             })
         );

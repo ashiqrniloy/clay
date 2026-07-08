@@ -93,6 +93,8 @@ Phase 18.12 note: `clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileB
 
 End-to-end file-browser workflow note: `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed built-in client UI command ids. Binding them through `bindKey` installs inert client UI routes only. The folder picker still requires explicit native user selection plus the server's selected-path capability/root validation flow. Copy selection writes only the current native editor selection to the OS clipboard after a user-routed command; it does not expose clipboard read, paste, cut, arbitrary clipboard text, server/package clipboard access, or hidden background clipboard writes.
 
+Shifted character matching note: character-key chords match case-insensitively at route time. The chord parser stores the manifest character as lowercase (for example `Ctrl+Shift+O` stores `"o"`), and the client compares modifier sets exactly but character keys case-insensitively, so a Linux/GNOME key event reporting uppercase `"O"` (because Shift is held) still routes to the bound command. Unbound shifted printable input (for example `Shift+1`) still inserts its shifted text (`!`) into the editor. Modifier sets (`Ctrl`, `Alt`, `Shift`, `Super`) must match exactly.
+
 ## Options
 
 - `key` (`string`): Key chord, for example `"Ctrl+I"`.

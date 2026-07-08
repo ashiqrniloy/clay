@@ -714,20 +714,37 @@ impl Widget for EditorWidget {
                 }
             }
             PointerEvent::Up(_) | PointerEvent::Cancel(_) if ctx.is_active() => (false, true),
-            PointerEvent::Scroll(PointerScrollEvent { delta, .. }) => {
-                let changed = match delta {
-                    ScrollDelta::LineDelta(_, y) => {
-                        self.editor.scroll_lines((-*y).round() as isize)
-                    }
-                    ScrollDelta::PixelDelta(position) => {
-                        let logical = position.to_logical::<f64>(ctx.get_scale_factor());
-                        self.editor.scroll_vertical_pixels(-logical.y)
-                    }
-                    ScrollDelta::PageDelta(_, y) => {
-                        self.editor.scroll_lines((-*y).round() as isize)
-                    }
-                };
-                (changed, changed)
+            PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {
+                let point = ctx.local_position(state.position);
+                if self.sdui.scrolls_point(ctx.size(), point) {
+                    let changed = match delta {
+                        ScrollDelta::LineDelta(_, y) => {
+                            self.sdui.scroll_lines(ctx.size(), (-*y).round() as isize)
+                        }
+                        ScrollDelta::PixelDelta(position) => {
+                            let logical = position.to_logical::<f64>(ctx.get_scale_factor());
+                            self.sdui.scroll_vertical_pixels(ctx.size(), -logical.y)
+                        }
+                        ScrollDelta::PageDelta(_, y) => {
+                            self.sdui.scroll_lines(ctx.size(), (-*y).round() as isize)
+                        }
+                    };
+                    (changed, changed)
+                } else {
+                    let changed = match delta {
+                        ScrollDelta::LineDelta(_, y) => {
+                            self.editor.scroll_lines((-*y).round() as isize)
+                        }
+                        ScrollDelta::PixelDelta(position) => {
+                            let logical = position.to_logical::<f64>(ctx.get_scale_factor());
+                            self.editor.scroll_vertical_pixels(-logical.y)
+                        }
+                        ScrollDelta::PageDelta(_, y) => {
+                            self.editor.scroll_lines((-*y).round() as isize)
+                        }
+                    };
+                    (changed, changed)
+                }
             }
             _ => (false, false),
         };
@@ -1377,6 +1394,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn opening_second_file_browser_file_replaces_editor_snapshot() {
+        let mut widget = EditorWidget::default();
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "first.md".to_string(),
+                },
+                text: "# first\n".to_string(),
+            })
+        );
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 43,
+                    version: 1,
+                    access: DocumentAccess::Editable { lease_id: 9 },
+                    lease_id: Some(9),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "src/main.rs".to_string(),
+                },
+                text: "fn main() {}\n".to_string(),
+            })
+        );
+
+        assert_eq!(widget.editor.visible_text(), "fn main() {}\n");
+        assert_eq!(widget.editor.document_state().document_id, 43);
+        assert_eq!(widget.editor.document_state().document_version, 1);
+        assert_eq!(
+            widget.status_text(),
+            "Clay — Connected — Editable — doc 43 — v1"
+        );
+    }
+
     #[tokio::test]
     async fn opened_file_edits_continue_as_deltas() {
         let (queue, mut receiver) = ClientEditQueue::bounded(4);
@@ -1558,6 +1617,51 @@ mod tests {
             widget
                 .editor_local_point(size, masonry::kurbo::Point::new(100.0, 80.0))
                 .is_none()
+        );
+        assert_eq!(
+            widget.editor_local_point(size, masonry::kurbo::Point::new(300.0, 80.0)),
+            Some(masonry::kurbo::Point::new(60.0, 80.0))
+        );
+    }
+
+    #[test]
+    fn editor_pointer_hit_testing_uses_non_overlapping_editor_region_after_open() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.apply_connection_event(ClientConnectionEvent::SduiSnapshot {
+            client_id: 11,
+            tree: sdui_tree("Workspace"),
+        });
+        // Opening a workspace file swaps the active document ID away from the
+        // bootstrap document the SDUI editor view still binds. The editor main
+        // region must still exclude the Clay-owned left slot, so a click in the
+        // left file browser does not place a caret under the panel.
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 1,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "src/main.rs".to_string(),
+                },
+                text: "fn main() {}\n".to_string(),
+            })
+        );
+
+        let size = masonry::kurbo::Size::new(900.0, 600.0);
+        let main = widget.editor_main_rect(size);
+        assert_eq!(main.x0, 240.0);
+        assert_eq!(main.x1, 900.0);
+        assert!(
+            widget
+                .editor_local_point(size, masonry::kurbo::Point::new(100.0, 80.0))
+                .is_none(),
+            "clicks in the left file-browser pane must not place a caret"
         );
         assert_eq!(
             widget.editor_local_point(size, masonry::kurbo::Point::new(300.0, 80.0)),

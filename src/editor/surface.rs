@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use masonry::core::PaintCtx;
-use masonry::kurbo::{Affine, Circle, Point, Rect};
+use masonry::kurbo::{Affine, Point, Rect};
 use masonry::peniko::{Color, Fill};
 
 use crate::client::behavior::{
@@ -28,7 +28,6 @@ use super::selection::SelectionState;
 use super::viewport::{Viewport, visible_line_count_from_height};
 
 const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
-const ACCENT_COLOR: Color = Color::from_rgb8(0x8a, 0x6f, 0xff);
 const TEXT_COLOR: Color = Color::from_rgb8(0xf4, 0xf1, 0xff);
 const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
 const SELECTION_COLOR: Color = Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66);
@@ -38,6 +37,11 @@ const DIAGNOSTIC_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0x4d, 0x6d, 0
 const SEARCH_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0xd1, 0x66, 0x45);
 const CARET_COLOR: Color = Color::from_rgb8(0xff, 0xff, 0xff);
 const CARET_WIDTH: f64 = 1.5;
+const SCROLLBAR_COLOR: Color = Color::from_rgba8(0xb9, 0xb2, 0xd6, 0x99);
+const SCROLLBAR_TRACK_COLOR: Color = Color::from_rgba8(0xff, 0xff, 0xff, 0x14);
+const SCROLLBAR_WIDTH: f64 = 8.0;
+const SCROLLBAR_MARGIN: f64 = 4.0;
+const SCROLLBAR_MIN_THUMB: f64 = 24.0;
 pub(super) const TEXT_INSET: f64 = 48.0;
 pub(super) const TEXT_FONT_SIZE: f32 = 20.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
@@ -787,17 +791,10 @@ impl EditorSurface {
         self.update_visible_line_count_for_height(height);
 
         scene.push_clip_layer(Affine::IDENTITY, &rect);
-        let canvas = Rect::new(
-            rect.x0 + 24.0,
-            rect.y0 + 24.0,
-            (rect.x0 + width - 24.0).max(rect.x0 + 24.0),
-            (rect.y0 + height - 24.0).max(rect.y0 + 24.0),
-        );
-        scene.fill(Fill::NonZero, Affine::IDENTITY, PANEL_COLOR, None, &canvas);
-
-        let radius = (width.min(height) * 0.12).clamp(32.0, 96.0);
-        let circle = Circle::new((rect.x0 + width - 72.0, rect.y0 + height - 72.0), radius);
-        scene.fill(Fill::NonZero, Affine::IDENTITY, ACCENT_COLOR, None, &circle);
+        // Paint the editor background across the full editor rect. There is no
+        // visible inset card or decorative accent circle; a small text inset
+        // keeps text from hugging the edges.
+        scene.fill(Fill::NonZero, Affine::IDENTITY, PANEL_COLOR, None, &rect);
 
         let max_width = (width - (TEXT_INSET * 2.0)).max(1.0) as f32;
         let available_height = (height - (TEXT_INSET * 2.0)).max(0.0);
@@ -810,7 +807,65 @@ impl EditorSurface {
             focused,
             (rect.x0, rect.y0),
         );
+        self.paint_vertical_scrollbar(scene, rect, available_height);
         scene.pop_layer();
+    }
+
+    /// Compute the vertical scrollbar thumb rect for the editor `rect`, or
+    /// `None` when the content fits (no scrollable overflow). Shared between
+    /// paint and tests so the thumb position is deterministic and never depends
+    /// on rendered pixels.
+    pub(crate) fn scrollbar_thumb_rect(&self, rect: Rect) -> Option<Rect> {
+        let max_scroll = self.last_visual_max_scroll_y;
+        if !max_scroll.is_finite() || max_scroll <= 0.0 {
+            return None;
+        }
+        let available_height = (rect.height() - (TEXT_INSET * 2.0)).max(0.0);
+        let track_y0 = rect.y0 + TEXT_INSET;
+        let track_y1 = rect.y0 + TEXT_INSET + available_height;
+        let track_height = (track_y1 - track_y0).max(0.0);
+        let content = available_height + max_scroll;
+        let ratio = if content > 0.0 {
+            (available_height / content).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let thumb_height = (ratio * track_height).max(SCROLLBAR_MIN_THUMB.min(track_height));
+        let scrollable_track = (track_height - thumb_height).max(0.0);
+        let frac = (self.visual_scroll_y / max_scroll).clamp(0.0, 1.0);
+        let thumb_y0 = track_y0 + frac * scrollable_track;
+        let x1 = rect.x1 - SCROLLBAR_MARGIN;
+        let x0 = x1 - SCROLLBAR_WIDTH;
+        Some(Rect::new(x0, thumb_y0, x1, thumb_y0 + thumb_height))
+    }
+
+    fn paint_vertical_scrollbar(
+        &mut self,
+        scene: &mut masonry::vello::Scene,
+        rect: Rect,
+        available_height: f64,
+    ) {
+        let track_y0 = rect.y0 + TEXT_INSET;
+        let track_y1 = rect.y0 + TEXT_INSET + available_height;
+        let x1 = rect.x1 - SCROLLBAR_MARGIN;
+        let x0 = x1 - SCROLLBAR_WIDTH;
+        let track = Rect::new(x0, track_y0, x1, track_y1);
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            SCROLLBAR_TRACK_COLOR,
+            None,
+            &track,
+        );
+        if let Some(thumb) = self.scrollbar_thumb_rect(rect) {
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                SCROLLBAR_COLOR,
+                None,
+                &thumb,
+            );
+        }
     }
 
     fn paint_text(
@@ -1427,6 +1482,104 @@ mod tests {
         KeyStroke, RoutingPolicy, TabMode,
     };
     use crate::shell::CompletionMenuAcceptAction;
+    use masonry::kurbo::Rect;
+
+    #[test]
+    fn editor_surface_paint_has_no_decorative_accent_circle() {
+        // Source guard: the permanent purple bottom-right accent circle was
+        // removed. If it returns, this test fails fast. The guard targets the
+        // Circle shape primitive used only for that decoration.
+        let source = include_str!("surface.rs");
+        let paint = source
+            .split("mod tests")
+            .next()
+            .expect("non-test editor surface source");
+        assert!(
+            !paint.contains("Circle::new"),
+            "editor surface must not paint a decorative circle"
+        );
+    }
+
+    #[test]
+    fn editor_surface_uses_full_rect_background_without_visible_card_inset() {
+        // Source guard: the 24px inset card/canvas rect has been removed; the
+        // background is filled across the full editor rect.
+        let source = include_str!("surface.rs");
+        let paint = source
+            .split("fn paint_in_rect")
+            .nth(1)
+            .expect("paint_in_rect body");
+        let body = paint.split("fn paint_text").next().expect("paint body");
+        assert!(
+            body.contains("scene.fill(Fill::NonZero, Affine::IDENTITY, PANEL_COLOR, None, &rect)"),
+            "editor background must fill the full editor rect"
+        );
+        assert!(
+            !body.contains("+ 24.0"),
+            "editor paint must not reintroduce a visible 24px inset card"
+        );
+    }
+
+    fn editor_with_scroll_bounds(max_scroll_y: f64) -> EditorSurface {
+        let mut editor = EditorSurface::default();
+        editor.set_visual_scroll_bounds_for_test(max_scroll_y);
+        editor
+    }
+
+    #[test]
+    fn editor_scrollbar_thumb_reflects_visual_scroll_position() {
+        let rect = Rect::new(240.0, 0.0, 900.0, 600.0);
+        let mut editor = editor_with_scroll_bounds(2000.0);
+
+        let top = editor.scrollbar_thumb_rect(rect).expect("scrollable thumb");
+        // Scrolling down moves the thumb down without changing its height.
+        editor.scroll_vertical_pixels(700.0);
+        let scrolled = editor.scrollbar_thumb_rect(rect).expect("scrollable thumb");
+        assert!(
+            scrolled.y0 > top.y0,
+            "thumb moves down as visual_scroll_y grows"
+        );
+        assert!((scrolled.height() - top.height()).abs() < 1e-6);
+        // Reaching the bottom pins the thumb to the bottom of the track.
+        editor.scroll_vertical_pixels(2000.0);
+        let bottom = editor.scrollbar_thumb_rect(rect).expect("scrollable thumb");
+        assert!(bottom.y1 <= rect.y1 - TEXT_INSET + 0.5);
+        assert!(bottom.y1 > scrolled.y1);
+    }
+
+    #[test]
+    fn editor_scrollbar_hidden_when_content_fits() {
+        let rect = Rect::new(240.0, 0.0, 900.0, 600.0);
+        let editor = editor_with_scroll_bounds(0.0);
+        assert!(editor.scrollbar_thumb_rect(rect).is_none());
+    }
+
+    #[test]
+    fn editor_scrollbar_stays_inside_main_editor_region_with_left_browser() {
+        // The left file browser occupies [0, 240]; the editor main region is
+        // [240, 900]. The scrollbar thumb must stay inside the editor rect and
+        // never cross into the file browser or past the editor's right edge.
+        let rect = Rect::new(240.0, 0.0, 900.0, 600.0);
+        let mut editor = editor_with_scroll_bounds(1500.0);
+        editor.scroll_vertical_pixels(400.0);
+        let thumb = editor.scrollbar_thumb_rect(rect).expect("scrollable thumb");
+        assert!(
+            thumb.x0 >= rect.x0,
+            "scrollbar must not overlap the file browser"
+        );
+        assert!(
+            thumb.x1 <= rect.x1,
+            "scrollbar must stay left of the editor right edge"
+        );
+        assert!(
+            thumb.y0 >= rect.y0,
+            "scrollbar must stay below the editor top"
+        );
+        assert!(
+            thumb.y1 <= rect.y1,
+            "scrollbar must stay above the editor bottom"
+        );
+    }
 
     fn generated_lines(line_count: usize) -> String {
         let mut text = String::new();

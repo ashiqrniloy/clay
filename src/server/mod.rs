@@ -476,11 +476,10 @@ impl IpcServer {
 /// Outcome of applying a [`js_runtime::ClayRuntimeEvaluation`]'s shared
 /// outputs to server state.
 ///
-/// Built by [`apply_runtime_outputs`]; both the server-startup path
-/// (`IpcServer::apply_runtime_evaluation`) and the selected-file-open path
-/// (`connection::open_document_followup_messages`) compose their
-/// flow-specific client messages from this single result so that behavior and
-/// SDUI state mutation + validation live in exactly one place.
+/// Built by [`apply_runtime_outputs`] for explicit runtime/config publication
+/// and [`apply_runtime_outputs_without_sdui`] for open-document follow-ups.
+/// This keeps Clay-owned workspace chrome separate from package/open-time SDUI
+/// while preserving one result shape for behavior/decorations diagnostics.
 #[derive(Default)]
 pub(crate) struct RuntimeOutputApplication {
     /// `Some(Ok(installed))` when a behavior manifest replaced the active
@@ -524,8 +523,8 @@ impl RuntimeOutputApplication {
     }
 }
 
-/// Apply the client-independent outputs of a runtime evaluation to shared
-/// server state: the behavior manifest and the per-document SDUI tree.
+/// Apply explicit runtime/config outputs to shared server state: behavior and
+/// per-document SDUI tree.
 ///
 /// `ui_contributions` on the evaluation are intentionally not applied here:
 /// the shell owns the package-UI registry; `IpcServer` does not hold one to
@@ -565,6 +564,33 @@ pub(crate) async fn apply_runtime_outputs(
     RuntimeOutputApplication {
         behavior: behavior_out,
         sdui: sdui_out,
+        decorations: evaluation.published_decoration_set.clone(),
+    }
+}
+
+/// Apply open-document runtime outputs without replacing shared SDUI state.
+///
+/// Open-time classification may load packages or activate modes, but that path
+/// must not erase Clay-owned file-browser validation state. Explicit runtime
+/// SDUI publication still goes through [`apply_runtime_outputs`].
+pub(crate) async fn apply_runtime_outputs_without_sdui(
+    evaluation: &js_runtime::ClayRuntimeEvaluation,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+) -> RuntimeOutputApplication {
+    let behavior_out = match &evaluation.behavior_manifest {
+        Some(manifest) => Some(
+            behavior
+                .lock()
+                .await
+                .publish_replacement(manifest.clone())
+                .map_err(|_| ()),
+        ),
+        None => None,
+    };
+
+    RuntimeOutputApplication {
+        behavior: behavior_out,
+        sdui: None,
         decorations: evaluation.published_decoration_set.clone(),
     }
 }
@@ -883,9 +909,15 @@ mod runtime_outputs_tests {
 
     use tokio::sync::Mutex;
 
-    use super::{ActiveBehaviorManifest, StaticSduiState, apply_runtime_outputs};
+    use super::{
+        ActiveBehaviorManifest, StaticSduiState, apply_runtime_outputs,
+        apply_runtime_outputs_without_sdui,
+    };
     use crate::{
-        protocol::{BehaviorManifest, DecorationSet, DocumentId},
+        protocol::{
+            BehaviorManifest, DecorationSet, DocumentId, SduiActionIntent, SduiActionSource,
+            SduiNodeId,
+        },
         server::{js_runtime::ClayRuntimeEvaluation, sdui::default_document_tree},
     };
 
@@ -950,6 +982,38 @@ mod runtime_outputs_tests {
             2,
             "shared behavior advanced"
         );
+    }
+
+    #[tokio::test]
+    async fn open_time_runtime_sdui_output_does_not_replace_workspace_browser_state() {
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = Arc::new(Mutex::new(StaticSduiState::for_document(1, 1)));
+        let evaluation = ClayRuntimeEvaluation {
+            op_records: vec![],
+            published_sdui_tree: Some(default_document_tree(2, 1)),
+            published_decoration_set: Some(empty_decoration_set(1)),
+            parse_handlers: vec![],
+            js_parse_handlers: vec![],
+            behavior_manifest: Some(valid_manifest()),
+            ui_contributions: Default::default(),
+            syntax_grammars: vec![],
+            completion_providers: vec![],
+        };
+
+        let application = apply_runtime_outputs_without_sdui(&evaluation, &behavior).await;
+
+        assert!(application.sdui.is_none(), "open-time SDUI is ignored");
+        assert!(application.behavior.is_some_and(|result| result.is_ok()));
+        assert!(application.decorations.is_some());
+        sdui.lock()
+            .await
+            .validate_action(&SduiActionIntent::command(
+                "workspace.refresh",
+                SduiActionSource::Button {
+                    node_id: SduiNodeId(5),
+                },
+            ))
+            .expect("original workspace browser action still validates");
     }
 
     /// An SDUI tree bound to a different document fails per-document

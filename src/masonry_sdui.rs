@@ -76,6 +76,14 @@ pub struct SduiNativeState {
     actions: Vec<SduiVisibleAction>,
     package_ui: PackageUiRuntimeState,
     active_menu: Option<TransientMenuSession>,
+    // Client-local vertical scroll offset (pixels) for the Clay-owned left
+    // file-browser panel. Scroll reveals already-listed rows only; it never
+    // relists directories or calls the server.
+    scroll_offset: f64,
+    // Last measured content (rows) and viewport heights of the left panel,
+    // captured during paint so scroll clamping can run without repainting.
+    content_height: f64,
+    viewport_height: f64,
 }
 
 impl SduiNativeState {
@@ -88,6 +96,9 @@ impl SduiNativeState {
             actions: Vec::new(),
             package_ui: PackageUiRuntimeState::new(),
             active_menu: None,
+            scroll_offset: 0.0,
+            content_height: 0.0,
+            viewport_height: 0.0,
         }
     }
 
@@ -148,6 +159,7 @@ impl SduiNativeState {
         self.ui_version = tree.ui_version;
         self.root_id = Some(tree.root_id);
         self.nodes = tree.nodes.into_iter().map(|node| (node.id, node)).collect();
+        self.scroll_offset = 0.0;
         self.rebuild_derived_state();
     }
 
@@ -177,6 +189,7 @@ impl SduiNativeState {
             }
         }
         self.ui_version = update.new_ui_version;
+        self.scroll_offset = 0.0;
         self.rebuild_derived_state();
         true
     }
@@ -219,6 +232,35 @@ impl SduiNativeState {
             .iter()
             .find(|action| action.rect.contains(point))
             .map(|action| action.intent.clone())
+    }
+
+    /// True when `point` lies inside the Clay-owned left file-browser panel,
+    /// i.e. scroll events here should scroll the file browser, not the editor.
+    pub(crate) fn scrolls_point(&self, size: Size, point: Point) -> bool {
+        sdui_panel_left_slot_rect(size, self).is_some_and(|rect| rect.contains(point))
+    }
+
+    /// Scroll the left file browser by `delta` pixels (positive = down). Returns
+    /// true when the scroll offset changed. Client-local paint math only.
+    pub(crate) fn scroll_vertical_pixels(&mut self, size: Size, delta: f64) -> bool {
+        let viewport = sdui_panel_left_slot_rect(size, self).map_or(0.0, |r| r.height());
+        self.viewport_height = viewport;
+        let max_scroll = (self.content_height - self.viewport_height).max(0.0);
+        let next = (self.scroll_offset - delta).clamp(0.0, max_scroll);
+        if next == self.scroll_offset {
+            return false;
+        }
+        self.scroll_offset = next;
+        true
+    }
+
+    /// Scroll the left file browser by whole rows (positive = down).
+    pub(crate) fn scroll_lines(&mut self, size: Size, lines: isize) -> bool {
+        self.scroll_vertical_pixels(size, lines as f64 * sdui_theme_style().row_height)
+    }
+
+    pub(crate) fn scroll_offset(&self) -> f64 {
+        self.scroll_offset
     }
 
     pub(crate) fn observable_snapshot(&self, widget_size: Size) -> SduiObservableSnapshot {
@@ -324,8 +366,14 @@ impl SduiNativeState {
         let Some(sidebar) = sdui_panel_left_slot_rect(size, self) else {
             return;
         };
-        let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding;
+        self.viewport_height = sidebar.height();
+        let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding - self.scroll_offset;
         self.collect_action_regions(root_id, 0, &mut cursor_y, sidebar.width(), sidebar.x0);
+        self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
+        let max_scroll = (self.content_height - self.viewport_height).max(0.0);
+        if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
     }
 
     pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
@@ -341,7 +389,11 @@ impl SduiNativeState {
                 None,
                 &sidebar,
             );
-            let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding;
+            self.viewport_height = sidebar.height();
+            // Clip panel content to the sidebar so scrolled-out rows do not
+            // paint over the editor main region.
+            scene.push_clip_layer(Affine::IDENTITY, &sidebar);
+            let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding - self.scroll_offset;
             self.paint_node(
                 ctx,
                 scene,
@@ -351,6 +403,14 @@ impl SduiNativeState {
                 sidebar.width(),
                 sidebar.x0,
             );
+            // Content height is independent of the current scroll offset: add
+            // it back so clamping reflects the full row extent.
+            self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
+            scene.pop_layer();
+            let max_scroll = (self.content_height - self.viewport_height).max(0.0);
+            if self.scroll_offset > max_scroll {
+                self.scroll_offset = max_scroll;
+            }
         }
         self.paint_package_overlays(ctx, scene);
     }
@@ -1163,19 +1223,22 @@ pub fn editor_region(size: Size, sdui: &SduiNativeState) -> Rect {
 pub fn editor_region_for_document(
     size: Size,
     sdui: &SduiNativeState,
-    document_id: DocumentId,
+    _document_id: DocumentId,
 ) -> Rect {
+    // Reserve the Clay-owned left file-browser slot whenever a Clay-owned SDUI
+    // panel exists, even if its editor binding still points at the bootstrap
+    // document while a freshly opened workspace document is active. Reserving
+    // by panel presence (not binding match) keeps the editor main region from
+    // overlapping the left file browser after a workspace file opens.
     let full_rect = size.to_rect();
-    let package_main_rect = sdui
-        .package_ui
-        .slot_layout()
-        .compute_geometry(full_rect)
-        .main_rect;
-    match sdui.editor_binding() {
-        Some(binding) if binding.document_id == document_id => editor_region(size, sdui),
-        _ if package_main_rect != full_rect => package_main_rect,
-        _ => full_rect,
+    let mut layout = sdui.package_ui.slot_layout();
+    if (sdui.root_id.is_some() || sdui.editor_binding().is_some())
+        && size.width > SIDEBAR_WIDTH + 100.0
+        && !layout.contains_slot(PaneSlotId::Left)
+    {
+        layout = layout.with_fixed_slot(fixed_sdui_left_slot());
     }
+    layout.compute_geometry(full_rect).main_rect
 }
 
 fn sdui_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
@@ -1590,13 +1653,138 @@ mod tests {
     }
 
     #[test]
-    fn unknown_editor_view_document_uses_safe_full_editor_region() {
+    fn workspace_browser_reserves_left_slot_after_document_id_changes() {
         let mut state = SduiNativeState::empty();
         state.apply_snapshot(sample_tree());
 
+        // The active document ID (999) differs from the SDUI editor binding
+        // (document 7), as happens when a freshly opened workspace file becomes
+        // active while the Clay-owned file browser still binds the bootstrap
+        // document. The editor main region must still exclude the left
+        // file-browser slot instead of falling back to the full rect and
+        // overlapping the panel.
         let region = editor_region_for_document(Size::new(900.0, 600.0), &state, 999);
 
-        assert_eq!(region, Size::new(900.0, 600.0).to_rect());
+        assert_eq!(region.x0, SIDEBAR_WIDTH);
+        assert_eq!(region.x1, 900.0);
+        assert_eq!(region.y0, 0.0);
+        assert_eq!(region.y1, 600.0);
+    }
+
+    fn browser_tree_with_rows(row_count: usize) -> SduiTree {
+        let root = SduiNodeId(1);
+        let panel = SduiNodeId(2);
+        let list = SduiNodeId(3);
+        let items: Vec<SduiListItem> = (0..row_count)
+            .map(|index| SduiListItem {
+                id: format!("item-{index}"),
+                label: format!("Row {index}"),
+                detail: None,
+                action: Some(SduiActionIntent::command(
+                    "clay.workspace.openFile",
+                    SduiActionSource::ListItem {
+                        node_id: list,
+                        item_id: format!("item-{index}"),
+                    },
+                )),
+            })
+            .collect();
+        SduiTree {
+            ui_version: 1,
+            root_id: root,
+            nodes: vec![
+                SduiNode::new(
+                    root,
+                    SduiNodeKind::Flex {
+                        direction: SduiFlexDirection::Row,
+                        children: vec![panel],
+                    },
+                ),
+                SduiNode::new(
+                    panel,
+                    SduiNodeKind::Panel {
+                        title: "Workspace".to_string(),
+                        children: vec![list],
+                    },
+                ),
+                SduiNode::new(list, SduiNodeKind::List { items }),
+            ],
+        }
+    }
+
+    #[test]
+    fn file_browser_scroll_reveals_later_rows_without_relisting() {
+        // A bounded snapshot with more rows than the viewport height. Scrolling
+        // is client-local paint/action math: it never relists directories,
+        // calls the server, runs JS, or enqueues workspace actions.
+        let size = Size::new(900.0, 120.0);
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(browser_tree_with_rows(30));
+        state.rebuild_action_regions_for_test(size);
+
+        assert!(state.scroll_offset() == 0.0);
+        assert!(state.content_height > state.viewport_height);
+
+        // Scroll "down" (delta < 0 reveals later rows): offset increases.
+        assert!(state.scroll_vertical_pixels(size, -72.0));
+        assert_eq!(state.scroll_offset(), 72.0);
+        // No server round-trip exists on this type; the method is pure paint
+        // math. Clamping at the top edge keeps non-positive deltas inert.
+        assert!(!state.scroll_vertical_pixels(size, 10.0_f64) || state.scroll_offset() < 72.0);
+    }
+
+    #[test]
+    fn file_browser_scrolled_action_hits_visible_row() {
+        // After scrolling, clicking a screen position must activate the row
+        // currently under the pointer, not the row that occupied that pixel
+        // before scrolling.
+        let size = Size::new(900.0, 120.0);
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(browser_tree_with_rows(30));
+        state.rebuild_action_regions_for_test(size);
+
+        let sidebar = sdui_panel_left_slot_rect(size, &state).expect("left file-browser panel");
+        let click_point = Point::new(
+            sidebar.x0 + sdui_theme_style().panel_padding + 10.0 + 4.0,
+            sidebar.y0 + sdui_theme_style().panel_padding + sdui_theme_style().row_height + 4.0,
+        );
+
+        let before = state
+            .action_for_point(click_point)
+            .expect("first visible row");
+        let SduiActionSource::ListItem { item_id, .. } = &before.source else {
+            panic!("expected list-item action source");
+        };
+        assert_eq!(item_id, "item-0");
+
+        // Scroll down ~2 rows. The pixel that showed item-0 now shows item-2.
+        let row_pitch = sdui_theme_style().row_height + 10.0;
+        assert!(state.scroll_vertical_pixels(size, -(row_pitch * 2.0)));
+        state.rebuild_action_regions_for_test(size);
+
+        let after = state
+            .action_for_point(click_point)
+            .expect("scrolled-in row");
+        let SduiActionSource::ListItem { item_id, .. } = &after.source else {
+            panic!("expected list-item action source after scroll");
+        };
+        assert_eq!(item_id, "item-2");
+    }
+
+    #[test]
+    fn scrolls_point_routes_scroll_to_file_browser_only_inside_left_pane() {
+        // Scroll routing boundary: only points inside the left file-browser
+        // panel route to the SDUI scroll path; everything else keeps the
+        // existing editor scroll behavior.
+        let size = Size::new(900.0, 600.0);
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(browser_tree_with_rows(3));
+
+        let sidebar = sdui_panel_left_slot_rect(size, &state).expect("left file-browser panel");
+        assert!(state.scrolls_point(size, Point::new(sidebar.x0 + 8.0, sidebar.y0 + 8.0)));
+        // Just to the right of the file browser belongs to the editor.
+        assert!(!state.scrolls_point(size, Point::new(sidebar.x1 + 8.0, sidebar.y0 + 8.0)));
+        assert!(!state.scrolls_point(size, Point::new(size.width - 8.0, size.height - 8.0)));
     }
 
     #[test]

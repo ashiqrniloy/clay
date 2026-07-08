@@ -22,9 +22,64 @@ fn markdown_package_reference() -> String {
     .expect("read docs/reference/packages/markdown.md")
 }
 
+fn manual_file_browser_bug_contract() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/development/manual-file-browser-workflow-bug-contract.md"
+    ))
+    .expect("read docs/development/manual-file-browser-workflow-bug-contract.md")
+}
+
 fn wiki_doc(path: &str) -> String {
     std::fs::read_to_string(format!("{}/{}", env!("CARGO_MANIFEST_DIR"), path))
         .unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
+#[test]
+fn manual_file_browser_workflow_bug_contract_locks_reported_failures() {
+    let contract = manual_file_browser_bug_contract();
+
+    for expected in [
+        "Manual File Browser Workflow Bug Contract",
+        "cargo run",
+        "~/.config/clay/init.js",
+        "do not use `cargo run -- smoke-gui --config-fixture file-browser-workflow`",
+        "Ctrl+Shift+O",
+        "clientOpenFolderDialog()",
+        "lowercase `o`",
+        "uppercase `O`",
+        "ActionSourceMismatch(SduiNodeId(5))",
+        "row id is `main.rs`",
+        "action source item id is `src/main.rs`",
+        "UnknownActionCommand(\"clay.workspace.openFile\")",
+        "clay.parse.open_activation_timeout",
+        "second file contents do not replace the editor buffer",
+        "editor region falls back to the full rect",
+        "bottom-right purple circle",
+        "inset card/padding region",
+        "File browser cannot scroll",
+        "no vertical scrollbar/thumb",
+        "keybinding route / behavior manifest lookup",
+        "SDUI list/action identity",
+        "server `StaticSduiState` workspace-browser validation",
+        "editor region computation / shell pane layout",
+        "editor paint chrome",
+        "SDUI scroll state / pointer scroll routing",
+        "editor scroll chrome",
+        "must not open a real GUI",
+        "must not run package JavaScript, server IPC, filesystem work, shell commands, or full-document serialization",
+        "Packages still cannot call raw `Deno.core.ops`",
+        "keybinding_shifted_character_routes_client_ui_command",
+        "file_browser_nested_file_action_source_matches_list_item_id",
+        "file_browser_actions_still_validate_after_markdown_open_timeout",
+        "opening_second_workspace_file_replaces_editor_snapshot",
+        "file_browser_left_slot_still_reserves_editor_region_after_document_open",
+    ] {
+        assert!(
+            contract.contains(expected),
+            "manual file browser bug contract must lock `{expected}`"
+        );
+    }
 }
 
 #[test]
@@ -183,6 +238,36 @@ fn end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract() {
         assert!(
             !fixture.contains(forbidden),
             "file-browser-workflow fixture must not use hidden/raw authority `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn end_to_end_file_browser_workflow_smoke_covers_cargo_run_config_path() {
+    let launch_doc = launch_smoke_doc();
+
+    // The real product workflow path must be documented alongside the
+    // fixture: a bare `cargo run` driven by `~/.config/clay/init.js`, with
+    // the Plan 044 regressions (shifted folder picker, nested `.rs` open,
+    // second-file replacement, file browser surviving Markdown activation,
+    // file-browser scroll, editor scroller, copy) as a manual checklist.
+    for expected in [
+        "Product `cargo run` configuration path",
+        "cargo run",
+        "~/.config/clay/init.js",
+        "Ctrl+Shift+O",
+        "src/main.rs",
+        "Opening a second file replaces the editor buffer",
+        "The file browser scrolls when there are many rows",
+        "The editor shows a slim vertical scrollbar thumb",
+        "copies only the selected UTF-8 text",
+        "Typing, paint, layout, pointer, and scroll stay client-local",
+        "selected-folder grants are server-validated",
+        "clipboard copy is write-only",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must cover the cargo run config path marker `{expected}`"
         );
     }
 }

@@ -269,7 +269,7 @@ impl FileBrowserEntry {
             command_id: command_id.to_string(),
             source: SduiActionSource::ListItem {
                 node_id: list_node_id,
-                item_id: relative.clone(),
+                item_id: self.name.clone(),
             },
             arguments: vec![
                 SduiActionArgument {
@@ -532,8 +532,43 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn file_browser_nested_file_row_source_id_matches_declared_item_id() {
+        let root = temp_workspace("browser-nested-source-id");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let browser =
+            FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();
+        let tree = browser.to_sdui_tree(1u64, 1u64);
+
+        let item = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => items.iter().find(|item| item.label == "main.rs"),
+                _ => None,
+            })
+            .expect("nested main.rs list item");
+        let action = item.action.as_ref().unwrap();
+        let SduiActionSource::ListItem { item_id, .. } = &action.source else {
+            panic!("expected list item source");
+        };
+
+        assert_eq!(item.id, "main.rs");
+        assert_eq!(item_id, &item.id);
+        assert!(action.arguments.iter().any(|arg| {
+            arg.name == "relativePath"
+                && arg.value == SduiActionValue::String("src/main.rs".to_string())
+        }));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
-    async fn file_browser_list_action_opens_file_through_workspace_api() {
+    async fn workspace_nested_file_action_opens_file_through_workspace_api() {
         use crate::packages::commands::CommandRegistry;
         use crate::server::command_execution::{
             CommandExecutionRequest, CommandExecutionStatus, CommandExecutionTarget,
@@ -564,6 +599,10 @@ mod tests {
             .find(|item| item.label == "main.rs")
             .expect("main.rs entry in src/");
         let action = item.action.as_ref().unwrap();
+        let SduiActionSource::ListItem { item_id, .. } = &action.source else {
+            panic!("expected list item source");
+        };
+        assert_eq!(item_id, &item.id);
 
         let arguments = {
             let mut obj = serde_json::Map::new();

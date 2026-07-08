@@ -998,7 +998,7 @@ async fn classify_open_document(
     metadata: &DocumentMetadata,
     text: &str,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
+    _sdui: &Arc<Mutex<StaticSduiState>>,
 ) -> Option<OpenModeActivation> {
     // Supply the open path's bounded leading-content slice and shebang line so
     // server-owned classification probes can route scripts (shebang) and
@@ -1056,7 +1056,7 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
     );
     let evaluation = js_runtime.evaluate_controlled_module(source).await.ok()?;
     let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
-    super::apply_runtime_outputs(&evaluation, metadata.document_id, behavior, sdui).await;
+    super::apply_runtime_outputs_without_sdui(&evaluation, behavior).await;
     let record = evaluation.op_records.last()?;
     let value: serde_json::Value = serde_json::from_str(record).ok()?;
     Some(OpenModeActivation {
@@ -1249,6 +1249,7 @@ await loadPackage("@clay/markdown");"#,
             js_runtime::ClayJsRuntimeService, parse_coordinator::ParseCoordinator,
             sdui::StaticSduiState, workspace::WorkspaceState,
         },
+        shell::file_browser::FileBrowserState,
     };
 
     #[tokio::test]
@@ -1364,6 +1365,71 @@ await loadPackage("@clay/markdown");"#,
             .unwrap();
         assert!(labels.iter().any(|label| label == "../"));
         assert!(labels.iter().any(|label| label == "main.rs"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn file_browser_action_survives_markdown_open_followup_diagnostic() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let root = temp_workspace("browser-survives-open-followup");
+        fs::write(root.join("note.md"), "# note\n").unwrap();
+
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let browser = FileBrowserState::from_workspace(&workspace_state_value, root_id).unwrap();
+        let tree = browser.to_sdui_tree(1u64, 1u64);
+        let action = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => items
+                    .iter()
+                    .find(|item| item.label == "note.md")
+                    .and_then(|item| item.action.clone()),
+                _ => None,
+            })
+            .expect("note.md file-browser action");
+        let sdui = empty_sdui_state();
+        sdui.lock()
+            .await
+            .replace_for_document_with_runtime_tree(1, tree)
+            .unwrap();
+
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+        let metadata = DocumentMetadata {
+            document_id: 2,
+            version: 1,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: root_id,
+            path: "note.md".to_string(),
+        };
+
+        let messages = super::open_document_followup_messages(
+            &metadata,
+            "# note\n",
+            &behavior,
+            &sdui,
+            1,
+            &runtime,
+            &coordinator,
+        )
+        .await;
+        assert!(messages.iter().any(|message| {
+            matches!(
+                message,
+                ServerMessage::BehaviorManifest(_) | ServerMessage::RuntimeDiagnostic(_)
+            )
+        }));
+        sdui.lock()
+            .await
+            .validate_action(&action)
+            .expect("file-browser action remains valid after open-time follow-up");
 
         let _ = fs::remove_dir_all(root);
     }

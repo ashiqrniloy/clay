@@ -925,6 +925,13 @@ fn end_to_end_file_browser_workflow_primitive_review() -> String {
     .expect("read end-to-end file browser workflow primitive review")
 }
 
+fn manual_file_browser_workflow_bugfix_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/manual-file-browser-workflow-bugfix-primitive-review.md",
+    ))
+    .expect("read manual file browser workflow bugfix primitive review")
+}
+
 fn phase18_13_git_discovery_primitive_review() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/phase18.13-git-discovery-primitive-review.md",
@@ -2114,6 +2121,92 @@ fn end_to_end_file_browser_workflow_primitive_review_records_inventory_and_gaps(
         assert!(
             review.contains(required),
             "end-to-end primitive review must record security boundary: {required}"
+        );
+    }
+}
+
+#[test]
+fn manual_file_browser_workflow_bugfix_primitive_review_records_root_causes() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = manual_file_browser_workflow_bugfix_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/manual-file-browser-workflow-bugfix-primitive-review.md"),
+        "docs/wiki/index.md must link the manual file browser bugfix primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("manual-file-browser-workflow-bugfix-primitive-review.md"),
+        "primitive architecture wiki must link the manual file browser bugfix primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Keybinding route and behavior manifests",
+        "Client UI command route",
+        "FileBrowserState and bounded workspace APIs",
+        "StaticSduiState validation",
+        "SduiNativeState rendering and local action regions",
+        "PaneSlotLayout and editor region computation",
+        "EditorSurface visual scroll and paint chrome",
+        "Open-document follow-ups",
+        "`KeyRoutingOverride`",
+        "`ClientUiCommandRoute`",
+        "`FileBrowserState`",
+        "`StaticSduiState`",
+        "`SduiNativeState`",
+        "`PaneSlotLayout`",
+        "`EditorSurface`",
+        "`WorkspaceState`",
+    ] {
+        assert!(
+            review.contains(required),
+            "manual file browser bugfix review must record inventory text: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Fix Map",
+        "`Ctrl+Shift+O` does not open folder picker",
+        "Nested `src/main.rs` fails with `ActionSourceMismatch`",
+        "Browser actions fail after Markdown activation",
+        "`clay.parse.open_activation_timeout` hangs workflow",
+        "Second file does not replace first",
+        "Editor overlaps file browser",
+        "Purple circle and visible card padding",
+        "File browser cannot scroll",
+        "Main text area lacks scroller",
+        "Row ID and action source item ID match exactly",
+        "Open-time package outputs cannot replace Clay-owned workspace browser validation state",
+        "Visible Clay-owned left slot reserves editor region independent of the active document ID",
+    ] {
+        assert!(
+            review.contains(required),
+            "manual file browser bugfix review must map root causes: {required}"
+        );
+    }
+
+    for required in [
+        "Rejected Approaches",
+        "Do not add Markdown-specific Rust branches",
+        "Do not add Rust/TypeScript/JavaScript-specific file-open branches",
+        "Do not relax `StaticSduiState::validate_action`",
+        "Do not route file-browser scrolling through server relisting",
+        "Do not add hidden JSON/TOML/ad hoc config keys",
+        "raw `Deno.core.ops`",
+        "Hot-Path and Security Boundaries",
+        "Client hot paths remain local",
+        "Server owns workspace/file authority",
+        "Client owns native rendering/input state",
+        "Packages still cannot read clipboard contents",
+    ] {
+        assert!(
+            review.contains(required),
+            "manual file browser bugfix review must record boundaries: {required}"
         );
     }
 }

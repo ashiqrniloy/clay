@@ -211,7 +211,8 @@ Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::ph
 
 ### End-to-end file browser workflow smoke
 
-This smoke validates the six-step app workflow on Linux, Clay's primary development and CI host:
+This smoke validates the six-step app workflow on Linux, Clay's primary development and CI host. The Plan 044 real-`cargo run` regressions are locked separately in [Manual File Browser Workflow Bug Contract](manual-file-browser-workflow-bug-contract.md).
+
 
 1. Open the Clay app.
 2. See the Clay-owned Workspace file browser.
@@ -243,6 +244,29 @@ bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 ```
+
+#### Product `cargo run` configuration path
+
+The smoke fixture above is the checked-in equivalent of the real end-user configuration path. To exercise the actual product workflow without a fixture, place the same shape in `~/.config/clay/init.js` and run a bare `cargo run`:
+
+```bash
+cargo run
+# with ~/.config/clay/init.js binding Ctrl+Shift+O to clientOpenFolderDialog(),
+# Ctrl+B to clay.workspace.toggleFileBrowser, and native Ctrl+C / Ctrl+Shift+C to copy
+```
+
+This is the regression-checked product path on Linux/GNOME. The shifted-character binding fix means `Ctrl+Shift+O` (manifest chord stored lowercase as `o`) now routes when the GNOME key event reports uppercase `O`. Manual verification mirrors the steps below but also covers the Plan 044 regressions:
+
+- `Ctrl+Shift+O` opens the native folder picker (shifted-character case-insensitive routing).
+- Selecting a folder adds it as a server-validated workspace root and refreshes the file browser.
+- Clicking nested files such as `src/main.rs` (`.rs`), `main.ts` (`.ts`), `main.js` (`.js`), and `.md` opens them through the generic open-document path; the row identity and action source now match for nested paths.
+- Opening a second file replaces the editor buffer with the new file's snapshot (second-file replacement).
+- The file browser keeps working after opening a Markdown file and after any `clay.parse.open_activation_timeout` diagnostic (Clay-owned workspace browser state is no longer replaced by open-time runtime SDUI).
+- The file browser scrolls when there are many rows (client-local paint/action scroll, no relisting or server calls).
+- The editor shows a slim vertical scrollbar thumb for long files and stays non-overlapping with the file browser.
+- Selecting text and pressing `Ctrl+C` (or `Ctrl+Shift+C`) copies only the selected UTF-8 text to the OS clipboard; a collapsed selection is a no-op.
+
+Typing, paint, layout, pointer, and scroll stay client-local/non-blocking throughout; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling. Security and authority are unchanged from the fixture path: selected-folder grants are server-validated, file opens are root-relative or selected-file validated, and clipboard copy is write-only.
 
 Manual Linux verification:
 
