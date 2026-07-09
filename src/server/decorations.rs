@@ -91,17 +91,22 @@ pub fn validate_decoration_set(
         if span.byte_start < set.viewport_byte_start || span.byte_end > set.viewport_byte_end {
             return Err(DecorationValidationError::SpanOutsideViewport { index });
         }
-        if span.style_token.trim().is_empty()
-            || span.style_token.contains('{')
-            || span.style_token.contains('}')
-        {
-            return Err(DecorationValidationError::EmptyStyleToken { index });
-        }
-        if !is_known_style_token(&span.style_token) {
-            return Err(DecorationValidationError::UnknownStyleToken {
-                index,
-                style_token: span.style_token.clone(),
-            });
+        // Plan 046 two-axis model: the free-form style-token string now lives in
+        // the optional `scope` escape. Production preserves the original string
+        // there via `DecorationSpan::from_style_token`, so the closed allowlist +
+        // injection guards apply to `scope` exactly as they did to `style_token`.
+        // A `scope`-less span is direct two-axis construction with a closed
+        // `token_type` (always valid), so nothing to validate for it here.
+        if let Some(scope) = span.scope.as_deref() {
+            if scope.trim().is_empty() || scope.contains('{') || scope.contains('}') {
+                return Err(DecorationValidationError::EmptyStyleToken { index });
+            }
+            if !is_known_style_token(scope) {
+                return Err(DecorationValidationError::UnknownStyleToken {
+                    index,
+                    style_token: scope.to_string(),
+                });
+            }
         }
         if let Some(package) = package {
             let provenance = &span.provenance;
@@ -359,18 +364,18 @@ mod tests {
             document_version,
             viewport_byte_start: byte_start,
             viewport_byte_end: byte_start + 64,
-            spans: vec![DecorationSpan {
+            spans: vec![DecorationSpan::from_style_token(
                 byte_start,
-                byte_end: byte_start + 5,
-                kind: DecorationKind::Syntax,
-                style_token: "markup.heading.1".to_string(),
-                priority: 10,
-                provenance: DecorationProvenance {
+                byte_start + 5,
+                DecorationKind::Syntax,
+                "markup.heading.1",
+                10,
+                DecorationProvenance {
                     package_name: "@clay/markdown".to_string(),
                     package_version: "0.1.0".to_string(),
                     package_prefix: "markdown".to_string(),
                 },
-            }],
+            )],
         }
     }
 

@@ -5,7 +5,7 @@ use clay::packages::record::assemble_package_record;
 use clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES;
 use clay::protocol::{
     BehaviorManifest, DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan,
-    DocumentAccess, ServerMessage, codec::Codec,
+    DocumentAccess, ServerMessage, TokenType, codec::Codec,
 };
 use clay::server::decorations::{DecorationValidationError, validate_decoration_publication};
 use serde_json::json;
@@ -60,14 +60,14 @@ fn decoration_set_for_range(
         document_version,
         viewport_byte_start: byte_start,
         viewport_byte_end: byte_end,
-        spans: vec![DecorationSpan {
+        spans: vec![DecorationSpan::from_style_token(
             byte_start,
-            byte_end: (byte_start + 5).min(byte_end),
-            kind: DecorationKind::Syntax,
-            style_token: "markup.heading.1".to_string(),
-            priority: 10,
-            provenance: provenance(),
-        }],
+            (byte_start + 5).min(byte_end),
+            DecorationKind::Syntax,
+            "markup.heading.1",
+            10,
+            provenance(),
+        )],
     }
 }
 
@@ -82,13 +82,15 @@ fn decoration_payload_rejected_when_exceeding_budget() {
     let package = decoration_package();
     let mut set = valid_set(3);
     set.spans = (0..DECORATION_PAYLOAD_BUDGET_BYTES as u64)
-        .map(|offset| DecorationSpan {
-            byte_start: offset,
-            byte_end: offset + 1,
-            kind: DecorationKind::Syntax,
-            style_token: "markup.heading.1".to_string(),
-            priority: 10,
-            provenance: provenance(),
+        .map(|offset| {
+            DecorationSpan::from_style_token(
+                offset,
+                offset + 1,
+                DecorationKind::Syntax,
+                "markup.heading.1",
+                10,
+                provenance(),
+            )
         })
         .collect();
     set.viewport_byte_end = DECORATION_PAYLOAD_BUDGET_BYTES as u64 + 1;
@@ -126,7 +128,7 @@ fn decoration_update_rejects_invalid_ranges_and_unknown_tokens() {
     ));
 
     let mut unknown_token = valid_set(3);
-    unknown_token.spans[0].style_token = "css:color:red".to_string();
+    unknown_token.spans[0].scope = Some("css:color:red".to_string());
     assert!(matches!(
         validate_decoration_publication(&package, 3, unknown_token).unwrap_err(),
         DecorationValidationError::UnknownStyleToken { .. }
@@ -147,22 +149,22 @@ fn generic_decoration_publication_accepts_language_package_spans() {
         viewport_byte_start: 0,
         viewport_byte_end: 32,
         spans: vec![
-            DecorationSpan {
-                byte_start: 0,
-                byte_end: 3,
-                kind: DecorationKind::Syntax,
-                style_token: "keyword.control".to_string(),
-                priority: 70,
-                provenance: provenance.clone(),
-            },
-            DecorationSpan {
-                byte_start: 8,
-                byte_end: 15,
-                kind: DecorationKind::Syntax,
-                style_token: "string.quoted".to_string(),
-                priority: 60,
+            DecorationSpan::from_style_token(
+                0,
+                3,
+                DecorationKind::Syntax,
+                "keyword.control",
+                70,
+                provenance.clone(),
+            ),
+            DecorationSpan::from_style_token(
+                8,
+                15,
+                DecorationKind::Syntax,
+                "string.quoted",
+                60,
                 provenance,
-            },
+            ),
         ],
     };
 
@@ -194,14 +196,14 @@ fn markdown_representative_decoration_payload_fits_budget_and_client_applies() {
     .into_iter()
     .map(|(needle, style_token, priority)| {
         let (byte_start, byte_end) = byte_range(text, needle);
-        DecorationSpan {
+        DecorationSpan::from_style_token(
             byte_start,
             byte_end,
-            kind: DecorationKind::Syntax,
-            style_token: style_token.to_string(),
+            DecorationKind::Syntax,
+            style_token,
             priority,
-            provenance: provenance(),
-        }
+            provenance(),
+        )
     })
     .collect();
     let set = DecorationSet {
@@ -228,6 +230,10 @@ fn markdown_representative_decoration_payload_fits_budget_and_client_applies() {
         text: text.to_string(),
         access: DocumentAccess::Editable { lease_id: 1 },
         behavior_manifest: BehaviorManifest::minimal_text_editing(0),
+        active_theme: clay::protocol::ActiveTheme {
+            specifier: "@clay/default".to_string(),
+            overrides: Vec::new(),
+        },
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
     assert!(widget.apply_connection_event(ClientConnectionEvent::DecorationSet(validated)));
@@ -318,6 +324,56 @@ fn decoration_transport_round_trips_through_protocol_codec() {
 }
 
 #[test]
+fn two_axis_decoration_span_round_trips_token_type_modifiers_and_scope() {
+    // Plan 046 task 3: lock the two-axis shape through the codec. The span
+    // carries `token_type` + `modifiers` + optional `scope` instead of the
+    // old free-form `style_token`; rkyv must preserve all three fields and the
+    // compat mapper must reproduce the closed-vocabulary classification.
+    use clay::protocol::Modifiers;
+    let mut set = valid_set(3);
+    set.spans[0].token_type = TokenType::Heading1;
+    set.spans[0].modifiers = Modifiers::BOLD | Modifiers::ITALIC;
+    set.spans[0].scope = Some("markup.heading.1".to_string());
+
+    let codec = Codec::default();
+    let frame = codec
+        .encode_server_message(&ServerMessage::DecorationSet(set.clone()))
+        .unwrap();
+    let decoded = codec.decode_server_message(&frame).unwrap();
+    let decoded_set = match decoded {
+        ServerMessage::DecorationSet(s) => s,
+        other => panic!("expected DecorationSet, got {other:?}"),
+    };
+
+    assert_eq!(
+        decoded_set, set,
+        "codec preserves token_type+modifiers+scope"
+    );
+    assert_eq!(decoded_set.spans[0].token_type, TokenType::Heading1);
+    assert!(decoded_set.spans[0].modifiers.contains(Modifiers::BOLD));
+    assert!(decoded_set.spans[0].modifiers.contains(Modifiers::ITALIC));
+    assert_eq!(
+        decoded_set.spans[0].scope.as_deref(),
+        Some("markup.heading.1")
+    );
+
+    // Compat mapper reproduces the closed-vocabulary classification for the
+    // baseline families so existing packages render unchanged.
+    assert_eq!(
+        TokenType::classify_style_token("keyword.control"),
+        (TokenType::Keyword, Modifiers::NONE)
+    );
+    assert_eq!(
+        TokenType::classify_style_token("markup.strong"),
+        (TokenType::Paragraph, Modifiers::BOLD)
+    );
+    assert_eq!(
+        TokenType::classify_style_token("punctuation.definition"),
+        (TokenType::Operator, Modifiers::NONE)
+    );
+}
+
+#[test]
 fn decoration_render_hook_applies_validated_spans_without_package_js() {
     let package = decoration_package();
     let set = validate_decoration_publication(&package, 3, valid_set(3)).unwrap();
@@ -328,6 +384,10 @@ fn decoration_render_hook_applies_validated_spans_without_package_js() {
         text: "hello markdown".to_string(),
         access: DocumentAccess::Editable { lease_id: 1 },
         behavior_manifest: BehaviorManifest::minimal_text_editing(0),
+        active_theme: clay::protocol::ActiveTheme {
+            specifier: "@clay/default".to_string(),
+            overrides: Vec::new(),
+        },
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
 

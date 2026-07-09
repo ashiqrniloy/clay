@@ -641,6 +641,39 @@ impl RuntimeDiagnostic {
     }
 }
 
+/// Wire form of one inert text-style override declared by a theme package
+/// (`clay.contributions.textStyles`). Colors travel as RGBA bytes so the
+/// protocol never depends on a peniko `Color`; the client reconstructs a
+/// [`crate::editor::theme::StyleRegistry`] at the point the active theme is
+/// applied. This is pure style data: no code, ops, widgets, or CSS (Plan 046,
+/// decision 2026-07-09-0352).
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TextThemeOverride {
+    /// Override target: a [`TokenType`] variant name or a base-UI color key
+    /// (e.g. `Keyword`, `panelBg`).
+    pub token: String,
+    /// RGBA override, present only when the entry declares a color.
+    pub color: Option<[u8; 4]>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub strike: Option<bool>,
+    /// Owning theme package api prefix (provenance).
+    pub provenance: String,
+}
+
+/// Resolved active theme snapshot shipped from the server (which owns package
+/// records) to the client (which owns the editor `StyleRegistry`). Sent once
+/// during the welcome handshake when `setTheme("...")` ran in `init.js`; the
+/// client reconstructs and installs the registry before/at startup paint.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ActiveTheme {
+    /// Selected package specifier (e.g. `@clay/theme-gruvbox-material-dark`).
+    pub specifier: String,
+    /// Inert text-style + base-UI-color overrides for the selected theme.
+    pub overrides: Vec<TextThemeOverride>,
+}
+
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum ServerMessage {
     Welcome {
@@ -734,6 +767,11 @@ pub enum ServerMessage {
         request_id: CompletionRequestId,
         reason: CompletionRejection,
     },
+    /// Phase 18.15 (Plan 046) resolved active theme snapshot. Sent once after
+    /// the welcome `BehaviorManifest` when `setTheme("...")` ran in `init.js`;
+    /// absent when no theme is selected (Clay default theme applies). The
+    /// client reconstructs the `StyleRegistry` from the inert overrides.
+    ActiveTheme(ActiveTheme),
     Error {
         code: ProtocolErrorCode,
         message: String,

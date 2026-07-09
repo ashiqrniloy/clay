@@ -12,6 +12,7 @@ mod parse;
 mod planned;
 mod sdui;
 mod syntax;
+mod theme;
 mod ui;
 mod workspace;
 
@@ -66,6 +67,7 @@ use self::{
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
     syntax::op_clay_syntax_register_syntax_grammar,
+    theme::op_clay_theme_set_theme,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
         op_clay_ui_register_panel_contribution, op_clay_ui_register_theme_token,
@@ -102,6 +104,11 @@ pub(crate) struct ClayOpState {
     git_status_cache: crate::server::git::GitStatusCache,
     syntax_grammars: Mutex<crate::server::syntax::SyntaxGrammarRegistry>,
     completion_providers: Mutex<Vec<crate::server::completion::CompletionProviderMeta>>,
+    /// Resolved active theme snapshot set by the `setTheme` Clay JS op during
+    /// `init.js`. Carried out in [`crate::server::js_runtime::ClayRuntimeEvaluation`]
+    /// and applied to the shared server slot at load/reload so the welcome
+    /// handshake ships it to the client. `None` = Clay default theme.
+    active_theme: Mutex<Option<crate::protocol::ActiveTheme>>,
     runtime_context: Mutex<ClayRuntimeContext>,
     // Shared PackageService for loadPackage resolution. Bundled packages are
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
@@ -151,6 +158,7 @@ impl ClayOpState {
             git_status_cache: crate::server::git::GitStatusCache::default(),
             syntax_grammars: Mutex::new(crate::server::syntax::SyntaxGrammarRegistry::new()),
             completion_providers: Mutex::new(Vec::new()),
+            active_theme: Mutex::new(None),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
@@ -548,6 +556,23 @@ impl ClayOpState {
             .collect()
     }
 
+    /// Record the active theme resolved by the `setTheme` Clay JS op.
+    pub(super) fn set_active_theme(&self, theme: crate::protocol::ActiveTheme) {
+        *self
+            .active_theme
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(theme);
+    }
+
+    /// Take the active theme snapshot out of this evaluation (cloned; the worker
+    /// next evaluation resets it before reuse).
+    pub(crate) fn active_theme(&self) -> Option<crate::protocol::ActiveTheme> {
+        self.active_theme
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
     pub(crate) fn completion_providers(
         &self,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
@@ -743,6 +768,7 @@ extension!(
         op_clay_configuration_set_package_option,
         op_clay_sdui_define_node,
         op_clay_sdui_publish_tree,
+        op_clay_theme_set_theme,
         op_clay_ui_register_panel_contribution,
         op_clay_ui_register_component_contribution,
         op_clay_ui_register_transient_overlay_contribution,

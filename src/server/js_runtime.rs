@@ -54,6 +54,7 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
         "clay:completion" => Some(CLAY_FACADE_COMPLETION),
         "clay:application" => Some(CLAY_FACADE_APPLICATION),
         "clay:editor" => Some(CLAY_FACADE_EDITOR),
+        "clay:theme" => Some(CLAY_FACADE_THEME),
         _ => None,
     }
 }
@@ -462,6 +463,16 @@ export function clientSetViewport(options) { void options; unavailable("clay.edi
 export function clientCopySelection() { return "clay.editor.clientCopySelection"; }
 "#;
 
+const CLAY_FACADE_THEME: &str = r#"
+export function setTheme(options) {
+  const specifier = typeof options === "string" ? options : options?.specifier;
+  if (typeof specifier !== "string" || specifier.length === 0) {
+    throw new Error("clay.theme.invalid_request: setTheme requires a theme specifier");
+  }
+  return JSON.parse(Deno.core.ops.op_clay_theme_set_theme(JSON.stringify({ specifier })));
+}
+"#;
+
 /// Isolated server-side Clay JavaScript runtime boundary.
 #[derive(Debug, Clone)]
 pub(crate) struct ClayJsRuntimeService {
@@ -755,6 +766,10 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) ui_contributions: crate::server::ui::PackageUiRegistrySnapshot,
     pub(crate) syntax_grammars: Vec<crate::server::syntax::SyntaxGrammarContribution>,
     pub(crate) completion_providers: Vec<crate::server::completion::CompletionProviderMeta>,
+    /// Resolved active theme snapshot from `setTheme` (`clay:theme` facade). `None`
+    /// when `init.js` did not select a theme (Clay default applies). Applied to
+    /// the shared server slot at load/reload so the welcome handshake ships it.
+    pub(crate) active_theme: Option<crate::protocol::ActiveTheme>,
 }
 
 #[derive(Debug)]
@@ -1162,6 +1177,7 @@ async fn evaluate_loaded_module(
             ui_contributions: op_state.ui_contributions(),
             syntax_grammars: op_state.syntax_grammars(),
             completion_providers: op_state.completion_providers(),
+            active_theme: op_state.active_theme(),
         })
     }
     .await;
@@ -1355,31 +1371,31 @@ fn span_from_value(
             )));
         }
     };
-    Ok(DecorationSpan {
-        byte_start: object
+    let style_token = object
+        .get("styleToken")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("markup.plain");
+    Ok(DecorationSpan::from_style_token(
+        object
             .get("byteStart")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0),
-        byte_end: object
+        object
             .get("byteEnd")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0),
         kind,
-        style_token: object
-            .get("styleToken")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("markup.plain")
-            .to_string(),
-        priority: object
+        style_token,
+        object
             .get("priority")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as u16,
-        provenance: DecorationProvenance {
+        DecorationProvenance {
             package_name: registration.package.manifest.name.clone(),
             package_version: registration.package.manifest.version.clone(),
             package_prefix: registration.package.manifest.clay.api_prefix.clone(),
         },
-    })
+    ))
 }
 
 /// Watchdog that terminates a V8 isolate when an evaluation exceeds a budget.
@@ -5479,6 +5495,38 @@ mod tests {
             allowlist.resolve_relative("clay://packages/@clay/unknown/dist/x.js", "./y.js"),
             None,
             "a relative import from a non-validated referrer must be denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_theme_resolves_first_party_gruvbox_theme() {
+        let root = config_fixture("set-theme-e2e");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setTheme } from "clay:theme";
+            const summary = setTheme("@clay/theme-gruvbox-material-dark");
+            Deno.core.ops.op_clay_runtime_record(
+              `theme:${summary.specifier}:overrides:${summary.overrideCount}`
+            );
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("setTheme('@clay/theme-gruvbox-material-dark') must succeed");
+
+        let theme = result.active_theme.expect("active theme snapshot emitted");
+        assert_eq!(theme.specifier, "@clay/theme-gruvbox-material-dark");
+        assert_eq!(theme.overrides.len(), 45);
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|record| record == "theme:@clay/theme-gruvbox-material-dark:overrides:45"),
+            "setTheme summary must reach init.js"
         );
     }
 

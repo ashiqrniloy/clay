@@ -1,0 +1,72 @@
+{
+  "name": "@clay/theme-gruvbox-material-dark",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js"
+  },
+  "clay": {
+    "apiPrefix": "theme-gruvbox-material-dark",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "permissions": [],
+    "modes": [],
+    "docs": "./docs/index.md",
+    "performance": {
+      "estimatedManifestBytes": 2400,
+      "hotPathPolicy": "inert style data parsed at load; no hot-path JS"
+    },
+    "contributions": {
+      "textStyles": [
+        { "token": "shellBg", "color": "#1d2021" },
+        { "token": "panelBg", "color": "#282828" },
+        { "token": "text", "color": "#d4be98" },
+        { "token": "placeholder", "color": "#7c6f64" },
+        { "token": "selection", "color": "#7daea333" },
+        { "token": "caret", "color": "#d4be98" },
+        { "token": "scrollbar", "color": "#928374aa" },
+        { "token": "scrollbarTrack", "color": "#7c6f6422" },
+        { "token": "statusBg", "color": "#32302f" },
+        { "token": "statusText", "color": "#d4be98" },
+
+        { "token": "Keyword", "color": "#ea6962", "bold": true },
+        { "token": "Modifier", "color": "#e78a4e" },
+        { "token": "Operator", "color": "#89b482" },
+        { "token": "Comment", "color": "#7c6f64", "italic": true },
+        { "token": "String", "color": "#a9b665" },
+        { "token": "Number", "color": "#d3869b" },
+        { "token": "Regexp", "color": "#89b482" },
+        { "token": "Function", "color": "#d8a657", "bold": true },
+        { "token": "Method", "color": "#d8a657" },
+        { "token": "Macro", "color": "#d3869b" },
+        { "token": "Namespace", "color": "#7daea3" },
+        { "token": "Type", "color": "#d8a657" },
+        { "token": "Class", "color": "#e78a4e" },
+        { "token": "Enum", "color": "#7daea3" },
+        { "token": "Interface", "color": "#7daea3" },
+        { "token": "Struct", "color": "#e78a4e" },
+        { "token": "TypeParameter", "color": "#e78a4e" },
+        { "token": "Parameter", "color": "#ddc7a1" },
+        { "token": "Variable", "color": "#ddc7a1" },
+        { "token": "Property", "color": "#ddc7a1" },
+        { "token": "EnumMember", "color": "#a9b665" },
+        { "token": "Event", "color": "#e78a4e" },
+        { "token": "Decorator", "color": "#d3869b" },
+
+        { "token": "Heading1", "color": "#ea6962", "bold": true },
+        { "token": "Heading2", "color": "#e78a4e", "bold": true },
+        { "token": "Heading3", "color": "#d8a657", "bold": true },
+        { "token": "Heading4", "color": "#a9b665" },
+        { "token": "Heading5", "color": "#89b482" },
+        { "token": "Heading6", "color": "#7daea3" },
+        { "token": "ListItem", "color": "#d4be98" },
+        { "token": "Quote", "color": "#7c6f64", "italic": true },
+        { "token": "CodeBlock", "color": "#d4be98" },
+        { "token": "CodeSpan", "color": "#e78a4e" },
+        { "token": "Link", "color": "#7daea3", "underline": true },
+        { "token": "Paragraph", "color": "#d4be98" }
+      ]
+    }
+  }
+}

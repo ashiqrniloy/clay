@@ -4,7 +4,10 @@
 import { bindKey } from "clay:keybindings";
 import { clientCopySelection } from "clay:editor";
 import { loadPackage } from "clay:packages";
+import { setTheme } from "clay:theme";
 import { clientOpenFolderDialog } from "clay:workspace";
+
+setTheme("@clay/theme-gruvbox-material-dark");
 
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");

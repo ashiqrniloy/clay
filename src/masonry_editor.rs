@@ -9,14 +9,14 @@ use masonry::core::{
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
-use masonry::peniko::{Color, Fill};
+use masonry::peniko::Fill;
 use masonry::vello::Scene;
 
 use crate::client::{
     ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientUiCommandRoute,
     ClipboardSink, SystemClipboard,
 };
-use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface, background_color};
+use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface};
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
@@ -26,8 +26,6 @@ use crate::protocol::{
 
 const STATUS_BAR_HEIGHT: f64 = 28.0;
 const STATUS_TEXT_SIZE: f32 = 12.0;
-const STATUS_BACKGROUND: Color = Color::from_rgb8(0x18, 0x18, 0x1f);
-const STATUS_TEXT_COLOR: Color = Color::from_rgb8(0xd7, 0xd2, 0xe8);
 
 #[allow(
     clippy::large_enum_variant,
@@ -224,6 +222,9 @@ impl EditorWidget {
             initial_state.access.clone(),
         );
         editor.install_behavior_manifest(initial_state.behavior_manifest);
+        editor.set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
+            &initial_state.active_theme,
+        ));
         let status = EditorStatus::connected(
             initial_state.document_id,
             initial_state.document_version,
@@ -308,6 +309,13 @@ impl EditorWidget {
             ClientConnectionEvent::BehaviorManifestInstalled { manifest, .. } => {
                 self.editor.install_behavior_manifest(manifest);
                 false
+            }
+            ClientConnectionEvent::ActiveTheme(theme) => {
+                self.editor
+                    .set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
+                        &theme,
+                    ));
+                true
             }
             ClientConnectionEvent::SduiSnapshot { tree, .. } => {
                 self.sdui.apply_snapshot(tree);
@@ -619,7 +627,7 @@ impl EditorWidget {
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            STATUS_BACKGROUND,
+            self.editor.theme().base.status_bg,
             None,
             &rect,
         );
@@ -637,7 +645,7 @@ impl EditorWidget {
             scene,
             Affine::translate((12.0, y0 + 7.0)),
             &layout,
-            &[STATUS_TEXT_COLOR.into()],
+            &[self.editor.theme().base.status_text.into()],
             true,
         );
     }
@@ -876,7 +884,7 @@ impl Widget for EditorWidget {
         scene.fill(
             Fill::NonZero,
             masonry::kurbo::Affine::IDENTITY,
-            background_color(),
+            self.editor.theme().base.shell_bg,
             None,
             &rect,
         );
@@ -972,6 +980,10 @@ mod tests {
             text: "server text".to_string(),
             access,
             behavior_manifest: BehaviorManifest::minimal_text_editing(3),
+            active_theme: crate::protocol::ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            },
         }
     }
 

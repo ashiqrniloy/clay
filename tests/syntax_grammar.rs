@@ -2,7 +2,9 @@ use clay::packages::{
     modes::{DocumentClassificationInput, MajorModeActivation, ModePatternKind},
     record::{PackageRecord, PackageRecordRule, assemble_package_record},
 };
-use clay::protocol::{ParseByteRange, ParseEditNotification, ParsePolicy, ParseWindowSnapshot};
+use clay::protocol::{
+    ParseByteRange, ParseEditNotification, ParsePolicy, ParseWindowSnapshot, TokenType,
+};
 #[cfg(any(unix, windows))]
 use clay::server::{
     parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
@@ -483,7 +485,7 @@ fn manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow() {
             assert!(
                 set.spans
                     .iter()
-                    .any(|span| span.style_token == "keyword.control"),
+                    .any(|span| span.token_type == TokenType::Keyword),
                 "{package_dir} fixture should highlight after v{version} parse"
             );
         }
@@ -554,19 +556,19 @@ fn first_party_syntax_fixtures_produce_bounded_decoration_sets() {
         assert!(
             set.spans
                 .iter()
-                .any(|span| span.style_token == "keyword.control"),
+                .any(|span| span.token_type == TokenType::Keyword),
             "{package_dir} fixture should highlight a keyword"
         );
         assert!(
             set.spans
                 .iter()
-                .any(|span| span.style_token == "string.quoted"),
+                .any(|span| span.token_type == TokenType::String),
             "{package_dir} fixture should highlight a string"
         );
         assert!(
             set.spans
                 .iter()
-                .any(|span| span.style_token == "comment.line"),
+                .any(|span| span.token_type == TokenType::Comment),
             "{package_dir} fixture should highlight a comment"
         );
         assert!(
@@ -609,22 +611,22 @@ fn tree_sitter_handler_extracts_highlight_captures_as_bounded_decorations() {
     assert!(
         set.spans
             .iter()
-            .any(|span| span.style_token == "keyword.control")
+            .any(|span| span.token_type == TokenType::Keyword)
     );
     assert!(
         set.spans
             .iter()
-            .any(|span| span.style_token == "string.quoted")
+            .any(|span| span.token_type == TokenType::String)
     );
     assert!(
         set.spans
             .iter()
-            .any(|span| span.style_token == "comment.line")
+            .any(|span| span.token_type == TokenType::Comment)
     );
     assert!(
         set.spans
             .iter()
-            .any(|span| span.style_token == "punctuation.definition")
+            .any(|span| span.token_type == TokenType::Operator)
     );
     assert!(
         set.spans

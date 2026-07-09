@@ -5,7 +5,14 @@ pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
 // result/rejection variants and leaves a small fixed-envelope margin without
 // changing the edit-ack message shape.
 pub const EDIT_ACK_PAYLOAD_BUDGET_BYTES: usize = 128;
-pub const BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES: usize = 2048;
+/// Bounded load-time manifest metadata for one package, including its inert
+/// `clay.contributions.*` declarations. Sized at 4096 bytes (Plan 046) to
+/// accommodate first-party theme packages that declare a full inert
+/// `textStyles` mapping (every `TokenType` family + base UI color ~45 entries,
+/// ~2.3 KB) alongside their manifest, while still bounding package-load cost.
+/// Oversize manifests are rejected with `ManifestValidationFailed`/
+/// `PayloadBudgetExceeded` at record time.
+pub const BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
 

@@ -58,6 +58,7 @@ pub struct ClientInitialState {
     pub text: String,
     pub access: DocumentAccess,
     pub behavior_manifest: BehaviorManifest,
+    pub active_theme: crate::protocol::ActiveTheme,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -414,6 +415,7 @@ pub enum ClientConnectionEvent {
         behavior_version: BehaviorVersion,
         reason: String,
     },
+    ActiveTheme(crate::protocol::ActiveTheme),
     ResyncSnapshot(ClientResyncSnapshot),
     DocumentOpened {
         metadata: DocumentMetadata,
@@ -677,6 +679,18 @@ where
         }
     };
 
+    let active_theme = match codec.read_server_message(&mut *stream).await? {
+        ServerMessage::ActiveTheme(theme) => theme,
+        ServerMessage::Error { code, message } => {
+            return Err(ClientBootstrapError::ServerError { code, message });
+        }
+        _ => {
+            return Err(ClientBootstrapError::UnexpectedMessage(
+                "expected ActiveTheme",
+            ));
+        }
+    };
+
     Ok(ClientInitialState {
         client_id,
         document_id,
@@ -684,6 +698,7 @@ where
         text,
         access,
         behavior_manifest,
+        active_theme,
     })
 }
 
@@ -821,6 +836,9 @@ async fn run_connection<S>(
                     }
                     Ok(message @ ServerMessage::EditTransaction { .. }) => {
                         let _ = events.send(ClientConnectionEvent::EditTransaction(message)).await;
+                    }
+                    Ok(ServerMessage::ActiveTheme(theme)) => {
+                        let _ = events.send(ClientConnectionEvent::ActiveTheme(theme)).await;
                     }
                     Ok(ServerMessage::BehaviorManifest(manifest)) => {
                         let behavior_version = manifest.behavior_version;
@@ -1000,6 +1018,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(9)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1353,6 +1381,16 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
             let _edit = codec.read_client_message(&mut server).await.unwrap();
             codec
                 .write_server_message(
@@ -1432,6 +1470,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1521,6 +1569,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1627,6 +1685,16 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
         });
 
         let state = load_initial_state_from_stream(client, codec).await.unwrap();
@@ -1669,6 +1737,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(24)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1715,6 +1793,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(44)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1773,6 +1861,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1846,6 +1944,16 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
                     &ServerMessage::DocumentOpened {
                         metadata,
                         text: "# opened\n".to_string(),
@@ -1904,6 +2012,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -1979,6 +2097,16 @@ mod tests {
                     .await
                     .unwrap();
                 codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                            specifier: "@clay/default".to_string(),
+                            overrides: Vec::new(),
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                codec
                     .write_server_message(&mut server, &ServerMessage::RuntimeDiagnostic(expected))
                     .await
                     .unwrap();
@@ -2033,7 +2161,27 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(5)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();
@@ -2087,12 +2235,32 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
             let mut invalid = BehaviorManifest::minimal_text_editing(5);
             invalid
                 .commands
                 .push(CommandDeclaration::client_edit("text.insert", "Duplicate"));
             codec
                 .write_server_message(&mut server, &ServerMessage::BehaviorManifest(invalid))
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
+                )
                 .await
                 .unwrap();
         });
@@ -2353,6 +2521,7 @@ mod tests {
                     reason,
                 } if rejected_document_id == document_id => break reason,
                 ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::ActiveTheme(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
@@ -2467,6 +2636,7 @@ mod tests {
                     reason,
                 } if rejected_document_id == document_id => break reason,
                 ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::ActiveTheme(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
@@ -2542,6 +2712,16 @@ mod tests {
                 .write_server_message(
                     &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1)),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                        specifier: "@clay/default".to_string(),
+                        overrides: Vec::new(),
+                    }),
                 )
                 .await
                 .unwrap();

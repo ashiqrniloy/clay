@@ -48,6 +48,7 @@ pub(crate) async fn handle_connection<S>(
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     workspace: Arc<Mutex<WorkspaceState>>,
     sdui: Arc<Mutex<StaticSduiState>>,
+    active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     runtime_generation: RuntimeGenerationStore,
     parse_coordinator: ParseCoordinator,
@@ -69,6 +70,7 @@ where
                 &behavior,
                 &workspace,
                 &sdui,
+                &active_theme,
                 &runtime_diagnostics,
                 codec,
             )
@@ -607,6 +609,7 @@ async fn send_welcome_snapshot_and_manifest<S>(
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     workspace: &Arc<Mutex<WorkspaceState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
+    active_theme: &Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     runtime_diagnostics: &Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     codec: Codec,
 ) -> Result<(), CodecError>
@@ -635,6 +638,18 @@ where
     let manifest_message = behavior.lock().await.manifest_message();
     codec
         .write_server_message(stream, &manifest_message)
+        .await?;
+
+    let theme = active_theme
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_else(|| crate::protocol::ActiveTheme {
+            specifier: "@clay/default".to_string(),
+            overrides: Vec::new(),
+        });
+    codec
+        .write_server_message(stream, &ServerMessage::ActiveTheme(theme))
         .await?;
 
     let (document_id, document_version) = match &initial_document {
@@ -1184,6 +1199,10 @@ mod tests {
         Arc::new(Mutex::new(Vec::new()))
     }
 
+    fn active_theme_state() -> Arc<Mutex<Option<crate::protocol::ActiveTheme>>> {
+        Arc::new(Mutex::new(None))
+    }
+
     fn js_runtime() -> ClayJsRuntimeService {
         ClayJsRuntimeService::default()
     }
@@ -1242,7 +1261,7 @@ await loadPackage("@clay/markdown");"#,
             BehaviorManifest, BehaviorScope, ClientMessage, DecorationKind, DocumentAccess,
             DocumentMetadata, EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION,
             RuntimeDiagnostic, SduiActionArgument, SduiActionIntent, SduiActionSource,
-            SduiActionValue, SduiNodeId, SduiNodeKind, ServerMessage, codec::Codec,
+            SduiActionValue, SduiNodeId, SduiNodeKind, ServerMessage, TokenType, codec::Codec,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState,
@@ -1451,6 +1470,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1504,6 +1524,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1550,6 +1571,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             empty_sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1571,6 +1593,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         // Post-handshake file-open capability is always issued once.
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
@@ -1643,6 +1666,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             Arc::clone(&sdui),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1664,6 +1688,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => {
                 assert!(tree.nodes.iter().any(|node| matches!(
@@ -1695,6 +1720,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             diagnostics,
             runtime_generation(),
             parse_coordinator(),
@@ -1716,6 +1742,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         assert_eq!(
             codec.read_server_message(&mut client).await.unwrap(),
@@ -1746,6 +1773,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1766,6 +1794,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -1818,6 +1847,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1838,6 +1868,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -1921,6 +1952,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -1941,6 +1973,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -1996,6 +2029,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             Arc::clone(&workspace),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2016,6 +2050,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -2140,6 +2175,7 @@ await loadPackage("@clay/markdown");"#,
             Arc::clone(&behavior),
             Arc::clone(&workspace),
             Arc::clone(&sdui),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation_from(runtime),
             coordinator,
@@ -2160,6 +2196,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let tree = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => tree,
             message => panic!("expected file browser SduiSnapshot, got {message:?}"),
@@ -2212,7 +2249,7 @@ await loadPackage("@clay/markdown");"#,
             ServerMessage::DecorationSet(set) => {
                 assert_eq!(set.document_id, 2);
                 assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.style_token == "markup.heading.1"
+                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::Heading1
                 }));
             }
             message => panic!("expected Markdown DecorationSet, got {message:?}"),
@@ -2257,6 +2294,7 @@ await loadPackage("@clay/markdown");"#,
             Arc::clone(&behavior),
             Arc::clone(&workspace),
             Arc::clone(&sdui),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation_from(runtime),
             coordinator,
@@ -2277,6 +2315,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
@@ -2326,13 +2365,13 @@ await loadPackage("@clay/markdown");"#,
             ServerMessage::DecorationSet(set) => {
                 assert_eq!(set.document_id, 2);
                 assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.style_token == "markup.heading.1"
+                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::Heading1
                 }));
                 assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.style_token == "markup.list-marker"
+                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::ListItem
                 }));
                 assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.style_token == "markup.inline-code"
+                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::CodeSpan
                 }));
             }
             message => panic!("expected Markdown DecorationSet, got {message:?}"),
@@ -2414,7 +2453,10 @@ await loadPackage("@clay/markdown");"#,
             message,
             ServerMessage::DecorationSet(set)
                 if set.document_id == 2
-                    && set.spans.iter().any(|span| span.style_token == "markup.heading.1")
+                    && set
+                        .spans
+                        .iter()
+                        .any(|span| span.token_type == TokenType::Heading1)
         )));
         let _ = fs::remove_file(config_root.join("init.js"));
         let _ = fs::remove_dir(config_root);
@@ -2483,7 +2525,7 @@ await loadPackage("@clay/markdown");"#,
         assert!(
             set.spans
                 .iter()
-                .any(|span| span.style_token == "markup.heading.1" && span.byte_start == 0)
+                .any(|span| span.token_type == TokenType::Heading1 && span.byte_start == 0)
         );
         assert!(!set.spans.iter().any(|span| span.byte_start > 64 * 1024));
     }
@@ -2512,6 +2554,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             Arc::clone(&workspace),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2532,6 +2575,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
@@ -2623,6 +2667,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             Arc::clone(&workspace),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2643,6 +2688,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
@@ -2693,6 +2739,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             Arc::clone(&workspace),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2713,6 +2760,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -2762,6 +2810,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace,
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2782,6 +2831,7 @@ await loadPackage("@clay/markdown");"#,
         let _welcome = codec.read_server_message(&mut client).await.unwrap();
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -2848,6 +2898,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             workspace_state(),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2885,6 +2936,7 @@ await loadPackage("@clay/markdown");"#,
             behavior,
             Arc::clone(&workspace),
             sdui_state(),
+            active_theme_state(),
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
@@ -2902,14 +2954,16 @@ await loadPackage("@clay/markdown");"#,
             )
             .await
             .unwrap();
-        for _ in 0..4 {
-            let _ = codec.read_server_message(&mut client).await.unwrap();
+        // Consume handshake noise and the post-handshake capability so it is no
+        // longer pending.
+        loop {
+            if matches!(
+                codec.read_server_message(&mut client).await.unwrap(),
+                ServerMessage::FileOpenCapabilityIssued { .. }
+            ) {
+                break;
+            }
         }
-        // Consume the post-handshake capability so it is no longer pending.
-        assert!(matches!(
-            codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::FileOpenCapabilityIssued { .. }
-        ));
 
         // Raw path with no valid capability: server must reject and must NOT
         // open or grant the file.

@@ -10,7 +10,7 @@ use clay::{
     ipc::{IpcEndpoint, smoke_endpoint},
     protocol::{
         BehaviorScope, ClientMessage, DecorationKind, DiagnosticSeverity, PROTOCOL_VERSION,
-        ServerMessage, codec::Codec,
+        ServerMessage, TokenType, codec::Codec,
     },
     server::{IpcServer, ServerConfig},
 };
@@ -136,10 +136,10 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
         ServerMessage::DecorationSet(set) => {
             assert_eq!(set.document_id, opened_document_id);
             assert!(set.spans.iter().any(|span| {
-                span.kind == DecorationKind::Syntax && span.style_token == "markup.heading.1"
+                span.kind == DecorationKind::Syntax && span.token_type == TokenType::Heading1
             }));
             assert!(set.spans.iter().any(|span| {
-                span.kind == DecorationKind::Syntax && span.style_token == "markup.inline-code"
+                span.kind == DecorationKind::Syntax && span.token_type == TokenType::CodeSpan
             }));
         }
         message => panic!("expected Markdown DecorationSet, got {message:?}"),
@@ -164,7 +164,9 @@ where
     for _ in 0..8 {
         match read_message(codec, stream).await {
             ServerMessage::FileOpenCapabilityIssued { token } => return token,
-            ServerMessage::SduiSnapshot { .. } | ServerMessage::RuntimeDiagnostic(_) => continue,
+            ServerMessage::ActiveTheme(_)
+            | ServerMessage::SduiSnapshot { .. }
+            | ServerMessage::RuntimeDiagnostic(_) => continue,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
         }
     }

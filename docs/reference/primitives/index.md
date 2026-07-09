@@ -14,6 +14,7 @@ This directory is the Phase 16 architecture source for package- and mode-control
 - [Phase 17 Package Loading Runtime Facades](package-loading.md) — package load/runtime boundaries, conflict handling, runtime facade wiring, hot-path policy, and Phase 18 decoration/parse handoff.
 - [Primitive Implementation Gate](implementation-gate.md) — Phase 16.5 runtime validation gate, fixture format, load/activation scope boundary, and Phase 17/18 handoff.
 - [Prioritized Primitive Backlog](backlog.md) — sortable Phase-17-required, Phase-18-required, and deferred primitive implementation backlog plus the Phase 17 prerequisite checklist.
+- [Text Vocabulary and Two-Axis Decoration Contract](syntax-vocabulary.md) — Phase 18.15 locked LSP-based `TokenType` + `Modifiers` vocabulary, Clay prose/text-attribute extensions, open-string scope escape, compatibility mapping from free-form `style_token`, and the single-source-of-color `StyleRegistry` invariant.
 
 ## Phase 17 Readiness Summary
 

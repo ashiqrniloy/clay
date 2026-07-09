@@ -474,7 +474,9 @@ fn performance_budget_constants_are_exported() {
     // will fail to compile, making this an implicit compile-time guard.
     assert_eq!(CLIENT_EDIT_PAYLOAD_BUDGET_BYTES, 512);
     assert_eq!(EDIT_ACK_PAYLOAD_BUDGET_BYTES, 128);
-    assert_eq!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, 2048);
+    // Plan 046: raised from 2048 to 4096 to fit first-party theme packages'
+    // full inert `textStyles` mappings (~2.3 KB) alongside their manifest.
+    assert_eq!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, 4096);
     assert_eq!(SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, 4096);
     assert_eq!(SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, 1024);
     assert_eq!(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, 16);

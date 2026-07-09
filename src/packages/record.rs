@@ -24,6 +24,8 @@ use crate::shell::{
     theme::{PackageThemeToken, ThemeTokenResolver, ThemeTokenType, core_fallback_matches_type},
 };
 
+use crate::editor::theme::{parse_hex_rgba, parse_override_token};
+
 // ── Contribution descriptors ─────────────────────────────────────────────────
 
 /// Inert descriptor for a command contribution declared by a package.
@@ -216,6 +218,45 @@ pub struct ThemeTokenContributionDescriptor {
     pub estimated_payload_bytes: usize,
 }
 
+/// Inert descriptor for a Plan 046 task-5 text-style override declared by a
+/// theme package. Stored as an `Eq` representation (RGBA bytes + bool flags)
+/// so it composes with the `Eq`-deriving contribution inventory; converted to
+/// the editor-side [`crate::editor::theme::TextStyleOverride`] at the point the
+/// active theme is resolved into the `StyleRegistry`. This is pure style data:
+/// no code/widgets/ops/CSS.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TextStyleOverrideDescriptor {
+    /// Override target: a `TokenType` variant name or a base-UI color key.
+    pub token: String,
+    /// RGBA override, present only when the entry declares a `color`.
+    pub color: Option<[u8; 4]>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub strike: Option<bool>,
+    /// Owning theme package api prefix (provenance).
+    pub provenance: String,
+}
+
+impl TextStyleOverrideDescriptor {
+    /// Convert to the editor-side override consumed by
+    /// [`crate::editor::theme::StyleRegistry::with_text_overrides`].
+    #[allow(dead_code)] // wired by Plan 046 task 7 (setTheme) — keep live.
+    pub(crate) fn to_override(&self) -> crate::editor::theme::TextStyleOverride {
+        crate::editor::theme::TextStyleOverride {
+            token: self.token.clone(),
+            color: self
+                .color
+                .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+            bold: self.bold,
+            italic: self.italic,
+            underline: self.underline,
+            strike: self.strike,
+            provenance: self.provenance.clone(),
+        }
+    }
+}
+
 /// Inert descriptor for package-owned pointer/focus/action input metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputContributionDescriptor {
@@ -295,6 +336,10 @@ pub struct PackageContributions {
     pub ui_components: Vec<UiComponentContributionDescriptor>,
     pub ui_overlays: Vec<UiOverlayContributionDescriptor>,
     pub theme_tokens: Vec<ThemeTokenContributionDescriptor>,
+    /// Inert text-style overrides declared by theme packages (Plan 046 task 5).
+    /// Converted to the editor `StyleRegistry` override shape when the active
+    /// theme is resolved (task 7 `setTheme`).
+    pub text_styles: Vec<TextStyleOverrideDescriptor>,
     pub input_contributions: Vec<InputContributionDescriptor>,
     pub ui_state_scopes: Vec<UiStateScopeContributionDescriptor>,
     pub layout_overrides: Vec<LayoutOverrideContributionDescriptor>,
@@ -690,6 +735,10 @@ fn parse_contributions(
         Some(v) => parse_theme_token_contributions(v, api_prefix, ctx)?,
         None => Vec::new(),
     };
+    let text_styles = match map.get("textStyles") {
+        Some(v) => parse_text_style_contributions(v, api_prefix, ctx)?,
+        None => Vec::new(),
+    };
     let registered_command_ids: Vec<String> =
         commands.iter().map(|command| command.id.clone()).collect();
     let theme_resolver = theme_resolver_for_package_tokens(&theme_tokens);
@@ -739,6 +788,7 @@ fn parse_contributions(
         ui_components,
         ui_overlays,
         theme_tokens,
+        text_styles,
         input_contributions,
         ui_state_scopes,
         layout_overrides,
@@ -1787,6 +1837,121 @@ fn parse_theme_token_contributions(
             token_type: token_type.as_str().to_string(),
             fallback: fallback.to_string(),
             estimated_payload_bytes: size,
+        });
+    }
+    Ok(descriptors)
+}
+
+/// Parse the Plan 046 task-5 `clay.contributions.textStyles` array into inert
+/// [`TextStyleOverride`]s. This is the theme-package declaration path for
+/// text-rendering overrides (the contract `setTheme` in task 7 selects). The
+/// SDUI typed-scalar `ThemeTokenResolver` is intentionally untouched: text
+/// styles are resolved into the editor `StyleRegistry`, separate from SDUI
+/// component theming. Validation mirrors `parse_theme_token_contributions`:—
+/// bounded payload, deny-by-default for executable/raw-CSS/raw-color fields,
+/// closed override-target vocabulary (TokenType variant names + base-UI keys),
+/// valid hex color, deterministic duplicate-token diagnostics, provenance
+/// recorded as the declaring package's api prefix.
+fn parse_text_style_contributions(
+    value: &Value,
+    api_prefix: &str,
+    ctx: &ErrorContext,
+) -> Result<Vec<TextStyleOverrideDescriptor>, PackageRecordError> {
+    let Value::Array(entries) = value else {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            "clay.contributions.textStyles must be an array",
+        ));
+    };
+
+    let mut seen = HashSet::new();
+    let mut descriptors = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let size = contribution_payload_size(entry);
+        if size > SDUI_UPDATE_PAYLOAD_BUDGET_BYTES {
+            return Err(ctx.error(
+                PackageRecordRule::PayloadBudgetExceeded,
+                None,
+                format!(
+                    "text style declaration payload ({size} bytes) exceeds SDUI_UPDATE_PAYLOAD_BUDGET_BYTES ({SDUI_UPDATE_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_ui_prohibited_authority(entry, ctx)?;
+        let obj = entry.as_object().ok_or_else(|| {
+            ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                "text style contribution entries must be objects",
+            )
+        })?;
+        // The override carries an actual color value via the `color` hex
+        // string; reject the raw-injection spelling (`rawColor`/`value`/`css`)
+        // so only the validated `color` field is honored.
+        if obj.contains_key("value")
+            || obj.contains_key("rawColor")
+            || obj.contains_key("css")
+            || obj.contains_key("rawCss")
+            || obj.contains_key("cssText")
+        {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                "text style declarations must use the validated `color` hex field, not raw values, raw colors, or CSS",
+            ));
+        }
+        let token = required_str_field(obj, "token", ctx)?;
+        if parse_override_token(token).is_none() {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(token),
+                "text style token must name a TokenType variant (e.g. `Keyword`, `Heading1`) or a base UI color key (e.g. `panelBg`, `caret`)",
+            ));
+        }
+        if !seen.insert(token.to_string()) {
+            return Err(ctx.error(
+                PackageRecordRule::DuplicateContributionId,
+                Some(token),
+                "text style tokens must be unique within a package",
+            ));
+        }
+        let color = match obj.get("color").and_then(Value::as_str) {
+            Some(hex) => Some(parse_hex_rgba(hex).ok_or_else(|| {
+                ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(token),
+                    "text style `color` must be a #rgb, #rrggbb, or #rrggbbaa hex string",
+                )
+            })?),
+            None => None,
+        };
+        let bold = obj.get("bold").and_then(Value::as_bool);
+        let italic = obj.get("italic").and_then(Value::as_bool);
+        let underline = obj.get("underline").and_then(Value::as_bool);
+        let strike = obj.get("strike").and_then(Value::as_bool);
+        // At least one override field must be present, otherwise the entry is
+        // a no-op declaration.
+        if color.is_none()
+            && bold.is_none()
+            && italic.is_none()
+            && underline.is_none()
+            && strike.is_none()
+        {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(token),
+                "text style declaration must override at least one of color, bold, italic, underline, strike",
+            ));
+        }
+        descriptors.push(TextStyleOverrideDescriptor {
+            token: token.to_string(),
+            color,
+            bold,
+            italic,
+            underline,
+            strike,
+            provenance: api_prefix.to_string(),
         });
     }
     Ok(descriptors)
@@ -3648,5 +3813,121 @@ mod tests {
         assert!(std::mem::size_of::<crate::packages::modes::ModeDiagnostic>() <= 128);
         assert!(std::mem::size_of::<crate::packages::commands::CommandDiagnostic>() <= 128);
         assert!(std::mem::size_of::<crate::packages::conflict::PackageConflictDiagnostic>() <= 128);
+    }
+
+    /// Minimal theme-package manifest carrying only `contributions.textStyles`.
+    fn theme_fixture_with_text_styles(overrides: Value) -> Value {
+        json!({
+            "name": "@clay/theme-test",
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": "clay-theme-test",
+                "entry": "./dist/index.js",
+                "loadEntry": "./dist/load.js",
+                "docs": "./docs/index.md",
+                "permissions": [],
+                "modes": [],
+                "contributions": {
+                    "textStyles": overrides
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn text_style_contributions_parse_into_inert_descriptor() {
+        let fixture = theme_fixture_with_text_styles(json!([
+            { "token": "Keyword", "color": "#c792ea", "bold": true },
+            { "token": "panelBg", "color": "#101010ff" },
+            { "token": "Heading1", "italic": true }
+        ]));
+        let record = assemble_package_record(&fixture).expect("theme textStyles must validate");
+        assert_eq!(record.contributions.text_styles.len(), 3);
+        let kw = &record.contributions.text_styles[0];
+        assert_eq!(kw.token, "Keyword");
+        assert_eq!(kw.color, Some([0xc7, 0x92, 0xea, 0xff]));
+        assert_eq!(kw.bold, Some(true));
+        assert_eq!(kw.provenance, "clay-theme-test");
+        // `to_override` round-trips the RGBA bytes into a peniko Color.
+        let kw_override = kw.to_override();
+        assert_eq!(
+            kw_override.color,
+            Some(masonry::peniko::Color::from_rgba8(0xc7, 0x92, 0xea, 0xff))
+        );
+        assert_eq!(kw_override.bold, Some(true));
+    }
+
+    #[test]
+    fn text_style_unknown_token_rejected() {
+        let fixture = theme_fixture_with_text_styles(json!([
+            { "token": "keyword.control", "color": "#fff" }
+        ]));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("TokenType variant"));
+    }
+
+    #[test]
+    fn text_style_duplicate_token_rejected() {
+        let fixture = theme_fixture_with_text_styles(json!([
+            { "token": "Keyword", "color": "#fff" },
+            { "token": "Keyword", "color": "#000" }
+        ]));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::DuplicateContributionId);
+    }
+
+    #[test]
+    fn text_style_bad_hex_color_rejected() {
+        let fixture = theme_fixture_with_text_styles(json!([
+            { "token": "Keyword", "color": "not-a-color" }
+        ]));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("hex string"));
+    }
+
+    #[test]
+    fn text_style_raw_color_and_css_fields_rejected() {
+        for bad_field in ["rawColor", "value", "css", "rawCss", "cssText"] {
+            let fixture = theme_fixture_with_text_styles(json!([
+                { "token": "Keyword", "color": "#fff", bad_field: "#000" }
+            ]));
+            let err = assemble_package_record(&fixture).unwrap_err();
+            assert_eq!(
+                err.rule,
+                PackageRecordRule::InvalidContributionDescriptor,
+                "raw color/css field `{bad_field}` must be rejected"
+            );
+            assert!(
+                err.message.contains("validated `color` hex field") || err.message.contains("raw"),
+                "raw color/css field `{bad_field}` must be denied as executable/raw-CSS"
+            );
+        }
+    }
+
+    #[test]
+    fn text_style_executable_field_rejected() {
+        // `code` is in the deny-by-default authority list; an inert theme must
+        // never carry executable fields.
+        let fixture = theme_fixture_with_text_styles(json!([
+            { "token": "Keyword", "color": "#fff", "code": "return 0" }
+        ]));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("raw ops, native widgets, raw CSS"));
+    }
+
+    #[test]
+    fn text_style_no_op_entry_rejected() {
+        // An entry that overrides nothing is a useless declaration.
+        let fixture = theme_fixture_with_text_styles(json!([
+            { "token": "Keyword" }
+        ]));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("at least one of color"));
     }
 }

@@ -100,22 +100,22 @@ fn markdown_decoration_update(version: u64) -> DecorationSet {
         viewport_byte_start: 0,
         viewport_byte_end: 64,
         spans: vec![
-            DecorationSpan {
-                byte_start: 0,
-                byte_end: 5,
-                kind: DecorationKind::Syntax,
-                style_token: "markup.heading.1".to_string(),
-                priority: 90,
-                provenance: provenance.clone(),
-            },
-            DecorationSpan {
-                byte_start: 10,
-                byte_end: 18,
-                kind: DecorationKind::Syntax,
-                style_token: "markup.strong".to_string(),
-                priority: 60,
+            DecorationSpan::from_style_token(
+                0,
+                5,
+                DecorationKind::Syntax,
+                "markup.heading.1",
+                90,
+                provenance.clone(),
+            ),
+            DecorationSpan::from_style_token(
+                10,
+                18,
+                DecorationKind::Syntax,
+                "markup.strong",
+                60,
                 provenance,
-            },
+            ),
         ],
     }
 }

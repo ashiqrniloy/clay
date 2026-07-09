@@ -2072,3 +2072,26 @@ permissions = ["workspace-read"]
 security_notes = "Routes through clay.workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority beyond that root, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority."
 current_rust_owner = "src/server/command_execution.rs::CommandExecutor::execute_workspace"
 registry_public = true
+
+[[api]]
+id = "clay.theme.setTheme"
+category = "theme"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:theme"
+js_export = "setTheme"
+user_facing_name = "Set Theme"
+authority = "first-party-inert-theme-selection"
+runtime_path = "init-js-op-to-active-theme-handshake"
+hot_path_policy = "Configuration-time only; resolves static package.json textStyles into an ActiveTheme snapshot before first paint. Paint reads the already-built StyleRegistry with no JS, filesystem, package resolution, allocation-heavy map lookup, or server IPC."
+facade_path = "runtime/js/theme.ts::setTheme"
+backing_rust = "src/server/ops/theme.rs::op_clay_theme_set_theme; src/editor/theme.rs::StyleRegistry::from_active_theme"
+deno_op = "op_clay_theme_set_theme"
+deno_op_path = "src/server/ops/theme.rs::op_clay_theme_set_theme"
+documentation_path = "docs/reference/clay-js-api/theme/set-theme.md"
+key_bindings = []
+custom_properties = ["specifier:string=required"]
+permissions = []
+security_notes = "Accepts only bundled first-party @clay/* theme specifiers and static inert textStyles data; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, renderer callbacks, client hooks, or arbitrary third-party theme execution authority."
+current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_theme"
+registry_public = true

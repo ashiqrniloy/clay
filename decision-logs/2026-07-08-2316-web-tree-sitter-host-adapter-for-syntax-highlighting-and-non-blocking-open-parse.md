@@ -1,12 +1,15 @@
 ---
 date: 2026-07-08 23:16
-status: approved
+status: superseded
+superseded_by: 2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp
 decision_about: "Syntax highlighting engine for Rust/TypeScript/JavaScript/Markdown decorations and the open-time parse pipeline"
 proposed_by: "agent"
 explicitly_approved_by_user: true
 ---
 
 # Decision: Generic web-tree-sitter host adapter for syntax highlighting, with markdown decoration folding and non-blocking open-time parse
+
+> **SUPERSEDED (2026-07-09)** by `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md` on the **engine choice** (web-tree-sitter-only → tiered: native Tier 1 + web-tree-sitter Tier 2 + JS Tier 3) and on the **vocabulary/theming** axis this decision never considered. The **non-blocking open-time parse** and **`ParseCoordinator::finish_task` silent-drop fix** below remain binding and are carried forward verbatim into the superseding decision.
 
 ## Decision
 

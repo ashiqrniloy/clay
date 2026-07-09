@@ -83,6 +83,13 @@ fn markdown_mode_requirements() -> String {
     .expect("read markdown mode requirements")
 }
 
+fn syntax_vocabulary_contract() -> String {
+    fs::read_to_string(repository_path(
+        "docs/reference/primitives/syntax-vocabulary.md",
+    ))
+    .expect("read syntax vocabulary contract")
+}
+
 fn package_security() -> String {
     fs::read_to_string(repository_path(
         "docs/reference/primitives/package-security.md",
@@ -349,6 +356,296 @@ fn markdown_mode_requirements_doc_linked_from_index() {
     assert!(
         index.contains("reference/primitives/markdown-mode-requirements.md"),
         "docs/index.md must link docs/reference/primitives/markdown-mode-requirements.md"
+    );
+}
+
+#[test]
+fn syntax_vocabulary_contract_doc_linked_from_index() {
+    let index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+
+    assert!(
+        index.contains("reference/primitives/syntax-vocabulary.md"),
+        "docs/index.md must link docs/reference/primitives/syntax-vocabulary.md"
+    );
+
+    let primitives_index =
+        fs::read_to_string(repository_path("docs/reference/primitives/index.md"))
+            .expect("read primitives index");
+    assert!(
+        primitives_index.contains("syntax-vocabulary.md"),
+        "docs/reference/primitives/index.md must link syntax-vocabulary.md"
+    );
+}
+
+#[test]
+fn syntax_vocabulary_contract_locks_two_axis_vocabulary() {
+    let contract = syntax_vocabulary_contract();
+
+    // Decision + status provenance.
+    assert!(
+        contract.contains("Locked contract"),
+        "syntax vocabulary contract must declare its locked-contract status"
+    );
+    assert!(
+        contract.contains("2026-07-09-0352-tiered-tree-sitter"),
+        "syntax vocabulary contract must cite decision log 2026-07-09-0352"
+    );
+
+    // LSP base vocabulary (axis 1): the closed enum is LSP-derived, not invented.
+    for required in [
+        "Language Server Protocol `SemanticTokenType`",
+        "Namespace, Type, Class, Enum, Interface, Struct, TypeParameter, Parameter, Variable, Property, EnumMember, Event, Function, Method, Macro, Keyword, Modifier, Comment, String, Number, Regexp, Operator, Decorator",
+    ] {
+        assert!(
+            contract.contains(required),
+            "syntax vocabulary contract must lock the LSP base TokenType set: {required}"
+        );
+    }
+
+    // Clay prose extension (axis 1) explicitly separated as Clay-owned.
+    for required in [
+        "Clay prose extension",
+        "Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, ListItem, Quote, CodeBlock, CodeSpan, Link, Paragraph",
+    ] {
+        assert!(
+            contract.contains(required),
+            "syntax vocabulary contract must lock the Clay prose TokenType extension: {required}"
+        );
+    }
+
+    // LSP base modifiers (axis 2).
+    assert!(
+        contract.contains("Declaration, Definition, Readonly, Static, Deprecated, Abstract, Async, Modification, Documentation, DefaultLibrary"),
+        "syntax vocabulary contract must lock the LSP base Modifiers bitflag set"
+    );
+
+    // Clay text-attribute modifiers (axis 2).
+    assert!(
+        contract.contains("Bold, Italic, Underline, Strikethrough"),
+        "syntax vocabulary contract must lock the Clay text-attribute Modifiers extension"
+    );
+
+    // Two-axis composition example + open-string escape.
+    assert!(
+        contract.contains("TokenType::Function + Modifiers::Bold | Declaration"),
+        "syntax vocabulary contract must demonstrate two-axis composition"
+    );
+    assert!(
+        contract.contains("longest-prefix fallback"),
+        "syntax vocabulary contract must lock the open-string scope escape rule"
+    );
+
+    // Compatibility mapping + baseline lock cross-reference.
+    assert!(
+        contract.contains("free_form_style_token_decoration_colors_baseline_locked"),
+        "syntax vocabulary contract must reference the baseline-color lock test"
+    );
+
+    // Inert-data security boundary + hot-path performance rule.
+    assert!(
+        contract
+            .contains("No code, widgets, ops, raw CSS, filesystem, network, or shell authority"),
+        "syntax vocabulary contract must lock the inert-data security boundary"
+    );
+    assert!(
+        contract.contains("no per-glyph map lookup"),
+        "syntax vocabulary contract must lock the hot-path performance rule"
+    );
+}
+
+#[test]
+fn phase18_15_theme_authoring_docs_lock_textstyles_contract() {
+    let contract = syntax_vocabulary_contract();
+    let guide = creating_packages_guide();
+    let index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+
+    for required in [
+        "`StyleSpec` (`color`, `bold`, `italic`, `underline`, `strike`)",
+        "`clay.contributions.textStyles`",
+        "`shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`",
+        "Theme resolution happens at configuration/package-load time",
+        "No code, widgets, ops, raw CSS, filesystem, network, or shell authority",
+    ] {
+        assert!(
+            contract.contains(required),
+            "syntax vocabulary contract must document theme binding detail: {required}"
+        );
+    }
+
+    for required in [
+        "Phase 18.15 theme authoring: `textStyles` and `setTheme`",
+        "Text Vocabulary and Two-Axis Decoration Contract",
+        "`textStyles` entry fields",
+        "Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`",
+        "Only one active theme is applied",
+        "setTheme(\"@clay/theme-gruvbox-material-dark\")",
+        "rawColor`, `value`, `css`, `rawCss`, `cssText`",
+        "No theme JavaScript, package parser, or raw IPC runs in paint",
+        "packages/theme-gruvbox-material-dark/",
+        "packages/theme-gruvbox-material-light/",
+    ] {
+        assert!(
+            guide.contains(required),
+            "package guide must document Phase 18.15 theme authoring detail: {required}"
+        );
+    }
+
+    assert!(
+        index.contains("reference/primitives/syntax-vocabulary.md"),
+        "docs/index.md must link syntax vocabulary docs"
+    );
+}
+
+fn text_vocabulary_theme_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/text-vocabulary-and-theme-primitive-review.md",
+    ))
+    .expect("read text vocabulary and theme primitive review")
+}
+
+#[test]
+fn text_vocabulary_theme_primitive_review_linked_from_wiki_index() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    assert!(
+        wiki_index.contains("modules/text-vocabulary-and-theme-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.15 text vocabulary and theme primitive review"
+    );
+}
+
+#[test]
+fn text_vocabulary_theme_primitive_review_inventories_and_gaps() {
+    let review = text_vocabulary_theme_primitive_review();
+
+    // Source provenance.
+    assert!(
+        review.contains("046-Phase-18.15"),
+        "primitive review must cite Plan 046"
+    );
+    assert!(
+        review.contains("2026-07-09-0352-tiered-tree-sitter"),
+        "primitive review must cite decision log 2026-07-09-0352"
+    );
+
+    // Existing primitive inventory (every primitive the refactor must reuse or extend).
+    for required in [
+        "DecorationSpan",
+        "DecorationKind { Syntax, Semantic, Diagnostic, SearchMatch }",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "visible_decoration_ranges",
+        "ThemeTokenType { ColorRole, Spacing, Radius, Typography, Opacity }",
+        "ThemeTokenContributionDescriptor",
+        "reject_ui_prohibited_authority",
+        "op_clay_ui_register_theme_token",
+        "serverRegisterThemeToken",
+        "decorations_for_window",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.15 primitive review must inventory existing primitive `{required}`"
+        );
+    }
+
+    // Generic gaps the phase introduces.
+    for required in [
+        "Two-axis `TokenType` + `Modifiers` vocabulary",
+        "`StyleSpec` and `StyleRegistry`",
+        "Text-style theme contribution and active-theme application",
+        "Free-form `style_token` compatibility mapper",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.15 primitive review must record generic gap: {required}"
+        );
+    }
+
+    // Reuse statement + rejected non-generic approaches.
+    assert!(
+        review.contains("What the Refactor Achieves with Existing Primitives"),
+        "primitive review must state what the refactor reuses"
+    );
+    for rejected in [
+        "Per-language Rust branches",
+        "Relaxing `StaticSduiState` or decoration validation",
+        "Client-side JavaScript or raw CSS for styling",
+        "Overloading the SDUI `ThemeTokenType` typed-scalar resolver",
+        "Hidden JSON/TOML configuration keys for themes",
+    ] {
+        assert!(
+            review.contains(rejected),
+            "Phase 18.15 primitive review must reject non-generic approach: {rejected}"
+        );
+    }
+
+    // Hot-path + security boundaries.
+    assert!(
+        review.contains("no per-glyph lookup"),
+        "primitive review must lock the StyleRegistry hot-path rule"
+    );
+    assert!(
+        review.contains("inert data only"),
+        "primitive review must lock the inert-data security boundary"
+    );
+    assert!(
+        review.contains("denied by default"),
+        "primitive review must lock deny-by-default theme authority"
+    );
+}
+
+#[test]
+fn editor_theme_registry_wiki_documents_phase18_15_implementation() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let page = fs::read_to_string(repository_path(
+        "docs/wiki/modules/editor-theme-registry.md",
+    ))
+    .expect("read editor theme registry wiki");
+    let editor_page = fs::read_to_string(repository_path("docs/wiki/modules/masonry-editor.md"))
+        .expect("read masonry editor wiki");
+    let sdui_page = fs::read_to_string(repository_path("docs/wiki/modules/server-driven-ui.md"))
+        .expect("read server-driven-ui wiki");
+    let review = text_vocabulary_theme_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/editor-theme-registry.md"),
+        "wiki index must link the Phase 18.15 editor theme registry implementation page"
+    );
+
+    for required in [
+        "src/editor/theme.rs",
+        "StyleRegistry",
+        "[Color; 35]",
+        "TokenType::index()",
+        "StyleSpec { color, bold, italic, underline, strike }",
+        "clay.contributions.textStyles",
+        "TextStyleOverrideDescriptor",
+        "reject_ui_prohibited_authority",
+        "op_clay_theme_set_theme",
+        "ServerMessage::ActiveTheme",
+        "@clay/theme-gruvbox-material-dark",
+        "@clay/theme-gruvbox-material-light",
+        "no per-language Rust color branches",
+        "no package JavaScript",
+        "non-`@clay/*` specifiers are denied",
+        "cargo test --test theme_packages",
+    ] {
+        assert!(
+            page.contains(required),
+            "editor theme registry wiki must document `{required}`"
+        );
+    }
+
+    assert!(
+        editor_page.contains("StyleRegistry::from_active_theme"),
+        "masonry editor wiki must document ActiveTheme-to-StyleRegistry application"
+    );
+    assert!(
+        sdui_page.contains("SDUI theme tokens and editor text themes are separate primitives"),
+        "SDUI wiki must document separation from editor StyleRegistry"
+    );
+    assert!(
+        review.contains("Editor Theme Registry"),
+        "primitive review must link final implementation wiki"
     );
 }
 

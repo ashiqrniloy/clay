@@ -161,6 +161,9 @@ pub struct IpcServer {
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
     workspace: Arc<Mutex<WorkspaceState>>,
     sdui: Arc<Mutex<StaticSduiState>>,
+    /// Resolved active theme snapshot (Plan 046 task 7 `setTheme`) shipped to the
+    /// client during the welcome handshake. `None` = Clay default theme.
+    active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     #[allow(dead_code)]
     parse_coordinator: ParseCoordinator,
@@ -194,6 +197,7 @@ impl IpcServer {
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
             workspace: Arc::new(Mutex::new(workspace)),
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
+            active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
             runtime_generation: RuntimeGenerationStore::initial(),
@@ -415,6 +419,11 @@ impl IpcServer {
         )
         .await;
 
+        // Plan 046 task 7: resolve the active theme selected by `setTheme` in
+        // `init.js` onto the shared slot the welcome handshake ships to the
+        // client. `None` clears any previously selected theme on reload.
+        *self.active_theme.lock().await = evaluation.active_theme.clone();
+
         if let Err(error) =
             service.register_parse_handlers(&self.parse_coordinator, generation_id, &evaluation)
         {
@@ -448,6 +457,7 @@ impl IpcServer {
         let behavior = Arc::clone(&self.behavior);
         let workspace = Arc::clone(&self.workspace);
         let sdui = Arc::clone(&self.sdui);
+        let active_theme = Arc::clone(&self.active_theme);
         let runtime_diagnostics = Arc::clone(&self.runtime_diagnostics);
         let runtime_generation = self.runtime_generation.clone();
         let parse_coordinator = self.parse_coordinator.clone();
@@ -460,6 +470,7 @@ impl IpcServer {
                 behavior,
                 workspace,
                 sdui,
+                active_theme,
                 runtime_diagnostics,
                 runtime_generation,
                 parse_coordinator,
@@ -964,6 +975,7 @@ mod runtime_outputs_tests {
             ui_contributions: Default::default(),
             syntax_grammars: vec![],
             completion_providers: vec![],
+            active_theme: None,
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -998,6 +1010,7 @@ mod runtime_outputs_tests {
             ui_contributions: Default::default(),
             syntax_grammars: vec![],
             completion_providers: vec![],
+            active_theme: None,
         };
 
         let application = apply_runtime_outputs_without_sdui(&evaluation, &behavior).await;
@@ -1034,6 +1047,7 @@ mod runtime_outputs_tests {
             ui_contributions: Default::default(),
             syntax_grammars: vec![],
             completion_providers: vec![],
+            active_theme: None,
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -1069,6 +1083,7 @@ mod runtime_outputs_tests {
             ui_contributions: Default::default(),
             syntax_grammars: vec![],
             completion_providers: vec![],
+            active_theme: None,
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -1370,6 +1385,7 @@ mod tests {
                 Arc::new(Mutex::new(workspace))
             },
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
+            active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
             runtime_generation: RuntimeGenerationStore::initial(),
@@ -1419,6 +1435,7 @@ mod tests {
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
         assert!(matches!(
             codec.read_server_message(&mut stream).await.unwrap(),
             ServerMessage::FileOpenCapabilityIssued { .. }

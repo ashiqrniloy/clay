@@ -85,6 +85,7 @@ Clay currently has foundations for:
 - Runtime-backed public APIs in `clay:ui` for Phase 18.3 inert package UI contributions: `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and `serverRegisterThemeToken`.
 - Package manifest UI metadata validation for `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, and `themeTokens`.
 - Package manifest Phase 18.4 input/state/configuration metadata validation for `clay.contributions.input`, `uiStateScopes`, `layoutOverrides`, and `packageOptions`, including deterministic conflict diagnostics and provenance.
+- Phase 18.15 text styling: two-axis `TokenType` + `Modifiers` decoration vocabulary, inert `clay.contributions.textStyles` theme data, first-party Gruvbox Material Dark/Light theme packages, and `clay.theme.setTheme()` for one active startup theme.
 - Decoration publication and parse handler foundations.
 - First-party `@clay/markdown` package scaffold and smoke fixtures.
 - First-party `@clay/git` read-only status package consuming the server-owned `clay:git` discovery facade (Phase 18.13).
@@ -133,6 +134,7 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.8 | Document the command execution lifecycle, inert action intents, transient menu sessions, and the difference between fixed panels, transient overlays, and bottom-pane transient menus. Update anti-patterns to reject client-side command execution, raw callbacks, and command-permission bypass. |
 | Phase 18.12 | Document the file-browser-era shell contract: Clay owns workspace discovery, bounded listing, the left file tree, bottom fuzzy-open sessions, and workspace command routing; packages may reuse generic panel/overlay/action primitives but cannot add roots, markers, ignore rules, raw file listing, native widgets, or direct filesystem authority. |
 | Phase 18.13 | Document the read-only Git package contract: `@clay/git` consumes the server-owned `clay:git` discovery facade, declares no permissions, publishes a sanitized status panel, and receives no shell/network/filesystem/mutating Git authority. Branch/status commands are server-owned built-ins (`clay.git.listStatuses`, `clay.git.refreshStatus`); the package only composes read-only display state. Mutating Git operations remain deferred. |
+| Phase 18.15 | Document the locked text vocabulary (`TokenType` + `Modifiers`), inert `textStyles` theme-package contract, one-active-theme `setTheme()` selection API, and the separation between SDUI typed theme tokens and editor text `StyleRegistry` overrides. |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
@@ -989,23 +991,99 @@ Clay maps component style variables to typed native properties and render styles
 
 Raw CSS is not supported as a package API. Unknown style tokens, duplicate package token names, type-incompatible fallbacks, native renderer callbacks, style strings, and raw colors without a typed token contract are rejected at package load, configuration, or UI update time.
 
+### Phase 18.15 theme authoring: `textStyles` and `setTheme`
+
+Implemented in Phase 18.15: editor text/chrome themes are first-party packages that declare inert `clay.contributions.textStyles` data and are activated from `~/.config/clay/init.js` with `clay.theme.setTheme()`. This is separate from `serverRegisterThemeToken`: SDUI theme tokens style package components; `textStyles` resolves editor/syntax/prose/base UI colors through `StyleRegistry`.
+
+Authoritative vocabulary: [Text Vocabulary and Two-Axis Decoration Contract](../primitives/syntax-vocabulary.md).
+
+A theme package declares no permissions and no modes. It contributes style data only:
+
+```json
+{
+  "name": "@clay/theme-example-dark",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./dist/index.js", "./load": "./dist/load.js" },
+  "clay": {
+    "apiPrefix": "theme-example-dark",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "permissions": [],
+    "modes": [],
+    "docs": "./docs/index.md",
+    "performance": { "estimatedManifestBytes": 2400 },
+    "apiDependencies": [],
+    "contributions": {
+      "textStyles": [
+        { "token": "panelBg", "color": "#282828" },
+        { "token": "text", "color": "#d4be98" },
+        { "token": "Keyword", "color": "#d3869b", "bold": true },
+        { "token": "Comment", "color": "#7c6f64", "italic": true },
+        { "token": "Link", "color": "#7daea3", "underline": true }
+      ]
+    }
+  }
+}
+```
+
+`textStyles` entry fields:
+
+| Field | Status | Meaning |
+| --- | --- | --- |
+| `token` | required | One base UI key or one `TokenType` variant name. |
+| `color` | optional | `#rgb`, `#rrggbb`, or `#rrggbbaa`. |
+| `bold` | optional | Boolean default for token text. Syntax-token targets only. |
+| `italic` | optional | Boolean default for token text. Syntax-token targets only. |
+| `underline` | optional | Boolean default for token text. Syntax-token targets only. |
+| `strike` | optional | Boolean strikethrough default. Syntax-token targets only. |
+
+Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`.
+
+Token names are the `TokenType` variant names from the vocabulary contract: `Namespace`, `Type`, `Class`, `Enum`, `Interface`, `Struct`, `TypeParameter`, `Parameter`, `Variable`, `Property`, `EnumMember`, `Event`, `Function`, `Method`, `Macro`, `Keyword`, `Modifier`, `Comment`, `String`, `Number`, `Regexp`, `Operator`, `Decorator`, `Heading1`, `Heading2`, `Heading3`, `Heading4`, `Heading5`, `Heading6`, `ListItem`, `Quote`, `CodeBlock`, `CodeSpan`, `Link`, `Paragraph`.
+
+Validation rules:
+
+- Every entry must set at least one override field.
+- Unknown `token` names are rejected.
+- Duplicate token entries in one package are rejected with deterministic diagnostics.
+- Invalid hex colors are rejected.
+- `rawColor`, `value`, `css`, `rawCss`, `cssText`, executable callbacks, native widget handles, raw ops, client JavaScript, filesystem/network/shell authority, and renderer callbacks are rejected.
+- `textStyles` is inert manifest data. It grants no permission and executes no styling code.
+
+Runtime selection:
+
+```js
+import { setTheme } from "clay:theme";
+
+setTheme("@clay/theme-gruvbox-material-dark");
+// or
+setTheme({ specifier: "@clay/theme-gruvbox-material-light" });
+```
+
+Only one active theme is applied. `setTheme()` currently accepts first-party `@clay/*` theme packages; arbitrary local/registry theme specifiers are denied until package installation/authority is designed. Theme resolution happens during configuration/package-load and is sent to the client as an inert `ActiveTheme` snapshot before first paint. No theme JavaScript, package parser, or raw IPC runs in paint, layout, scroll, keypress, text-event, or edit-ack hot paths.
+
+Full first-party examples live in `packages/theme-gruvbox-material-dark/` and `packages/theme-gruvbox-material-light/`.
+
 ## Rendering and Decorations
 
 Inline editor rendering uses inert decoration data, not UI components.
 
-Decoration span example:
+Decoration span shape (implemented protocol model):
 
 ```js
 {
   byteStart: 0,
   byteEnd: 7,
   kind: "syntax",
-  styleToken: "markup.heading.1",
+  tokenType: "Heading1",
+  modifiers: ["Bold"],
+  scope: "markup.heading.1",
   priority: 80
 }
 ```
 
-Packages should translate parser-specific output into generic Clay decoration spans. Rust should not branch on Markdown-specific token names.
+Current compatibility facades may still accept legacy `styleToken` strings at package/parse boundaries and map them through `DecorationSpan::from_style_token`; new package code should target `TokenType` + `Modifiers` from the vocabulary contract. Packages should translate parser-specific output into generic Clay decoration spans. Rust should not branch on Markdown-specific token names.
 
 ## Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption
 
@@ -1296,7 +1374,7 @@ Generic key behavior is `ClientFirstPredictable`: the Rust client executes inert
 
 - `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS = 16` — keypress-to-local-paint budget; no sync JS before paint.
 - `MODE_ACTIVATION_P95_BUDGET_MS = 100` — mode-activation budget.
-- `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES = 2048` — behavior manifest payload budget; oversize manifests are rejected with `PayloadBudgetExceeded` at record time.
+- `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES = 4096` — package manifest metadata payload budget (including inert `clay.contributions.*` declarations; sized to fit first-party theme packages' full `textStyles` mappings, Plan 046); oversize manifests are rejected with `ManifestValidationFailed`/`PayloadBudgetExceeded` at record time.
 
 Mode/classification defaults are compile-time (no configuration-evaluation cost at paint/text time). Configuration evaluation is bounded to init.js/package load or explicit setting change by `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS = 25`.
 

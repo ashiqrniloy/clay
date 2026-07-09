@@ -14,9 +14,8 @@ use crate::perf::{
 };
 use crate::protocol::{
     BehaviorManifest, BehaviorVersion, CompletionReplacementRange, CompletionTrigger,
-    DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan, DocumentAccess, DocumentId,
-    DocumentVersion, EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule, KeyStroke,
-    PairRule,
+    DecorationChunkKey, DecorationSet, DecorationSpan, DocumentAccess, DocumentId, DocumentVersion,
+    EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule, KeyStroke, PairRule,
 };
 use crate::shell::CompletionMenuAcceptAction;
 
@@ -25,28 +24,15 @@ use super::cursor::CursorState;
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState};
 use super::selection::SelectionState;
+use super::theme::StyleRegistry;
 use super::viewport::{Viewport, visible_line_count_from_height};
 
-const PANEL_COLOR: Color = Color::from_rgb8(0x24, 0x24, 0x24);
-const TEXT_COLOR: Color = Color::from_rgb8(0xf4, 0xf1, 0xff);
-const PLACEHOLDER_COLOR: Color = Color::from_rgb8(0x8d, 0x86, 0xa3);
-const SELECTION_COLOR: Color = Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66);
-// Syntax decorations are drawn as background tints behind text. Distinct,
-// saturated colors per token family make the highlighting visible against the
-// dark editor panel; without this the previous single faint blue tint was
-// essentially invisible.
-const SYNTAX_KEYWORD_COLOR: Color = Color::from_rgba8(0xc7, 0x92, 0xea, 0x55);
-const SYNTAX_STRING_COLOR: Color = Color::from_rgba8(0xc3, 0xe8, 0x8d, 0x55);
-const SYNTAX_COMMENT_COLOR: Color = Color::from_rgba8(0x7f, 0x84, 0x8e, 0x55);
-const SYNTAX_PUNCTUATION_COLOR: Color = Color::from_rgba8(0xab, 0xb2, 0xbf, 0x55);
-const SYNTAX_DEFAULT_COLOR: Color = Color::from_rgba8(0x61, 0xaf, 0xef, 0x55);
-const SEMANTIC_DECORATION_COLOR: Color = Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f);
-const DIAGNOSTIC_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f);
-const SEARCH_DECORATION_COLOR: Color = Color::from_rgba8(0xff, 0xd1, 0x66, 0x45);
-const CARET_COLOR: Color = Color::from_rgb8(0xff, 0xff, 0xff);
+// All color now comes from the single source of color, `StyleRegistry`
+// (super::theme). The only color literals permitted in the editor/shell paint
+// path live in super::theme.rs (the theme-definition module); a source-guard
+// test in tests/editor_performance_invariants.rs forbids Color::from_rgb*
+// literals anywhere else here.
 const CARET_WIDTH: f64 = 1.5;
-const SCROLLBAR_COLOR: Color = Color::from_rgba8(0xb9, 0xb2, 0xd6, 0x99);
-const SCROLLBAR_TRACK_COLOR: Color = Color::from_rgba8(0xff, 0xff, 0xff, 0x14);
 const SCROLLBAR_WIDTH: f64 = 8.0;
 const SCROLLBAR_MARGIN: f64 = 4.0;
 const SCROLLBAR_MIN_THUMB: f64 = 24.0;
@@ -54,22 +40,6 @@ pub(super) const TEXT_INSET: f64 = 48.0;
 pub(super) const TEXT_FONT_SIZE: f32 = 20.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
 const LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
-
-fn decoration_color(kind: DecorationKind, style_token: &str) -> Color {
-    match kind {
-        DecorationKind::Diagnostic => DIAGNOSTIC_DECORATION_COLOR,
-        DecorationKind::SearchMatch => SEARCH_DECORATION_COLOR,
-        DecorationKind::Semantic => SEMANTIC_DECORATION_COLOR,
-        DecorationKind::Syntax if style_token.starts_with("markup.") => SEMANTIC_DECORATION_COLOR,
-        DecorationKind::Syntax if style_token.starts_with("keyword.") => SYNTAX_KEYWORD_COLOR,
-        DecorationKind::Syntax if style_token.starts_with("string.") => SYNTAX_STRING_COLOR,
-        DecorationKind::Syntax if style_token.starts_with("comment.") => SYNTAX_COMMENT_COLOR,
-        DecorationKind::Syntax if style_token.starts_with("punctuation.") => {
-            SYNTAX_PUNCTUATION_COLOR
-        }
-        DecorationKind::Syntax => SYNTAX_DEFAULT_COLOR,
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorCommand<'a> {
@@ -360,6 +330,10 @@ pub struct EditorSurface {
     /// the caret instead of snapping back (the caret-keep-visible logic must
     /// not fight user scrolling).
     pin_caret_visible: bool,
+    /// Single source of color for the editor + shell paint path (Plan 046 task
+    /// 4). Defaults to the Clay theme; task 5 swaps in the active theme at
+    /// load/reload. Immutable during paint.
+    theme: StyleRegistry,
     perf: PerfRecorder,
 }
 
@@ -408,6 +382,21 @@ impl EditorSurface {
 
     pub fn decoration_state_version(&self) -> Option<DocumentVersion> {
         self.decorations.state_version()
+    }
+
+    /// Single source of color for the editor + shell paint path. `StyleRegistry`
+    /// is `Copy`, so callers cheaply snapshot the resolved theme for one paint.
+    pub(crate) fn theme(&self) -> StyleRegistry {
+        self.theme
+    }
+
+    /// Swap the active theme registry. Called by the task-7 `setTheme` flow at
+    /// load/reload (never during paint); the resolved registry is then
+    /// immutable until the next swap. This is the only sanctioned way to mutate
+    /// `theme` after construction.
+    #[allow(dead_code)] // wired by Plan 046 task 7 (setTheme) — keep the hook live.
+    pub(crate) fn set_theme(&mut self, theme: StyleRegistry) {
+        self.theme = theme;
     }
 
     pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
@@ -838,8 +827,10 @@ impl EditorSurface {
         scene.push_clip_layer(Affine::IDENTITY, &rect);
         // Paint the editor background across the full editor rect. There is no
         // visible inset card or decorative accent circle; a small text inset
-        // keeps text from hugging the edges.
-        scene.fill(Fill::NonZero, Affine::IDENTITY, PANEL_COLOR, None, &rect);
+        // keeps text from hugging the edges. Color comes from the single source
+        // of color (super::theme), never an inline literal.
+        let panel_bg = self.theme.base.panel_bg;
+        scene.fill(Fill::NonZero, Affine::IDENTITY, panel_bg, None, &rect);
 
         let max_width = (width - (TEXT_INSET * 2.0)).max(1.0) as f32;
         let available_height = (height - (TEXT_INSET * 2.0)).max(0.0);
@@ -920,7 +911,7 @@ impl EditorSurface {
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            SCROLLBAR_TRACK_COLOR,
+            self.theme.base.scrollbar_track,
             None,
             &track,
         );
@@ -928,7 +919,7 @@ impl EditorSurface {
             scene.fill(
                 Fill::NonZero,
                 Affine::IDENTITY,
-                SCROLLBAR_COLOR,
+                self.theme.base.scrollbar,
                 None,
                 &thumb,
             );
@@ -947,9 +938,9 @@ impl EditorSurface {
         let snapshot = self.visible_snapshot();
         let current_text = snapshot.text.as_str();
         let (display_text, color) = if current_text.is_empty() {
-            (PLACEHOLDER_TEXT, PLACEHOLDER_COLOR)
+            (PLACEHOLDER_TEXT, self.theme.base.placeholder)
         } else {
-            (current_text, TEXT_COLOR)
+            (current_text, self.theme.base.text)
         };
 
         let caret_visible_offset = self.visible_caret_offset(&snapshot);
@@ -969,7 +960,7 @@ impl EditorSurface {
             key,
             caret_visible_offset,
             selection_visible_range,
-            SELECTION_COLOR,
+            self.theme.base.selection,
             &decoration_visible_ranges,
             origin,
             pin_caret_visible,
@@ -1035,7 +1026,13 @@ impl EditorSurface {
             origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
-        scene.fill(Fill::NonZero, Affine::IDENTITY, CARET_COLOR, None, &caret);
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            self.theme.base.caret,
+            None,
+            &caret,
+        );
         scene.pop_layer();
     }
 
@@ -1095,7 +1092,9 @@ impl EditorSurface {
                 (start < end).then(|| {
                     (
                         (start - visible_start)..(end - visible_start),
-                        decoration_color(span.kind, &span.style_token),
+                        self.theme
+                            .style_for(span.kind, span.token_type, span.modifiers)
+                            .color,
                     )
                 })
             })
@@ -1537,13 +1536,13 @@ fn dedent_leading_one_level(
 mod tests {
     use std::fmt::Write as _;
 
-    use super::{EditorCommand, EditorSurface, TEXT_INSET};
+    use super::{Color, EditorCommand, EditorSurface, TEXT_INSET};
     use crate::editor::layout::LayoutCacheKey;
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
         BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration, CompletionTrigger,
         DecorationKind, DocumentAccess, EditOperation, KeyBindingContext, KeyBindingRule, KeyCode,
-        KeyModifiers, KeyStroke, RoutingPolicy, TabMode,
+        KeyModifiers, KeyStroke, Modifiers, RoutingPolicy, TabMode, TokenType,
     };
     use crate::shell::CompletionMenuAcceptAction;
     use masonry::kurbo::Rect;
@@ -1575,7 +1574,11 @@ mod tests {
             .expect("paint_in_rect body");
         let body = paint.split("fn paint_text").next().expect("paint body");
         assert!(
-            body.contains("scene.fill(Fill::NonZero, Affine::IDENTITY, PANEL_COLOR, None, &rect)"),
+            body.contains("let panel_bg = self.theme.base.panel_bg;"),
+            "editor background color must come from the StyleRegistry single source of color"
+        );
+        assert!(
+            body.contains("scene.fill(Fill::NonZero, Affine::IDENTITY, panel_bg, None, &rect)"),
             "editor background must fill the full editor rect"
         );
         assert!(
@@ -2897,17 +2900,119 @@ mod tests {
 
     #[test]
     fn syntax_decoration_colors_are_distinct_by_token_family() {
+        let registry = super::StyleRegistry::default();
+        let kw = TokenType::classify_style_token("keyword.control").0;
+        let str = TokenType::classify_style_token("string.quoted").0;
+        let com = TokenType::classify_style_token("comment.line").0;
+        let pun = TokenType::classify_style_token("punctuation.definition").0;
+        let h1 = TokenType::classify_style_token("markup.heading.1").0;
         assert_ne!(
-            super::decoration_color(DecorationKind::Syntax, "keyword.control"),
-            super::decoration_color(DecorationKind::Syntax, "string.quoted")
+            registry
+                .style_for(DecorationKind::Syntax, kw, Modifiers::NONE)
+                .color,
+            registry
+                .style_for(DecorationKind::Syntax, str, Modifiers::NONE)
+                .color
         );
         assert_ne!(
-            super::decoration_color(DecorationKind::Syntax, "comment.line"),
-            super::decoration_color(DecorationKind::Syntax, "punctuation.definition")
+            registry
+                .style_for(DecorationKind::Syntax, com, Modifiers::NONE)
+                .color,
+            registry
+                .style_for(DecorationKind::Syntax, pun, Modifiers::NONE)
+                .color
         );
         assert_eq!(
-            super::decoration_color(DecorationKind::Syntax, "markup.heading.1"),
-            super::SEMANTIC_DECORATION_COLOR
+            registry
+                .style_for(DecorationKind::Syntax, h1, Modifiers::NONE)
+                .color,
+            registry
+                .style_for(
+                    DecorationKind::Semantic,
+                    TokenType::Function,
+                    Modifiers::NONE
+                )
+                .color
+        );
+    }
+
+    #[test]
+    fn free_form_style_token_decoration_colors_baseline_locked() {
+        // Phase 18.15 (Plan 046) baseline lock: pins the EXACT rendered color
+        // for every two-axis token family and decoration layer. The compat
+        // mapper (`TokenType::classify_style_token`) feeds the original
+        // free-form style_token families into the StyleRegistry single source
+        // of color; the task-5 active-theme overrides MUST reproduce these
+        // colors unchanged. Edit only if a theme change intentionally revises
+        // the default palette.
+        let registry = super::StyleRegistry::default();
+        let assert_family_color = |style_token: &str, expected: Color, family: &str| {
+            let (token_type, _mods) = TokenType::classify_style_token(style_token);
+            assert_eq!(
+                registry
+                    .style_for(DecorationKind::Syntax, token_type, Modifiers::NONE)
+                    .color,
+                expected,
+                "{family} family baseline"
+            );
+        };
+        assert_family_color(
+            "keyword.control",
+            Color::from_rgba8(0xc7, 0x92, 0xea, 0x55),
+            "keyword.*",
+        );
+        assert_family_color(
+            "string.quoted",
+            Color::from_rgba8(0xc3, 0xe8, 0x8d, 0x55),
+            "string.*",
+        );
+        assert_family_color(
+            "comment.line",
+            Color::from_rgba8(0x7f, 0x84, 0x8e, 0x55),
+            "comment.*",
+        );
+        assert_family_color(
+            "punctuation.definition",
+            Color::from_rgba8(0xab, 0xb2, 0xbf, 0x55),
+            "punctuation.*",
+        );
+        // Unknown prefixes fall back to Variable -> default Syntax color.
+        let (variable_tt, _) = TokenType::classify_style_token("variable.other");
+        assert_eq!(
+            registry
+                .style_for(DecorationKind::Syntax, variable_tt, Modifiers::NONE)
+                .color,
+            Color::from_rgba8(0x61, 0xaf, 0xef, 0x55),
+            "default Syntax family baseline"
+        );
+        assert_family_color(
+            "markup.heading.1",
+            Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
+            "markup.* Syntax",
+        );
+        // Semantic/Diagnostic/SearchMatch color by layer (kind-first),
+        // token_type is inert for them.
+        let (any_tt, _) = TokenType::classify_style_token("function");
+        assert_eq!(
+            registry
+                .style_for(DecorationKind::Semantic, any_tt, Modifiers::NONE)
+                .color,
+            Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
+            "Semantic layer baseline"
+        );
+        assert_eq!(
+            registry
+                .style_for(DecorationKind::Diagnostic, any_tt, Modifiers::NONE)
+                .color,
+            Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f),
+            "Diagnostic layer baseline"
+        );
+        assert_eq!(
+            registry
+                .style_for(DecorationKind::SearchMatch, any_tt, Modifiers::NONE)
+                .color,
+            Color::from_rgba8(0xff, 0xd1, 0x66, 0x45),
+            "SearchMatch layer baseline"
         );
     }
 }

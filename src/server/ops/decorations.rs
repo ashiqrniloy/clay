@@ -103,19 +103,18 @@ fn span_from_value(
             )));
         }
     };
-    Ok(DecorationSpan {
-        byte_start: required_u64(object, "byteStart", "clay.decorations.invalid_span")?,
-        byte_end: required_u64(object, "byteEnd", "clay.decorations.invalid_span")?,
+    Ok(DecorationSpan::from_style_token(
+        required_u64(object, "byteStart", "clay.decorations.invalid_span")?,
+        required_u64(object, "byteEnd", "clay.decorations.invalid_span")?,
         kind,
-        style_token: required_str(object, "styleToken", "clay.decorations.invalid_span")?
-            .to_string(),
-        priority: optional_u64(object.get("priority"))?.unwrap_or(0) as u16,
-        provenance: DecorationProvenance {
+        required_str(object, "styleToken", "clay.decorations.invalid_span")?,
+        optional_u64(object.get("priority"))?.unwrap_or(0) as u16,
+        DecorationProvenance {
             package_name: package.manifest.name.clone(),
             package_version: package.manifest.version.clone(),
             package_prefix: package.manifest.clay.api_prefix.clone(),
         },
-    })
+    ))
 }
 
 pub(super) fn package_from_options(

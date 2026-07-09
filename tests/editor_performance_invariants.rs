@@ -206,3 +206,65 @@ fn phase18_9_keypress_to_paint_budget_orders_below_mode_activation_budget() {
     };
     const { assert!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES > 0) };
 }
+
+/// Return the non-test portion of a source file: everything before the first
+/// `#[cfg(test)]` or `mod tests` boundary. Files without a test module return
+/// the whole source.
+fn non_test_body(src: &str) -> &str {
+    let mut cut = src.len();
+    if let Some(i) = src.find("\n#[cfg(test)]") {
+        cut = cut.min(i);
+    }
+    if let Some(i) = src.find("\nmod tests") {
+        cut = cut.min(i);
+    }
+    &src[..cut]
+}
+
+#[test]
+fn style_registry_is_single_source_of_color_for_paint_paths() {
+    // Plan 046 task 4 source guard: no editor/shell paint-path file may hold a
+    // `Color::from_rgb*` literal except `src/editor/theme.rs` (the theme-
+    // definition module). The StyleRegistry owns all color; surface/shell read
+    // from it. If a literal reappears in the paint path this fails fast.
+    let paint_path_files = [
+        "src/editor.rs",
+        "src/editor/surface.rs",
+        "src/editor/layout.rs",
+        "src/editor/buffer.rs",
+        "src/editor/cursor.rs",
+        "src/editor/selection.rs",
+        "src/editor/viewport.rs",
+        "src/masonry_editor.rs",
+        "src/masonry_sdui.rs",
+        "src/masonry_shell.rs",
+    ];
+    for file in paint_path_files {
+        let src =
+            fs::read_to_string(file).unwrap_or_else(|e| panic!("{file} should be readable: {e}"));
+        let body = non_test_body(&src);
+        assert!(
+            !body.contains("Color::from_rgb8("),
+            "{file} paint path must source color from StyleRegistry, not a Color::from_rgb8 literal"
+        );
+        assert!(
+            !body.contains("Color::from_rgba8("),
+            "{file} paint path must source color from StyleRegistry, not a Color::from_rgba8 literal"
+        );
+    }
+
+    // The theme-definition module is the ONLY paint-path file allowed to hold
+    // color literals, and it must actually hold them (the default Clay theme
+    // lives there), otherwise the registry stopped being the single source.
+    let theme_src = fs::read_to_string("src/editor/theme.rs")
+        .expect("src/editor/theme.rs (theme-definition module) should be readable");
+    let theme_body = non_test_body(&theme_src);
+    assert!(
+        theme_body.contains("Color::from_rgb8(") || theme_body.contains("Color::from_rgba8("),
+        "src/editor/theme.rs must own the default Clay theme color literals"
+    );
+    assert!(
+        theme_body.contains("pub struct StyleRegistry"),
+        "src/editor/theme.rs must define the StyleRegistry single source of color"
+    );
+}

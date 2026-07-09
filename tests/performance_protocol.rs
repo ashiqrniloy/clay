@@ -86,18 +86,18 @@ fn decoration_set_for_payload() -> DecorationSet {
         document_version: 3,
         viewport_byte_start: 8 * 1024 * 1024,
         viewport_byte_end: 8 * 1024 * 1024 + DECORATION_NEAR_VIEWPORT_GUARD_BYTES,
-        spans: vec![DecorationSpan {
-            byte_start: 8 * 1024 * 1024,
-            byte_end: 8 * 1024 * 1024 + 16,
-            kind: DecorationKind::Syntax,
-            style_token: "markup.heading.1".to_string(),
-            priority: 10,
-            provenance: DecorationProvenance {
+        spans: vec![DecorationSpan::from_style_token(
+            8 * 1024 * 1024,
+            8 * 1024 * 1024 + 16,
+            DecorationKind::Syntax,
+            "markup.heading.1",
+            10,
+            DecorationProvenance {
                 package_name: "@clay/markdown".to_string(),
                 package_version: "0.1.0".to_string(),
                 package_prefix: "markdown".to_string(),
             },
-        }],
+        )],
     }
 }
 

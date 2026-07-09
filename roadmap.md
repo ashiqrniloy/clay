@@ -903,6 +903,218 @@ Expected outcome:
 - Grammar-only packages have a clear upgrade path into fuller modes without changing the package-provided syntax architecture.
 - Phase 19 hot reload can then operate against several real package contributions instead of only Markdown.
 
+## Phases 18.15–18.21: Themable Syntax, Tiered Tree-sitter, Language Packages, and Opt-in LSP
+
+The following sequence implements `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md` (which supersedes `2026-07-08-2316` on the engine choice). It adds a themable, LSP-based syntax vocabulary; a tiered tree-sitter engine (native first-party + `web-tree-sitter` + JS fallback); range diagnostics; full first-party Rust/TypeScript/JavaScript/Markdown language packages; completion extensions (snippets, exclusive claim, disable-native); engine-agnostic language-intelligence primitives; and opt-in LSP bridge packages. It is sequenced so every later phase renders through the Phase 18.15 vocabulary/theme contract.
+
+**Supersessions recorded by this sequence:** Phase 18.10's "do not embed Rust/TypeScript/JavaScript grammar ownership in Clay core" prohibition is superseded by Phase 18.16 (native tree-sitter is Tier 1 for first-party languages, via bundled grammar data behind a generic engine — the no-per-language-Rust-branches rule still holds). Phase 20's "theme system" daily-editing item is pulled forward into Phase 18.15 because every rendering feature below depends on it.
+
+## Phase 18.15: Text Vocabulary, Two-Axis Decorations, and Theme Registry
+
+Establish the LSP-based token vocabulary, the two-axis decoration model, and the theme registry as the single source of color, before any highlighting/engine/intelligence work. Every later phase renders through this contract.
+
+Entry gate:
+
+- Do not start until Phase 18.14 is complete.
+- Do not start until the entry gate has produced a headless repro confirming today's free-form `style_token` decorations still render, so the vocabulary migration is observable against a baseline.
+
+Focus areas:
+
+- Define the token vocabulary: LSP `SemanticTokenType` + `SemanticTokenModifiers` as the base set, plus a Clay-owned prose extension (`heading-1..6`, `strong`, `emphasis`, `code-span`, `code-block`, `list-marker`, `link`, `quote`). Document the closed base enum plus open-string escape with prefix fallback (TextMate scope style) so third-party packages can mint new tokens a theme still catches via prefix.
+- Refactor `DecorationSpan` (`src/protocol/decorations.rs`) to the two-axis model: `token_type` (what it is) + text-attribute `modifiers` bitflags (`bold | italic | underline | strikethrough | declaration | definition | readonly | static | deprecated | async | abstract`) alongside the existing `layer` (Syntax/Semantic/Diagnostic/SearchMatch), `priority`, and `provenance`. Provide a compatibility mapping from today's `style_token` families (`keyword.*`, `string.*`, `comment.*`, `punctuation.*`, `markup.*`) so existing packages keep rendering during the transition.
+- Introduce a `StyleRegistry` mapping `token_type + modifiers → StyleSpec{color, bold, italic, underline, strike}` plus base UI colors (`panel.bg`, `text`, `accent`, `scrollbar`, `editor.gutter`, `selection`). The registry is a cheap hot-path read queried per span during paint.
+- Migrate today's hardcoded `Color` constants out of `src/editor/surface.rs` (`SYNTAX_*_COLOR`, `PANEL_COLOR`, `ACCENT_COLOR`, `TEXT_COLOR`, scrollbar colors) into the registry; delete `decoration_color()` and ensure no paint code reads a hardcoded color. The registry is the single source of color — this invariant is test-enforced (source guards forbidding `Color::from_rgba8` literals in paint paths).
+- Reuse and extend the existing `ThemeTokenContributionDescriptor` (`src/packages/record.rs`), currently wired only to SDUI/UI components, to cover text rendering. Theme contributions are inert style overrides only — no code, no widgets, no ops, no raw CSS.
+- Author the default Clay-owned theme (today's palette, now in the registry) and the two initial shipped themes: **Gruvbox Material Dark** and **Gruvbox Material Light**, each as a first-party theme package (`@clay/theme-gruvbox-material-dark`, `@clay/theme-gruvbox-material-light`) or core theme module.
+- Add a `setTheme("@clay/...")` Clay JS API and a `clay.theme.*` facade for `~/.config/clay/init.js` to select the active theme. One active theme; user-selected.
+- Add full Clay JS API documentation, generated registry entries, `docs/index.md` links, the theme-author contribution contract in `docs/reference/packages/creating-packages.md`, and a syntax-vocabulary reference page under `docs/reference/primitives/`.
+- Add tests enforcing: two-axis coverage (a markdown `**x**` span emits `modifiers=bold` with no token-type color; a function name can carry `modifiers=bold|declaration`); theme override precedence; no hardcoded color literals in paint paths; and that disabling all themes still produces a renderable default.
+
+Expected outcome:
+
+- Clay has a documented LSP-based vocabulary and two-axis decoration model as the rendering contract every later phase emits.
+- All editor and syntax color is read from the `StyleRegistry`; no hardcoded paint colors remain.
+- Gruvbox Material Dark and Light themes are selectable from `init.js` via `setTheme()`.
+- The Phase 18.10/18.14 free-form `style_token` packages keep rendering through the compatibility mapping while later phases migrate them to vocabulary tokens.
+
+Carried-forward items:
+
+- Theme-author tooling (palette generators, live preview) is deferred to a later hardening phase; themes are authored as inert data files for now.
+- Token `modifiers` for niche cases (e.g. `modification`, `documentation`, `defaultLibrary`) are added as needed by language packages in later phases.
+
+## Phase 18.16: Tiered Tree-sitter Syntax Engine (Native First-Party + Web-tree-sitter + JS Fallback)
+
+Stand up the generic grammar→vocabulary pipeline with three engine backends so first-party languages get native performance, third-party/override languages use wasm, and grammar-less languages keep a JS parser.
+
+Entry gate:
+
+- Do not start until Phase 18.15 (vocabulary + theme registry) is complete, because all engine output is vocabulary tokens rendered through the registry.
+- Entry gate must verify that the candidate native grammar crates (`tree-sitter-rust`, `tree-sitter-typescript` covering typescript + tsx, `tree-sitter-javascript`, `tree-sitter-md`/`tree-sitter-markdown`) are version-compatible with the host `tree-sitter` crate, and that moving them from `[dev-dependencies]` to runtime `[dependencies]` builds cleanly on the Linux host.
+
+Focus areas:
+
+- Implement one engine-agnostic grammar→`DecorationSpan` pipeline: load grammar + `queries/highlights.scm` + `styleMap`, run an incremental parse, extract captures, map to vocabulary `token_type` + `modifiers`, bound output to the viewport, reject stale versions, cancel superseded parses, and publish a `DecorationSet`. The pipeline holds no language names.
+- **Tier 1 (native):** register compiled-in native `tree-sitter-*` crates as first-party grammar contributions at startup, dispatched by grammar/extension lookup. Reuse the existing `TreeSitterSyntaxHandler` shape (`src/server/syntax.rs`) with parser-instance caching per grammar (the per-parse `Parser::new()` overhead already identified and cached). **No per-language Rust branches** — dispatch is data-driven by the registered grammar, not `match language_id`.
+- **Tier 2 (`web-tree-sitter` host adapter):** a generic host-side WebAssembly adapter running inside the existing Deno/V8 background worker, loads resolver-validated package `grammars/*.wasm` + `queries/highlights.scm` through the same generic pipeline. Covers third-party languages and package override of a first-party language.
+- **Tier 3 (package-JS parser):** retain the per-package JS parse-handler fallback (the original `@clay/markdown` `parser.js` route) for languages with no tree-sitter grammar.
+- Implement engine selection: by default a first-party language uses Tier 1; a package may declare a higher-priority Tier 2 grammar to override it; the user may force a tier via config. Selection is user/package-initiated and recorded in package provenance, never silent.
+- Land the binding 2316/0352 fixes carried over: **non-blocking open-time parse** (document text renders immediately on open; `DecorationSet` paints when background parse completes) and **`ParseCoordinator::finish_task` surfaces handler errors as `RuntimeDiagnostic`** instead of silently dropping them.
+- Produce real `queries/highlights.scm` artifacts (and `grammars/*.wasm` for Tier 2) for Rust/TypeScript/JavaScript/Markdown; vendor upstream releases with recorded provenance, or document a build step. The grammar directories currently hold only `README.md`.
+- Add tests: each tier produces vocabulary tokens; Tier 1 native parse is bounded and incremental; Tier 2 wasm override suppresses Tier 1 when higher priority; user tier override is honored; open-time parse does not block initial render; a handler error surfaces a diagnostic instead of hanging.
+- Update `docs/reference/primitives/parse.md` (or successor), `docs/wiki/modules/parse-coordinator.md`, `docs/wiki/modules/syntax-grammar-registry.md`, and the package-author guide for the tiered engine.
+
+Expected outcome:
+
+- Rust/TypeScript/JavaScript/Markdown highlighting works in production through Tier 1 native tree-sitter, emitting vocabulary tokens rendered by the Phase 18.15 theme.
+- Third-party and override languages highlight through the Tier 2 wasm adapter; grammar-less languages keep Tier 3.
+- Open-time parse no longer blocks and no longer silently swallows handler errors.
+- No per-language Rust branches exist; the host knows no language names.
+
+Carried-forward items:
+
+- Arbitrary third-party `tree-sitter-wasm` grammar loading (non-`@clay/*`) stays out of scope until a dedicated trust/integrity decision (Phase 23 ecosystem hardening).
+- Incremental reparse across edits (reusing `old_tree` changed ranges) is implemented where the engine supports it cheaply; full re-parse-on-edit remains acceptable within budgets until profiling demands otherwise.
+
+## Phase 18.17: Range Diagnostics and Syntax Error Highlighting
+
+Add the range-diagnostic primitive and the Diagnostic decoration layer so syntax errors (and later LSP diagnostics) render as inline squiggles instead of document-level toasts.
+
+Entry gate:
+
+- Do not start until Phase 18.15 (theme registry provides the squiggle/severity colors) is complete.
+
+Focus areas:
+
+- Add a `DiagnosticSpan` primitive `{byte_range, severity (info/warning/error), code, message, source, provenance}` distinct from today's document-level `RuntimeDiagnostic` (`src/protocol/mod.rs`). Diagnostics are a first-class decoration layer, additive to Syntax/Semantic layers.
+- Wire the Diagnostic layer rendering in `src/editor/surface.rs`: severity-colored squiggles/underlines read from the `StyleRegistry` (Phase 18.15), painted without blocking the text paint path, bounded to the viewport.
+- Produce diagnostic spans from tree-sitter `ERROR`/`MISSING` nodes (engine-agnostic: the Tier 1/2/3 pipeline emits them as a side channel of the parse), so every grammar-bearing language gets basic syntax-error highlighting with no per-language work.
+- Define the diagnostic publish contract so the future LSP bridge (Phase 18.20/18.21) feeds the same primitive, not a parallel path.
+- Add a severity-to-`StyleSpec` mapping in the registry and a test enforcing diagnostics compose with (do not erase) syntax/semantic decorations.
+- Add Clay JS API documentation for diagnostic publication where packages may contribute diagnostics, generated registry coverage, and a `docs/reference/primitives/diagnostics.md` page.
+
+Expected outcome:
+
+- Syntax errors render as inline squiggles sourced from tree-sitter error nodes, theme-colored, viewport-bounded, and additive over syntax highlighting.
+- The `DiagnosticSpan` primitive is ready for the Phase 18.20/18.21 LSP bridge to reuse.
+- `RuntimeDiagnostic` remains for document/session-level diagnostics; `DiagnosticSpan` is the range-level primitive.
+
+Carried-forward items:
+
+- Diagnostic hover/quick-fix UX is deferred to Phase 18.20 (code actions) and Phase 20 daily-editing polish; this phase renders the squiggle and carries the data.
+- Multi-source diagnostic deduplication rules across tree-sitter and LSP are finalized when the LSP bridge lands in Phase 18.21.
+
+## Phase 18.18: First-Party Language Package Full Implementation (Rust, TypeScript, JavaScript, Markdown)
+
+Expand the first-party language packages into full mode packages on top of the Tier 1 native engine, the vocabulary, and the theme registry.
+
+Entry gate:
+
+- Do not start until Phase 18.16 (tiered engine emitting vocabulary tokens) and Phase 18.15 (vocabulary + theme) are complete.
+
+Focus areas:
+
+- For `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown`: ship Tier 1 native grammar + `queries/highlights.scm` + `styleMap` mapping grammar captures to vocabulary `token_type` + `modifiers`, so highlighting renders through the active theme.
+- Add full mode declarations only where they provide user-visible behavior: language-specific indentation parameters, electric characters, bracket/quote pairs, comment-toggle rules, autocomplete triggers, and status items. All on generic primitives (behavior manifests, command declarations) — no per-language Rust branches.
+- Add a priority-0 base keyword/snippet completion provider per language (e.g. `rust.keywords`) so every mode has completion even before Phase 18.19/18.21 richer providers.
+- Markdown: move only the *decoration* role onto the Tier 1 engine; the **Markdown preview SDUI panel stays package-JS** (preview and decoration remain separate, per decision 0352).
+- Validate against measured budgets (Phase 14): open-parse cost, incremental edit cost, decoration payload size (`DECORATION_PAYLOAD_BUDGET_BYTES`), scroll/render latency, memory. Save/compare Criterion baselines.
+- Add per-language smoke fixtures and manual `cargo run` coverage: open `.rs`/`.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`/`.md` files, confirm Gruvbox-themed highlighting, keyword completion, indent/pairs/comment behavior, and graceful fallback when a package is disabled.
+- Update package docs, generated registry entries, the package-author guide, code wiki, and `docs/development/launch-and-gui-smoke.md` end-to-end workflow for all four languages.
+
+Expected outcome:
+
+- Rust, TypeScript, JavaScript, and Markdown are full first-party language packages: themed highlighting, mode behavior, and base completion, all on generic primitives and the Tier 1 native engine.
+- Markdown preview continues to work unchanged.
+- All four are ready for Phase 18.21 LSP enrichment without architectural change.
+
+Carried-forward items:
+
+- Advanced per-language features (formatter execution, import management, structural commands beyond comment-toggle) wait for later phases or LSP (Phase 18.21).
+
+## Phase 18.19: Completion Extensions: Snippets, Exclusive Claim, Disable-Native
+
+Extend the Phase 18.11 completion framework with snippet support, exclusive claim, and user disable-native so language packages and the LSP bridge can express merge vs replace cleanly.
+
+Entry gate:
+
+- Do not start until Phase 18.18 (base keyword providers exist to override/disable) is complete.
+
+Focus areas:
+
+- Add a snippet kind to `CompletionItem` (`src/protocol/completion.rs`) carrying LSP snippet syntax (tabstops, placeholders, choices) as inert text the client expands locally. Snippets are a `CompletionProvider` variant, not a separate subsystem.
+- Add an opt-in `exclusive: bool` claim on `CompletionProviderMeta` (`src/server/completion.rs`): when a provider claims a `(package_prefix, mode)` exclusively, lower-priority providers are suppressed for that request. Default remains priority-merge across providers.
+- Add a `disableCompletion("@clay/...")` Clay JS API so users turn off the native/base provider (or any provider) from `init.js`, rather than packages silently self-promoting.
+- Ship a small first-party snippet set per language (e.g. Rust `fn`/`match`/`impl`, TypeScript `interface`/`type`) to validate the snippet kind end-to-end.
+- Add tests: priority-merge default; exclusive claim suppresses lower priority; user disable-native removes the base provider; snippet expansion is client-local with no provider code on accept; no hot-path blocking.
+- Update `docs/reference/clay-js-api/completion/`, generated registry, and the package-author guide for snippets, exclusive claim, and disable-native.
+
+Expected outcome:
+
+- Completion supports priority-merge (default), exclusive claim (opt-in replace), user disable-native, and snippets.
+- Language packages and the LSP bridge (Phase 18.21) can express their relationship to the base provider without provider wars.
+
+Carried-forward items:
+
+- AI/workspace-index completion providers remain later add-ons; this phase ships the framework extensions and snippet kind only.
+
+## Phase 18.20: Language Intelligence Primitives and LSP Authority
+
+Define the engine-agnostic language-intelligence primitives and the opt-in LSP authority boundary, so LSP bridges in Phase 18.21 integrate against Clay primitives rather than spawning servers from core.
+
+Entry gate:
+
+- Do not start until Phase 18.15 (Semantic layer vocabulary) and Phase 18.17 (range diagnostics) are complete.
+- **This phase is an authority-expansion gate:** the LSP subprocess+filesystem authority must ship with its own decision log, security review, and dedicated tests, not as an incremental patch to a later phase.
+
+Focus areas:
+
+- Create a decision log approving a new per-package `"language-server"` permission granting explicit, user-declared subprocess + bounded filesystem authority for LSP bridge packages. Record the deny-by-default boundary, the opt-in surface (declared in `init.js`), the upgrade/trust path, and the security review. No language-server subprocess authority is granted implicitly.
+- Add engine-agnostic integration-target primitives: `Hover {range, markdown}`, `GoToDefinition {location}`, `CodeAction {range, title, command/edit}`, `SignatureHelp {signatures, active_signature, active_parameter}`, and wire the existing `DecorationKind::Semantic` layer so an analyzer can publish semantic vocabulary tokens that refine (not replace) tree-sitter syntax tokens.
+- Define the LSP→Clay bridge contract: LSP `SemanticTokens`/`Diagnostic`/`Completion`/`Hover`/`Goto`/`CodeAction`/`SignatureHelp` map onto the Clay primitives above (near-identity, because the vocabulary is LSP-based). The bridge lives in a package, never core.
+- Add the subprocess/process-boundary primitive a bridge package uses to spawn and communicate with a language server, gated on the `language-server` permission, with bounded args, cwd rooted in a known workspace, timeout, sanitized output, and deterministic diagnostics. Reuse the Phase 18.13 typed-process-boundary precedent.
+- Add tests enforcing: deny-by-default LSP authority without the permission; the permission must be user-declared; semantic tokens compose with (do not erase) syntax tokens; primitives are engine-agnostic (work with any analyzer, not just LSP).
+- Add Clay JS API documentation for the new primitives and the `language-server` permission, generated registry entries, a `docs/reference/primitives/language-intelligence.md` page, and security notes.
+
+Expected outcome:
+
+- Clay core has engine-agnostic hover/goto/code-action/signature-help primitives and an activated Semantic decoration layer.
+- The `language-server` authority is approved, deny-by-default, user-opt-in, and decision-logged.
+- Phase 18.21 LSP bridge packages integrate by mapping LSP responses onto these primitives, with no LSP code in core.
+
+Carried-forward items:
+
+- Rename/refactor support and full workspace-symbol search are deferred to later phases; this phase ships the read-only intelligence primitives and the authority gate.
+- The specific subprocess transport (stdio JSON-RPC vs other) is pinned in Phase 18.21 per chosen language server.
+
+## Phase 18.21: First-Party LSP Bridge Packages (Rust, TypeScript, JavaScript, Markdown)
+
+Ship opt-in `@clay/lsp-*` packages that spawn language servers under the Phase 18.20 authority and bridge LSP intelligence to Clay primitives for all four first-party languages.
+
+Entry gate:
+
+- Do not start until Phase 18.20 (intelligence primitives + `language-server` authority decision log) is complete.
+- Entry gate must verify the chosen language servers are available/installable on the Linux host: `rust-analyzer` (Rust), `typescript-language-server` or `vscode-langservers-extracted` (TypeScript/JavaScript), and `marksman` or equivalent (Markdown).
+
+Focus areas:
+
+- Create `@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript`, and `@clay/lsp-markdown` as opt-in packages. Each declares the `language-server` permission, spawns its server under the Phase 18.20 typed process boundary, and bridges LSP responses → Clay primitives: `SemanticTokens` → Semantic decorations (refining tree-sitter syntax), `Diagnostic` → `DiagnosticSpan`, `Completion` → `CompletionItem` (richer than the Phase 18.18 keyword base, with priority/exclusive as needed), `Hover`/`Goto`/`CodeAction`/`SignatureHelp` → the Phase 18.20 primitives.
+- Keep LSP work off the typing/rendering hot path: requests are UI-reactive, cancellable, versioned, and superseded on edit/cursor move; responses apply asynchronously and never block local paint.
+- User opt-in via `init.js`: a package is loaded and authorized explicitly; without it, no language server runs and the Tier 1 tree-sitter + keyword completion baseline (Phases 18.16/18.18) still works fully.
+- Define diagnostic deduplication between tree-sitter error nodes (Phase 18.17) and LSP diagnostics so users are not double-warned.
+- Add per-server smoke coverage and manual `cargo run` validation: hover shows types, go-to-definition navigates, code actions appear, real diagnostics underline errors, semantic highlighting refines syntax tokens — all with and without the LSP package loaded (fallback must be clean).
+- Update package docs, generated registry, the package-author guide (the `language-server` authority section), code wiki, and the end-to-end smoke docs for LSP-enriched editing.
+
+Expected outcome:
+
+- Rust, TypeScript, JavaScript, and Markdown gain opt-in semantic intelligence (real diagnostics, type-aware completion, hover, go-to-definition, code actions) through user-authorized LSP packages.
+- Core Clay grants no language-server subprocess authority implicitly; the baseline tree-sitter experience remains fully functional when no LSP package is loaded.
+- All four LSP packages integrate through the same engine-agnostic primitives, proving the Phase 18.20 contract.
+
+Carried-forward items:
+
+- Mutating LSP operations (rename, refactor, formatting, build/test runners, import management) require their own authority review and are deferred to later phases.
+- Additional language servers beyond the four first-party languages are third-party-package territory (Tier 2/3 + a `@clay/lsp-*` package) once Phase 23 ecosystem hardening provides trust guarantees.
+
 ## Phase 19: Hot Reload and Behavior Update Semantics
 
 Make runtime package and mode behavior changes safe and non-janky after the package capability sequence has several real contribution types to reload.

@@ -618,14 +618,14 @@ impl TreeSitterSyntaxHandler {
             if byte_start >= byte_end {
                 continue;
             }
-            spans.push(DecorationSpan {
+            spans.push(DecorationSpan::from_style_token(
                 byte_start,
                 byte_end,
-                kind: DecorationKind::Syntax,
-                style_token: style_token.clone(),
-                priority: 70,
-                provenance: provenance.clone(),
-            });
+                DecorationKind::Syntax,
+                style_token,
+                70,
+                provenance.clone(),
+            ));
         }
 
         let set = DecorationSet {

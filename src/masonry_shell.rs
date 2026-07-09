@@ -188,6 +188,10 @@ mod tests {
             text: "server text".to_string(),
             access,
             behavior_manifest: BehaviorManifest::minimal_text_editing(3),
+            active_theme: crate::protocol::ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            },
         }
     }
 

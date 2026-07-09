@@ -281,16 +281,16 @@ fn markdown_decoration_set(document_version: u64, viewport_end: u64) -> Decorati
         (110, 136, "markup.code-block", 70),
     ]
     .into_iter()
-    .map(
-        |(byte_start, byte_end, style_token, priority)| DecorationSpan {
+    .map(|(byte_start, byte_end, style_token, priority)| {
+        DecorationSpan::from_style_token(
             byte_start,
             byte_end,
-            kind: DecorationKind::Syntax,
-            style_token: style_token.to_string(),
+            DecorationKind::Syntax,
+            style_token,
             priority,
-            provenance: provenance.clone(),
-        },
-    )
+            provenance.clone(),
+        )
+    })
     .collect();
 
     DecorationSet {

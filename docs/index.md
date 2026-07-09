@@ -25,6 +25,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [@clay/typescript Package](reference/packages/typescript.md) — first-party grammar-only TypeScript syntax package contract, permissions, file patterns, and runtime boundary.
 - [@clay/javascript Package](reference/packages/javascript.md) — first-party grammar-only JavaScript syntax package contract, permissions, file patterns, and runtime boundary.
 - [Primitive Implementation Gate](reference/primitives/implementation-gate.md) — Phase 16.5 package/mode validation gate, fixture format, deterministic failure coverage, and Phase 17/18 handoff.
+- [Text Vocabulary and Two-Axis Decoration Contract](reference/primitives/syntax-vocabulary.md) — Phase 18.15 locked LSP-based `TokenType` + `Modifiers` vocabulary, Clay prose/text-attribute extensions, open-string scope escape, compatibility mapping from free-form `style_token`, and single-source-of-color `StyleRegistry` invariant.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, `smoke-gui`, foreground server/client, GUI status, and local IPC smoke validation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
@@ -76,6 +77,7 @@ The generated documentation registry must read this section as the explicit incl
 - [loadPackage](reference/clay-js-api/packages/load-package.md) — `clay.packages.loadPackage`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `clay.parse.serverRegisterParseHandler`
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `clay.syntax.serverRegisterSyntaxGrammar`
+- [setTheme](reference/clay-js-api/theme/set-theme.md) — `clay.theme.setTheme`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `clay.completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `clay.completion.serverListCompletionProvidersForTrigger`
 - [serverRegisterCompletionProvider](reference/clay-js-api/completion/server-register-completion-provider.md) — `clay.completion.serverRegisterCompletionProvider`
