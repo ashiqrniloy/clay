@@ -114,6 +114,88 @@ fn planned_shell_layout_apis_are_not_generated_registry_entries() {
 }
 
 #[test]
+fn syntax_engine_api_docs_registry_are_fresh() {
+    let root = repository_root();
+    check_generated_registry_current(&root).unwrap_or_else(|error| {
+        panic!("{error}\nRepair command: {UPDATE_COMMAND}");
+    });
+    let docs_index = std::fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    let syntax_facade =
+        std::fs::read_to_string(root.join("runtime/js/syntax.ts")).expect("read syntax facade");
+    let syntax_ops =
+        std::fs::read_to_string(root.join("src/server/ops/syntax.rs")).expect("read syntax ops");
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    for (id, export, docs_path, required_properties) in [
+        (
+            "clay.syntax.serverRegisterSyntaxGrammar",
+            "serverRegisterSyntaxGrammar",
+            "docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md",
+            [
+                "packagePrefix",
+                "languageId",
+                "grammar",
+                "queries",
+                "styleMap",
+            ]
+            .as_slice(),
+        ),
+        (
+            "clay.syntax.setSyntaxEnginePreference",
+            "setSyntaxEnginePreference",
+            "docs/reference/clay-js-api/syntax/set-syntax-engine-preference.md",
+            ["target", "tier"].as_slice(),
+        ),
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing Phase 18.16 syntax API {id}"));
+        assert_eq!(entry.js_module, "clay:syntax");
+        assert_eq!(entry.js_export, export);
+        assert_eq!(entry.documentation_path, docs_path);
+        assert_eq!(entry.stability, "runtime-backed");
+        assert!(entry.app_visible);
+        assert!(entry.help_visible);
+        assert!(entry.key_bindings.is_empty(), "{id} has no default key");
+        assert!(docs_index.contains(docs_path.trim_start_matches("docs/")));
+        assert!(syntax_facade.contains(export));
+        assert!(syntax_ops.contains(&entry.deno_op));
+        assert!(registry.by_js_export("clay:syntax", export).is_some());
+        for property in required_properties {
+            assert!(
+                entry
+                    .custom_properties
+                    .iter()
+                    .any(|custom_property| custom_property.name == *property),
+                "{id} must preserve custom property {property}"
+            );
+        }
+        for tag in ["js-api", "syntax"] {
+            assert!(
+                entry.lookup_tags.iter().any(|lookup_tag| lookup_tag == tag),
+                "{id} must preserve lookup tag {tag}"
+            );
+        }
+        for denied in [
+            "filesystem",
+            "network",
+            "shell",
+            "extension loading",
+            "AI mutation",
+            "client-side JavaScript",
+        ] {
+            assert!(
+                entry.security.contains(denied),
+                "{id} security metadata must deny {denied} authority"
+            );
+        }
+    }
+
+    assert!(!syntax_facade.contains("Deno.core.ops.op_"));
+    assert!(!syntax_facade.contains("rawOps("));
+}
+
+#[test]
 fn generated_registry_contains_phase18_4_public_apis() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 

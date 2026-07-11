@@ -1169,6 +1169,127 @@ fn syntax_grammar_configuration_review_uses_only_documented_clay_js_apis() {
 }
 
 #[test]
+fn syntax_engine_configuration_is_documented_or_explicitly_not_needed() {
+    let configuration = read("docs/reference/clay-js-api/configuration.md");
+    let api_doc = read("docs/reference/clay-js-api/syntax/set-syntax-engine-preference.md");
+    let api_inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+    let generated_registry = read("docs/generated/clay-js-api-registry.json");
+    let syntax_wiki = read("docs/wiki/modules/syntax-grammar-registry.md");
+
+    for phrase in [
+        "Phase 18.16 syntax engine configuration review",
+        "clay.syntax.setSyntaxEnginePreference",
+        "No call is needed for normal use",
+        "Tier 1 native for first-party Rust, TypeScript, TSX, JavaScript, and Markdown",
+        "explicit `wasm` enables the Tier 2 artifact path",
+        "explicit `javascript`/`js` suppresses syntax-grammar selection",
+        "Hidden JSON/TOML/ad hoc syntax-engine keys remain invalid",
+        "syntax.engine",
+        "treeSitter.wasmPath",
+        "custom_properties` for `target` and `tier`",
+        "empty `key_bindings`",
+        "Configuration evaluation and preference lookup happen only during startup, package load, document open, reload, or reclassification work",
+        "packages cannot silently promote themselves over native tier",
+    ] {
+        assert!(
+            configuration.contains(phrase),
+            "configuration docs must pin Phase 18.16 syntax engine configuration boundary: {phrase}"
+        );
+    }
+
+    for source in [&api_doc, &api_inventory, &generated_registry] {
+        for phrase in [
+            "setSyntaxEnginePreference",
+            "target",
+            "tier",
+            "native",
+            "wasm",
+            "javascript",
+            "configuration",
+        ] {
+            assert!(
+                source.contains(phrase),
+                "syntax engine preference API docs/registry must expose `{phrase}`"
+            );
+        }
+    }
+
+    assert!(
+        syntax_wiki.contains("setSyntaxEnginePreference")
+            && syntax_wiki.contains("User config remains one-line `loadPackage`"),
+        "syntax wiki must connect engine preferences to existing init.js loading contract"
+    );
+}
+
+#[test]
+fn syntax_engine_preference_requires_documented_clay_js_api() {
+    let configuration = read("docs/reference/clay-js-api/configuration.md");
+    let facade = read("runtime/js/syntax.ts");
+    let op = read("src/server/ops/syntax.rs");
+    let registry =
+        clay::docs::registry::ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let entry = registry
+        .by_id("clay.syntax.setSyntaxEnginePreference")
+        .expect("generated registry exposes syntax engine preference API");
+
+    assert_eq!(entry.js_module, "clay:syntax");
+    assert_eq!(entry.js_export, "setSyntaxEnginePreference");
+    assert_eq!(entry.key_bindings.len(), 0);
+    assert!(entry.permissions.is_empty());
+    for property in ["target", "tier"] {
+        assert!(
+            entry
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "generated registry must preserve syntax preference custom property {property}"
+        );
+    }
+    for tag in ["syntax", "engine", "configuration", "phase18.16"] {
+        assert!(
+            entry.lookup_tags.iter().any(|lookup_tag| lookup_tag == tag),
+            "generated registry must expose lookup tag {tag}"
+        );
+    }
+    for denied in [
+        "filesystem",
+        "network",
+        "shell",
+        "extension loading",
+        "AI mutation",
+        "workspace",
+        "package-manager",
+        "native-library",
+        "WASM artifact",
+        "client-side JavaScript",
+        "raw-op",
+    ] {
+        assert!(
+            entry.security.contains(denied),
+            "syntax engine preference API must deny {denied} authority"
+        );
+    }
+
+    assert!(facade.contains("op_clay_syntax_set_engine_preference"));
+    assert!(op.contains("tier must be native, wasm, or javascript"));
+    for forbidden in [
+        "syntax.preferredEngine",
+        "treeSitter.engine",
+        "treeSitter.wasmPath",
+        "autoLoadSyntaxPackages",
+    ] {
+        assert!(
+            configuration.contains(forbidden),
+            "configuration docs must explicitly reject hidden syntax key {forbidden}"
+        );
+        assert!(
+            !facade.contains(forbidden) && !op.contains(forbidden),
+            "hidden syntax key {forbidden} must not appear in runtime facade/op"
+        );
+    }
+}
+
+#[test]
 fn phase18_14_language_package_default_init_js_loading_is_documented() {
     // Phase 18.14 expands @clay/rust, @clay/typescript, and @clay/javascript
     // into full language packages while keeping the same one-line explicit
@@ -1441,6 +1562,63 @@ fn package_author_guide_documents_persistent_parse_and_open_time_contract() {
             package_guide.contains(forbidden),
             "package author guide must list forbidden anti-pattern `{forbidden}`"
         );
+    }
+}
+
+#[test]
+fn package_author_guide_documents_native_wasm_js_fallback_routes() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_docs = [
+        read("docs/reference/packages/rust.md"),
+        read("docs/reference/packages/typescript.md"),
+        read("docs/reference/packages/javascript.md"),
+        read("docs/reference/packages/markdown.md"),
+        read("packages/rust/docs/index.md"),
+        read("packages/typescript/docs/index.md"),
+        read("packages/javascript/docs/index.md"),
+        read("packages/markdown/docs/index.md"),
+    ];
+
+    for phrase in [
+        "Phase 18.16 authoring contract: tiered syntax engine",
+        "Tier 1 — native first-party",
+        "Tier 2 — web-tree-sitter WASM",
+        "Tier 3 — package JavaScript fallback",
+        "setSyntaxEnginePreference",
+        "TokenType` + `Modifiers",
+        "clay.parse.open_failed",
+        "Open is enqueue-only",
+        "INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+        "tree-sitter build --wasm",
+        "grammars/PROVENANCE.md",
+        "third-party grammar/native trust is deferred to Phase 23",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "package author guide must document syntax engine route `{phrase}`"
+        );
+    }
+
+    for (index, docs) in package_docs.iter().enumerate() {
+        for phrase in [
+            "Tier 1",
+            "Tier 2",
+            "Tier 3",
+            "setSyntaxEnginePreference",
+            "TokenType",
+            "Modifiers",
+            "clay.parse.open_failed",
+            "package-root-confined",
+            "third-party/native grammar artifact loading",
+            "keypress, paint, layout, scroll, pointer, or text-event hot paths",
+        ] {
+            assert!(
+                docs.contains(phrase),
+                "package reference {index} must document syntax engine marker `{phrase}`"
+            );
+        }
     }
 }
 

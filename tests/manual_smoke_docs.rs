@@ -97,14 +97,18 @@ fn phase18_10_manual_syntax_smoke_has_runnable_fixture_contract() {
         "loadPackage(\"@clay/rust\")",
         "loadPackage(\"@clay/typescript\")",
         "loadPackage(\"@clay/javascript\")",
+        "loadPackage(\"@clay/markdown\")",
         "tests/fixtures/syntax/rust.rs",
         "tests/fixtures/syntax/typescript.ts",
+        "tests/fixtures/syntax/typescript.tsx",
         "tests/fixtures/syntax/javascript.js",
-        "editable under its active `core.code`/`core.text` fallback behavior",
+        "tests/fixtures/syntax/markdown.md",
+        "renders text immediately and remains editable under its active `core.code`/`core.text` fallback behavior",
         "Remove the language package load lines and relaunch",
         "Automated coverage (no manual execution needed)",
         "manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow",
-        "first_party_syntax_fixtures_produce_bounded_decoration_sets",
+        "first_party_language_fixtures_produce_themed_vocabulary_decorations",
+        "first_party_artifact_provenance_is_recorded",
         "syntax_provider_selection_falls_back_to_no_highlighting_without_changing_mode",
     ] {
         assert!(
@@ -117,10 +121,39 @@ fn phase18_10_manual_syntax_smoke_has_runnable_fixture_contract() {
         fixture.contains("loadPackage(\"@clay/rust\")")
             && fixture.contains("loadPackage(\"@clay/typescript\")")
             && fixture.contains("loadPackage(\"@clay/javascript\")")
+            && fixture.contains("loadPackage(\"@clay/markdown\")")
             && !fixture.contains("serverRegisterSyntaxGrammar")
             && !fixture.contains("Deno.core.ops"),
         "syntax-grammars smoke fixture must use only end-user loadPackage calls"
     );
+}
+
+#[test]
+fn phase18_16_tiered_syntax_smoke_documents_engine_selection() {
+    let launch_doc = launch_smoke_doc();
+
+    for expected in [
+        "Phase 18.16 tiered syntax engine smoke",
+        "setSyntaxEnginePreference(\"rust\", \"wasm\")",
+        "setSyntaxEnginePreference(\"markdown\", \"javascript\")",
+        "Tier 1 vocabulary highlighting",
+        "Tier 2 package assets",
+        "Tier 3 package parser",
+        "clay.parse.open_failed",
+        "cargo test --test syntax_grammar",
+        "cargo test --test parse_coordinator",
+        "cargo test --test manual_smoke_docs",
+        "cargo test --test editor_performance_invariants",
+        "No network fetch",
+        "third-party grammar trust is deferred to Phase 23",
+        "tests/fixtures/syntax/typescript.tsx",
+        "packages/*/grammars/PROVENANCE.md",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Phase 18.16 tiered syntax marker `{expected}`"
+        );
+    }
 }
 
 #[test]

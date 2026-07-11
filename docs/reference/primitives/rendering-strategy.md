@@ -168,9 +168,9 @@ Security and performance rules:
 - Paint consumes already-applied local spans only; cache eviction, chunk validation, parser execution, and package JavaScript remain outside paint, keypress, scroll, layout, and text-event handlers.
 - Rust cache/renderer primitives do not branch on Markdown syntax or markdown-it token names; package adapters translate language-specific parser output to generic decoration chunks before publication.
 
-## Phase 18.10 Syntax Grammar Capture Validation
+## Phase 18.16 Tiered Syntax Capture and Vocabulary Validation
 
-`SyntaxGrammarContribution` packages translate `tree-sitter-wasm` highlight captures to generic Clay style tokens through the `Background` no-hot-path parse/decor path before any `DecorationSet` reaches the client. The package declares a `styleMap` such as:
+`SyntaxGrammarContribution` packages and native first-party descriptors translate captures from Tier 1 native tree-sitter, Tier 2 web-tree-sitter, or Tier 3 package-JS adapters through one `Background` no-hot-path parse/decor path before any `DecorationSet` reaches the client. `setSyntaxEnginePreference` selects a tier only at init/package-load/open/reclassification time; package load order cannot silently replace Tier 1. The package declares a `styleMap` such as:
 
 ```json
 {
@@ -181,14 +181,15 @@ Security and performance rules:
 }
 ```
 
-Validation runs outside paint/key/text hot paths and remains bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` plus the shared `SYNTAX_CACHE_BUDGET_BYTES` syntax-chunk cache:
+The shared mapper converts the selected style token to the Phase 18.15 `TokenType` + `Modifiers` axes and preserves package scope/provenance. Validation runs outside paint/key/text hot paths and remains bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` plus the shared `SYNTAX_CACHE_BUDGET_BYTES` syntax-chunk cache:
 
-1. Package metadata validation rejects raw CSS, raw color strings, unknown style tokens, native handles, raw ops, client JavaScript, and external/traversing grammar/query paths.
-2. `TreeSitterSyntaxHandler::new` compiles the highlight query and rejects any query capture without a `styleMap` entry, returning an actionable diagnostic such as an unmapped `@function` capture.
-3. Viewport parse/highlight execution uses `QueryCursor::set_byte_range`, maps captures to `DecorationKind::Syntax`, clamps spans to the requested viewport, and rejects capture output above the per-viewport cap before serialization/publication.
-4. `DecorationSet` validation and `DECORATION_PAYLOAD_BUDGET_BYTES` checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport.
+1. Package metadata validation rejects raw CSS, raw color strings, unknown style tokens, native handles, raw ops, client JavaScript, and external/traversing grammar/query paths. Tier 2 assets must be package-root-confined `./grammars/*.wasm` and `./queries/*.scm` files.
+2. Native descriptor/query construction and the web-tree-sitter host adapter compile/cache query state outside hot paths. Package-JS fallback handlers remain behind the existing server-issued parse-handler token.
+3. The engine-neutral capture mapper rejects any capture without a `styleMap` entry, returning an actionable diagnostic such as an unmapped `@function` capture. It never contains language-name branches.
+4. Viewport parse/highlight execution clamps spans to the requested viewport and rejects capture output above the per-viewport cap before serialization/publication.
+5. `DecorationSet` validation and `DECORATION_PAYLOAD_BUDGET_BYTES` checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport. Open itself returns before this work completes; failures become sanitized `RuntimeDiagnostic` values such as `clay.parse.open_failed`.
 
-Invalid or unsupported queries fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar.
+Invalid or unsupported queries, artifacts, or captures fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar. Runtime performs no network fetch, shell/package-manager build, native-library load, or client-side JavaScript execution.
 
 ## Phase 17/18 Follow-Up
 

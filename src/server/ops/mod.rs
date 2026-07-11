@@ -66,7 +66,7 @@ use self::{
     parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
-    syntax::op_clay_syntax_register_syntax_grammar,
+    syntax::{op_clay_syntax_register_syntax_grammar, op_clay_syntax_set_engine_preference},
     theme::op_clay_theme_set_theme,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
@@ -156,7 +156,9 @@ impl ClayOpState {
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
             ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
             git_status_cache: crate::server::git::GitStatusCache::default(),
-            syntax_grammars: Mutex::new(crate::server::syntax::SyntaxGrammarRegistry::new()),
+            syntax_grammars: Mutex::new(
+                crate::server::syntax::SyntaxGrammarRegistry::with_first_party_native(),
+            ),
             completion_providers: Mutex::new(Vec::new()),
             active_theme: Mutex::new(None),
             runtime_context: Mutex::new(ClayRuntimeContext {
@@ -631,6 +633,17 @@ impl ClayOpState {
             .register_package(package)
     }
 
+    pub(super) fn set_syntax_engine_preference(
+        &self,
+        target: &str,
+        tier: crate::server::syntax::SyntaxEngineTier,
+    ) -> Result<(), crate::server::syntax::SyntaxGrammarRegistryError> {
+        self.syntax_grammars
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .set_engine_preference(target, tier)
+    }
+
     pub(super) fn register_panel_contribution(
         &self,
         package: &crate::packages::manifest::ClayPackageManifest,
@@ -809,6 +822,7 @@ extension!(
         op_clay_parse_register_parse_handler,
         op_clay_parse_store_update,
         op_clay_syntax_register_syntax_grammar,
+        op_clay_syntax_set_engine_preference,
         op_clay_completion_register_completion_provider,
         op_clay_completion_providers_for_trigger,
         op_clay_runtime_unavailable,

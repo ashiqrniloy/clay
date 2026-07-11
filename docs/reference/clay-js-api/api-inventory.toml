@@ -1138,6 +1138,29 @@ current_rust_owner = "src/server/syntax.rs::SyntaxGrammarRegistry; src/server/op
 registry_public = true
 
 [[api]]
+id = "clay.syntax.setSyntaxEnginePreference"
+category = "syntax-engine-configuration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:syntax"
+js_export = "setSyntaxEnginePreference"
+user_facing_name = "Set Syntax Engine Preference"
+authority = "server-first-syntax-engine-selection"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Syntax engine preferences are recorded during init.js/package-load/reclassification work only; no preference lookup or package JavaScript runs in keypress, paint, layout, scroll, pointer, or text-event hot paths."
+facade_path = "runtime/js/syntax.ts::setSyntaxEnginePreference"
+backing_rust = "src/server/syntax.rs::SyntaxGrammarRegistry::set_engine_preference"
+deno_op = "op_clay_syntax_set_engine_preference"
+deno_op_path = "src/server/ops/syntax.rs::op_clay_syntax_set_engine_preference"
+documentation_path = "docs/reference/clay-js-api/syntax/set-syntax-engine-preference.md"
+key_bindings = []
+custom_properties = ["target:string=language-or-package", "tier:enum=native|wasm|javascript|js"]
+permissions = []
+security_notes = "does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package-manager, native-library, WASM artifact, client-side JavaScript, raw-op, third-party grammar, package enable/disable, raw CSS/color, native-widget, parser callback, or arbitrary artifact authority; records user-initiated engine selection for already-validated first-party syntax packages so packages cannot silently promote themselves over native tier."
+current_rust_owner = "src/server/syntax.rs::SyntaxGrammarRegistry; src/server/ops/syntax.rs"
+registry_public = true
+
+[[api]]
 id = "clay.completion.serverRegisterCompletionProvider"
 category = "completion-provider-registration"
 visibility = "public"

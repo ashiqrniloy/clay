@@ -13,7 +13,8 @@ use crate::{
     perf::budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     protocol::{
         BehaviorVersion, DocumentId, DocumentVersion, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot, SyntaxMemoryBudget,
+        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot, RuntimeDiagnostic,
+        SyntaxMemoryBudget,
     },
     server::decorations::validate_decoration_set,
 };
@@ -165,6 +166,8 @@ pub struct ParseCoordinator {
     inner: Arc<Mutex<ParseCoordinatorInner>>,
     updates_tx: mpsc::UnboundedSender<IncrementalParseUpdate>,
     updates_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<IncrementalParseUpdate>>>,
+    diagnostics_tx: mpsc::UnboundedSender<RuntimeDiagnostic>,
+    diagnostics_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<RuntimeDiagnostic>>>,
 }
 
 struct ParseCoordinatorInner {
@@ -198,6 +201,7 @@ struct HandlerKeyWithDocument {
 impl ParseCoordinator {
     pub fn new() -> Self {
         let (updates_tx, updates_rx) = mpsc::unbounded_channel();
+        let (diagnostics_tx, diagnostics_rx) = mpsc::unbounded_channel();
         Self {
             inner: Arc::new(Mutex::new(ParseCoordinatorInner {
                 handlers: HashMap::new(),
@@ -207,6 +211,8 @@ impl ParseCoordinator {
             })),
             updates_tx,
             updates_rx: Arc::new(tokio::sync::Mutex::new(updates_rx)),
+            diagnostics_tx,
+            diagnostics_rx: Arc::new(tokio::sync::Mutex::new(diagnostics_rx)),
         }
     }
 
@@ -413,9 +419,14 @@ impl ParseCoordinator {
         result: Result<IncrementalParseUpdate, ParseCoordinatorError>,
     ) {
         let Ok(update) = result else {
+            let error = result.expect_err("parse result error present");
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
             inner.active_tasks.remove(&task_key);
             inner.stats.failed_tasks += 1;
+            drop(inner);
+            let _ = self
+                .diagnostics_tx
+                .send(parse_failure_diagnostic(&task_key, &error));
             return;
         };
 
@@ -439,10 +450,14 @@ impl ParseCoordinator {
                 inner.active_tasks.remove(&task_key);
                 inner.stats.stale_results_rejected += 1;
             }
-            Err(_) => {
+            Err(error) => {
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
                 inner.active_tasks.remove(&task_key);
                 inner.stats.failed_tasks += 1;
+                drop(inner);
+                let _ = self
+                    .diagnostics_tx
+                    .send(parse_failure_diagnostic(&task_key, &error));
             }
         }
     }
@@ -528,6 +543,10 @@ impl ParseCoordinator {
         self.updates_rx.lock().await.recv().await
     }
 
+    pub async fn next_diagnostic(&self) -> Option<RuntimeDiagnostic> {
+        self.diagnostics_rx.lock().await.recv().await
+    }
+
     pub fn stats(&self) -> ParseCoordinatorStats {
         self.inner
             .lock()
@@ -535,6 +554,28 @@ impl ParseCoordinator {
             .stats
             .clone()
     }
+}
+
+fn parse_failure_diagnostic(
+    task_key: &TaskKey,
+    error: &ParseCoordinatorError,
+) -> RuntimeDiagnostic {
+    let reason = match error {
+        ParseCoordinatorError::HandlerFailed(_) => "handler failed",
+        ParseCoordinatorError::PayloadBudgetExceeded { .. } => "payload budget exceeded",
+        ParseCoordinatorError::WindowTooLarge { .. }
+        | ParseCoordinatorError::WindowBudgetExceeded { .. } => "parse window budget exceeded",
+        ParseCoordinatorError::StaleDocumentVersion { .. }
+        | ParseCoordinatorError::StaleRuntimeGeneration { .. } => "stale parse result rejected",
+        _ => "parse result rejected",
+    };
+    RuntimeDiagnostic::error(
+        "clay.parse.open_failed",
+        format!(
+            "Background parse for package '{}' mode '{}' on document {} failed: {}.",
+            task_key.package_prefix, task_key.mode_id, task_key.document_id, reason
+        ),
+    )
 }
 
 fn abort_tasks(inner: &mut ParseCoordinatorInner, task_keys: Vec<TaskKey>) {

@@ -3,14 +3,15 @@ use clay::packages::{
     record::{PackageRecord, PackageRecordRule, assemble_package_record},
 };
 use clay::protocol::{
-    ParseByteRange, ParseEditNotification, ParsePolicy, ParseWindowSnapshot, TokenType,
+    Modifiers, ParseByteRange, ParseEditNotification, ParsePolicy, ParseWindowSnapshot, TokenType,
 };
 #[cfg(any(unix, windows))]
 use clay::server::{
     parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
     syntax::{
-        SyntaxGrammarContribution, SyntaxGrammarPatternKind, SyntaxGrammarRegistry,
-        SyntaxGrammarRegistryError, TreeSitterSyntaxError, TreeSitterSyntaxHandler,
+        SyntaxCapture, SyntaxEngineTier, SyntaxGrammarContribution, SyntaxGrammarPatternKind,
+        SyntaxGrammarRegistry, SyntaxGrammarRegistryError, TreeSitterSyntaxError,
+        TreeSitterSyntaxHandler, WebTreeSitterArtifactError, map_capture_to_vocabulary,
     },
 };
 use serde_json::{Value, json};
@@ -86,6 +87,330 @@ fn rust_highlights_query() -> &'static str {
       (string_literal) @string
       (line_comment) @comment
     "#
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn native_tree_sitter_crates_are_runtime_compatible() {
+    let languages: &[(&str, tree_sitter::Language)] = &[
+        ("rust", tree_sitter_rust::LANGUAGE.into()),
+        (
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        ),
+        ("tsx", tree_sitter_typescript::LANGUAGE_TSX.into()),
+        ("javascript", tree_sitter_javascript::LANGUAGE.into()),
+        ("markdown", tree_sitter_md_025::LANGUAGE.into()),
+        (
+            "markdown-inline",
+            tree_sitter_md_025::INLINE_LANGUAGE.into(),
+        ),
+    ];
+
+    for (name, language) in languages {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(language).unwrap_or_else(|err| {
+            panic!("{name} grammar is incompatible with host tree-sitter: {err}")
+        });
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[cfg(any(unix, windows))]
+#[test]
+fn tier1_native_first_party_is_default_for_known_extensions() {
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+    assert_eq!(
+        SyntaxGrammarRegistry::first_party_native_descriptors().len(),
+        5
+    );
+
+    for (path, contribution_id, language_id, package_prefix) in [
+        ("src/main.rs", "rust.rust", "rust", "rust"),
+        (
+            "src/app.ts",
+            "typescript.typescript",
+            "typescript",
+            "typescript",
+        ),
+        ("src/app.tsx", "typescript.tsx", "tsx", "typescript"),
+        (
+            "src/app.js",
+            "javascript.javascript",
+            "javascript",
+            "javascript",
+        ),
+        (
+            "src/app.jsx",
+            "javascript.javascript",
+            "javascript",
+            "javascript",
+        ),
+        (
+            "src/app.mjs",
+            "javascript.javascript",
+            "javascript",
+            "javascript",
+        ),
+        (
+            "src/app.cjs",
+            "javascript.javascript",
+            "javascript",
+            "javascript",
+        ),
+        ("README.md", "markdown.markdown", "markdown", "markdown"),
+        (
+            "README.markdown",
+            "markdown.markdown",
+            "markdown",
+            "markdown",
+        ),
+    ] {
+        let activation = core_code_activation(91, 12);
+        let selection =
+            registry.select_for_document(&classification_input(91, Some(path)), &activation, 3);
+        let grammar = selection
+            .active_syntax_grammar
+            .as_ref()
+            .unwrap_or_else(|| panic!("{path} should select a native grammar"));
+        let contribution = registry
+            .get(contribution_id)
+            .unwrap_or_else(|| panic!("{contribution_id} registered"));
+
+        assert_eq!(grammar.contribution_id, contribution_id);
+        assert_eq!(grammar.language_id, language_id);
+        assert_eq!(grammar.package_prefix, package_prefix);
+        assert_eq!(contribution.engine_tier, SyntaxEngineTier::Native);
+        assert_eq!(contribution.grammar_kind, "tree-sitter-native");
+        registry
+            .native_language(contribution_id)
+            .unwrap_or_else(|| panic!("{contribution_id} native language available"));
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn user_forced_tier_is_honored_and_recorded_in_provenance() {
+    let (_, record) = first_party_grammar_package_record("rust");
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+    registry
+        .set_engine_preference("rust", SyntaxEngineTier::Wasm)
+        .expect("valid preference");
+
+    assert_eq!(registry.register_package(&record), Ok(1));
+
+    let selection = registry.select_for_document(
+        &classification_input(17, Some("src/main.rs")),
+        &core_code_activation(17, 2),
+        3,
+    );
+    let grammar = selection
+        .active_syntax_grammar
+        .as_ref()
+        .expect("forced wasm grammar selected");
+    assert_eq!(grammar.engine_tier, SyntaxEngineTier::Wasm);
+    assert_eq!(grammar.package_prefix, "rust");
+    assert!(selection.why.contains("wasm tier"));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn js_parser_fallback_still_runs_without_tree_sitter_grammar() {
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+    registry
+        .set_engine_preference("rust", SyntaxEngineTier::JavaScriptFallback)
+        .expect("valid preference");
+
+    let selection = registry.select_for_document(
+        &classification_input(18, Some("src/main.rs")),
+        &MajorModeActivation {
+            document_id: 18,
+            package_name: "@clay/rust".to_string(),
+            package_version: "0.1.0".to_string(),
+            api_prefix: "rust".to_string(),
+            mode_id: "rust".to_string(),
+            behavior_version: 9,
+            matched_by: ModePatternKind::Extension,
+        },
+        4,
+    );
+
+    assert_eq!(selection.active_major_mode, "rust");
+    assert_eq!(selection.behavior_version, 9);
+    assert!(selection.active_syntax_grammar.is_none());
+    assert!(selection.why.contains("document remains editable"));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn package_cannot_silently_override_native_tier() {
+    let (_, record) = first_party_grammar_package_record("rust");
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    assert_eq!(registry.register_package(&record), Ok(0));
+
+    let grammar = registry
+        .find_for_extension("rs")
+        .expect("native rust registered");
+    assert_eq!(grammar.engine_tier, SyntaxEngineTier::Native);
+    assert_eq!(grammar.package_version, "builtin");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn native_registration_shadows_first_party_wasm_package_metadata() {
+    let (_, record) = first_party_grammar_package_record("rust");
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    assert_eq!(registry.register_package(&record), Ok(0));
+
+    let grammar = registry
+        .find_for_extension("rs")
+        .expect("native rust registered");
+    assert_eq!(grammar.engine_tier, SyntaxEngineTier::Native);
+    assert_eq!(grammar.package_name, "@clay/rust");
+    assert_eq!(grammar.package_version, "builtin");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn web_tree_sitter_artifact_contract_accepts_package_confined_wasm() {
+    let record = assemble_package_record(&grammar_package("rust", "rust", "rs"))
+        .expect("valid wasm grammar package");
+    let contribution = rust_contribution(&record);
+
+    let contract = contribution
+        .web_tree_sitter_artifact_contract()
+        .expect("valid Tier 2 artifact contract");
+
+    assert_eq!(contract.contribution_id, "rust.rust");
+    assert_eq!(contract.package_name, "@clay/rust");
+    assert_eq!(contract.grammar_path, "./grammars/rust.wasm");
+    assert_eq!(contract.highlights_query_path, "./queries/highlights.scm");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn tier2_rejects_grammar_path_outside_package_root() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let native = registry.get("rust.rust").expect("native rust");
+    assert!(matches!(
+        native.web_tree_sitter_artifact_contract(),
+        Err(WebTreeSitterArtifactError::NotWasmTier { .. })
+    ));
+
+    let mut contribution = native.clone();
+    contribution.engine_tier = SyntaxEngineTier::Wasm;
+    contribution.grammar_kind = "tree-sitter-wasm".to_string();
+    contribution.grammar_path = "../grammars/rust.wasm".to_string();
+    contribution.highlights_query_path = "./queries/highlights.scm".to_string();
+    assert!(matches!(
+        contribution.web_tree_sitter_artifact_contract(),
+        Err(WebTreeSitterArtifactError::GrammarPathNotConfined { .. })
+    ));
+
+    contribution.grammar_path = "./grammars/rust.wasm".to_string();
+    contribution.highlights_query_path = "https://example.invalid/highlights.scm".to_string();
+    assert!(matches!(
+        contribution.web_tree_sitter_artifact_contract(),
+        Err(WebTreeSitterArtifactError::QueryPathNotConfined { .. })
+    ));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn tier2_wasm_override_suppresses_tier1_when_user_selected() {
+    let (_, record) = first_party_grammar_package_record("rust");
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    assert_eq!(
+        registry.register_package_with_explicit_tier2_override(&record),
+        Ok(1)
+    );
+
+    let grammar = registry
+        .find_for_extension("rs")
+        .expect("explicit Tier 2 rust registered");
+    assert_eq!(grammar.engine_tier, SyntaxEngineTier::Wasm);
+    assert_eq!(grammar.package_version, "0.1.0");
+    assert!(grammar.web_tree_sitter_artifact_contract().is_ok());
+    assert!(registry.native_language("rust.rust").is_none());
+}
+
+#[test]
+fn web_tree_sitter_runtime_is_bundled_and_loadable_without_network() {
+    let source = std::fs::read_to_string("runtime/js/web-tree-sitter-host.ts")
+        .expect("web-tree-sitter host adapter source readable");
+
+    for required in [
+        "initializeWebTreeSitter",
+        "Parser.init",
+        "Language.load",
+        "languageCache",
+        "queryCache",
+        "./grammars/",
+        ".wasm",
+        "./queries/",
+        ".scm",
+        "clay://runtime/tree-sitter.wasm",
+    ] {
+        assert!(
+            source.contains(required),
+            "Tier 2 host adapter must contain {required}"
+        );
+    }
+    for forbidden in [
+        "fetch(",
+        "http://",
+        "https://",
+        "npm:",
+        "child_process",
+        "Deno.run",
+        "Deno.Command",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Tier 2 host adapter must not use network/shell/package manager: {forbidden}"
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn native_parser_instance_is_cached_per_grammar() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry.get("rust.rust").expect("native rust").clone();
+    let language = registry
+        .native_language("rust.rust")
+        .expect("native language");
+    let handler = TreeSitterSyntaxHandler::new(contribution, language, rust_highlights_query())
+        .expect("handler compiles query once");
+
+    let first_parser = handler.parser_cache_id();
+    let second_parser = handler.parser_cache_id();
+
+    assert_eq!(first_parser, second_parser);
+}
+
+#[test]
+fn tiered_engine_has_no_language_specific_rust_branches() {
+    let source = std::fs::read_to_string("src/server/syntax.rs").expect("syntax source readable");
+
+    for forbidden in [
+        "if contribution.language_id",
+        "if grammar.language_id",
+        "match contribution.language_id",
+        "match grammar.language_id",
+        "RustSyntaxHighlighter",
+        "TypeScriptSyntaxHighlighter",
+        "JavaScriptSyntaxHighlighter",
+        "MarkdownTreeSitterHighlighter",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "tiered syntax engine must stay data-driven, found {forbidden}"
+        );
+    }
 }
 
 #[cfg(any(unix, windows))]
@@ -591,6 +916,162 @@ fn first_party_syntax_fixtures_produce_bounded_decoration_sets() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn first_party_language_fixtures_produce_themed_vocabulary_decorations() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    for (package_dir, contribution_id, language, fixture, expected_tokens) in [
+        (
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            "tests/fixtures/syntax/rust.rs",
+            &[TokenType::Keyword, TokenType::String, TokenType::Comment][..],
+        ),
+        (
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            "tests/fixtures/syntax/typescript.ts",
+            &[TokenType::Keyword, TokenType::String, TokenType::Comment][..],
+        ),
+        (
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            "tests/fixtures/syntax/typescript.tsx",
+            &[TokenType::Keyword, TokenType::String, TokenType::Comment][..],
+        ),
+        (
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            "tests/fixtures/syntax/javascript.js",
+            &[TokenType::Keyword, TokenType::String, TokenType::Comment][..],
+        ),
+        (
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            "tests/fixtures/syntax/markdown.md",
+            &[TokenType::Paragraph, TokenType::Operator][..],
+        ),
+    ] {
+        let contribution = registry
+            .get(contribution_id)
+            .unwrap_or_else(|| panic!("registered {contribution_id}"))
+            .clone();
+        let query = std::fs::read_to_string(format!(
+            "{manifest_dir}/packages/{package_dir}/queries/highlights.scm"
+        ))
+        .unwrap_or_else(|error| panic!("read {package_dir} query: {error}"));
+        let text = std::fs::read_to_string(format!("{manifest_dir}/{fixture}"))
+            .unwrap_or_else(|error| panic!("read {fixture}: {error}"));
+        let handler = TreeSitterSyntaxHandler::new(contribution, language, &query)
+            .unwrap_or_else(|error| panic!("{fixture} query compiles: {error}"));
+
+        let set = handler
+            .parse_sync(parse_notification_for(package_dir, 1, &text))
+            .unwrap_or_else(|error| panic!("{fixture} parses: {error}"))
+            .decoration_update
+            .unwrap_or_else(|| panic!("{fixture} publishes decorations"));
+
+        assert_eq!(set.document_version, 1);
+        assert!(
+            set.spans.len() <= 512,
+            "{fixture} decoration count stays bounded"
+        );
+        for expected in expected_tokens {
+            assert!(
+                set.spans.iter().any(|span| span.token_type == *expected),
+                "{fixture} should emit {expected:?} vocabulary decoration"
+            );
+        }
+        assert!(set.spans.iter().all(|span| span.scope.is_some()));
+        assert!(
+            set.spans
+                .iter()
+                .all(|span| span.provenance.package_prefix == package_dir)
+        );
+    }
+}
+
+#[test]
+fn first_party_artifact_provenance_is_recorded() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+
+    for (package_dir, wasm_name, upstream) in [
+        ("rust", "rust.wasm", "tree-sitter-rust = 0.24.2"),
+        (
+            "typescript",
+            "typescript.wasm",
+            "tree-sitter-typescript = 0.23.2",
+        ),
+        (
+            "javascript",
+            "javascript.wasm",
+            "tree-sitter-javascript = 0.25.0",
+        ),
+        ("markdown", "markdown.wasm", "tree-sitter-md-025 = 0.5.6"),
+    ] {
+        let grammar_dir = format!("{manifest_dir}/packages/{package_dir}/grammars");
+        let provenance_path = format!("{grammar_dir}/PROVENANCE.md");
+        let provenance = std::fs::read_to_string(&provenance_path)
+            .unwrap_or_else(|error| panic!("read {provenance_path}: {error}"));
+        let wasm_path = format!("{grammar_dir}/{wasm_name}");
+        let has_committed_wasm = std::path::Path::new(&wasm_path).exists();
+
+        assert!(provenance.contains(upstream));
+        assert!(provenance.contains("sha256sum"));
+        assert!(provenance.contains("No network fetch"));
+        assert!(provenance.contains("No network fetch, package-manager install, shell build, or native-library load occurs at Clay runtime"));
+        assert!(
+            has_committed_wasm || provenance.contains("is not committed yet"),
+            "{package_dir} must either commit {wasm_name} or document reproducible build provenance"
+        );
+        assert!(
+            std::path::Path::new(&format!(
+                "{manifest_dir}/packages/{package_dir}/queries/highlights.scm"
+            ))
+            .exists()
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn syntax_pipeline_maps_captures_to_vocabulary_tokens() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+
+    let keyword = map_capture_to_vocabulary(
+        &contribution,
+        &SyntaxCapture {
+            byte_start: 0,
+            byte_end: 2,
+            capture_name: "keyword".to_string(),
+        },
+    )
+    .expect("keyword capture maps");
+    let unmapped = map_capture_to_vocabulary(
+        &contribution,
+        &SyntaxCapture {
+            byte_start: 3,
+            byte_end: 7,
+            capture_name: "function.declaration".to_string(),
+        },
+    );
+
+    assert_eq!(keyword.token_type, TokenType::Keyword);
+    assert_eq!(keyword.modifiers, Modifiers::NONE);
+    assert!(matches!(
+        unmapped,
+        Err(TreeSitterSyntaxError::QueryCaptureNotMapped { capture }) if capture == "function.declaration"
+    ));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn tree_sitter_handler_extracts_highlight_captures_as_bounded_decorations() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
@@ -971,7 +1452,12 @@ fn syntax_grammars_init_fixture_loads_all_first_party_grammar_packages_explicitl
     ))
     .expect("read syntax-grammars fixture");
 
-    for specifier in ["@clay/rust", "@clay/typescript", "@clay/javascript"] {
+    for specifier in [
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "@clay/markdown",
+    ] {
         assert!(
             fixture.contains(&format!("loadPackage(\"{specifier}\")")),
             "fixture must explicitly load {specifier}"

@@ -905,9 +905,9 @@ Expected outcome:
 
 ## Phases 18.15–18.21: Themable Syntax, Tiered Tree-sitter, Language Packages, and Opt-in LSP
 
-The following sequence implements `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md` (which supersedes `2026-07-08-2316` on the engine choice). It adds a themable, LSP-based syntax vocabulary; a tiered tree-sitter engine (native first-party + `web-tree-sitter` + JS fallback); range diagnostics; full first-party Rust/TypeScript/JavaScript/Markdown language packages; completion extensions (snippets, exclusive claim, disable-native); engine-agnostic language-intelligence primitives; and opt-in LSP bridge packages. It is sequenced so every later phase renders through the Phase 18.15 vocabulary/theme contract.
+The following sequence implements `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md` (which supersedes `2026-07-08-2316` on the engine choice) and the typography boundary recorded in `decision-logs/2026-07-11-1418-semantic-font-roles-and-user-owned-typography.md`. It adds a themable, LSP-based syntax vocabulary; a tiered tree-sitter engine (native first-party + `web-tree-sitter` + JS fallback); semantic font roles and user-owned typography; range diagnostics; full first-party Rust/TypeScript/JavaScript/Markdown language packages; completion extensions (snippets, exclusive claim, disable-native); engine-agnostic language-intelligence primitives; and opt-in LSP bridge packages. It is sequenced so every later phase renders through the Phase 18.15 vocabulary/theme contract and the Phase 18.16.5 typography contract.
 
-**Supersessions recorded by this sequence:** Phase 18.10's "do not embed Rust/TypeScript/JavaScript grammar ownership in Clay core" prohibition is superseded by Phase 18.16 (native tree-sitter is Tier 1 for first-party languages, via bundled grammar data behind a generic engine — the no-per-language-Rust-branches rule still holds). Phase 20's "theme system" daily-editing item is pulled forward into Phase 18.15 because every rendering feature below depends on it.
+**Supersessions recorded by this sequence:** Phase 18.10's "do not embed Rust/TypeScript/JavaScript grammar ownership in Clay core" prohibition is superseded by Phase 18.16 (native tree-sitter is Tier 1 for first-party languages, via bundled grammar data behind a generic engine — the no-per-language-Rust-branches rule still holds). Phase 20's "theme system" daily-editing item is pulled forward into Phase 18.15 because every rendering feature below depends on it. Phase 1's fixed editor font-size/line-height assumptions and Phase 18.3's size-only typography tokens are superseded by Phase 18.16.5; the earlier bounded layout, SDUI, and theme primitives remain reusable.
 
 ## Phase 18.15: Text Vocabulary, Two-Axis Decorations, and Theme Registry
 
@@ -975,13 +975,41 @@ Carried-forward items:
 - Arbitrary third-party `tree-sitter-wasm` grammar loading (non-`@clay/*`) stays out of scope until a dedicated trust/integrity decision (Phase 23 ecosystem hardening).
 - Incremental reparse across edits (reusing `old_tree` changed ranges) is implemented where the engine supports it cheaply; full re-parse-on-edit remains acceptable within budgets until profiling demands otherwise.
 
+## Phase 18.16.5: Semantic Font Roles and User-Owned Typography
+
+Add atomic user-owned typography profiles and semantic font roles before diagnostics and full language packages consume the text-rendering contract.
+
+Entry gate:
+
+- Do not start until Phase 18.16's engine-neutral vocabulary pipeline and bounded parse handoff are complete or remaining work is explicitly isolated.
+- Preserve the existing server/client and package authority boundaries: profiles contain inert ordered family names and sizes only; no font files, downloads, filesystem scans, or renderer callbacks.
+
+Focus areas:
+
+- Add `monospace`, `proportional`, and `ui` profiles with ordered fallback families and logical-pixel sizes, delivered through one atomic `clay:theme.setTypography` configuration API and a protocol snapshot separate from `ActiveTheme`.
+- Add semantic document/component font roles. `core.code` defaults monospace; `core.text`/Markdown default proportional; Markdown code spans/blocks use monospace; Clay/package UI defaults UI. Packages cannot choose concrete families or sizes.
+- Apply Parley `FontStack`/`FontSize` defaults and normalized Syntax/Semantic ranged roles; include typography/layout-style revisions in cache identity and keep diagnostics/search paint-only.
+- Replace fixed editor/UI font-size geometry assumptions with typography-aware caret, wrapping, scrolling, row, hit-region, and accessibility metrics while retaining bounded visible extraction.
+- Update package/component validation, references, API registry, tests, and wiki coverage. Keep bundled/remote fonts, font picker UI, and variable-font axes out of scope.
+
+Expected outcome:
+
+- Users can configure all three profiles atomically from `~/.config/clay/init.js`; missing named fonts fall back through generic families on the client.
+- Typography changes invalidate dependent layout/render/accessibility state without blocking typing, paint, scroll, or pointer handling.
+- Subsequent diagnostic and language-package phases can consume stable role-aware text geometry without revising their rendering contracts.
+
+Carried-forward items:
+
+- Exact full-document metric-driven scrolling remains a later optimization; the phase uses bounded visible Parley metrics plus a documented conservative baseline.
+- Font assets/downloads, font picker UI, and variable-font controls remain deferred until a separate product/security decision.
+
 ## Phase 18.17: Range Diagnostics and Syntax Error Highlighting
 
 Add the range-diagnostic primitive and the Diagnostic decoration layer so syntax errors (and later LSP diagnostics) render as inline squiggles instead of document-level toasts.
 
 Entry gate:
 
-- Do not start until Phase 18.15 (theme registry provides the squiggle/severity colors) is complete.
+- Do not start until Phase 18.15 (theme registry provides the squiggle/severity colors) and Phase 18.16.5 (typography-aware layout and font-role contract) are complete.
 
 Focus areas:
 
@@ -1005,11 +1033,11 @@ Carried-forward items:
 
 ## Phase 18.18: First-Party Language Package Full Implementation (Rust, TypeScript, JavaScript, Markdown)
 
-Expand the first-party language packages into full mode packages on top of the Tier 1 native engine, the vocabulary, and the theme registry.
+Expand the first-party language packages into full mode packages on top of the Tier 1 native engine, the vocabulary, the typography contract, and the theme registry.
 
 Entry gate:
 
-- Do not start until Phase 18.16 (tiered engine emitting vocabulary tokens) and Phase 18.15 (vocabulary + theme) are complete.
+- Do not start until Phase 18.16 (tiered engine emitting vocabulary tokens), Phase 18.16.5 (semantic font roles and typography-aware layout), and Phase 18.15 (vocabulary + theme) are complete.
 
 Focus areas:
 

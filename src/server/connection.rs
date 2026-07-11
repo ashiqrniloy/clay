@@ -1126,29 +1126,7 @@ async fn schedule_open_parse(
             )
         })?;
 
-    let deadline = tokio::time::Duration::from_millis(6_000);
-    loop {
-        let update = tokio::time::timeout(deadline, parse_coordinator.next_update())
-            .await
-            .map_err(|_| {
-                RuntimeDiagnostic::error(
-                    "clay.parse.open_activation_timeout",
-                    "Open-time parse did not finish before the decoration freshness deadline.",
-                )
-            })?
-            .ok_or_else(|| {
-                RuntimeDiagnostic::error(
-                    "clay.parse.open_activation_closed",
-                    "Open-time parse coordinator closed before publishing decorations.",
-                )
-            })?;
-        if update.document_id == metadata.document_id
-            && update.package_prefix == activation.package_prefix
-            && update.mode_id == activation.mode_id
-        {
-            return Ok(update.decoration_update);
-        }
-    }
+    Ok(None)
 }
 
 fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
@@ -1258,10 +1236,10 @@ await loadPackage("@clay/markdown");"#,
     }
     use crate::{
         protocol::{
-            BehaviorManifest, BehaviorScope, ClientMessage, DecorationKind, DocumentAccess,
-            DocumentMetadata, EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION,
-            RuntimeDiagnostic, SduiActionArgument, SduiActionIntent, SduiActionSource,
-            SduiActionValue, SduiNodeId, SduiNodeKind, ServerMessage, TokenType, codec::Codec,
+            BehaviorManifest, BehaviorScope, ClientMessage, DocumentAccess, DocumentMetadata,
+            EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic,
+            SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue, SduiNodeId,
+            SduiNodeKind, ServerMessage, TokenType, codec::Codec,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState,
@@ -2245,15 +2223,15 @@ await loadPackage("@clay/markdown");"#,
             }
             message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
         }
-        match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::DecorationSet(set) => {
-                assert_eq!(set.document_id, 2);
-                assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::Heading1
-                }));
-            }
-            message => panic!("expected Markdown DecorationSet, got {message:?}"),
-        }
+        assert!(
+            timeout(
+                Duration::from_millis(25),
+                codec.read_server_message(&mut client)
+            )
+            .await
+            .is_err(),
+            "open follow-up should not block waiting for background decorations"
+        );
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -2361,30 +2339,17 @@ await loadPackage("@clay/markdown");"#,
             }
             message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
         }
-        match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::DecorationSet(set) => {
-                assert_eq!(set.document_id, 2);
-                assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::Heading1
-                }));
-                assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::ListItem
-                }));
-                assert!(set.spans.iter().any(|span| {
-                    span.kind == DecorationKind::Syntax && span.token_type == TokenType::CodeSpan
-                }));
-            }
-            message => panic!("expected Markdown DecorationSet, got {message:?}"),
-        }
-        // Server re-issues one pending capability after the open attempt.
+        // Server re-issues one pending capability after the open attempt; parse
+        // decorations are scheduled in the background instead of blocking open.
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
             ServerMessage::FileOpenCapabilityIssued { .. }
         ));
 
-        // Selected-file activation publishes behavior and decorations only;
-        // optional package UI panels stay opt-in, so no extra SduiSnapshot
-        // follows before the replenished capability.
+        // Selected-file activation publishes behavior only on the open path;
+        // optional package UI panels stay opt-in, and highlights arrive later
+        // through the parse coordinator rather than before the replenished
+        // capability.
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -2449,15 +2414,22 @@ await loadPackage("@clay/markdown");"#,
                 if manifest.manifest_id == "markdown.markdown"
                     && matches!(manifest.scope, BehaviorScope::Document { document_id: 2 })
         ));
-        assert!(messages.iter().any(|message| matches!(
-            message,
-            ServerMessage::DecorationSet(set)
-                if set.document_id == 2
-                    && set
-                        .spans
-                        .iter()
-                        .any(|span| span.token_type == TokenType::Heading1)
-        )));
+        assert!(messages.iter().all(|message| {
+            !matches!(message, ServerMessage::DecorationSet(set) if set.document_id == 2)
+        }));
+        let update = timeout(Duration::from_secs(1), coordinator.next_update())
+            .await
+            .unwrap()
+            .unwrap();
+        let set = update
+            .decoration_update
+            .expect("background markdown decorations");
+        assert_eq!(set.document_id, 2);
+        assert!(
+            set.spans
+                .iter()
+                .any(|span| span.token_type == TokenType::Heading1)
+        );
         let _ = fs::remove_file(config_root.join("init.js"));
         let _ = fs::remove_dir(config_root);
     }
@@ -2481,7 +2453,7 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
-    async fn generic_open_parse_uses_bounded_window_for_large_file() {
+    async fn open_document_renders_before_background_parse_completes() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let mut text = "# Top\n\n".to_string();
         text.push_str(&"a".repeat(80 * 1024));
@@ -2512,11 +2484,20 @@ await loadPackage("@clay/markdown");"#,
         .await
         .expect("loaded package should classify markdown path");
 
-        let set =
+        let immediate =
             super::schedule_open_parse(&coordinator, &metadata, &text, &behavior, &activation)
                 .await
-                .expect("open parse should schedule")
-                .expect("open parse should publish decorations");
+                .expect("open parse should schedule");
+        assert!(
+            immediate.is_none(),
+            "open follow-up must not wait for parse output"
+        );
+
+        let update = timeout(Duration::from_secs(1), coordinator.next_update())
+            .await
+            .unwrap()
+            .unwrap();
+        let set = update.decoration_update.expect("background decorations");
 
         assert_eq!(set.document_id, 2);
         assert_eq!(set.viewport_byte_start, 0);

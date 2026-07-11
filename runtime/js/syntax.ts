@@ -41,6 +41,12 @@ export type ServerRegisterSyntaxGrammarOptions = {
   rawOps?: never;
 };
 
+export type SyntaxEngineTierPreference = "native" | "wasm" | "javascript" | "js";
+
+export function setSyntaxEnginePreference(target: string, tier: SyntaxEngineTierPreference): unknown {
+  return parseResult(requireOps()["op_clay_syntax_set_engine_preference"](target, tier));
+}
+
 export function serverRegisterSyntaxGrammar(options: ServerRegisterSyntaxGrammarOptions): unknown {
   for (const key of ["handler", "callback", "onParse", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
     if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {

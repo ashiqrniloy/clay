@@ -1436,11 +1436,39 @@ await loadPackage("@clay/javascript");
 
 Do not add hidden JSON/TOML/ad hoc syntax configuration keys for preferred grammar selection, grammar paths, style maps, capture styles, or auto-load behavior. If a later phase exposes any of those as user preferences, they must be promoted as documented Clay JS APIs with custom properties and registry coverage.
 
-Shipped Phase 18.10 grammar-only packages are documented at:
+Shipped first-party grammar packages are documented at:
 
 - [`@clay/rust`](rust.md)
 - [`@clay/typescript`](typescript.md)
 - [`@clay/javascript`](javascript.md)
+- [`@clay/markdown`](markdown.md)
+
+## Phase 18.16 authoring contract: tiered syntax engine
+
+Phase 18.16 extends the Phase 18.10 `SyntaxGrammarContribution` contract without changing the package manifest shape. Package metadata still declares Tier 2 assets and the capture `styleMap`; Clay's host registry chooses the engine at package-load/open/reclassification time:
+
+1. **Tier 1 — native first-party.** Clay seeds compiled-in `tree-sitter-*` grammar data for Rust, TypeScript/TSX, JavaScript, and Markdown. Dispatch is by descriptor data (`languageId`, extensions/file names, query path, and style map), not language-specific Rust branches. First-party package load remains required for package-owned mode behavior; native syntax registration does not silently auto-load a package.
+2. **Tier 2 — web-tree-sitter WASM.** A package-root-confined `./grammars/*.wasm` plus `./queries/*.scm` contribution uses the shared host adapter. It replaces Tier 1 only after explicit user selection, for example `setSyntaxEnginePreference("rust", "wasm")`; package load order alone cannot promote it.
+3. **Tier 3 — package JavaScript fallback.** Existing `clay.parse.serverRegisterParseHandler` handlers remain available for grammar-less packages, Markdown-specific parser behavior, or an explicit `javascript` preference. This route uses the existing server-issued handler token and does not run package JavaScript in the client.
+
+All tiers feed one grammar/capture-to-vocabulary path. A query capture maps through `styleMap` to Phase 18.15 `TokenType` + `Modifiers`, retains package scope/provenance, and publishes only bounded inert `DecorationSet` spans. Unknown captures fail closed. The active syntax grammar remains separate from the active major mode, so a document can stay editable as `core.code` or `core.text` while highlighting is selected.
+
+```js
+import { loadPackage } from "clay:packages";
+import { setSyntaxEnginePreference } from "clay:syntax";
+
+// Normal first-party setup: Tier 1 native is selected by default.
+await loadPackage("@clay/rust");
+
+// Optional explicit selection, evaluated before package registration/open.
+setSyntaxEnginePreference("rust", "wasm"); // or "javascript"
+```
+
+Open is enqueue-only: text and the initial mode manifest return before background parse completion. Later parse failures or invalid results publish sanitized `RuntimeDiagnostic` values such as `clay.parse.open_failed`; they must never block typing or leak paths/source text. Parse windows, decoration payloads, and retained syntax cache remain bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`.
+
+Tier 2 binaries may be committed when available. Until then, each first-party `grammars/PROVENANCE.md` records the upstream crate/release, reproducible `tree-sitter build --wasm` command, and SHA-256 recording step. Runtime does not fetch, build, shell out, install packages, load native libraries, or execute client-side JavaScript. First-party artifact loading and package-root confinement remain required; third-party grammar/native trust is deferred to Phase 23 and a separate security decision.
+
+Use the documented `clay:syntax` API for engine preference. Do not add hidden JSON/TOML keys for grammar paths, query paths, style maps, auto-loading, or tier selection. See [`setSyntaxEnginePreference`](../clay-js-api/syntax/set-syntax-engine-preference.md) and the [Syntax Grammar Registry](../../wiki/modules/syntax-grammar-registry.md) implementation guide.
 
 ## Phase 18.11 authoring contract: completion providers
 
@@ -1570,7 +1598,7 @@ Optional customization is exposed through documented Clay/package JS APIs, not b
 
 ### Declarative additions beyond grammar-only
 
-Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. Add the following surfaces through generic primitives:
+Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same metadata is the Tier 2 package contribution in Phase 18.16; Tier 1 native selection and Tier 3 JavaScript fallback are host/runtime decisions. Add the following full-language surfaces through generic primitives:
 
 - **Major mode**: declare `clay.modes` and register a mode pattern with `clay.modes.serverRegisterModePattern`. The pattern uses generic file-extension, MIME-type, and bounded shebang/leading-content probes; do not add language-specific Rust classification branches.
 - **Behavior manifest**: declare editor rules (indentation, tab, enter, delimiter pairs, comment continuation, electric characters) through the behavior manifest API. Use `clay.behavior.buildCodeEditingManifest({ indentSize, lineComment, electricOutdentCharacters, autocompleteTriggers })` to produce a validated C-family manifest; do not add a Rust-specific behavior manifest branch in core.

@@ -4,12 +4,35 @@ use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Map, Value, json};
 
-use crate::packages::record::assemble_package_record;
+use crate::{packages::record::assemble_package_record, server::syntax::SyntaxEngineTier};
 
 use super::{
     ClayOpState,
     decorations::{clay_error, parse_json, required_str},
 };
+
+#[op2]
+#[string]
+pub(super) fn op_clay_syntax_set_engine_preference(
+    state: &mut OpState,
+    #[string] target: String,
+    #[string] tier: String,
+) -> Result<String, JsErrorBox> {
+    let tier = parse_engine_tier(&tier)?;
+    state
+        .borrow::<Arc<ClayOpState>>()
+        .set_syntax_engine_preference(&target, tier)
+        .map_err(|error| {
+            clay_error(format!(
+                "clay.syntax.invalid_engine_preference: syntax engine preference rejected: {error:?}"
+            ))
+        })?;
+    serde_json::to_string(&json!({
+        "target": target,
+        "tier": tier.as_str(),
+    }))
+    .map_err(|error| clay_error(format!("clay.syntax.invalid_engine_preference: {error}")))
+}
 
 #[op2]
 #[string]
@@ -62,6 +85,17 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
             "clay.syntax.registration_failed: failed to serialize result ({error})"
         ))
     })
+}
+
+fn parse_engine_tier(tier: &str) -> Result<SyntaxEngineTier, JsErrorBox> {
+    match tier {
+        "native" => Ok(SyntaxEngineTier::Native),
+        "wasm" => Ok(SyntaxEngineTier::Wasm),
+        "javascript" | "js" => Ok(SyntaxEngineTier::JavaScriptFallback),
+        _ => Err(clay_error(
+            "clay.syntax.invalid_engine_preference: tier must be native, wasm, or javascript",
+        )),
+    }
 }
 
 fn package_value_from_options(options: &Map<String, Value>) -> Result<Value, JsErrorBox> {

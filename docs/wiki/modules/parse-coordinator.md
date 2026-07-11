@@ -7,6 +7,7 @@
 - `src/server/ops/parse.rs`
 - `runtime/js/parse.ts`
 - `src/server/syntax.rs`
+- `src/server/connection.rs`
 - `src/server/mod.rs`
 - `tests/parse_coordinator.rs`
 - `docs/reference/primitives/parse-update-strategy.md`
@@ -28,7 +29,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 - Sort invalidated ranges so viewport-intersecting work is handled first, using only generic byte-range metadata that token-stream adapters for Markdown, Python, or other modes can consume.
 - Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, optional parse-produced decoration metadata, known decoration style tokens, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
 - Instrument scheduled, cancelled, published, stale, and failed parse tasks through `ParseCoordinatorStats`.
-- Expose an internal update receiver for later decoration/folding/diagnostic publication paths.
+- Expose internal update and diagnostic receivers for later decoration/folding/runtime diagnostic publication paths through `next_update()` and `next_diagnostic()`.
 
 ## How It Works
 
@@ -40,7 +41,7 @@ The live JS bridge is deliberately split across the facade and the op. Package l
 
 `ParseCoordinator::schedule_parse_with_windows` is the Phase 18.5 large-file path. The caller prepares bounded server-canonical snapshots from already-open document text, then the coordinator validates each snapshot before any package handler can observe it: document ID and version must match the request, package prefix and mode ID must match handler provenance, `byte_end - byte_start` must equal the UTF-8 byte length of `text`, every window must fit `ParsePolicy::max_window_bytes`, and total retained window text must fit `ParsePolicy::memory_budget_bytes` and `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB). Valid windows are delivered in `ParseEditNotification::parse_windows` with `SyntaxMemoryBudget` metadata.
 
-The spawned task calls the handler with a compact `ParseEditNotification`. For metadata-only requests `parse_windows` is empty; for windowed requests it contains only the bounded snapshots selected for the viewport/invalidated ranges. JS-backed handlers are invoked on the persistent runtime worker by token; the runtime calls the registered package function under the smaller of the service timeout and the handler's registered `timeoutMs`, stores the returned update through `op_clay_parse_store_update`, converts it into `IncrementalParseUpdate`, then returns it to the coordinator task. Phase 18.10 Tree-sitter highlighting uses the same handler trait through `TreeSitterSyntaxHandler`: package grammar metadata is validated before registration, the handler receives only bounded server-prepared windows, compiles/caches its query and tree server-side, and returns an inert `DecorationSet` inside `IncrementalParseUpdate` for normal coordinator validation. When the handler resolves, `finish_task` first verifies that the task generation still matches the active handler generation for that package/mode; old-generation results are counted as stale and never published. It then runs normal update validation before sending an `IncrementalParseUpdate` on the coordinator's internal update channel. If the result document version no longer matches the latest recorded document version, the coordinator drops it and increments stale-result stats instead of publishing. Handler errors, parse timeouts, invalid updates, and payload-budget failures increment failed-task stats and publish no half-updated result.
+The spawned task calls the handler with a compact `ParseEditNotification`. For metadata-only requests `parse_windows` is empty; for windowed requests it contains only the bounded snapshots selected for the viewport/invalidated ranges. JS-backed handlers are invoked on the persistent runtime worker by token; the runtime calls the registered package function under the smaller of the service timeout and the handler's registered `timeoutMs`, stores the returned update through `op_clay_parse_store_update`, converts it into `IncrementalParseUpdate`, then returns it to the coordinator task. Phase 18.10 Tree-sitter highlighting uses the same handler trait through `TreeSitterSyntaxHandler`: package grammar metadata is validated before registration, the handler receives only bounded server-prepared windows, compiles/caches its query and tree server-side, and returns an inert `DecorationSet` inside `IncrementalParseUpdate` for normal coordinator validation. When the handler resolves, `finish_task` first verifies that the task generation still matches the active handler generation for that package/mode; old-generation results are counted as stale and never published. It then runs normal update validation before sending an `IncrementalParseUpdate` on the coordinator's internal update channel. If the result document version no longer matches the latest recorded document version, the coordinator drops it and increments stale-result stats instead of publishing. Handler errors, parse timeouts, invalid updates, and payload-budget failures increment failed-task stats, publish no half-updated result, and enqueue sanitized `RuntimeDiagnostic` values on the diagnostic receiver (`clay.parse.open_failed`) without leaking handler messages, file paths, or source text.
 
 `src/protocol/parse.rs` defines the inert parse shapes:
 
@@ -55,6 +56,14 @@ The spawned task calls the handler with a compact `ParseEditNotification`. For m
 
 These types are `rkyv`-serializable for future protocol/cache use, but the current coordinator keeps parse updates server-side for downstream decoration/folding consumption rather than adding them to hot edit-ack IPC messages.
 
+## Runtime Diagnostics
+
+`ParseCoordinator` owns separate unbounded channels for `IncrementalParseUpdate` and `RuntimeDiagnostic`. `finish_task` publishes a sanitized `clay.parse.open_failed` diagnostic for handler failures, invalid decoration/update validation, parse-window or payload-budget failures, and stale-result rejection paths that must be visible to the runtime/UI without publishing a partial update. `parse_failure_diagnostic` reports only package prefix, mode ID, document ID, and a bounded reason category such as `handler failed` or `payload budget exceeded`; it does not forward handler text, paths, source text, query text, or parser internals. Consumers await `next_diagnostic()` outside the typing/paint path.
+
+## Open-Time Flow
+
+`open_document_followup_messages` classifies and activates the document, schedules a bounded 64 KiB parse window, and returns the behavior manifest immediately. `schedule_open_parse` is enqueue-only, so initial text and mode state render before background syntax/parse work completes. Later decorations arrive on `next_update()` and failures on `next_diagnostic()`; open-time scheduling errors use a separate sanitized `clay.parse.open_activation_failed` diagnostic.
+
 ## Invariants and Constraints
 
 - Parsing is `Background` work and must not block edit acknowledgement, client shadow updates, Masonry text-event handlers, or paint.
@@ -62,7 +71,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - Parser execution stays server-side through the typed handler/runtime boundary; Rust never accepts executable callback fields in the op payload.
 - The client receives only later validated inert render/folding/diagnostic data; it does not receive parser functions or package JavaScript.
 - Stale results are discarded before publication, including old-runtime-generation task results after hot reload.
-- Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; over-budget updates increment failed-task stats and are not published.
+- Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; over-budget updates increment failed-task stats, emit sanitized diagnostics, and are not published.
 - Windowed parser input is bounded by `ParsePolicy::max_window_bytes` per snapshot and `SYNTAX_CACHE_BUDGET_BYTES`/`SyntaxMemoryBudget` across retained syntax windows.
 - Optional parse-produced decorations are validated through the shared decoration validation path before client publication, including range/style-token, document-version, viewport, and decoration payload-budget checks.
 - The Markdown parser adapter and the Tree-sitter syntax handler publish decoration updates as generic `DecorationSet` values; the coordinator validates them without knowing markdown-it tokens, Markdown syntax, Rust syntax, TypeScript syntax, or JavaScript syntax.
@@ -77,6 +86,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - `tests/parse_coordinator.rs::rust_code_has_no_markdown_specific_parser_branch`
 - `tests/parse_coordinator.rs::markdown_parse_update_accepts_valid_decoration_payload`
 - `tests/parse_coordinator.rs::markdown_parse_update_rejects_decoration_version_mismatch`
+- `tests/parse_coordinator.rs::finish_task_publishes_runtime_diagnostic_for_handler_error`
 - `tests/parse_coordinator.rs::stale_parse_result_is_not_published`
 - `tests/parse_coordinator.rs::parse_window_snapshot_is_bounded_and_versioned`
 - `tests/parse_coordinator.rs::large_file_edit_does_not_copy_full_document_to_parser`
@@ -97,7 +107,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - `src/server/js_runtime.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`
 - `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`
 - `src/server/js_runtime.rs::runtime_boundary_does_not_expose_platform_authorities`
-- `src/server/connection.rs::generic_open_parse_uses_bounded_window_for_large_file`
+- `src/server/connection.rs::open_document_renders_before_background_parse_completes`
 - `src/server/connection.rs::selected_markdown_file_publishes_manifest_and_decorations`
 - `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow`
 - `tests/syntax_grammar.rs::tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`

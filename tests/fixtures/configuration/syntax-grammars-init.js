@@ -6,3 +6,4 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");

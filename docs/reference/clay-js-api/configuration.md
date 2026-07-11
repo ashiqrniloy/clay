@@ -118,6 +118,36 @@ No hidden JSON/TOML/ad hoc syntax keys are valid in this phase. Rejected example
 
 This review adds no filesystem, network, shell, package-manager, AI, WASM, raw-op, native-widget, client-runtime, package-control, package-enable/disable, third-party grammar, native artifact, or client-side JavaScript authority. If a future phase adds syntax preferences, grammar overrides, or theme/style configuration, each behavior-changing option must be a documented Clay JS API with custom properties, Markdown docs, generated registry coverage, hot-path policy, and security tests.
 
+## Phase 18.16 syntax engine configuration review
+
+Phase 18.16 promotes exactly one syntax-engine configuration API: [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md). No call is needed for normal use. The default end-user setup remains explicit package loading from `~/.config/clay/init.js`; no preference is required for normal first-party highlighting:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
+```
+
+Use `setSyntaxEnginePreference` only when a user intentionally forces an engine tier for a language/package during `init.js` or package-load setup:
+
+```js
+import { setSyntaxEnginePreference } from "clay:syntax";
+
+setSyntaxEnginePreference("rust", "wasm");
+setSyntaxEnginePreference("markdown", "javascript");
+```
+
+Default behavior with no preference is Tier 1 native for first-party Rust, TypeScript, TSX, JavaScript, and Markdown; explicit `wasm` enables the Tier 2 artifact path for an already-validated first-party package; explicit `javascript`/`js` suppresses syntax-grammar selection so package JS parse handlers remain the Tier 3 fallback. Preference targets are lowercase language ids, package API prefixes, or first-party package names such as `rust`, `markdown`, or `@clay/rust`. This API has no default key binding, no file watcher, no hidden config file key, and no automatic package loading behavior.
+
+The public registry entry lists `custom_properties` for `target` and `tier`, empty `key_bindings`, lookup tags including `configuration` and `syntax`, and security metadata. Hidden JSON/TOML/ad hoc syntax-engine keys remain invalid, including `syntax.engine`, `syntax.preferredEngine`, `syntax.preferredGrammar`, `treeSitter.engine`, `treeSitter.grammarPath`, `treeSitter.wasmPath`, `syntax.styleMap`, `syntax.captureStyles`, `syntax.autoLoad`, and `autoLoadSyntaxPackages`.
+
+Configuration evaluation and preference lookup happen only during startup, package load, document open, reload, or reclassification work. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, and decoration rendering paths do not execute user configuration JavaScript, recompute engine choices, or run package JavaScript.
+
+This API grants no filesystem, network, shell, package-manager, native-library, extension loading, AI mutation, workspace, package enable/disable, arbitrary third-party grammar, raw-op, WASM artifact, native-widget, client-runtime, client-side JavaScript, raw CSS/color, or parser callback authority. It only records user-initiated engine preference for already-validated first-party syntax packages; packages cannot silently promote themselves over native tier.
+
 ## Phase 19 persistent-runtime hot reload configuration review
 
 Phase 19 reviewed persistent runtime hot reload and did **not** promote a new user-facing reload setting, command, key binding, or `clay:configuration` API. Hot reload is an internal/developer-only server lifecycle primitive in this phase, triggered headlessly through `IpcServer::trigger_developer_hot_reload` for tests and developer workflow. That Rust helper and its `RuntimeReloadOutcome`/`ReloadedDocumentRefresh` types are `#[doc(hidden)]` test/developer surfaces around the shared reload primitive; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`.

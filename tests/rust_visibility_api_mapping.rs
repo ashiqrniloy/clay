@@ -163,6 +163,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/parse_coordinator.rs::ParseCoordinator::cancel_generation",
         "src/server/parse_coordinator.rs::ParseCoordinator::cancel_package",
         "src/server/parse_coordinator.rs::ParseCoordinator::new",
+        "src/server/parse_coordinator.rs::ParseCoordinator::next_diagnostic",
         "src/server/parse_coordinator.rs::ParseCoordinator::next_update",
         "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
         "src/server/parse_coordinator.rs::ParseCoordinator::register_handler_for_generation",
@@ -183,10 +184,15 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor::spawn",
         "src/server/runtime_sandbox.rs::SandboxEvaluation",
         "src/server/syntax.rs::ActiveSyntaxGrammar",
+        "src/server/syntax.rs::NativeGrammarDescriptor",
+        "src/server/syntax.rs::SyntaxCapture",
+        "src/server/syntax.rs::SyntaxEngineTier",
         "src/server/syntax.rs::SyntaxGrammarContribution",
         "src/server/syntax.rs::SyntaxGrammarContribution::provenance",
+        "src/server/syntax.rs::SyntaxGrammarContribution::web_tree_sitter_artifact_contract",
         "src/server/syntax.rs::SyntaxGrammarPatternKind",
         "src/server/syntax.rs::SyntaxGrammarSelection",
+        "src/server/syntax.rs::SyntaxVocabularySpan",
         "src/server/syntax.rs::TreeSitterSyntaxError",
         "src/server/syntax.rs::TreeSitterSyntaxHandler",
         "src/server/syntax.rs::TreeSitterSyntaxHandler::cached_tree_version",
@@ -195,13 +201,22 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/syntax.rs::SyntaxGrammarRegistry",
         "src/server/syntax.rs::SyntaxGrammarRegistry::active_selection",
         "src/server/syntax.rs::SyntaxGrammarRegistry::find_for_extension",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::first_party_native_descriptors",
         "src/server/syntax.rs::SyntaxGrammarRegistry::find_for_file_name",
         "src/server/syntax.rs::SyntaxGrammarRegistry::get",
         "src/server/syntax.rs::SyntaxGrammarRegistry::list",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::native_language",
         "src/server/syntax.rs::SyntaxGrammarRegistry::new",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::register_first_party_native_grammars",
         "src/server/syntax.rs::SyntaxGrammarRegistry::register_package",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::register_package_with_explicit_tier2_override",
         "src/server/syntax.rs::SyntaxGrammarRegistry::select_for_document",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::with_first_party_native",
         "src/server/syntax.rs::SyntaxGrammarRegistryError",
+        "src/server/syntax.rs::TreeSitterSyntaxHandler::parser_cache_id",
+        "src/server/syntax.rs::WebTreeSitterArtifactContract",
+        "src/server/syntax.rs::WebTreeSitterArtifactError",
+        "src/server/syntax.rs::map_capture_to_vocabulary",
         "src/server/command_execution.rs::CommandExecutionDiagnostic",
         "src/server/command_execution.rs::CommandExecutionProvenance",
         "src/server/command_execution.rs::CommandExecutionRequest",
@@ -640,6 +655,60 @@ fn open_dialog_internal_helpers_are_private_or_inventory_mapped() {
     assert!(!workspace_source.contains("pub enum WorkspaceAuthority"));
     assert!(connection_source.contains("async fn open_selected_file_response"));
     assert!(!connection_source.contains("pub async fn open_selected_file_response"));
+}
+
+#[test]
+fn phase18_16_public_rust_surfaces_have_js_api_or_are_crate_private() {
+    let inventory_text = inventory_rust_mapping_text();
+    let public_items: BTreeSet<_> = public_server_items().into_iter().collect();
+
+    for (rust_path, op, facade) in [
+        (
+            "src/server/syntax.rs::SyntaxGrammarRegistry::register_package",
+            "op_clay_syntax_register_syntax_grammar",
+            "runtime/js/syntax.ts::serverRegisterSyntaxGrammar",
+        ),
+        (
+            "src/server/syntax.rs::SyntaxGrammarRegistry::set_engine_preference",
+            "op_clay_syntax_set_engine_preference",
+            "runtime/js/syntax.ts::setSyntaxEnginePreference",
+        ),
+    ] {
+        assert!(
+            public_items.contains(rust_path),
+            "Phase 18.16 public Rust capability should be inventory-visible: {rust_path}"
+        );
+        assert!(
+            inventory_text.contains(rust_path),
+            "Phase 18.16 public Rust capability must map to Clay JS API inventory: {rust_path}"
+        );
+        assert!(
+            inventory_text.contains(op),
+            "Phase 18.16 public Rust capability {rust_path} must have op wrapper {op}"
+        );
+        assert!(
+            inventory_text.contains(facade),
+            "Phase 18.16 public Rust capability {rust_path} must have facade {facade}"
+        );
+    }
+
+    for internal_surface in [
+        "src/server/parse_coordinator.rs::ParseCoordinator::next_diagnostic",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::register_first_party_native_grammars",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::register_package_with_explicit_tier2_override",
+        "src/server/syntax.rs::SyntaxGrammarRegistry::native_language",
+        "src/server/syntax.rs::TreeSitterSyntaxHandler::parser_cache_id",
+        "src/server/syntax.rs::map_capture_to_vocabulary",
+    ] {
+        assert!(
+            public_items.contains(internal_surface),
+            "Phase 18.16 internal server primitive should remain explicitly reviewed: {internal_surface}"
+        );
+        assert!(
+            !inventory_text.contains(&format!("backing_rust = \"{internal_surface}\"")),
+            "internal Phase 18.16 primitive {internal_surface} must not be promoted as a direct Clay JS API backing surface"
+        );
+    }
 }
 
 #[test]

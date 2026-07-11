@@ -10,23 +10,23 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 
 ## Developer Guides
 
-- [Clay Primitives Reference](reference/primitives/index.md) — Phase 16 primitives navigation index, prioritized backlog, and Phase 17 prerequisite checklist.
+- [Clay Primitives Reference](reference/primitives/index.md) — Phase 16 primitives navigation index, prioritized backlog, Phase 17 prerequisite checklist, and Phase 18.16 tiered syntax-engine contract.
 - [Existing Primitive Audit](reference/primitives/audit.md) — Phase 16 static audit of behavior manifest, SDUI, configuration, file/workspace, document, and observability primitives.
 - [Primitive Registry Schema](reference/primitives/registry.md) — Phase 16 primitive category taxonomy, registry schema, Clay JS API shape stubs, security boundaries, and advisory primitive budgets.
 - [Rendering Customization Strategy](reference/primitives/rendering-strategy.md) — Phase 16 inert rendering declarations, decoration update shape, SDUI reuse, client rendering attachment points, budgets, and security boundaries.
 - [Clay Shell and Package UI/Layout Strategy](reference/primitives/shell-layout-strategy.md) — Phase 18.1/18.2 shell vocabulary and runtime status, Phase 18.3 runtime-backed slot-aware package UI contribution contract, working area and pane/slot layout model, package UI/state/style contract, and Masonry implementation boundary.
-- [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — Phase 16 parse unit boundaries, cancellable server-side parse tasks, viewport-prioritized result delivery, fallback behavior, budgets, and security boundaries.
+- [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — cancellable server-side parse tasks, tiered syntax engines, non-blocking open, viewport-prioritized results, diagnostics, budgets, and security boundaries.
 - [Markdown Mode POC Requirements](reference/primitives/markdown-mode-requirements.md) — Phase 16 Markdown mode Phase 18 readiness checklist, primitive prerequisite map, performance targets, API stubs, and first-party package security scope.
 - [Package Primitive Security and Provenance Requirements](reference/primitives/package-security.md) — Phase 16 package primitive prefix, permission, validation, conflict, prohibited-authority, and provenance model.
 - [Phase 17 Package Loading Runtime Facades](reference/primitives/package-loading.md) — package load/runtime boundaries, conflict handling, runtime facade wiring, hot-path policy, and Phase 18 decoration/parse handoff.
-- [Creating Clay Packages](reference/packages/creating-packages.md) — package authoring guide covering manifests, explicit loading, UI/layout, components, input, actions, logic, data/state, configuration, styling/theme tokens, permissions, documentation, tests, and current/planned shell architecture.
+- [Creating Clay Packages](reference/packages/creating-packages.md) — package authoring guide covering manifests, explicit loading, tiered syntax engines, UI/layout, components, input, actions, logic, data/state, configuration, styling/theme tokens, permissions, documentation, tests, and current/planned shell architecture.
 - [@clay/markdown Package](reference/packages/markdown.md) — first-party Markdown package contract, entries, permissions, file patterns, and runtime boundary.
 - [@clay/rust Package](reference/packages/rust.md) — first-party grammar-only Rust syntax package contract, permissions, file patterns, and runtime boundary.
 - [@clay/typescript Package](reference/packages/typescript.md) — first-party grammar-only TypeScript syntax package contract, permissions, file patterns, and runtime boundary.
 - [@clay/javascript Package](reference/packages/javascript.md) — first-party grammar-only JavaScript syntax package contract, permissions, file patterns, and runtime boundary.
 - [Primitive Implementation Gate](reference/primitives/implementation-gate.md) — Phase 16.5 package/mode validation gate, fixture format, deterministic failure coverage, and Phase 17/18 handoff.
 - [Text Vocabulary and Two-Axis Decoration Contract](reference/primitives/syntax-vocabulary.md) — Phase 18.15 locked LSP-based `TokenType` + `Modifiers` vocabulary, Clay prose/text-attribute extensions, open-string scope escape, compatibility mapping from free-form `style_token`, and single-source-of-color `StyleRegistry` invariant.
-- [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, `smoke-gui`, foreground server/client, GUI status, and local IPC smoke validation.
+- [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, tiered syntax-engine smoke, `smoke-gui`, foreground server/client, GUI status, and local IPC validation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
@@ -77,6 +77,7 @@ The generated documentation registry must read this section as the explicit incl
 - [loadPackage](reference/clay-js-api/packages/load-package.md) — `clay.packages.loadPackage`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `clay.parse.serverRegisterParseHandler`
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `clay.syntax.serverRegisterSyntaxGrammar`
+- [setSyntaxEnginePreference](reference/clay-js-api/syntax/set-syntax-engine-preference.md) — `clay.syntax.setSyntaxEnginePreference`
 - [setTheme](reference/clay-js-api/theme/set-theme.md) — `clay.theme.setTheme`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `clay.completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `clay.completion.serverListCompletionProvidersForTrigger`

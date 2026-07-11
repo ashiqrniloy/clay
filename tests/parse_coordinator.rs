@@ -308,6 +308,36 @@ fn parse_result_rejected_for_stale_version_and_oversized_payload() {
 }
 
 #[tokio::test]
+async fn finish_task_publishes_runtime_diagnostic_for_handler_error() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(&package, "markdown", |_notification| async move {
+            Err(ParseCoordinatorError::HandlerFailed(
+                "/home/alice/project/secret.rs token=abc123".to_string(),
+            ))
+        })
+        .unwrap();
+
+    coordinator.schedule_parse(request(5)).unwrap();
+
+    let diagnostic = tokio::time::timeout(Duration::from_secs(1), coordinator.next_diagnostic())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(diagnostic.code, "clay.parse.open_failed");
+    assert!(diagnostic.message.contains("markdown"));
+    assert!(diagnostic.message.contains("handler failed"));
+    assert!(!diagnostic.message.contains("/home/alice"));
+    assert!(!diagnostic.message.contains("token=abc123"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), coordinator.next_update())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn stale_parse_result_is_not_published() {
     let coordinator = ParseCoordinator::new();
     let package = package_with_permissions(&["parse-document"]);

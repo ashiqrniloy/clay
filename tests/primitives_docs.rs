@@ -1243,6 +1243,13 @@ fn phase18_14_language_package_expansion_primitive_review() -> String {
     .expect("read Phase 18.14 first-party Rust, TypeScript, and JavaScript language package expansion primitive review")
 }
 
+fn phase18_16_tiered_engine_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.16-tiered-tree-sitter-engine-primitive-review.md",
+    ))
+    .expect("read Phase 18.16 tiered Tree-sitter syntax engine primitive review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -2042,6 +2049,205 @@ fn phase18_10_tree_sitter_grammar_primitive_review_records_inventory_and_gaps() 
         backlog.contains("SyntaxGrammarContribution"),
         "primitive backlog must contain the SyntaxGrammarContribution handoff row"
     );
+}
+
+#[test]
+fn phase18_16_tiered_engine_primitive_review_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_16_tiered_engine_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.16-tiered-tree-sitter-engine-primitive-review.md"),
+        "docs/wiki/index.md must link the Phase 18.16 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.16-tiered-tree-sitter-engine-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.16 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Grammar registry and package grammar metadata",
+        "Parse coordinator and open-time parse path",
+        "Decoration transport and vocabulary/theme registry",
+        "Package loading and JS parse bridge",
+        "`src/server/syntax.rs::SyntaxGrammarRegistry`",
+        "`src/server/parse_coordinator.rs::ParseCoordinator`",
+        "`src/protocol/decorations.rs::DecorationSpan`",
+        "`src/editor/theme.rs::StyleRegistry`",
+        "`runtime/js/syntax.ts`",
+        "`runtime/js/parse.ts`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16 primitive review must inventory existing primitive: {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.16 Gaps",
+        "### `SyntaxEngineTier` and engine selection/provenance",
+        "### Tier 1 native first-party descriptors",
+        "### Tier 2 web-tree-sitter host adapter",
+        "### Tier 3 JS parser fallback",
+        "### One capture-to-vocabulary mapper",
+        "### Open-parse diagnostics",
+        "SyntaxEngineTier::Native",
+        "SyntaxEngineTier::Wasm",
+        "SyntaxEngineTier::JavaScriptFallback",
+        "SyntaxGrammarContribution -> SyntaxEngineSelection -> ParseCoordinator -> DecorationSet(TokenType, Modifiers)",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16 primitive review must map generic tier gaps: {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "Package load / grammar validation",
+        "Document open / reload / explicit reclassification",
+        "Background parse/highlight work",
+        "Paint/text-event/key/layout/scroll/pointer hot path",
+        "No parser/query compilation",
+        "no runtime configuration evaluation",
+        "`INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`",
+        "`DECORATION_PAYLOAD_BUDGET_BYTES`",
+        "`SYNTAX_CACHE_BUDGET_BYTES`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16 primitive review must record hot-path split: {required}"
+        );
+    }
+
+    for required in [
+        "Security and Authority Boundary",
+        "First-party native grammars are compiled-in Clay-maintained grammar data",
+        "Tier 2 WASM artifacts must be resolver-validated, package-root-confined `grammars/*.wasm` files",
+        "Tier 3 JS parser fallback stays server-side through existing runtime handler tokens",
+        "The client receives only inert `DecorationSet`/`RuntimeDiagnostic` data",
+        "filesystem, network, shell, AI, workspace mutation, native-ui, package-control, package-manager, raw-ops, and client-runtime authority stay out of scope",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16 primitive review must record security boundary: {required}"
+        );
+    }
+
+    for required in [
+        "Rejected Implementation Shapes",
+        "Do not add `RustSyntaxHighlighter`, `TypeScriptSyntaxHighlighter`, `JavaScriptSyntaxHighlighter`, `MarkdownTreeSitterHighlighter`",
+        "Do not add a second parse scheduler",
+        "Do not run Tree-sitter, web-tree-sitter, package JavaScript, query compilation, or package loading in Masonry paint",
+        "Do not silently let packages override Tier 1 native highlighting by load order or priority alone",
+        "Do not add hidden JSON/TOML syntax-engine keys",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16 primitive review must reject unsafe/language-specific shape: {required}"
+        );
+    }
+}
+
+#[test]
+fn tiered_syntax_engine_docs_are_indexed_and_security_boundaries_recorded() {
+    let docs_index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+    let primitive_index = primitives_index();
+    let registry = primitives_registry();
+    let parse = parse_update_strategy();
+    let rendering = rendering_strategy();
+    let security = package_security();
+    let backlog = primitives_backlog();
+    let package_guide = creating_packages_guide();
+    let development =
+        fs::read_to_string(repository_path("docs/development/launch-and-gui-smoke.md"))
+            .expect("read launch and GUI smoke docs");
+
+    for link in [
+        "reference/packages/creating-packages.md",
+        "reference/primitives/registry.md",
+        "reference/primitives/parse-update-strategy.md",
+        "reference/primitives/rendering-strategy.md",
+        "reference/primitives/package-security.md",
+        "development/launch-and-gui-smoke.md",
+        "reference/packages/rust.md",
+        "reference/packages/typescript.md",
+        "reference/packages/javascript.md",
+        "reference/packages/markdown.md",
+    ] {
+        assert!(
+            docs_index.contains(link),
+            "docs/index.md must link tiered syntax documentation {link}"
+        );
+    }
+
+    for required in [
+        "Phase 18.16 authoring contract: tiered syntax engine",
+        "Tier 1 — native first-party",
+        "Tier 2 — web-tree-sitter WASM",
+        "Tier 3 — package JavaScript fallback",
+        "TokenType` + `Modifiers",
+        "setSyntaxEnginePreference",
+        "clay.parse.open_failed",
+        "Open is enqueue-only",
+        "INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "SYNTAX_CACHE_BUDGET_BYTES",
+        "grammars/PROVENANCE.md",
+        "third-party grammar/native trust is deferred to Phase 23",
+    ] {
+        assert!(
+            package_guide.contains(required),
+            "package author guide must document tiered syntax contract `{required}`"
+        );
+    }
+
+    for (source, name) in [
+        (&primitive_index, "primitive index"),
+        (&registry, "primitive registry"),
+        (&parse, "parse strategy"),
+        (&rendering, "rendering strategy"),
+        (&security, "package security"),
+        (&backlog, "primitive backlog"),
+        (&development, "development smoke docs"),
+    ] {
+        for required in [
+            "Phase 18.16",
+            "Tier 1",
+            "Tier 2",
+            "Tier 3",
+            "setSyntaxEnginePreference",
+            "TokenType",
+            "Modifiers",
+            "package-root-confined",
+            "clay.parse.open_failed",
+        ] {
+            assert!(
+                source.contains(required),
+                "{name} must document tiered syntax marker `{required}`"
+            );
+        }
+    }
+
+    for required in [
+        "no runtime downloads",
+        "no shell/package-manager",
+        "native-library",
+        "client-side JavaScript",
+        "Third-party grammar/native trust remains out of scope until Phase 23",
+        "does not grant filesystem",
+    ] {
+        assert!(
+            security.contains(required) || package_guide.contains(required),
+            "tiered syntax docs must record security boundary `{required}`"
+        );
+    }
 }
 
 #[test]

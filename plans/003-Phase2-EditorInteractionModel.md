@@ -15,6 +15,11 @@
 - `cargo fmt`, `cargo test`, and `cargo check` pass.
 - No IPC, `deno_core`, SDUI protocol, server process, extension loading, filesystem access, or network access is introduced in this phase.
 
+## Phase 18.16.5 Typography Handoff
+
+- Phase 2's Parley-backed caret geometry and hit testing remain reusable; configured font stacks and ranged semantic roles must flow through that same cached layout.
+- The old fixed-width approximation remains rejected. Phase 18.16.5 preserves Unicode-safe offsets while making wrapping, caret, selection, and pointer geometry typography-aware.
+
 ## Tasks
 
 - [ ] Set up the Clay JavaScript API facade boundary

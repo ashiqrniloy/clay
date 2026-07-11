@@ -65,6 +65,14 @@ await markdownLoadMode();
 
 The explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` separation is preserved — file-open is app/editor configuration, not Markdown mode behavior.
 
+## Engine tiers
+
+- **Tier 1 native** is the default for `.md`, `.markdown`, and `.mdown`, using Clay's compiled Markdown grammar descriptor.
+- **Tier 2 web-tree-sitter WASM** uses the package-root-confined `./grammars/markdown.wasm` only after `setSyntaxEnginePreference("markdown", "wasm")`; package load order cannot override native highlighting.
+- **Tier 3 JavaScript fallback** remains the package-owned `markdown-it`/scanner parser for Markdown mode decorations and preview behavior, or when `setSyntaxEnginePreference("markdown", "javascript")` is selected.
+
+Tree-sitter captures use one `TokenType`/`Modifiers` vocabulary mapper. Open returns before background parsing finishes; later failures publish sanitized `clay.parse.open_failed` diagnostics. Parse/query work remains outside keypress, paint, layout, scroll, pointer, or text-event hot paths. The package cannot use network, shell, AI mutation, remote listeners, raw `Deno.core.ops`, direct Masonry/widget mutation, or client-side JavaScript authority. The package keeps arbitrary third-party/native grammar artifact loading deferred to Phase 23 and a separate trust decision. See the [tiered syntax engine package-author contract](../../../docs/reference/packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine).
+
 ## Smoke Fixture
 
 The deterministic smoke fixture at `tests/fixtures/configuration/markdown-mode/` registers the package metadata, opens `workspace/sample.md` when a workspace root is available, activates Markdown mode, registers parse/decorations, and publishes representative decorations. If no workspace root is available, the fixture falls back to document `1` so `cargo run -- smoke-gui --config-fixture markdown-mode` still validates the package workflow without expanding filesystem authority. The fixture does not publish a default side panel; the optional preview is a `PanelContribution` the host opts into.

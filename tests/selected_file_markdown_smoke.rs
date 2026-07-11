@@ -9,8 +9,8 @@ use std::{
 use clay::{
     ipc::{IpcEndpoint, smoke_endpoint},
     protocol::{
-        BehaviorScope, ClientMessage, DecorationKind, DiagnosticSeverity, PROTOCOL_VERSION,
-        ServerMessage, TokenType, codec::Codec,
+        BehaviorScope, ClientMessage, DiagnosticSeverity, PROTOCOL_VERSION, ServerMessage,
+        codec::Codec,
     },
     server::{IpcServer, ServerConfig},
 };
@@ -131,18 +131,6 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
             ));
         }
         message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
-    }
-    match read_message(&codec, &mut stream).await {
-        ServerMessage::DecorationSet(set) => {
-            assert_eq!(set.document_id, opened_document_id);
-            assert!(set.spans.iter().any(|span| {
-                span.kind == DecorationKind::Syntax && span.token_type == TokenType::Heading1
-            }));
-            assert!(set.spans.iter().any(|span| {
-                span.kind == DecorationKind::Syntax && span.token_type == TokenType::CodeSpan
-            }));
-        }
-        message => panic!("expected Markdown DecorationSet, got {message:?}"),
     }
     let _next_token = expect_capability(read_message(&codec, &mut stream).await);
 }

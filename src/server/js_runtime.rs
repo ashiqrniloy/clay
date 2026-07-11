@@ -405,6 +405,9 @@ export function serverRegisterParseHandler(options) {
 const CLAY_FACADE_SYNTAX: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
+export function setSyntaxEnginePreference(target, tier) {
+  return parse(ops.op_clay_syntax_set_engine_preference(String(target ?? ""), String(tier ?? "")));
+}
 export function serverRegisterSyntaxGrammar(options) {
   for (const key of ["handler", "callback", "onParse", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
     if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
@@ -1926,9 +1929,45 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(evaluation.op_records, vec!["rust:rust:1"]);
-        assert_eq!(evaluation.syntax_grammars.len(), 1);
-        assert_eq!(evaluation.syntax_grammars[0].language_id, "rust");
+        assert_eq!(evaluation.op_records, vec!["rust:rust:0"]);
+        assert!(evaluation.syntax_grammars.iter().any(|grammar| {
+            grammar.language_id == "rust"
+                && grammar.engine_tier == crate::server::syntax::SyntaxEngineTier::Native
+        }));
+    }
+
+    #[tokio::test]
+    async fn syntax_facade_engine_preference_allows_explicit_wasm_override() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { setSyntaxEnginePreference, serverRegisterSyntaxGrammar } from "clay:syntax";
+                setSyntaxEnginePreference("rust", "wasm");
+                const result = serverRegisterSyntaxGrammar({
+                  packageName: "@clay/rust",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "rust",
+                  permissions: ["parse-document", "render-decorations"],
+                  syntaxGrammar: {
+                    languageId: "rust",
+                    filePatterns: { extensions: ["rs"] },
+                    grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
+                    queries: { highlights: "./queries/highlights.scm" },
+                    styleMap: { keyword: "keyword.control" }
+                  }
+                });
+                Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.registeredGrammarCount}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(evaluation.op_records, vec!["rust:1"]);
+        assert!(evaluation.syntax_grammars.iter().any(|grammar| {
+            grammar.language_id == "rust"
+                && grammar.engine_tier == crate::server::syntax::SyntaxEngineTier::Wasm
+        }));
     }
 
     #[tokio::test]
@@ -2128,9 +2167,24 @@ mod tests {
         let languages = evaluation
             .syntax_grammars
             .iter()
-            .map(|grammar| grammar.language_id.as_str())
+            .map(|grammar| (grammar.language_id.as_str(), grammar.engine_tier))
             .collect::<Vec<_>>();
-        assert_eq!(languages, vec!["javascript", "rust", "typescript"]);
+        assert_eq!(
+            languages,
+            vec![
+                (
+                    "javascript",
+                    crate::server::syntax::SyntaxEngineTier::Native
+                ),
+                ("markdown", crate::server::syntax::SyntaxEngineTier::Native),
+                ("rust", crate::server::syntax::SyntaxEngineTier::Native),
+                ("tsx", crate::server::syntax::SyntaxEngineTier::Native),
+                (
+                    "typescript",
+                    crate::server::syntax::SyntaxEngineTier::Native
+                ),
+            ]
+        );
     }
 
     #[tokio::test]

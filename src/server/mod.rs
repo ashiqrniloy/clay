@@ -1221,7 +1221,8 @@ await loadPackage("@clay/markdown");"#,
             markdown_refresh
                 .messages
                 .iter()
-                .any(|message| matches!(message, ServerMessage::DecorationSet(_)))
+                .all(|message| !matches!(message, ServerMessage::DecorationSet(_))),
+            "reload refresh should not block on background parse decorations"
         );
         assert!(
             outcome

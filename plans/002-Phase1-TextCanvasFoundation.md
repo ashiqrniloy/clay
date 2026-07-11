@@ -14,6 +14,11 @@
 - `cargo fmt`, `cargo test`, and `cargo check` pass.
 - No IPC, `deno_core`, SDUI protocol, server process, extension loading, filesystem access, or network access is introduced in this phase.
 
+## Phase 18.16.5 Typography Handoff
+
+- Phase 1's bounded visible extraction and cached Parley layout remain the foundation for typography configuration.
+- The original fixed `TEXT_FONT_SIZE`/estimated line-height assumptions are superseded by Phase 18.16.5's typography revision, semantic roles, configured font stacks, and role-aware geometry; no Phase 1 behavior is rewritten here.
+
 ## Tasks
 
 - [x] Refactor editor internals into explicit buffer, viewport, and render/layout modules

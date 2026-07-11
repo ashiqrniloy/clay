@@ -14,6 +14,11 @@
 - Payload budget guards covering `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` and `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` pass with a non-trivial representative tree, and any found-in-practice tree that exceeds either threshold triggers an explicit investigation before Phase 17 package-owned UI multiplies the payload surface.
 - Clay JS API documentation, configuration docs, generated registry state, and the implementation wiki are updated or explicitly verified as unchanged for the surfaces introduced by this phase.
 
+## Phase 18.16.5 Typography Handoff
+
+- Phase 15's structural SDUI/layout/accessibility observations remain the deterministic baseline; typography coverage should extend those observations rather than introduce brittle pixel snapshots.
+- Phase 18.16.5 must verify that UI font-size changes scale text, row geometry, hit regions, and accessibility bounds together.
+
 ## Tasks
 
 - [x] Add a `SduiObservableSnapshot` type and extraction helper

@@ -13,11 +13,12 @@
 - `tests/decoration_transport.rs`
 - `packages/markdown/dist/parser.js`
 - `src/server/syntax.rs`
+- `runtime/js/web-tree-sitter-host.ts`
 - `tests/syntax_grammar.rs`
 
 ## Overview
 
-The decoration transport carries package-produced inline editor decorations as bounded inert data. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `clay.decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. The first-party Markdown package uses this path from its parser adapter for heading, emphasis, code, fence, and list-marker spans. Phase 18.10 reuses the same primitive for Tree-sitter syntax highlighting: `TreeSitterSyntaxHandler` maps package-approved query captures to known style tokens, validates the resulting syntax `DecorationSet`, enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and lets the parse coordinator publish the inert update. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript.
+The decoration transport carries package-produced inline editor decorations as bounded inert data. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `clay.decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. The first-party Markdown package uses this path from its parser adapter for heading, emphasis, code, fence, and list-marker spans. Phase 18.10 Tree-sitter syntax highlighting established this shared transport; Phase 18.16 reuses it for all syntax-engine tiers: native Tree-sitter and the web-tree-sitter host adapter produce capture records, while the shared mapper emits Phase 18.15 `TokenType` + `Modifiers` spans; Tier 3 package-JavaScript handlers publish through the same validation path. The transport enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and the parse coordinator publishes only inert updates. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript.
 
 ## Responsibilities
 
@@ -28,6 +29,13 @@ The decoration transport carries package-produced inline editor decorations as b
 - Provide the runtime-backed `clay:decorations` facade and explicit `op_clay_decorations_publish_decorations` wrapper for package-side publication.
 - Route `ServerMessage::DecorationSet` through the client connection event loop into `EditorWidget::apply_connection_event`.
 - Store current validated spans in `EditorSurface` and render native highlight rectangles via `LayoutState::paint_text`.
+
+## Primitive Coverage
+
+- **Decoration publication** — `DecorationSet`/`DecorationSpan` in `src/protocol/decorations.rs` is the reusable inert output primitive for Markdown, native/WASM Tree-sitter, and package-JavaScript parser adapters.
+- **Vocabulary/theme boundary** — syntax spans carry `TokenType`, `Modifiers`, optional compatibility `scope`, and provenance; `StyleRegistry` remains the single color resolver during paint.
+- **Validation/performance** — server validation enforces document/version, viewport, provenance, permission, serialized payload, and `SYNTAX_CACHE_BUDGET_BYTES` limits before publication or cache insertion. Paint consumes cached spans only.
+- **Reuse rule** — new modes produce bounded spans through the existing facade or parse handler/coordinator path; they do not add parser callbacks, renderer hooks, raw CSS, client JavaScript, or language-specific paint branches.
 
 ## How It Works
 
@@ -61,7 +69,7 @@ let message = ServerMessage::DecorationSet(set);
 ## Tests
 
 - `tests/decoration_transport.rs`: oversized payload rejection, stale-version rejection, invalid range/unknown token rejection, off-viewport rejection, generic non-Markdown language package syntax-span acceptance, representative Markdown decoration payload budget coverage, near-viewport client pruning, stale-version cache clearing, protocol codec round trip, and client render-hook application.
-- `tests/syntax_grammar.rs`: Tree-sitter syntax handlers produce bounded `DecorationSet` values for Rust, TypeScript, and JavaScript fixtures, reject per-viewport capture overflow, reject unmapped captures, and preserve package provenance on syntax spans.
+- `tests/syntax_grammar.rs`: native Tree-sitter fixtures for Rust, TypeScript, TSX, JavaScript, and Markdown produce bounded vocabulary decorations; tier selection, unmapped captures, per-viewport overflow, cached parsing, and package provenance are covered.
 - `src/server/decorations.rs::tests::large_file_decoration_cache_respects_30_mib_budget`: verifies server-side chunk-cache budget accounting and LRU eviction.
 - `tests/performance_protocol.rs::decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport`: verifies chunk IPC payloads remain under the decoration transport budget.
 - `tests/editor_performance_invariants.rs::paint_uses_cached_inert_spans_without_package_javascript`: guards paint/layout source against package JavaScript, parser, server, or op calls.

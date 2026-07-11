@@ -14,6 +14,11 @@
 - SDUI schema/helpers exposed as public programmatic behavior are inspectable through Markdown Clay JS API docs, generated registry entries, and lookup tests.
 - Ordinary typing, painting, scrolling, and text-event handling remain free of blocking IPC, JavaScript execution, full-document serialization, and server-driven layout computation.
 
+## Phase 18.16.5 Typography Handoff
+
+- Phase 12's server-declarative SDUI schema and client-owned native rendering boundary remain unchanged.
+- Typography profiles are separate layout-affecting client state; Phase 18.16.5 must not add server-computed font geometry, package JavaScript, or full-document text to SDUI payloads.
+
 ## Tasks
 
 - [x] Define the initial SDUI schema and authority boundaries

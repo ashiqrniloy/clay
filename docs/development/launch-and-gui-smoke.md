@@ -172,18 +172,65 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
 ```
 
 Manual syntax smoke:
 
-1. Put the three `loadPackage` lines above in `~/.config/clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
+1. Put the four `loadPackage` lines above in `~/.config/clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
 2. Launch Clay with `cargo run`, `cargo run -- smoke-gui`, or the fixture command above.
-3. Open small `.rs`, `.ts`, and `.js` files similar to `tests/fixtures/syntax/rust.rs`, `tests/fixtures/syntax/typescript.ts`, and `tests/fixtures/syntax/javascript.js`.
-4. Confirm each file remains editable under its active `core.code`/`core.text` fallback behavior while syntax decorations arrive asynchronously from the background parse/decor path.
+3. Open small `.rs`, `.ts`, `.tsx`, `.js`, and `.md` files similar to `tests/fixtures/syntax/rust.rs`, `tests/fixtures/syntax/typescript.ts`, `tests/fixtures/syntax/typescript.tsx`, `tests/fixtures/syntax/javascript.js`, and `tests/fixtures/syntax/markdown.md`.
+4. Confirm each file renders text immediately and remains editable under its active `core.code`/`core.text` fallback behavior while syntax decorations arrive asynchronously from the background parse/decor path.
 5. Type a small edit and scroll; local editing and paint must remain responsive while highlighting may refresh later.
 6. Remove the language package load lines and relaunch. The same files should still open editable, but with no active syntax grammar and no syntax highlights.
 
-Automated coverage (no manual execution needed): `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow` runs the documented smoke contract deterministically by loading all three grammar packages, selecting active syntax grammars for `.rs`, `.ts`, and `.js` fixture paths while preserving `core.code`, producing decorations before and after a small edit, and verifying unloaded no-highlight fallback editability. `tests/syntax_grammar.rs::first_party_syntax_fixtures_produce_bounded_decoration_sets` parses the Rust, TypeScript, and JavaScript fixture files with the package highlight queries and verifies bounded `DecorationSet` output; `syntax_provider_selection_falls_back_to_no_highlighting_without_changing_mode` covers unloaded fallback editability; `tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`, `tests/parse_coordinator.rs`, `tests/decoration_transport.rs`, and `tests/editor_performance_invariants.rs` cover background scheduling, stale-result rejection, payload/cache budgets, and hot-path source guards.
+Automated coverage (no manual execution needed): `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow` runs the documented smoke contract deterministically by loading grammar packages, selecting active syntax grammars for `.rs`, `.ts`, and `.js` fixture paths while preserving `core.code`, producing decorations before and after a small edit, and verifying unloaded no-highlight fallback editability. `tests/syntax_grammar.rs::first_party_language_fixtures_produce_themed_vocabulary_decorations` parses Rust, TypeScript, TSX, JavaScript, and Markdown fixture files with package highlight queries and verifies bounded vocabulary `DecorationSet` output; `tests/syntax_grammar.rs::first_party_artifact_provenance_is_recorded` checks reproducible artifact provenance; `syntax_provider_selection_falls_back_to_no_highlighting_without_changing_mode` covers unloaded fallback editability; `tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`, `tests/parse_coordinator.rs`, `tests/decoration_transport.rs`, and `tests/editor_performance_invariants.rs` cover background scheduling, stale-result rejection, payload/cache budgets, and hot-path source guards.
+
+### Phase 18.16 tiered syntax engine smoke
+
+Phase 18.16 keeps first-party syntax explicit while selecting among native, WASM, and package-JavaScript engines through one generic pipeline. Captures map to `TokenType` + `Modifiers` vocabulary spans. Normal setup uses native Tier 1 automatically after package load:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
+```
+
+To exercise explicit engine selection from `~/.config/clay/init.js`, set the preference before loading the package:
+
+```js
+import { setSyntaxEnginePreference } from "clay:syntax";
+import { loadPackage } from "clay:packages";
+
+setSyntaxEnginePreference("rust", "wasm");       // Tier 2, explicit override
+// setSyntaxEnginePreference("markdown", "javascript"); // Tier 3 package parser
+await loadPackage("@clay/rust");
+await loadPackage("@clay/markdown");
+```
+
+Manual verification:
+
+1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` with the four package loads. Open `.rs`, `.ts`, `.tsx`, `.js`, and `.md` fixtures and confirm Tier 1 vocabulary highlighting arrives after text renders.
+2. Confirm syntax selection does not replace the active `core.code`/`core.text` or package major mode, and small edits remain local while background decorations refresh.
+3. Select `wasm` for one language. If no `*.wasm` binary is committed, confirm `packages/*/grammars/PROVENANCE.md` documents the reproducible build and SHA-256 step; do not build or fetch artifacts during the smoke run.
+4. Select `javascript` for Markdown and confirm the existing package parser remains usable as Tier 3 fallback. Remove the preference and return to the native default.
+5. If a parse handler fails, confirm a sanitized `clay.parse.open_failed` runtime diagnostic appears asynchronously while the document remains editable. No absolute path, source text, or token data should appear in the diagnostic.
+
+Representative checks:
+
+```bash
+cargo test --test syntax_grammar
+cargo test --test parse_coordinator
+cargo test --test manual_smoke_docs
+cargo test --test editor_performance_invariants
+```
+
+Security/performance contract: engine selection, package loading, query compilation, artifact validation, and parse work happen at init/package-load/open/reclassification or background time. No network fetch, shell/package-manager execution, native-library load, client-side JavaScript, parser work, configuration evaluation, or blocking IPC is allowed in keypress, paint, layout, scroll, pointer, or text-event handlers. Tier 2 package assets remain first-party, resolver-validated, and package-root-confined; third-party grammar trust is deferred to Phase 23 and a separate security decision.
+
+Automated coverage: `first_party_language_fixtures_produce_themed_vocabulary_decorations`, `first_party_artifact_provenance_is_recorded`, `user_forced_tier_is_honored_and_recorded_in_provenance`, `tier2_wasm_override_suppresses_tier1_when_user_selected`, `js_parser_fallback_still_runs_without_tree_sitter_grammar`, `package_cannot_silently_override_native_tier`, `finish_task_publishes_runtime_diagnostic_for_handler_error`, and `open_document_renders_before_background_parse_completes` cover the tier choices, provenance, fallback, diagnostics, and non-blocking open contract.
 
 ### Phase 18.14 language package expansion smoke
 
