@@ -4,10 +4,10 @@ use crate::{
     masonry_sdui::SduiNativeState,
     perf::fixtures::{FixtureKind, FixtureSpec, generate_fixture},
     protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, PROTOCOL_VERSION,
-        SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem,
-        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
-        ServerMessage, codec::Codec,
+        ActiveTypography, BehaviorManifest, ClientMessage, DocumentAccess, EditOperation,
+        PROTOCOL_VERSION, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection,
+        SduiListItem, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation,
+        SduiTreeUpdate, ServerMessage, codec::Codec,
     },
 };
 
@@ -66,6 +66,19 @@ pub fn editor_scroll_window_signature(size_bytes: usize, delta_lines: isize) -> 
 pub fn editor_resize_viewport_visible_text_len(size_bytes: usize, height: f64) -> usize {
     let mut surface = editor_surface_with_fixture(size_bytes);
     let _ = surface.update_visible_line_count_for_height(height);
+    surface.visible_text().len()
+}
+
+pub fn editor_typography_viewport_visible_text_len(size_bytes: usize, font_size: f32) -> usize {
+    let mut surface = editor_surface_with_fixture(size_bytes);
+    let mut typography = ActiveTypography {
+        revision: 1,
+        ..ActiveTypography::default()
+    };
+    typography.monospace.size = font_size;
+    typography.proportional.size = font_size;
+    let _ = surface.set_typography(typography);
+    let _ = surface.update_visible_line_count_for_height(1080.0);
     surface.visible_text().len()
 }
 

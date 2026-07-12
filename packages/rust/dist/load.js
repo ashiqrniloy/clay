@@ -47,6 +47,7 @@ export async function loadRustPackage() {
   await serverRegisterModePattern(manifest, {
     modeId,
     displayName: "Rust",
+    defaultFontRole: "monospace",
     extensions: supportedExtensions,
     fileNames: supportedFileNames,
     editorRules: rustEditorRules

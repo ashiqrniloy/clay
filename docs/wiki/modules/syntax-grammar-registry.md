@@ -141,16 +141,25 @@ Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE
 5. selects the viewport-intersecting `ParseWindowSnapshot`
 6. enforces the contribution `maxWindowBytes` before parsing
 7. sets parser/query timeouts from `timeoutMs`
-8. reuses a cached prior `Tree` for later document versions on the same window
+8. reuses a cached prior `Tree` for later document versions on the same window, applying a whole-window `InputEdit` before incremental reparsing so stale recovery nodes cannot survive changed text
 9. extracts query captures with `QueryCursor::set_byte_range`
 10. maps captures to inert `DecorationSpan` values with package provenance
-11. rejects per-viewport capture output above the syntax span cap instead of silently truncating query output
-12. validates the resulting `DecorationSet` with the existing decoration validator
-13. enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion or publication
-14. inserts the validated set into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
-15. returns an `IncrementalParseUpdate`
+11. walks the same cached parse tree only when `root.has_error()` and emits generic Tree-sitter `ERROR`/`MISSING` recovery nodes through `diagnostic_update`
+12. rejects per-viewport highlight capture output above the syntax span cap instead of silently truncating query output
+13. validates the resulting `DecorationSet` with the existing decoration validator
+14. enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion or publication
+15. inserts the validated set into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
+16. returns one `IncrementalParseUpdate` containing both current syntax decorations and the current `tree-sitter` diagnostic source set
 
 Capture extraction is engine-neutral after parse: Tree-sitter and future web-tree-sitter adapters produce `SyntaxCapture { byte_start, byte_end, capture_name }` records. `map_capture_to_vocabulary` is the one shared capture-to-vocabulary mapper; it looks up the descriptor `style_map`, converts the style token to the Phase 18.15 closed `TokenType` + `Modifiers` axes, preserves the original token as `scope`, and fails closed for unmapped captures. Native and WASM tiers therefore feed the same `DecorationSpan` construction path.
+
+### Generic Tree-sitter Recovery Diagnostics
+
+Native extraction uses only grammar-neutral `Node::has_error`, `is_error`, `is_missing`, `byte_range`, and `walk` APIs. A valid root takes the constant-time empty path and still emits an empty current-source `DiagnosticSet`, allowing replacement semantics to clear old syntax errors. Error roots are traversed iteratively over the already bounded parse window; only error-bearing children are visited. Candidate ranges are clipped to the viewport, nested/equal ranges are reduced deterministically to innermost visible ranges, and output stops at `DIAGNOSTIC_MAX_SPANS_PER_SET`.
+
+Tree-sitter `MISSING` nodes have zero-width ranges. `visible_scalar_range` anchors them to the next UTF-8 scalar, or the previous scalar at end-of-window; empty text emits no span. Published metadata is Clay-owned and fixed: source `tree-sitter`, severity `Error`, codes `syntax.error` / `syntax.missing`, and messages `syntax error` / `missing syntax`. Raw source snippets, parser node names, query text, and paths never enter diagnostic metadata. Provenance comes from the selected `SyntaxGrammarContribution`.
+
+Tier 2 mirrors the local capture contract through `collectWebTreeSitterDiagnostics` in `runtime/js/web-tree-sitter-host.ts`; Tier 3 uses the already documented inert parse diagnostic records. Neither adapter adds callbacks or language-name branches.
 
 The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. Handler failures and invalid results publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives the normal decoration/diagnostic transport message path; no package code runs in the Rust client.
 
@@ -201,7 +210,9 @@ Coverage:
 - engine-neutral `SyntaxCapture` to `TokenType`/`Modifiers` vocabulary mapping with fail-closed unmapped captures
 - Tree-sitter highlight query capture extraction into bounded decoration spans
 - valid capture mapping to `keyword.control`, `string.quoted`, `comment.line`, and `punctuation.definition`
-- cached-tree reuse for later document versions
+- cached-tree reuse for later document versions with whole-window `InputEdit` correctness
+- generic `ERROR` and `MISSING` extraction, valid-tree empty-set clearing, UTF-8-safe missing anchors, viewport/deduplication/count bounds, first-party invalid grammar coverage, and no language-specific branches
+- Tier 2 host-side generic error/missing capture contract
 - invalid query/unmapped capture fail-closed behavior with actionable diagnostics
 - parse-window budget enforcement before parsing
 - per-viewport capture overflow rejection before decoration publication
@@ -215,3 +226,4 @@ Coverage:
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Parse Coordinator](parse-coordinator.md)
 - [Decoration Transport](decoration-transport.md)
+- [Range Diagnostics](range-diagnostics.md)

@@ -90,6 +90,16 @@ fn syntax_vocabulary_contract() -> String {
     .expect("read syntax vocabulary contract")
 }
 
+fn typography_contract() -> String {
+    fs::read_to_string(repository_path("docs/reference/primitives/typography.md"))
+        .expect("read semantic typography contract")
+}
+
+fn diagnostics_contract() -> String {
+    fs::read_to_string(repository_path("docs/reference/primitives/diagnostics.md"))
+        .expect("read range diagnostics contract")
+}
+
 fn package_security() -> String {
     fs::read_to_string(repository_path(
         "docs/reference/primitives/package-security.md",
@@ -462,7 +472,7 @@ fn phase18_15_theme_authoring_docs_lock_textstyles_contract() {
     for required in [
         "`StyleSpec` (`color`, `bold`, `italic`, `underline`, `strike`)",
         "`clay.contributions.textStyles`",
-        "`shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`",
+        "`shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`",
         "Theme resolution happens at configuration/package-load time",
         "No code, widgets, ops, raw CSS, filesystem, network, or shell authority",
     ] {
@@ -476,7 +486,7 @@ fn phase18_15_theme_authoring_docs_lock_textstyles_contract() {
         "Phase 18.15 theme authoring: `textStyles` and `setTheme`",
         "Text Vocabulary and Two-Axis Decoration Contract",
         "`textStyles` entry fields",
-        "Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`",
+        "Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`",
         "Only one active theme is applied",
         "setTheme(\"@clay/theme-gruvbox-material-dark\")",
         "rawColor`, `value`, `css`, `rawCss`, `cssText`",
@@ -617,6 +627,8 @@ fn editor_theme_registry_wiki_documents_phase18_15_implementation() {
         "[Color; 35]",
         "TokenType::index()",
         "StyleSpec { color, bold, italic, underline, strike }",
+        "VisibleTextStyleRun",
+        "Diagnostics and search may still paint their rectangles and attributes but cannot select a font role.",
         "clay.contributions.textStyles",
         "TextStyleOverrideDescriptor",
         "reject_ui_prohibited_authority",
@@ -646,6 +658,14 @@ fn editor_theme_registry_wiki_documents_phase18_15_implementation() {
     assert!(
         review.contains("Editor Theme Registry"),
         "primitive review must link final implementation wiki"
+    );
+
+    let decoration_page =
+        fs::read_to_string(repository_path("docs/wiki/modules/decoration-transport.md"))
+            .expect("read decoration transport wiki");
+    assert!(
+        decoration_page.contains("only syntax/semantic roles survive normalization"),
+        "decoration transport wiki must document client-side fail-closed font-role normalization"
     );
 }
 
@@ -1248,6 +1268,20 @@ fn phase18_16_tiered_engine_primitive_review() -> String {
         "docs/wiki/modules/phase18.16-tiered-tree-sitter-engine-primitive-review.md",
     ))
     .expect("read Phase 18.16 tiered Tree-sitter syntax engine primitive review")
+}
+
+fn phase18_16_5_typography_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.16.5-typography-primitive-review.md",
+    ))
+    .expect("read Phase 18.16.5 semantic typography primitive review")
+}
+
+fn phase18_17_range_diagnostics_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.17-range-diagnostics-primitive-review.md",
+    ))
+    .expect("read Phase 18.17 range diagnostics primitive review")
 }
 
 fn workspace_file_browser_wiki() -> String {
@@ -2151,6 +2185,408 @@ fn phase18_16_tiered_engine_primitive_review_linked_and_complete() {
         assert!(
             review.contains(required),
             "Phase 18.16 primitive review must reject unsafe/language-specific shape: {required}"
+        );
+    }
+}
+
+#[test]
+fn typography_primitive_is_registered_documented_and_indexed() {
+    let docs_index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+    let primitive_index = primitives_index();
+    let registry = primitives_registry();
+    let rendering = rendering_strategy();
+    let security = package_security();
+    let typography = typography_contract();
+
+    assert!(docs_index.contains("reference/primitives/typography.md"));
+    assert!(primitive_index.contains("typography.md"));
+    assert!(registry.contains("| SemanticTypographyRole |"));
+    for marker in [
+        "defaultFontRole",
+        "fontRole",
+        "style.fontRole",
+        "core.code",
+        "core.text",
+        "TypographyRegistry",
+        "TYPOGRAPHY_PAYLOAD_BUDGET_BYTES",
+        "DECORATION_PAYLOAD_BUDGET_BYTES",
+        "tests/typography_protocol.rs",
+        "docs/development/launch-and-gui-smoke.md",
+    ] {
+        assert!(
+            typography.contains(marker),
+            "typography reference must document {marker}"
+        );
+    }
+    assert!(rendering.contains("## Semantic Typography Roles"));
+    assert!(security.contains("## Semantic Typography Authority Boundary"));
+}
+
+#[test]
+fn range_diagnostics_reference_is_indexed_and_complete() {
+    let docs_index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+    let primitive_index = primitives_index();
+    let registry = primitives_registry();
+    let backlog = fs::read_to_string(repository_path("docs/reference/primitives/backlog.md"))
+        .expect("read primitive backlog");
+    let rendering = rendering_strategy();
+    let parse_strategy = fs::read_to_string(repository_path(
+        "docs/reference/primitives/parse-update-strategy.md",
+    ))
+    .expect("read parse update strategy");
+    let security = package_security();
+    let diagnostics = diagnostics_contract();
+    let package_guide = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package author guide");
+    let launch = fs::read_to_string(repository_path("docs/development/launch-and-gui-smoke.md"))
+        .expect("read launch smoke docs");
+
+    assert!(docs_index.contains("reference/primitives/diagnostics.md"));
+    assert!(primitive_index.contains("diagnostics.md"));
+    assert!(registry.contains("| DiagnosticSpan |"));
+    assert!(backlog.contains("| DiagnosticSpan |"));
+    assert!(rendering.contains("## Range Diagnostics"));
+    assert!(parse_strategy.contains("DIAGNOSTIC_PAYLOAD_BUDGET_BYTES"));
+    assert!(security.contains("## Range Diagnostics Authority Boundary"));
+    assert!(package_guide.contains("### Phase 18.17 range diagnostics publication"));
+    assert!(launch.contains("Phase 18.17 range diagnostics and syntax-error smoke"));
+
+    for marker in [
+        "DiagnosticSpan",
+        "DiagnosticSet",
+        "RuntimeDiagnostic",
+        "DecorationSpan",
+        "ERROR",
+        "MISSING",
+        "next UTF-8 scalar",
+        "previous scalar",
+        "diagnostic_update",
+        "serverPublishDiagnostics",
+        "diagnosticError",
+        "diagnosticWarning",
+        "diagnosticInfo",
+        "DIAGNOSTIC_PAYLOAD_BUDGET_BYTES",
+        "DIAGNOSTIC_MAX_SPANS_PER_SET",
+        "DIAGNOSTIC_CACHE_BUDGET_BYTES",
+        "render-decorations",
+        "tests/range_diagnostics.rs",
+        "additive",
+    ] {
+        assert!(
+            diagnostics.contains(marker),
+            "range diagnostics reference must document {marker}"
+        );
+    }
+}
+
+#[test]
+fn range_diagnostics_implementation_wiki_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let page = fs::read_to_string(repository_path("docs/wiki/modules/range-diagnostics.md"))
+        .expect("read range diagnostics implementation wiki");
+    let review = phase18_17_range_diagnostics_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/range-diagnostics.md"),
+        "docs/wiki/index.md must link the range diagnostics implementation page"
+    );
+    assert!(
+        review.contains("range-diagnostics.md"),
+        "Phase 18.17 primitive review must link the implementation wiki"
+    );
+
+    for required in [
+        "## Overview",
+        "## Responsibilities",
+        "## How It Works",
+        "Protocol and validation",
+        "Parse side channel",
+        "Tree-sitter extraction",
+        "Server/client chunk lifecycle",
+        "Package publication",
+        "Theme and paint",
+        "## Code Examples",
+        "## Primitive Coverage",
+        "## Invariants and Constraints",
+        "## Tests",
+        "## Related",
+        "DiagnosticSpan",
+        "DiagnosticSet",
+        "DiagnosticChunkCache",
+        "EditorDiagnosticState",
+        "collect_syntax_diagnostics",
+        "visible_scalar_range",
+        "diagnostic_update",
+        "serverPublishDiagnostics",
+        "op_clay_diagnostics_publish_diagnostics",
+        "paint_squiggle",
+        "diagnostic_style",
+        "diagnosticError",
+        "DIAGNOSTIC_PAYLOAD_BUDGET_BYTES",
+        "DIAGNOSTIC_CACHE_BUDGET_BYTES",
+        "DIAGNOSTIC_MAX_SPANS_PER_SET",
+        "render-decorations",
+        "additive",
+        "RuntimeDiagnostic",
+        "layout_style_revision",
+        "tests/range_diagnostics.rs",
+        "tests/syntax_grammar.rs",
+        "tests/editor_performance_invariants.rs",
+        "diagnostics.md",
+        "server-publish-diagnostics.md",
+    ] {
+        assert!(
+            page.contains(required),
+            "range diagnostics implementation wiki must document {required}"
+        );
+    }
+}
+
+#[test]
+fn typography_documentation_checks_do_not_mutate_generated_files() {
+    let generated = repository_path("docs/generated/clay-js-api-registry.json");
+    let before = fs::read(&generated).expect("read generated registry before documentation checks");
+    let _ = typography_contract();
+    let _ = primitives_index();
+    let _ = primitives_registry();
+    let after = fs::read(&generated).expect("read generated registry after documentation checks");
+    assert_eq!(before, after, "documentation checks must be read-only");
+}
+
+#[test]
+fn typography_implementation_wiki_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let page = fs::read_to_string(repository_path(
+        "docs/wiki/modules/typography-registry-and-font-roles.md",
+    ))
+    .expect("read typography implementation wiki");
+
+    assert!(
+        wiki_index.contains("modules/typography-registry-and-font-roles.md"),
+        "docs/wiki/index.md must link the typography implementation page"
+    );
+
+    for required in [
+        "## Overview",
+        "## Responsibilities",
+        "## How It Works",
+        "Configuration and server state",
+        "Protocol and delivery",
+        "Client registry and resolution",
+        "Editor layout and role normalization",
+        "Geometry",
+        "Native UI, SDUI, and accessibility",
+        "Package component roles",
+        "## Code Examples",
+        "## Primitive Coverage",
+        "## Invariants and Constraints",
+        "## Tests",
+        "## Related",
+        "TypographyRegistry",
+        "ResolvedFontProfile",
+        "UiTextVariant",
+        "UiTextMetrics",
+        "ActiveTypography",
+        "FontProfile",
+        "DocumentFontRole",
+        "document_line_height",
+        "DOCUMENT_LINE_HEIGHT_MULTIPLIER",
+        "layout_style_revision",
+        "normalize_visible_text_style_runs",
+        "font_role_precedes",
+        "decoration_layer_rank",
+        "font_role_rank",
+        "with_presentation",
+        "VisibleTextStyleRun",
+        "install_active_typography",
+        "ActiveTypographyState",
+        "op_clay_theme_set_typography",
+        "set-typography.md",
+        "typography.md",
+        "Only `Syntax` and `Semantic`",
+        "monotonic",
+        "`f32` sizes in `FontProfile`",
+        "no package JavaScript, IPC, filesystem/network access, font download, or server-side installed-font discovery",
+        "tests/typography_protocol.rs",
+        "tests/editor_performance_invariants.rs",
+        "tests/manual_smoke_docs.rs",
+    ] {
+        assert!(
+            page.contains(required),
+            "typography implementation wiki must document {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_16_5_typography_primitive_review_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_16_5_typography_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.16.5-typography-primitive-review.md"),
+        "wiki index must link the Phase 18.16.5 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.16.5-typography-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.16.5 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Configuration, bootstrap, and live client delivery",
+        "Style registry and decoration transport",
+        "Cached Parley editor layout and UTF-8 geometry",
+        "Viewport, scrolling, and editor chrome geometry",
+        "Native UI, SDUI, components, and accessibility",
+        "Package validation and authority boundary",
+        "`src/editor/layout.rs::LayoutState`",
+        "`src/editor/theme.rs::StyleRegistry`",
+        "`src/protocol/decorations.rs::DecorationSpan`",
+        "`src/masonry_sdui.rs`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16.5 primitive review must inventory {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.16.5 Gaps",
+        "Separate `ActiveTypography` snapshot and atomic configuration",
+        "`TypographyRegistry` and semantic roles",
+        "Normalized role-aware layout runs",
+        "Typography-aware cache and conservative geometry",
+        "`TypographyRegistry::document_line_height()`",
+        "Shared UI typography metrics",
+        "UiTextMetrics",
+        "style.fontRole",
+        "accessibility bounds",
+        "document default first; then normalized Syntax/Semantic spans",
+        "Diagnostic` and `SearchMatch` remain paint-only",
+        "monospace",
+        "proportional",
+        "ui",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16.5 primitive review must lock generic gap/rule {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "No family parsing, installed-font discovery, package JavaScript, server IPC",
+        "`DECORATION_PAYLOAD_BUDGET_BYTES`",
+        "`SYNTAX_CACHE_BUDGET_BYTES`",
+        "`SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS`",
+        "Security and Authority Boundary",
+        "font-file/byte/path/URL authority",
+        "filesystem, shell, AI, workspace mutation, native-ui, package-control, package-manager, raw-ops, or client-runtime authority",
+        "Rejected Implementation Shapes",
+        "Do not shape full documents merely to make scrolling exact",
+        "Do not add hidden JSON/TOML typography keys or three independent profile setters",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.16.5 primitive review must preserve boundary {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_17_range_diagnostics_primitive_review_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_17_range_diagnostics_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.17-range-diagnostics-primitive-review.md"),
+        "wiki index must link the Phase 18.17 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.17-range-diagnostics-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.17 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Status diagnostics and diagnostic severity",
+        "Decoration layers, transport, and client cache",
+        "Style registry and native rendering",
+        "Parse coordinator and incremental update transport",
+        "Tiered syntax engine and Tree-sitter error nodes",
+        "Package permissions and Clay JS publication",
+        "`src/protocol/mod.rs::RuntimeDiagnostic`",
+        "`src/protocol/mod.rs::DiagnosticSeverity`",
+        "`src/protocol/decorations.rs::DecorationSpan`",
+        "`src/server/parse_coordinator.rs::ParseCoordinator`",
+        "`src/server/syntax.rs::TreeSitterSyntaxHandler`",
+        "`src/editor/theme.rs::StyleRegistry`",
+        "`src/editor/layout.rs::LayoutState`",
+        "`runtime/js/decorations.ts`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.17 primitive review must inventory {required}"
+        );
+    }
+
+    for required in [
+        "What Existing Primitives Already Achieve",
+        "Generic Phase 18.17 Gaps",
+        "Distinct `DiagnosticSpan` and `DiagnosticSet`",
+        "Central diagnostic validation and budgets",
+        "Engine-neutral parse diagnostic side channel",
+        "Source-keyed server/client chunk lifecycle",
+        "Severity-aware theme resolution and native squiggle geometry",
+        "Bounded package publication for future analyzers/LSP bridges",
+        "next UTF-8 scalar",
+        "previous scalar",
+        "empty document",
+        "Syntax, Semantic, Diagnostic, and Search remain additive layers",
+        "RuntimeDiagnostic` unchanged for status failures",
+        "diagnostic_update: Option<DiagnosticSet>",
+        "clay:diagnostics.serverPublishDiagnostics",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.17 primitive review must lock generic gap/rule {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "No parser/package JavaScript, IPC, server validation",
+        "`INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`",
+        "`DECORATION_PAYLOAD_BUDGET_BYTES`",
+        "`SYNTAX_CACHE_BUDGET_BYTES`",
+        "`SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS`",
+        "Security and Authority Boundary",
+        "language-server subprocess",
+        "Rejected Implementation Shapes",
+        "Do not add `RustDiagnosticProvider`",
+        "Do not encode message, code, source, or severity into `style_token`",
+        "Do not add a second parse/diagnostic scheduler",
+        "Do not let diagnostics choose font roles",
+        "Do not implement LSP process spawning",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.17 primitive review must preserve boundary {required}"
         );
     }
 }

@@ -104,6 +104,7 @@ export default async function loadJavaScriptPackage() {
   await serverRegisterModePattern(javascriptPackageManifest(), {
     modeId: "javascript",
     displayName: "JavaScript",
+    defaultFontRole: "monospace",
     extensions: ["js", "jsx", "mjs", "cjs"],
     editorRules: javascriptEditorRules
   });

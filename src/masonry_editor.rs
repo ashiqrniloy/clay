@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use masonry::accesskit::{Node, Role};
+use masonry::accesskit::{Node, NodeId, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, KeyboardEvent,
@@ -16,22 +16,22 @@ use crate::client::{
     ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientUiCommandRoute,
     ClipboardSink, SystemClipboard,
 };
-use crate::editor::{EditorCommand, EditorCommandOutcome, EditorSurface};
+use crate::editor::{
+    EditorCommand, EditorCommandOutcome, EditorSurface,
+    typography::{UiTextMetrics, UiTextVariant},
+};
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
-    DocumentVersion, KeyCode, KeyModifiers, KeyStroke, RuntimeDiagnostic,
+    DocumentVersion, FontRole, KeyCode, KeyModifiers, KeyStroke, RuntimeDiagnostic,
 };
-
-const STATUS_BAR_HEIGHT: f64 = 28.0;
-const STATUS_TEXT_SIZE: f32 = 12.0;
 
 #[allow(
     clippy::large_enum_variant,
     reason = "editor event channel is low-volume; boxing would add churn without measured benefit"
 )]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum EditorAction {
     ExitRequested,
     ClientConnection(ClientConnectionEvent),
@@ -189,6 +189,7 @@ pub struct EditorWidget {
     active_completion_request_id: Option<CompletionRequestId>,
     status: EditorStatus,
     sdui: SduiNativeState,
+    layout_invalidated: bool,
 }
 
 impl Default for EditorWidget {
@@ -208,6 +209,7 @@ impl Default for EditorWidget {
             active_completion_request_id: None,
             status,
             sdui: SduiNativeState::empty(),
+            layout_invalidated: false,
         }
     }
 }
@@ -225,11 +227,14 @@ impl EditorWidget {
         editor.set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
             &initial_state.active_theme,
         ));
+        let _ = editor.set_typography(initial_state.active_typography.clone());
         let status = EditorStatus::connected(
             initial_state.document_id,
             initial_state.document_version,
             initial_state.access,
         );
+        let mut sdui = SduiNativeState::empty();
+        sdui.set_typography(editor.typography().clone());
         Self {
             editor,
             edit_queue: None,
@@ -237,8 +242,15 @@ impl EditorWidget {
             next_completion_request_id: 1,
             active_completion_request_id: None,
             status,
-            sdui: SduiNativeState::empty(),
+            sdui,
+            layout_invalidated: false,
         }
+    }
+
+    /// Return and clear a layout request caused by a typography profile change.
+    /// Other connection events retain the existing render-only behavior.
+    pub fn take_layout_invalidation(&mut self) -> bool {
+        std::mem::take(&mut self.layout_invalidated)
     }
 
     pub fn with_status(mut self, status: EditorStatus) -> Self {
@@ -317,12 +329,21 @@ impl EditorWidget {
                     ));
                 true
             }
+            ClientConnectionEvent::ActiveTypography(typography) => {
+                let changed = self.editor.set_typography(typography);
+                if changed {
+                    self.sdui.set_typography(self.editor.typography().clone());
+                }
+                self.layout_invalidated |= changed;
+                changed
+            }
             ClientConnectionEvent::SduiSnapshot { tree, .. } => {
                 self.sdui.apply_snapshot(tree);
                 true
             }
             ClientConnectionEvent::SduiUpdate(update) => self.sdui.apply_update(update),
             ClientConnectionEvent::DecorationSet(set) => self.editor.apply_decoration_set(set),
+            ClientConnectionEvent::DiagnosticSet(set) => self.editor.apply_diagnostic_set(set),
             ClientConnectionEvent::CompletionResult(result) => self.apply_completion_result(result),
             ClientConnectionEvent::CompletionRejected { request_id, .. } => {
                 if self.active_completion_request_id == Some(request_id) {
@@ -376,6 +397,10 @@ impl EditorWidget {
 
     pub fn decoration_span_count(&self) -> usize {
         self.editor.decoration_span_count()
+    }
+
+    pub fn diagnostic_span_count(&self) -> usize {
+        self.editor.diagnostic_span_count()
     }
 
     pub fn request_selected_file_open(&self, path: PathBuf) -> Option<ClientConnectionEvent> {
@@ -622,7 +647,11 @@ impl EditorWidget {
 
     fn paint_status_line(&self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
         let size = ctx.size();
-        let y0 = (size.height - STATUS_BAR_HEIGHT).max(0.0);
+        let metrics = self
+            .editor
+            .typography()
+            .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
+        let y0 = (size.height - metrics.status_height()).max(0.0);
         let rect = masonry::kurbo::Rect::new(0.0, y0, size.width.max(0.0), size.height.max(y0));
         scene.fill(
             Fill::NonZero,
@@ -636,14 +665,22 @@ impl EditorWidget {
         let max_width = (size.width - 24.0).max(1.0) as f32;
         let (font_context, layout_context) = ctx.text_contexts();
         let mut builder = layout_context.ranged_builder(font_context, &status, 1.0, true);
-        builder.push_default(StyleProperty::FontSize(STATUS_TEXT_SIZE));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.2)));
+        builder.push_default(StyleProperty::FontStack(
+            self.editor.typography().profile(FontRole::Ui).font_stack(),
+        ));
+        builder.push_default(StyleProperty::FontSize(metrics.font_size));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+            UiTextMetrics::LINE_HEIGHT_MULTIPLIER as f32,
+        )));
         builder.push_default(StyleProperty::Brush(BrushIndex(0)));
         let mut layout = builder.build(&status);
         layout.break_all_lines(Some(max_width));
         render_text(
             scene,
-            Affine::translate((12.0, y0 + 7.0)),
+            Affine::translate((
+                12.0,
+                y0 + (metrics.status_height() - metrics.line_height) / 2.0,
+            )),
             &layout,
             &[self.editor.theme().base.status_text.into()],
             true,
@@ -900,11 +937,29 @@ impl Widget for EditorWidget {
 
     fn accessibility(
         &mut self,
-        _ctx: &mut AccessCtx<'_>,
+        ctx: &mut AccessCtx<'_>,
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
         node.set_label(self.accessibility_label());
+        let mut children = self.sdui.append_accessibility_children(ctx);
+        let metrics = self
+            .editor
+            .typography()
+            .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
+        let size = ctx.size();
+        let status_id = NodeId::from(masonry::core::WidgetId::next());
+        let mut status = Node::new(Role::Status);
+        status.set_label(self.status_text());
+        status.set_bounds(masonry::accesskit::Rect {
+            x0: 0.0,
+            y0: (size.height - metrics.status_height()).max(0.0),
+            x1: size.width.max(0.0),
+            y1: size.height.max(0.0),
+        });
+        ctx.tree_update().nodes.push((status_id, status));
+        children.push(status_id);
+        node.set_children(children);
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -931,7 +986,7 @@ mod tests {
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
         CompletionReplacementRange, CompletionResultSet, CompletionStatus, DocumentAccess,
-        DocumentMetadata, EditOperation, KeyCode, KeyModifiers, RuntimeDiagnostic,
+        DocumentMetadata, EditOperation, FontRole, KeyCode, KeyModifiers, RuntimeDiagnostic,
         SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
         SduiTreeOperation, SduiTreeUpdate,
     };
@@ -984,6 +1039,7 @@ mod tests {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
             },
+            active_typography: crate::protocol::ActiveTypography::default(),
         }
     }
 
@@ -1022,6 +1078,31 @@ mod tests {
             }],
             provenance: CompletionProvenance::builtin_core(),
         }
+    }
+
+    #[test]
+    fn live_typography_update_requests_layout_render_and_accessibility() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        let mut typography = crate::protocol::ActiveTypography {
+            revision: 1,
+            ..crate::protocol::ActiveTypography::default()
+        };
+        typography.ui.size = 16.0;
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::ActiveTypography(
+                typography.clone()
+            ))
+        );
+        assert_eq!(widget.sdui.typography_revision(), 1);
+        assert!(widget.take_layout_invalidation());
+        assert!(
+            !widget.apply_connection_event(ClientConnectionEvent::ActiveTypography(typography))
+        );
+        assert!(!widget.take_layout_invalidation());
     }
 
     #[test]
@@ -1607,6 +1688,8 @@ mod tests {
                     PackageUiComponentTree {
                         id: "markdown.preview.root".to_string(),
                         kind: "panel".to_string(),
+                        font_role: FontRole::Ui,
+                        text_variant: None,
                         title: Some("Preview".to_string()),
                         text: None,
                         label: None,

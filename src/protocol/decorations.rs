@@ -1,4 +1,4 @@
-use crate::protocol::{DocumentId, DocumentVersion};
+use crate::protocol::{DocumentFontRole, DocumentId, DocumentVersion};
 
 /// Package provenance retained on every decoration publication.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -279,6 +279,9 @@ pub struct DecorationSpan {
     pub token_type: TokenType,
     pub modifiers: Modifiers,
     pub scope: Option<String>,
+    /// Optional syntax/semantic document-role override. `None` inherits the
+    /// document default; diagnostics and search are rejected at validation.
+    pub font_role: Option<DocumentFontRole>,
     pub priority: u16,
     pub provenance: DecorationProvenance,
 }
@@ -304,6 +307,7 @@ impl DecorationSpan {
             token_type,
             modifiers,
             scope: Some(style_token.to_string()),
+            font_role: None,
             priority,
             provenance,
         }

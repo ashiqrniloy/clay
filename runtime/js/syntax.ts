@@ -30,7 +30,10 @@ export type ServerRegisterSyntaxGrammarOptions = {
   filePatterns?: { extensions?: string[]; fileNames?: string[] };
   grammar?: { kind: "tree-sitter-wasm"; path: string; source?: string };
   queries?: { highlights: string; locals?: string; injections?: string };
-  styleMap?: Record<string, string>;
+  styleMap?: Record<string, string | {
+    styleToken: string;
+    fontRole?: "monospace" | "proportional";
+  }>;
   budgets?: { timeoutMs?: number; maxWindowBytes?: number };
   handler?: never;
   callback?: never;

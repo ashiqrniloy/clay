@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 
 use masonry::peniko::Color;
 
+use crate::editor::typography::UiTextVariant;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ThemeTokenType {
     ColorRole,
@@ -46,6 +48,7 @@ pub(crate) enum ResolvedThemeValue {
     Color(Color),
     F64(f64),
     F32(f32),
+    Typography(UiTextVariant),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -211,15 +214,15 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
         },
         "typography.body" => CoreThemeValue {
             token_type: Typography,
-            value: F32(12.0),
+            value: ResolvedThemeValue::Typography(UiTextVariant::Body),
         },
         "typography.title" => CoreThemeValue {
             token_type: Typography,
-            value: F32(14.0),
+            value: ResolvedThemeValue::Typography(UiTextVariant::Title),
         },
         "typography.status" => CoreThemeValue {
             token_type: Typography,
-            value: F32(12.0),
+            value: ResolvedThemeValue::Typography(UiTextVariant::Status),
         },
         "opacity.disabled" => CoreThemeValue {
             token_type: Opacity,
@@ -237,9 +240,9 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SduiThemeStyle {
     pub(crate) panel_padding: f64,
-    pub(crate) row_height: f64,
-    pub(crate) title_text_size: f32,
-    pub(crate) body_text_size: f32,
+    pub(crate) title_text: UiTextVariant,
+    pub(crate) body_text: UiTextVariant,
+    pub(crate) status_text: UiTextVariant,
     pub(crate) panel_background: Color,
     pub(crate) button_background: Color,
     pub(crate) list_background: Color,
@@ -252,9 +255,9 @@ impl SduiThemeStyle {
     pub(crate) fn from_resolver(resolver: &ThemeTokenResolver) -> Self {
         Self {
             panel_padding: resolve_f64(resolver, "spacing.panel", ThemeTokenType::Spacing),
-            row_height: resolve_f64(resolver, "spacing.row", ThemeTokenType::Spacing),
-            title_text_size: resolve_f32(resolver, "typography.title", ThemeTokenType::Typography),
-            body_text_size: resolve_f32(resolver, "typography.body", ThemeTokenType::Typography),
+            title_text: resolve_typography(resolver, "typography.title"),
+            body_text: resolve_typography(resolver, "typography.body"),
+            status_text: resolve_typography(resolver, "typography.status"),
             panel_background: resolve_color(resolver, "surface.panel"),
             button_background: resolve_color(resolver, "surface.control"),
             list_background: resolve_color(resolver, "surface.list"),
@@ -295,17 +298,13 @@ fn resolve_f64(resolver: &ThemeTokenResolver, token: &str, token_type: ThemeToke
     }
 }
 
-fn resolve_f32(resolver: &ThemeTokenResolver, token: &str, token_type: ThemeTokenType) -> f32 {
-    match resolver.resolve(token, token_type) {
+fn resolve_typography(resolver: &ThemeTokenResolver, token: &str) -> UiTextVariant {
+    match resolver.resolve(token, ThemeTokenType::Typography) {
         Some(ResolvedThemeToken {
-            value: ResolvedThemeValue::F32(value),
+            value: ResolvedThemeValue::Typography(variant),
             ..
-        }) => value,
-        Some(ResolvedThemeToken {
-            value: ResolvedThemeValue::F64(value),
-            ..
-        }) => value as f32,
-        _ => 0.0,
+        }) => variant,
+        _ => UiTextVariant::from_typography_token(token),
     }
 }
 
@@ -366,9 +365,9 @@ mod tests {
         let style = SduiThemeStyle::default();
 
         assert_eq!(style.panel_padding, 14.0);
-        assert_eq!(style.row_height, 26.0);
-        assert_eq!(style.title_text_size, 14.0);
-        assert_eq!(style.body_text_size, 12.0);
+        assert_eq!(style.title_text, UiTextVariant::Title);
+        assert_eq!(style.body_text, UiTextVariant::Body);
+        assert_eq!(style.status_text, UiTextVariant::Status);
         assert_eq!(style.panel_background, Color::from_rgb8(0x21, 0x20, 0x2b));
     }
 }

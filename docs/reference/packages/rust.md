@@ -56,6 +56,10 @@ Phase 18.14 keeps Rust editing defaults (4-space indentation, `//` line comments
 
 Tier 1 native highlighting uses Clay's compiled `tree-sitter-rust = 0.24.2` dependency and the package query at `packages/rust/queries/highlights.scm`. Tier 2 uses the package-root-confined `./grammars/rust.wasm` through the shared web-tree-sitter host adapter only after explicit `setSyntaxEnginePreference("rust", "wasm")`; package load order cannot replace native Tier 1. Tier 3 remains the server-side package-JS parse-handler route when `setSyntaxEnginePreference("rust", "javascript")` is selected or no grammar is available. All routes map captures through the shared `TokenType` + `Modifiers` vocabulary pipeline. Until a WASM binary is committed, `packages/rust/grammars/PROVENANCE.md` records the reproducible build command and required SHA-256 recording step. Runtime never fetches, builds, shells out, or loads native libraries for this artifact.
 
+## Typography
+
+Rust mode declares semantic `defaultFontRole: "monospace"`. User typography owns the selected family fallback stack and size; package metadata supplies no concrete font values. See [Semantic Typography Roles](../primitives/typography.md).
+
 ## Security and Performance
 
 Permissions are limited to `mode-registration`, `command-registration`, `completion-provider`, `parse-document`, and `render-decorations`. The package does not request filesystem, network, shell, AI, WASM-authority, raw-op, native-ui, client-runtime, package-manager, package-control, or workspace mutation authority.

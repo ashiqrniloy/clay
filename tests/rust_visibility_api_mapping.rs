@@ -285,6 +285,9 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/completion.rs::WordBoundaryRule::default_buffer_word",
         "src/server/completion.rs::WordBoundaryRule::new",
         "src/server/command_execution.rs::WorkspaceActionResult",
+        "src/server/diagnostics.rs::DiagnosticValidationError",
+        "src/server/diagnostics.rs::validate_diagnostic_publication",
+        "src/server/diagnostics.rs::validate_diagnostic_set",
         "src/server/workspace.rs::OpenDocumentSnapshot",
     ]
     .into_iter()
@@ -307,6 +310,7 @@ fn server_public_functions_are_private_or_facade_backed() {
     let inventory_text = inventory_rust_mapping_text();
     let internal_large_file_primitives: BTreeSet<&str> = [
         "src/server/decorations.rs::validate_decoration_set",
+        "src/server/diagnostics.rs::validate_diagnostic_set",
         "src/server/parse_coordinator.rs::ParseCoordinator::schedule_parse_with_windows",
         "src/server/parse_coordinator.rs::ParseCoordinator::stats",
         "src/server/parse_coordinator.rs::ParseCoordinator::validate_update",
@@ -316,10 +320,13 @@ fn server_public_functions_are_private_or_facade_backed() {
 
     for facade_backed in [
         "src/server/decorations.rs::validate_decoration_publication",
+        "src/server/diagnostics.rs::validate_diagnostic_publication",
         "src/server/parse_coordinator.rs::ParseCoordinator::register_handler",
         "op_clay_decorations_publish_decorations",
+        "op_clay_diagnostics_publish_diagnostics",
         "op_clay_parse_register_parse_handler",
         "runtime/js/decorations.ts::serverPublishDecorations",
+        "runtime/js/diagnostics.ts::serverPublishDiagnostics",
         "runtime/js/parse.ts::serverRegisterParseHandler",
     ] {
         assert!(
@@ -964,5 +971,190 @@ fn phase18_8_command_execution_and_transient_menu_surfaces_are_internal() {
             .expect("read ui facade")
             .contains("serverOpenTransientMenu"),
         "ui facade must not export a public serverOpenTransientMenu function"
+    );
+}
+
+#[test]
+fn set_typography_rust_op_facade_and_doc_mapping_is_complete() {
+    let inventory = inventory_entries();
+    let typography = inventory
+        .iter()
+        .find(|entry| entry.get("id") == "clay.theme.setTypography")
+        .expect("setTypography inventory entry");
+    assert_eq!(
+        typography.get("facade_path"),
+        "runtime/js/theme.ts::setTypography"
+    );
+    assert_eq!(typography.get("deno_op"), "op_clay_theme_set_typography");
+    assert_eq!(
+        typography.get("documentation_path"),
+        "docs/reference/clay-js-api/theme/set-typography.md"
+    );
+
+    let root = env!("CARGO_MANIFEST_DIR");
+    let facade =
+        std::fs::read_to_string(format!("{root}/runtime/js/theme.ts")).expect("read theme facade");
+    let op = std::fs::read_to_string(format!("{root}/src/server/ops/typography.rs"))
+        .expect("read typography op");
+    assert!(facade.contains("export function setTypography("));
+    assert!(facade.contains("Deno.core.ops.op_clay_theme_set_typography("));
+    assert!(op.contains("pub(super) fn op_clay_theme_set_typography("));
+}
+
+#[test]
+fn typography_client_helpers_are_not_public_server_api() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let typography = std::fs::read_to_string(format!("{root}/src/editor/typography.rs"))
+        .expect("read client typography registry");
+    let surface = std::fs::read_to_string(format!("{root}/src/editor/surface.rs"))
+        .expect("read editor surface");
+    let server =
+        std::fs::read_to_string(format!("{root}/src/server/mod.rs")).expect("read server state");
+
+    for private_item in [
+        "pub(crate) struct TypographyRegistry",
+        "pub(crate) struct ResolvedFontProfile",
+        "pub(crate) struct UiTextMetrics",
+        "pub(crate) enum UiTextVariant",
+    ] {
+        assert!(
+            typography.contains(private_item),
+            "missing internal visibility: {private_item}"
+        );
+    }
+    assert!(surface.contains("pub(crate) fn set_typography("));
+    assert!(server.contains("pub(crate) struct ActiveTypographyState"));
+    assert!(!inventory_rust_mapping_text().contains("src/editor/typography.rs"));
+}
+
+#[test]
+fn raw_typography_op_is_not_user_facing() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let facade =
+        std::fs::read_to_string(format!("{root}/runtime/js/theme.ts")).expect("read theme facade");
+    let docs_index =
+        std::fs::read_to_string(format!("{root}/docs/index.md")).expect("read docs index");
+
+    assert!(!facade.contains("export function op_clay_theme_set_typography"));
+    assert!(!facade.contains("export const op_clay_theme_set_typography"));
+    assert!(!docs_index.contains("clay.theme.op_clay_theme_set_typography"));
+    assert!(
+        inventory_entries()
+            .iter()
+            .all(|entry| entry.get("js_export") != "op_clay_theme_set_typography")
+    );
+}
+
+#[test]
+fn range_diagnostics_public_rust_surfaces_have_js_api_or_are_crate_private() {
+    let inventory_text = inventory_rust_mapping_text();
+    let public_items: BTreeSet<_> = public_server_items().into_iter().collect();
+    let inventory = inventory_entries();
+    let diagnostics = inventory
+        .iter()
+        .find(|entry| entry.get("id") == "clay.diagnostics.serverPublishDiagnostics")
+        .expect("serverPublishDiagnostics inventory entry");
+
+    assert_eq!(
+        diagnostics.get("facade_path"),
+        "runtime/js/diagnostics.ts::serverPublishDiagnostics"
+    );
+    assert_eq!(
+        diagnostics.get("deno_op"),
+        "op_clay_diagnostics_publish_diagnostics"
+    );
+    assert_eq!(
+        diagnostics.get("backing_rust"),
+        "src/server/diagnostics.rs::validate_diagnostic_publication"
+    );
+    assert_eq!(
+        diagnostics.get("documentation_path"),
+        "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md"
+    );
+
+    assert!(
+        public_items.contains("src/server/diagnostics.rs::validate_diagnostic_publication"),
+        "publication validator must remain the public facade-backed surface"
+    );
+    assert!(
+        inventory_text.contains("src/server/diagnostics.rs::validate_diagnostic_publication"),
+        "publication validator must map through Clay JS inventory"
+    );
+    assert!(
+        inventory_text.contains("op_clay_diagnostics_publish_diagnostics"),
+        "diagnostics inventory must name the explicit op wrapper"
+    );
+    assert!(
+        inventory_text.contains("runtime/js/diagnostics.ts::serverPublishDiagnostics"),
+        "diagnostics inventory must name the stable facade"
+    );
+
+    for internal_surface in [
+        "src/server/diagnostics.rs::validate_diagnostic_set",
+        "src/server/diagnostics.rs::DiagnosticValidationError",
+    ] {
+        assert!(
+            public_items.contains(internal_surface),
+            "internal diagnostics primitive should remain crate-visible: {internal_surface}"
+        );
+        assert!(
+            !inventory_text.contains(&format!("backing_rust = \"{internal_surface}\"")),
+            "internal diagnostics primitive {internal_surface} must not be a direct Clay JS backing surface"
+        );
+    }
+
+    let root = env!("CARGO_MANIFEST_DIR");
+    let facade = std::fs::read_to_string(format!("{root}/runtime/js/diagnostics.ts"))
+        .expect("read diagnostics facade");
+    let op = std::fs::read_to_string(format!("{root}/src/server/ops/diagnostics.rs"))
+        .expect("read diagnostics op");
+    let syntax = std::fs::read_to_string(format!("{root}/src/server/syntax.rs"))
+        .expect("read syntax handler");
+    let layout =
+        std::fs::read_to_string(format!("{root}/src/editor/layout.rs")).expect("read layout");
+    let docs_index =
+        std::fs::read_to_string(format!("{root}/docs/index.md")).expect("read docs index");
+
+    assert!(facade.contains("export function serverPublishDiagnostics("));
+    assert!(facade.contains("op_clay_diagnostics_publish_diagnostics"));
+    assert!(!facade.contains("export function op_clay_diagnostics_publish_diagnostics"));
+    assert!(!facade.contains("export const op_clay_diagnostics_publish_diagnostics"));
+    assert!(op.contains("pub(super) fn op_clay_diagnostics_publish_diagnostics("));
+    assert!(!docs_index.contains("clay.diagnostics.op_clay_diagnostics_publish_diagnostics"));
+    assert!(
+        inventory
+            .iter()
+            .all(|entry| entry.get("js_export") != "op_clay_diagnostics_publish_diagnostics")
+    );
+
+    assert!(
+        syntax.contains("fn collect_syntax_diagnostics("),
+        "Tree-sitter extraction helper must stay private"
+    );
+    assert!(
+        !syntax.contains("pub fn collect_syntax_diagnostics(")
+            && !syntax.contains("pub(crate) fn collect_syntax_diagnostics("),
+        "Tree-sitter extraction helper must not become a public API"
+    );
+    assert!(
+        syntax.contains("fn diagnostics_for_window("),
+        "window diagnostic helper must stay private"
+    );
+    assert!(
+        layout.contains("fn paint_squiggle("),
+        "native squiggle paint helper must stay private"
+    );
+    assert!(
+        !layout.contains("pub fn paint_squiggle(")
+            && !layout.contains("pub(crate) fn paint_squiggle("),
+        "native squiggle paint helper must not become a public API"
+    );
+    assert!(!inventory_text.contains("collect_syntax_diagnostics"));
+    assert!(!inventory_text.contains("paint_squiggle"));
+    assert!(
+        !inventory_text
+            .contains("backing_rust = \"src/server/syntax.rs::collect_syntax_diagnostics\"")
+            && !inventory_text.contains("backing_rust = \"src/editor/layout.rs::paint_squiggle\""),
+        "Tree-sitter extraction and squiggle paint helpers must not become Clay JS backing surfaces"
     );
 }

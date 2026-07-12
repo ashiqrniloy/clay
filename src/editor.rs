@@ -4,6 +4,7 @@ mod layout;
 pub(crate) mod selection;
 pub mod surface;
 pub mod theme;
+pub(crate) mod typography;
 mod viewport;
 
 pub(crate) use surface::EditorCompletionRequestEvent;

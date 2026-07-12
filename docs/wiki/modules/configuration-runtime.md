@@ -6,7 +6,9 @@
 - `src/server/js_runtime.rs`
 - `src/server/mod.rs`
 - `src/server/ops/configuration.rs`
+- `src/server/ops/typography.rs`
 - `runtime/js/configuration.ts`
+- `runtime/js/theme.ts`
 - `docs/wiki/modules/package-input-state-configuration.md`
 - `src/server/js_runtime.rs` tests
 
@@ -21,6 +23,7 @@ Clay can now evaluate a constrained local configuration entry point from a confi
 - Reject URLs, package specifiers, absolute paths, extensionless imports, and traversal outside the configuration root.
 - Expose `loadConfigurationModule({ path })` and `getConfigurationState()` through Clay-owned ops, not raw user-facing op calls.
 - Runtime-back `setPackageOption` for Phase 18.4 package-owned options while preserving `setModePreference`, `setDecorationTheme`, and `setParsePolicy` as explicit planned `clay:configuration` facade exports rather than ad hoc settings.
+- Accept `clay:theme.setTypography` as one complete user-owned three-profile transaction, then hand its inert candidate to server-authoritative revision/publication state.
 - Runtime-back Phase 18.4 package layout overrides through `clay.ui.serverSetLayoutOverride` while preserving hidden split/slot/panel/style keys as rejected; lower-level working-area/pane mutation APIs and package enable/disable through configuration remain planned.
 
 ## How It Works
@@ -34,6 +37,8 @@ Clay can now evaluate a constrained local configuration entry point from a confi
 3. Explicit relative `.js` modules that canonicalize under the configuration root.
 
 The facade validates `loadConfigurationModule({ path })` through `op_clay_configuration_load_module` before using dynamic `import(path)`. The module loader performs the authoritative canonical path check again when resolving/loading the module, reads the file directly with Rust filesystem APIs, and records successfully loaded local modules in deterministic first-load order. `getConfigurationState()` returns JSON from `op_clay_configuration_get_state`, which the facade parses into `{ entryPoint, loadedModules }`.
+
+Phase 18.16.5 adds [`setTypography`](../../reference/clay-js-api/theme/set-typography.md) to the existing `clay:theme` facade rather than creating an undocumented setting system. The op accepts exactly `monospace`, `proportional`, and `ui` objects, each with only `families` and `size`; it builds one `ActiveTypography` candidate, validates every bounded fallback stack and size before replacing runtime-local state, and returns its evaluation-local revision. `IpcServer` revalidates the successful candidate, assigns the persistent server revision only when profiles differ, and broadcasts one bounded `ActiveTypography` update. No configuration call discovers installed fonts, reads font files, fetches URLs, or grants package/network/shell authority. Client bootstrap installation is owned by the following client-registry task.
 
 The Phase 16.5 primitive gate reviewed package options, mode preferences, decoration theme preferences, and parse policy preferences but did not implement concrete behavior-changing settings. Phase 18.4 promotes `setPackageOption` to a runtime-backed API for package-owned options while keeping `setModePreference`, `setDecorationTheme`, and `setParsePolicy` as planned-unavailable APIs routed through `op_clay_runtime_unavailable`. This keeps `~/.config/clay/init.js` as the startup/configuration-change configuration entry point while preventing undocumented keys or package enable/disable authority from appearing without a dedicated server validator.
 
@@ -65,6 +70,7 @@ let result = service.load_configuration_from_root(config_root).await?;
 - Only explicit relative `.js` files under the configuration root are loadable. No network, npm/jsr/package, shell, workspace scan, extension loading, WASM, AI mutation, or direct client filesystem authority is introduced.
 - `loadConfigurationModule` does not implement Deno/npm-style resolution: callers must provide the exact `.js` filename.
 - Runtime-backed package option/layout override APIs do not grant package installation, enable/disable mutation, mode activation authority, decoration rendering authority, parse-document authority, component style override authority beyond typed tokens, raw Deno ops, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, client-side JavaScript, or external filesystem/network/shell/AI/workspace access. Planned package/mode/parse/decor configuration exports remain unavailable stubs until documented validators ship.
+- `setTypography` is an all-or-nothing inert data transaction. It rejects raw JSON envelopes over `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES` (1024), missing profiles, and unknown fields (including paths, URLs, font bytes, and font-download metadata) before mutation; server state retains defaults when no configuration selects typography.
 - **Phase 18.9 mode and generic key-behavior defaults are hardcoded structural defaults, not runtime-configurable Clay JS settings.** The `core.text`/`core.code` fallback modes, the classification precedence ladder, the electric-character outdent set, and the generic pair-insertion/comment-continuation rule sets are compiled into `ModeRegistry`/`EditorBehaviorRules` and are never read from configuration at mode-activation or paint/text time (`src/packages/modes.rs` and `src/editor/surface.rs` consult `behavior_manifest` only, never the package-option store). Because `setPackageOption` uses a closed suffix allowlist, behavior-changing Phase 18.9 keys such as `core.preferredFallbackMode`, `core.electricCharacters`, `core.pairInsertion`, and `core.commentContinuation` are rejected as unsupported options rather than silently accepted as undocumented settings, so built-in mode defaults cannot be overridden to grant package authority. Users who want different classification/behavior should register a package mode or behavior manifest through the documented Clay JS APIs, not an undocumented configuration key. (See `phase18_9_behavior_changing_defaults_are_not_configurable_and_are_rejected` in `src/server/configuration.rs`.)
 - **Phase 18.12 workspace file-browser defaults and workflow routes are Clay-owned runtime constants or existing command bindings, not new `clay:configuration` APIs.** Fuzzy-open, file-browser toggle, selected-folder picker, and copy-selection chords use the existing `clay.keybindings.bindKey` API with fixed command ids (`clay.workspace.openFuzzyFile`, `clay.workspace.toggleFileBrowser`, `clay.workspace.clientOpenFolderDialog`, `clay.editor.clientCopySelection`) and no Rust default chord. The left panel/default slot, bounded marker set (`KNOWN_PROJECT_MARKERS`), default ignore names, listing depth/count budgets, left-panel item budget, fuzzy item budget, native folder-picker backend, and OS clipboard backend are compiled Clay-owned workspace/client boundaries. They are not hidden `init.js` keys and cannot grant extra filesystem/workspace authority, clipboard read, paste/cut, arbitrary clipboard writes, or server/package clipboard authority. Public programmatic file-browser work goes through the Phase 18.12 `clay:workspace` and `clay:commands` facades documented in `docs/reference/clay-js-api/`, while configuration remains limited to existing documented APIs.
 
@@ -72,6 +78,8 @@ let result = service.load_configuration_from_root(config_root).await?;
 
 - `src/server/js_runtime.rs`: loads an `init.js` fixture, loads `./ui.js` via `loadConfigurationModule`, reports entry/module state, rejects traversal/URL/npm/package-style specifiers, and verifies planned package/mode configuration facade exports return clear unavailable errors.
 - `src/server/configuration.rs`: `package_option_configuration_accepts_supported_typed_options_only`, `package_option_configuration_rejects_hidden_ad_hoc_and_raw_authority_keys`, and the Phase 18.9 `phase18_9_behavior_changing_defaults_are_not_configurable_and_are_rejected` test pin the closed package-option allowlist (no ad-hoc or behavior-changing core.* keys accepted).
+- `src/server/js_runtime.rs`: `set_typography_replaces_all_profiles_atomically`, `set_typography_failure_preserves_previous_revision`, and `typography_configuration_grants_no_additional_authority` cover facade parsing and failure atomicity; `src/server/mod.rs` covers default state and one broadcast per changed replacement.
+- `tests/rust_visibility_api_mapping.rs`: `set_typography_rust_op_facade_and_doc_mapping_is_complete`, `typography_client_helpers_are_not_public_server_api`, and `raw_typography_op_is_not_user_facing` pin the single public facade/op/docs route while keeping client layout/registry helpers and the raw op name outside the user-facing API.
 - Command: `cargo test js_runtime --quiet && cargo test configuration_runtime --quiet`
 
 ## Related

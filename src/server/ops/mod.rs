@@ -3,6 +3,7 @@ mod commands;
 mod completion;
 mod configuration;
 mod decorations;
+mod diagnostics;
 mod documents;
 mod git;
 mod keybindings;
@@ -13,6 +14,7 @@ mod planned;
 mod sdui;
 mod syntax;
 mod theme;
+mod typography;
 mod ui;
 mod workspace;
 
@@ -24,10 +26,13 @@ use deno_error::JsErrorBox;
 
 use crate::{
     protocol::{
-        BehaviorManifest, BehaviorScope, CommandDeclaration, DecorationSet, EditorBehaviorRules,
-        KeyBindingContext, KeyBindingRule, KeyStroke,
+        BehaviorManifest, BehaviorScope, CommandDeclaration, DecorationSet, DiagnosticSet,
+        EditorBehaviorRules, KeyBindingContext, KeyBindingRule, KeyStroke,
     },
-    server::{behavior::ActiveBehaviorManifest, decorations::SyntaxChunkCache},
+    server::{
+        behavior::ActiveBehaviorManifest, decorations::SyntaxChunkCache,
+        diagnostics::DiagnosticChunkCache,
+    },
 };
 
 use self::{
@@ -44,6 +49,7 @@ use self::{
         op_clay_configuration_set_package_option,
     },
     decorations::op_clay_decorations_publish_decorations,
+    diagnostics::op_clay_diagnostics_publish_diagnostics,
     documents::{
         op_clay_documents_get_document_status, op_clay_documents_list_documents,
         op_clay_documents_open_document, op_clay_documents_reload_document,
@@ -68,6 +74,7 @@ use self::{
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
     syntax::{op_clay_syntax_register_syntax_grammar, op_clay_syntax_set_engine_preference},
     theme::op_clay_theme_set_theme,
+    typography::op_clay_theme_set_typography,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
         op_clay_ui_register_panel_contribution, op_clay_ui_register_theme_token,
@@ -93,7 +100,9 @@ pub(crate) struct ClayOpState {
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
+    published_diagnostic_set: Mutex<Option<DiagnosticSet>>,
     decoration_cache: Mutex<SyntaxChunkCache>,
+    diagnostic_cache: Mutex<DiagnosticChunkCache>,
     parse_handlers: Mutex<Vec<crate::server::parse_coordinator::ParseHandlerMeta>>,
     js_parse_handlers: Mutex<Vec<crate::server::parse_coordinator::JsParseHandlerRegistration>>,
     last_parse_update_json: Mutex<Option<String>>,
@@ -109,6 +118,7 @@ pub(crate) struct ClayOpState {
     /// and applied to the shared server slot at load/reload so the welcome
     /// handshake ships it to the client. `None` = Clay default theme.
     active_theme: Mutex<Option<crate::protocol::ActiveTheme>>,
+    active_typography: Mutex<Option<crate::protocol::ActiveTypography>>,
     runtime_context: Mutex<ClayRuntimeContext>,
     // Shared PackageService for loadPackage resolution. Bundled packages are
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
@@ -147,7 +157,9 @@ impl ClayOpState {
             runtime_records: Mutex::new(Vec::new()),
             published_sdui_tree: Mutex::new(None),
             published_decoration_set: Mutex::new(None),
+            published_diagnostic_set: Mutex::new(None),
             decoration_cache: Mutex::new(SyntaxChunkCache::default()),
+            diagnostic_cache: Mutex::new(DiagnosticChunkCache::default()),
             parse_handlers: Mutex::new(Vec::new()),
             js_parse_handlers: Mutex::new(Vec::new()),
             last_parse_update_json: Mutex::new(None),
@@ -161,6 +173,7 @@ impl ClayOpState {
             ),
             completion_providers: Mutex::new(Vec::new()),
             active_theme: Mutex::new(None),
+            active_typography: Mutex::new(None),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
@@ -258,6 +271,13 @@ impl ClayOpState {
             .clone()
     }
 
+    pub(crate) fn published_diagnostic_set(&self) -> Option<DiagnosticSet> {
+        self.published_diagnostic_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
     pub(crate) fn parse_handlers(&self) -> Vec<crate::server::parse_coordinator::ParseHandlerMeta> {
         self.parse_handlers
             .lock()
@@ -344,6 +364,18 @@ impl ClayOpState {
             .expect("Clay runtime op state mutex poisoned") = Some(set);
     }
 
+    pub(super) fn publish_diagnostic_set(&self, set: DiagnosticSet) {
+        let _ = self
+            .diagnostic_cache
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .insert_validated_set(set.clone());
+        *self
+            .published_diagnostic_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(set);
+    }
+
     pub(super) fn register_parse_handler_meta(
         &self,
         meta: crate::server::parse_coordinator::ParseHandlerMeta,
@@ -424,16 +456,17 @@ impl ClayOpState {
     /// `EditorBehaviorRules` the package chose, validates, and publishes.
     pub(super) fn publish_mode_behavior_manifest(
         &self,
-        behavior_version: crate::protocol::BehaviorVersion,
-        scope: BehaviorScope,
-        manifest_id: String,
+        activation: &crate::packages::modes::MajorModeActivation,
         editor_rules: EditorBehaviorRules,
         extra_commands: Vec<CommandDeclaration>,
         extra_keymaps: Vec<KeyBindingRule>,
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
-        let mut manifest = BehaviorManifest::minimal_text_editing(behavior_version);
-        manifest.manifest_id = manifest_id;
-        manifest.scope = scope;
+        let mut manifest = BehaviorManifest::minimal_text_editing(activation.behavior_version);
+        manifest.manifest_id = format!("{}.{}", activation.api_prefix, activation.mode_id);
+        manifest.scope = BehaviorScope::Document {
+            document_id: activation.document_id,
+        };
+        manifest.document_font_role = activation.document_font_role;
         manifest.editor_rules = editor_rules;
         manifest.commands.extend(extra_commands);
         manifest.keymaps.extend(extra_keymaps);
@@ -570,6 +603,33 @@ impl ClayOpState {
     /// next evaluation resets it before reuse).
     pub(crate) fn active_theme(&self) -> Option<crate::protocol::ActiveTheme> {
         self.active_theme
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    /// Validate and atomically retain a complete typography candidate for this
+    /// runtime evaluation. Server-global revision/publication happens only
+    /// after the evaluation succeeds.
+    pub(super) fn set_active_typography(
+        &self,
+        mut typography: crate::protocol::ActiveTypography,
+    ) -> Result<crate::protocol::ActiveTypography, crate::protocol::ActiveTypographyValidationError>
+    {
+        typography.validate()?;
+        let mut active = self
+            .active_typography
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        typography.revision = active
+            .as_ref()
+            .map_or(1, |current| current.revision.saturating_add(1));
+        *active = Some(typography.clone());
+        Ok(typography)
+    }
+
+    pub(crate) fn active_typography(&self) -> Option<crate::protocol::ActiveTypography> {
+        self.active_typography
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .clone()
@@ -782,6 +842,7 @@ extension!(
         op_clay_sdui_define_node,
         op_clay_sdui_publish_tree,
         op_clay_theme_set_theme,
+        op_clay_theme_set_typography,
         op_clay_ui_register_panel_contribution,
         op_clay_ui_register_component_contribution,
         op_clay_ui_register_transient_overlay_contribution,
@@ -819,6 +880,7 @@ extension!(
         op_clay_commands_list_commands,
         op_clay_commands_execute_command,
         op_clay_decorations_publish_decorations,
+        op_clay_diagnostics_publish_diagnostics,
         op_clay_parse_register_parse_handler,
         op_clay_parse_store_update,
         op_clay_syntax_register_syntax_grammar,

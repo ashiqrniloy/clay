@@ -16,7 +16,7 @@ use crate::{
         ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot, RuntimeDiagnostic,
         SyntaxMemoryBudget,
     },
-    server::decorations::validate_decoration_set,
+    server::{decorations::validate_decoration_set, diagnostics::validate_diagnostic_set},
 };
 
 pub type ParseHandlerFuture =
@@ -87,6 +87,7 @@ pub enum ParseCoordinatorError {
         decoration_version: DocumentVersion,
         parse_version: DocumentVersion,
     },
+    DiagnosticMetadataMismatch,
     PayloadBudgetExceeded {
         bytes: usize,
         budget: usize,
@@ -519,10 +520,36 @@ impl ParseCoordinator {
                     parse_version: update.document_version,
                 });
             }
+            if decorations.viewport_byte_start != update.viewport.start
+                || decorations.viewport_byte_end != update.viewport.end
+                || decorations
+                    .spans
+                    .iter()
+                    .any(|span| span.provenance.package_prefix != update.package_prefix)
+            {
+                return Err(ParseCoordinatorError::ProvenanceMismatch);
+            }
             validate_decoration_set(current_version, decorations.clone(), None).map_err(
                 |error| {
                     ParseCoordinatorError::HandlerFailed(format!(
                         "decoration validation failed: {error:?}"
+                    ))
+                },
+            )?;
+        }
+        if let Some(diagnostics) = &update.diagnostic_update {
+            if diagnostics.document_id != update.document_id
+                || diagnostics.document_version != update.document_version
+                || diagnostics.viewport_byte_start != update.viewport.start
+                || diagnostics.viewport_byte_end != update.viewport.end
+                || diagnostics.provenance.package_prefix != update.package_prefix
+            {
+                return Err(ParseCoordinatorError::DiagnosticMetadataMismatch);
+            }
+            validate_diagnostic_set(current_version, diagnostics.clone(), None).map_err(
+                |error| {
+                    ParseCoordinatorError::HandlerFailed(format!(
+                        "diagnostic validation failed: {error:?}"
                     ))
                 },
             )?;

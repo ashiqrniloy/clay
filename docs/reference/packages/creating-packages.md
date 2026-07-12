@@ -86,6 +86,7 @@ Clay currently has foundations for:
 - Package manifest UI metadata validation for `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, and `themeTokens`.
 - Package manifest Phase 18.4 input/state/configuration metadata validation for `clay.contributions.input`, `uiStateScopes`, `layoutOverrides`, and `packageOptions`, including deterministic conflict diagnostics and provenance.
 - Phase 18.15 text styling: two-axis `TokenType` + `Modifiers` decoration vocabulary, inert `clay.contributions.textStyles` theme data, first-party Gruvbox Material Dark/Light theme packages, and `clay.theme.setTheme()` for one active startup theme.
+- Phase 18.17 range diagnostics: `clay.diagnostics.serverPublishDiagnostics` for bounded `DiagnosticSet` publication, theme-owned `diagnosticError`/`diagnosticWarning`/`diagnosticInfo` squiggles, and Tree-sitter `ERROR`/`MISSING` recovery through the shared parse side channel.
 - Decoration publication and parse handler foundations.
 - First-party `@clay/markdown` package scaffold and smoke fixtures.
 - First-party `@clay/git` read-only status package consuming the server-owned `clay:git` discovery facade (Phase 18.13).
@@ -135,6 +136,7 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.12 | Document the file-browser-era shell contract: Clay owns workspace discovery, bounded listing, the left file tree, bottom fuzzy-open sessions, and workspace command routing; packages may reuse generic panel/overlay/action primitives but cannot add roots, markers, ignore rules, raw file listing, native widgets, or direct filesystem authority. |
 | Phase 18.13 | Document the read-only Git package contract: `@clay/git` consumes the server-owned `clay:git` discovery facade, declares no permissions, publishes a sanitized status panel, and receives no shell/network/filesystem/mutating Git authority. Branch/status commands are server-owned built-ins (`clay.git.listStatuses`, `clay.git.refreshStatus`); the package only composes read-only display state. Mutating Git operations remain deferred. |
 | Phase 18.15 | Document the locked text vocabulary (`TokenType` + `Modifiers`), inert `textStyles` theme-package contract, one-active-theme `setTheme()` selection API, and the separation between SDUI typed theme tokens and editor text `StyleRegistry` overrides. |
+| Phase 18.17 | Document bounded `DiagnosticSpan`/`DiagnosticSet` publication through `serverPublishDiagnostics`, Tree-sitter ERROR/MISSING recovery, theme severity colors, additive squiggle rendering, and the no-LSP-process authority boundary. |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
@@ -441,6 +443,45 @@ export default async function loadMyLanguage(options = {}) {
 
 Keep package docs current with the implemented Clay JS API reference; do not invent raw op or callback shortcuts.
 
+### Semantic typography roles
+
+Use [Semantic Typography Roles](../primitives/typography.md) for every package-controlled text surface. Packages declare intent only; user [`setTypography`](../clay-js-api/theme/set-typography.md) configuration owns concrete family fallback stacks and logical-pixel sizes.
+
+A mode may set one document default:
+
+```js
+await serverRegisterModePattern(packageManifest, {
+  modeId: "example-code",
+  displayName: "Example Code",
+  extensions: ["example"],
+  defaultFontRole: "monospace",
+});
+```
+
+`defaultFontRole` accepts `monospace` or `proportional`; omission inherits the base behavior manifest. `core.code` defaults monospace, while `core.text` and Markdown default proportional. Rust, TypeScript, and JavaScript package modes declare monospace. Future modes must use this generic field, not language-specific Rust rendering branches.
+
+Syntax grammar style maps and published syntax/semantic decorations may request a range override:
+
+```json
+{
+  "code": { "styleToken": "markup.code-block", "fontRole": "monospace" }
+}
+```
+
+```js
+{
+  byteStart: 10,
+  byteEnd: 16,
+  layer: "syntax",
+  styleToken: "markup.inline-code",
+  fontRole: "monospace",
+}
+```
+
+Range `fontRole` accepts `monospace` or `proportional`. Diagnostic/search layers, stale/out-of-bounds spans, and invalid UTF-8 boundaries cannot alter font role. Component text separately defaults to `ui` and follows the `style.fontRole` contract in [Components](#components).
+
+Never declare `fontFamily`, `fontFamilies`, `fontSize`, `fontStack`, font paths/bytes/URLs/downloads, raw CSS, raw Parley properties, or renderer callbacks. Semantic roles add no filesystem, network, shell, package-manager, extension, AI, WASM, workspace, native-widget, raw-op, or client-side JavaScript authority. Validation and role normalization remain outside paint/input/layout hot paths.
+
 ### Persistent runtime, open-time activation, and parse boundaries
 
 The end-user default stays one line in `~/.config/clay/init.js`:
@@ -722,6 +763,17 @@ Phase 18.3 component catalog status:
 | `modal` | Planned/deferred | Shell-owned transient dialog in a later component-catalog phase. |
 
 Packages should not assume these are Masonry widget types. They are Clay components validated by `src/shell/components.rs` and rendered through Clay-owned native code.
+
+Component text defaults to the user-owned `ui` typography profile. Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` declarations may request only a semantic `style.fontRole` of `"ui"`, `"monospace"`, or `"proportional"`; it selects the user-configured family stack and size together. Structural components and `editorView` cannot set `fontRole`. Packages must not provide `fontFamily`, `fontSize`, font stacks, raw Parley properties, CSS, font files, URLs, or renderer callbacks. `style.typography` remains a semantic Clay variant such as `typography.body`, `typography.title`, or `typography.status`, scaled from the configured role rather than an absolute size.
+
+```json
+{
+  "kind": "label",
+  "id": "markdown.preview.command",
+  "text": "cargo test",
+  "style": { "typography": "typography.body", "fontRole": "monospace" }
+}
+```
 
 ## Actions and Commands
 
@@ -1012,7 +1064,7 @@ A theme package declares no permissions and no modes. It contributes style data 
     "permissions": [],
     "modes": [],
     "docs": "./docs/index.md",
-    "performance": { "estimatedManifestBytes": 2400 },
+    "performance": { "estimatedManifestBytes": 2600 },
     "apiDependencies": [],
     "contributions": {
       "textStyles": [
@@ -1038,7 +1090,7 @@ A theme package declares no permissions and no modes. It contributes style data 
 | `underline` | optional | Boolean default for token text. Syntax-token targets only. |
 | `strike` | optional | Boolean strikethrough default. Syntax-token targets only. |
 
-Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`.
+Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`.
 
 Token names are the `TokenType` variant names from the vocabulary contract: `Namespace`, `Type`, `Class`, `Enum`, `Interface`, `Struct`, `TypeParameter`, `Parameter`, `Variable`, `Property`, `EnumMember`, `Event`, `Function`, `Method`, `Macro`, `Keyword`, `Modifier`, `Comment`, `String`, `Number`, `Regexp`, `Operator`, `Decorator`, `Heading1`, `Heading2`, `Heading3`, `Heading4`, `Heading5`, `Heading6`, `ListItem`, `Quote`, `CodeBlock`, `CodeSpan`, `Link`, `Paragraph`.
 
@@ -1084,6 +1136,40 @@ Decoration span shape (implemented protocol model):
 ```
 
 Current compatibility facades may still accept legacy `styleToken` strings at package/parse boundaries and map them through `DecorationSpan::from_style_token`; new package code should target `TokenType` + `Modifiers` from the vocabulary contract. Packages should translate parser-specific output into generic Clay decoration spans. Rust should not branch on Markdown-specific token names.
+
+### Phase 18.17 range diagnostics publication
+
+Range diagnostics are a separate primitive from decorations. Use [`clay.diagnostics.serverPublishDiagnostics`](../clay-js-api/diagnostics/server-publish-diagnostics.md) for severity/code/message/source metadata; do not stuff diagnostic messages into `serverPublishDecorations`. Canonical contract: [Range Diagnostics](../primitives/diagnostics.md).
+
+```ts
+import { serverPublishDiagnostics } from "clay:diagnostics";
+
+serverPublishDiagnostics({
+  packageName: "@clay/example",
+  packageVersion: "0.1.0",
+  packagePrefix: "example",
+  permissions: ["render-decorations"],
+  documentId,
+  documentVersion,
+  viewport: { byteStart, byteEnd },
+  source: "example-analyzer",
+  spans: [{
+    byteStart,
+    byteEnd,
+    severity: "error",
+    code: "example.syntax-error",
+    message: "Syntax error",
+  }],
+});
+```
+
+Rules:
+
+- Requires `render-decorations`. Empty `spans` clears only that `source` chunk.
+- Payload stays within `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES` and `DIAGNOSTIC_MAX_SPANS_PER_SET`.
+- Themes color squiggles through `diagnosticError` / `diagnosticWarning` / `diagnosticInfo` via `setTheme`; no diagnostic enable/geometry config API exists.
+- Rejected: executable handlers/callbacks, client JavaScript, raw ops, CSS/draw callbacks, native handles, language-server process spawning, filesystem/network/shell/AI authority.
+- Future LSP packages map onto this same inert contract; Phase 18.17 does not add LSP process APIs.
 
 ## Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption
 
@@ -1605,6 +1691,7 @@ Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same meta
 - **Commands**: register package-prefixed commands with `clay.commands.serverRegisterCommand`. Commands must route through the server-owned `CommandExecution` path, declare permissions, and avoid shell/network/filesystem authority unless explicitly approved.
 - **Completion providers**: register keyword/snippet providers with `clay.completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `clay.completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
 - **Parse handlers**: register a mode-scoped parse handler with `clay.parse.serverRegisterParseHandler` to derive decorations, folding ranges, diagnostics, or outline data. The handler runs as `Background`, cancellable, viewport-prioritized server work and never in paint/typing hot paths.
+- **Range diagnostics**: publish bounded `DiagnosticSet` data with `clay.diagnostics.serverPublishDiagnostics` under `render-decorations`. Keep status failures on `RuntimeDiagnostic`; keep visual tints on `serverPublishDecorations`. See [Range Diagnostics](../primitives/diagnostics.md).
 - **UI contributions**: declare optional components, status items, transient overlays, panels, and theme tokens through the `clay:ui` contribution APIs. All UI contributions are inert declarations that Clay validates, composes, and renders through Clay-owned Masonry widgets. Packages never create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
 - **Configuration**: Phase 18.14 language packages keep indent size, comment token, delimiter pairs, and autocomplete triggers as package-defined defaults. They do not introduce new user-tunable configuration keys in this phase. When user customization is justified in a later phase, expose package-prefixed options through the documented `clay.configuration.setPackageOption` API and layout defaults through `clay.ui.serverSetLayoutOverride`. Do not invent hidden JSON/TOML keys or undocumented config paths in `init.js`.
 

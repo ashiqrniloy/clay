@@ -71,6 +71,50 @@ fn layout_cache_invalidates_on_text_width_font_or_viewport_changes() {
 }
 
 #[test]
+fn typography_geometry_uses_shared_profile_baseline_not_fixed_font_size() {
+    let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let typography_source =
+        fs::read_to_string("src/editor/typography.rs").expect("typography readable");
+    let layout_source = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
+
+    assert!(!surface_source.contains("TEXT_FONT_SIZE"));
+    assert!(surface_source.contains("self.typography.document_line_height()"));
+    assert!(typography_source.contains("DOCUMENT_LINE_HEIGHT_MULTIPLIER"));
+    assert!(layout_source.contains("DOCUMENT_LINE_HEIGHT_MULTIPLIER"));
+}
+
+#[test]
+fn typography_updates_do_not_enter_editor_hot_paths() {
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let layout = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
+    let sdui = fs::read_to_string("src/masonry_sdui.rs").expect("SDUI readable");
+    let hot_paths = format!(
+        "{}\n{}\n{}",
+        non_test_body(&surface),
+        non_test_body(&layout),
+        non_test_body(&sdui)
+    );
+
+    assert!(layout.contains("editor.layout.cache_hit"));
+    assert!(layout.contains("normalize_style_runs()"));
+    for forbidden in [
+        "Deno.core",
+        "op_clay_theme_set_typography",
+        "setTypography(",
+        "std::fs",
+        "reqwest",
+        "ureq",
+        "TcpStream",
+        "Command::new",
+    ] {
+        assert!(
+            !hot_paths.contains(forbidden),
+            "typography paint/layout/input paths must not perform JS, IPC, font-file, network, or shell work: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn parse_window_snapshot_primitive_uses_bounded_rope_slicing() {
     let document_source =
         fs::read_to_string("src/server/document.rs").expect("document source readable");
@@ -95,6 +139,7 @@ fn paint_uses_cached_inert_spans_without_package_javascript() {
         "markdownIt",
         "parseMarkdown",
         "serverPublishDecorations",
+        "serverPublishDiagnostics",
         "TreeSitterSyntaxHandler",
         "tree_sitter",
         "Deno.core",
@@ -267,4 +312,63 @@ fn style_registry_is_single_source_of_color_for_paint_paths() {
         theme_body.contains("pub struct StyleRegistry"),
         "src/editor/theme.rs must define the StyleRegistry single source of color"
     );
+}
+
+#[test]
+fn diagnostic_paint_uses_theme_owned_severity_styles_only() {
+    let theme = fs::read_to_string("src/editor/theme.rs").unwrap();
+    assert!(theme.contains("fn diagnostic_style"));
+    assert!(theme.contains("diagnostic_error"));
+    assert!(theme.contains("diagnostic_warning"));
+    assert!(theme.contains("diagnostic_info"));
+
+    let surface = fs::read_to_string("src/editor/surface.rs").unwrap();
+    let body = non_test_body(&surface);
+    assert!(body.contains("diagnostic_style(span.severity)"));
+    let apply_body = body
+        .split("fn apply_diagnostic_set")
+        .nth(1)
+        .expect("apply_diagnostic_set")
+        .split("pub fn layout_style_revision_for_test")
+        .next()
+        .expect("apply_diagnostic_set body");
+    assert!(
+        !apply_body.contains("bump_layout_style_revision"),
+        "apply_diagnostic_set must not bump layout_style_revision"
+    );
+}
+
+#[test]
+fn range_diagnostics_do_not_enter_editor_hot_paths() {
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let layout = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
+    let widget = fs::read_to_string("src/masonry_editor.rs").expect("widget readable");
+    let hot_paths = format!(
+        "{}\n{}\n{}",
+        non_test_body(&surface),
+        non_test_body(&layout),
+        non_test_body(&widget)
+    );
+
+    assert!(layout.contains("fn paint_squiggle"));
+    assert!(surface.contains("visible_diagnostic_ranges"));
+    for forbidden in [
+        "TreeSitterSyntaxHandler",
+        "collect_syntax_diagnostics",
+        "validate_diagnostic_publication",
+        "validate_diagnostic_set",
+        "serverPublishDiagnostics",
+        "op_clay_diagnostics_publish_diagnostics",
+        "Deno.core",
+        "ParseCoordinator",
+        "std::fs",
+        "Command::new",
+        "reqwest",
+        "LanguageServer",
+    ] {
+        assert!(
+            !hot_paths.contains(forbidden),
+            "range-diagnostic paint/layout/input paths must not run parser/JS/IPC/validation work: {forbidden}"
+        );
+    }
 }

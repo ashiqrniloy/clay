@@ -182,6 +182,9 @@ function syntaxSpan(source, codeUnitStart, codeUnitEnd, styleToken, priority) {
     byteEnd: codeUnitToAbsoluteByte(source, codeUnitEnd),
     kind: "syntax",
     styleToken,
+    ...(styleToken === STYLE_TOKENS.inlineCode || styleToken === STYLE_TOKENS.codeBlock
+      ? { fontRole: "monospace" }
+      : {}),
     priority
   };
 }

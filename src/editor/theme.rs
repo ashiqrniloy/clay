@@ -16,12 +16,20 @@
 
 use masonry::peniko::Color;
 
-use crate::protocol::{DecorationKind, Modifiers, TokenType};
+use crate::protocol::{DecorationKind, DiagnosticSeverity, Modifiers, TokenType};
 
 /// Resolved visual style for one decoration span: a background tint `color` plus
 /// the text attributes the span's modifiers request (or the theme declares by
 /// default). The current paint path consumes `color`; the text attributes are
 /// carried for the task-5+ text-formatting work and theme overrides.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TextAttributes {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StyleSpec {
     pub color: Color,
@@ -29,6 +37,17 @@ pub struct StyleSpec {
     pub italic: bool,
     pub underline: bool,
     pub strike: bool,
+}
+
+impl StyleSpec {
+    pub(crate) const fn attributes(self) -> TextAttributes {
+        TextAttributes {
+            bold: self.bold,
+            italic: self.italic,
+            underline: self.underline,
+            strike: self.strike,
+        }
+    }
 }
 
 /// Base UI (non-decoration) colors consulted by the editor and shell chrome.
@@ -75,7 +94,12 @@ pub struct StyleRegistry {
     // Decoration-layer fallback colors (kind-first authoritatively; `Syntax`
     // falls through to the per-`TokenType` table below).
     semantic: Color,
+    /// Legacy `DecorationKind::Diagnostic` fill tint (error-severity default).
     diagnostic: Color,
+    /// Severity-aware squiggle/underline colors for `DiagnosticSpan` paint.
+    diagnostic_error: Color,
+    diagnostic_warning: Color,
+    diagnostic_info: Color,
     search_match: Color,
     // Per-`TokenType` colors for the `Syntax` layer, indexed by
     // [`TokenType::index`]. The Clay default still reproduces the old family
@@ -115,6 +139,9 @@ impl StyleRegistry {
             },
             semantic: Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
             diagnostic: Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f),
+            diagnostic_error: Color::from_rgb8(0xff, 0x4d, 0x6d),
+            diagnostic_warning: Color::from_rgb8(0xff, 0xd1, 0x66),
+            diagnostic_info: Color::from_rgb8(0x61, 0xaf, 0xef),
             search_match: Color::from_rgba8(0xff, 0xd1, 0x66, 0x45),
             syntax: [
                 Color::from_rgba8(0x61, 0xaf, 0xef, 0x55), // Namespace
@@ -154,6 +181,24 @@ impl StyleRegistry {
                 Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Paragraph
             ],
             attr_defaults: [0u16; 35],
+        }
+    }
+
+    /// Theme-owned color/style for one diagnostic severity. Paint maps
+    /// `DiagnosticSpan.severity` through this helper only — no language/source
+    /// branch and no hardcoded paint-path colors.
+    pub fn diagnostic_style(&self, severity: DiagnosticSeverity) -> StyleSpec {
+        let color = match severity {
+            DiagnosticSeverity::Error => self.diagnostic_error,
+            DiagnosticSeverity::Warning => self.diagnostic_warning,
+            DiagnosticSeverity::Info => self.diagnostic_info,
+        };
+        StyleSpec {
+            color,
+            bold: false,
+            italic: false,
+            underline: false,
+            strike: false,
         }
     }
 
@@ -212,6 +257,9 @@ pub enum BaseUiColorKey {
     ScrollbarTrack,
     StatusBg,
     StatusText,
+    DiagnosticError,
+    DiagnosticWarning,
+    DiagnosticInfo,
 }
 
 /// Where a [`TextStyleOverride`] applies: either a base-UI chrome color or a
@@ -239,6 +287,9 @@ pub fn parse_override_token(token: &str) -> Option<OverrideTarget> {
         "scrollbarTrack" => BaseUiColorKey::ScrollbarTrack,
         "statusBg" => BaseUiColorKey::StatusBg,
         "statusText" => BaseUiColorKey::StatusText,
+        "diagnosticError" => BaseUiColorKey::DiagnosticError,
+        "diagnosticWarning" => BaseUiColorKey::DiagnosticWarning,
+        "diagnosticInfo" => BaseUiColorKey::DiagnosticInfo,
         _ => return TokenType::from_name(token).map(OverrideTarget::Syntax),
     };
     Some(OverrideTarget::BaseUi(base))
@@ -346,6 +397,11 @@ impl StyleRegistry {
                             BaseUiColorKey::ScrollbarTrack => registry.base.scrollbar_track = color,
                             BaseUiColorKey::StatusBg => registry.base.status_bg = color,
                             BaseUiColorKey::StatusText => registry.base.status_text = color,
+                            BaseUiColorKey::DiagnosticError => registry.diagnostic_error = color,
+                            BaseUiColorKey::DiagnosticWarning => {
+                                registry.diagnostic_warning = color
+                            }
+                            BaseUiColorKey::DiagnosticInfo => registry.diagnostic_info = color,
                         }
                     }
                 }
@@ -398,9 +454,45 @@ mod tests {
         assert_eq!(r.base.selection, Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66));
         assert_eq!(r.semantic, Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f));
         assert_eq!(r.diagnostic, Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f));
+        assert_eq!(r.diagnostic_error, Color::from_rgb8(0xff, 0x4d, 0x6d));
+        assert_eq!(r.diagnostic_warning, Color::from_rgb8(0xff, 0xd1, 0x66));
+        assert_eq!(r.diagnostic_info, Color::from_rgb8(0x61, 0xaf, 0xef));
         assert_eq!(
             r.syntax_color(TokenType::Keyword),
             Color::from_rgba8(0xc7, 0x92, 0xea, 0x55)
+        );
+    }
+
+    #[test]
+    fn diagnostic_severities_resolve_distinct_theme_owned_styles() {
+        let r = StyleRegistry::default();
+        let error = r.diagnostic_style(DiagnosticSeverity::Error).color;
+        let warning = r.diagnostic_style(DiagnosticSeverity::Warning).color;
+        let info = r.diagnostic_style(DiagnosticSeverity::Info).color;
+        assert_ne!(error, warning);
+        assert_ne!(warning, info);
+        assert_ne!(error, info);
+        assert_eq!(error, r.diagnostic_error);
+        assert_eq!(warning, r.diagnostic_warning);
+        assert_eq!(info, r.diagnostic_info);
+
+        let overrides = [TextStyleOverride {
+            token: "diagnosticError".to_string(),
+            color: Some(Color::from_rgb8(0xaa, 0x00, 0x00)),
+            bold: None,
+            italic: None,
+            underline: None,
+            strike: None,
+            provenance: "test".to_string(),
+        }];
+        let themed = StyleRegistry::with_text_overrides(&overrides);
+        assert_eq!(
+            themed.diagnostic_style(DiagnosticSeverity::Error).color,
+            Color::from_rgb8(0xaa, 0x00, 0x00)
+        );
+        assert_eq!(
+            themed.diagnostic_style(DiagnosticSeverity::Warning).color,
+            r.diagnostic_warning
         );
     }
 
@@ -490,6 +582,10 @@ mod tests {
         assert!(matches!(
             parse_override_token("Heading1"),
             Some(OverrideTarget::Syntax(TokenType::Heading1))
+        ));
+        assert!(matches!(
+            parse_override_token("diagnosticError"),
+            Some(OverrideTarget::BaseUi(BaseUiColorKey::DiagnosticError))
         ));
         assert_eq!(parse_override_token("keyword.control"), None);
         assert_eq!(parse_override_token("notAToken"), None);

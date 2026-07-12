@@ -18,7 +18,7 @@
 
 ## Overview
 
-The decoration transport carries package-produced inline editor decorations as bounded inert data. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `clay.decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. The first-party Markdown package uses this path from its parser adapter for heading, emphasis, code, fence, and list-marker spans. Phase 18.10 Tree-sitter syntax highlighting established this shared transport; Phase 18.16 reuses it for all syntax-engine tiers: native Tree-sitter and the web-tree-sitter host adapter produce capture records, while the shared mapper emits Phase 18.15 `TokenType` + `Modifiers` spans; Tier 3 package-JavaScript handlers publish through the same validation path. The transport enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and the parse coordinator publishes only inert updates. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript.
+The decoration transport carries package-produced inline editor decorations as bounded inert data. Phase 18.17 range diagnostics use a parallel `DiagnosticSet` transport and client cache (see [Range Diagnostics](range-diagnostics.md)); they remain an additive paint layer and must not be folded into `DecorationSet` for source-keyed lifecycle. Phase 18.16.5 adds an optional closed document font-role override for syntax/semantic spans; it remains separate from user-owned concrete font profiles. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `clay.decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. The first-party Markdown package uses this path from its parser adapter for heading, emphasis, code, fence, and list-marker spans. Phase 18.10 Tree-sitter syntax highlighting established this shared transport; Phase 18.16 reuses it for all syntax-engine tiers: native Tree-sitter and the web-tree-sitter host adapter produce capture records, while the shared mapper emits Phase 18.15 `TokenType` + `Modifiers` spans; Tier 3 package-JavaScript handlers publish through the same validation path. The transport enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and the parse coordinator publishes only inert updates. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript.
 
 ## Responsibilities
 
@@ -28,12 +28,12 @@ The decoration transport carries package-produced inline editor decorations as b
 - Accept a small language-neutral style-token allowlist for both Markdown markup scopes and future code modes such as Python (`keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`) without adding parser-specific Rust branches.
 - Provide the runtime-backed `clay:decorations` facade and explicit `op_clay_decorations_publish_decorations` wrapper for package-side publication.
 - Route `ServerMessage::DecorationSet` through the client connection event loop into `EditorWidget::apply_connection_event`.
-- Store current validated spans in `EditorSurface` and render native highlight rectangles via `LayoutState::paint_text`.
+- Store current validated spans in `EditorSurface`, render native highlight rectangles, and normalize viewport-bounded syntax/semantic presentation runs for `LayoutState::paint_text`.
 
 ## Primitive Coverage
 
 - **Decoration publication** — `DecorationSet`/`DecorationSpan` in `src/protocol/decorations.rs` is the reusable inert output primitive for Markdown, native/WASM Tree-sitter, and package-JavaScript parser adapters.
-- **Vocabulary/theme boundary** — syntax spans carry `TokenType`, `Modifiers`, optional compatibility `scope`, and provenance; `StyleRegistry` remains the single color resolver during paint.
+- **Vocabulary/theme boundary** — syntax spans carry `TokenType`, `Modifiers`, optional compatibility `scope`, optional `DocumentFontRole`, and provenance; `StyleRegistry` remains the single color resolver during paint. Typography resolves separately from `ActiveTheme`.
 - **Validation/performance** — server validation enforces document/version, viewport, provenance, permission, serialized payload, and `SYNTAX_CACHE_BUDGET_BYTES` limits before publication or cache insertion. Paint consumes cached spans only.
 - **Reuse rule** — new modes produce bounded spans through the existing facade or parse handler/coordinator path; they do not add parser callbacks, renderer hooks, raw CSS, client JavaScript, or language-specific paint branches.
 
@@ -41,13 +41,15 @@ The decoration transport carries package-produced inline editor decorations as b
 
 1. Package code produces spans server-side, but only the Rust validation path may publish them.
 2. Package JavaScript calls `serverPublishDecorations`, which serializes options into `op_clay_decorations_publish_decorations`; the op reconstructs package provenance and rejects missing `render-decorations` permission before publication.
-3. `validate_decoration_publication` first checks the package has `PackagePermission::RenderDecorations`, then delegates to `validate_decoration_set` for cheap range/version/style/provenance checks.
+3. `validate_decoration_publication` first checks the package has `PackagePermission::RenderDecorations`, then delegates to `validate_decoration_set` for cheap range/version/style/provenance checks. A non-inherit font role is accepted only on `Syntax` or `Semantic` spans; diagnostic and search spans remain paint-only.
 4. Validation rejects unknown style tokens/kinds, rejects spans outside the declared viewport, sorts spans viewport-first by intersection, priority, and byte range, then serializes the set with `rkyv::to_bytes` to enforce `DECORATION_PAYLOAD_BUDGET_BYTES` before sending. Tree-sitter syntax handlers perform the same serialized payload check before inserting a validated syntax set into `SyntaxChunkCache`, so oversized query output fails closed instead of being cached.
 5. The protocol sends validated data as `ServerMessage::DecorationSet(DecorationSet)` through the existing codec; there is no decoration-specific serialization side channel.
 6. The client connection task converts the message into `ClientConnectionEvent::DecorationSet`.
 7. `EditorWidget::apply_connection_event` installs the chunk through `EditorSurface::apply_decoration_set`, which rejects mismatched document IDs or versions.
 8. `EditorSurface` stores the validated chunk by `DecorationChunkKey`, drops stale chunks on document version changes, prunes chunks outside the current visible/near-viewport guard, and keeps retained serialized chunk memory under `SYNTAX_CACHE_BUDGET_BYTES`.
-9. During paint, `EditorSurface` intersects cached local chunks with the current `VisibleSnapshot`, maps known kind/style tokens to local Rust colors, and asks `LayoutState` to fill highlight rectangles before text rendering.
+9. When the cached Parley layout misses, `EditorSurface` intersects cached local chunks with the current `VisibleSnapshot`, rejects malformed/out-of-document/non-UTF-8-boundary ranges again, maps known kind/style tokens to local Rust colors and attributes, then normalizes non-overlapping presentation runs. Font roles are considered only for `Syntax`/`Semantic`: higher priority wins, then semantic over syntax, then stable provenance; attributes compose. `LayoutState` applies Clay-resolved Parley properties to those ranges and retains runs with its layout. Diagnostics/search keep rectangle/attribute styling but cannot alter a font role. Cache-hit paint does not rescan spans.
+
+Phase 18.17 adds a parallel inert path for `ServerMessage::DiagnosticSet` / `ClientConnectionEvent::DiagnosticSet` / `EditorSurface::apply_diagnostic_set`. Source-keyed diagnostic chunks share the connection drain from `ParseCoordinator` updates, use `DIAGNOSTIC_CACHE_BUDGET_BYTES`, and remain independent from decoration chunk lifecycle. See [Phase 18.17 range diagnostics primitive review](phase18.17-range-diagnostics-primitive-review.md).
 
 ## Code Examples
 
@@ -65,11 +67,14 @@ let message = ServerMessage::DecorationSet(set);
 - Decorations are viewport/chunk-bounded; spans outside the declared viewport are rejected.
 - Large-file retained syntax/decor cache memory is bounded by `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB) and off-viewport chunks are evicted once they leave the near-viewport guard.
 - Style-token validation is generic and allowlist-based; `markup.*` tokens serve Markdown, while `keyword.control`, `string.quoted`, `comment.line`, and `punctuation.definition` prove that non-Markdown language packages can publish syntax spans through the same primitive.
+- A span may select only a closed semantic document role. Packages cannot send family names, sizes, raw Parley properties, CSS, callbacks, or UI roles through decoration transport. The client treats even malformed received data fail-closed: only syntax/semantic roles survive normalization, and only UTF-8-safe in-document ranges reach Parley.
 
 ## Tests
 
 - `tests/decoration_transport.rs`: oversized payload rejection, stale-version rejection, invalid range/unknown token rejection, off-viewport rejection, generic non-Markdown language package syntax-span acceptance, representative Markdown decoration payload budget coverage, near-viewport client pruning, stale-version cache clearing, protocol codec round trip, and client render-hook application.
-- `tests/syntax_grammar.rs`: native Tree-sitter fixtures for Rust, TypeScript, TSX, JavaScript, and Markdown produce bounded vocabulary decorations; tier selection, unmapped captures, per-viewport overflow, cached parsing, and package provenance are covered.
+- `tests/syntax_grammar.rs`: native Tree-sitter fixtures for Rust, TypeScript, TSX, JavaScript, and Markdown produce bounded vocabulary decorations; tier selection, unmapped captures, per-viewport overflow, cached parsing, package provenance, semantic style-map roles, and concrete-font rejection are covered.
+- `tests/typography_protocol.rs::decoration_font_role_is_limited_to_syntax_and_semantic_layers`: rejects diagnostic/search font-role transport before publication.
+- `src/editor/surface.rs`: verifies Markdown code uses monospace inside a proportional document, overlap resolution/attribute composition is deterministic, and diagnostic or invalid UTF-8 spans cannot affect font roles; `src/editor/layout.rs` verifies typography/style/default-role cache invalidation.
 - `src/server/decorations.rs::tests::large_file_decoration_cache_respects_30_mib_budget`: verifies server-side chunk-cache budget accounting and LRU eviction.
 - `tests/performance_protocol.rs::decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport`: verifies chunk IPC payloads remain under the decoration transport budget.
 - `tests/editor_performance_invariants.rs::paint_uses_cached_inert_spans_without_package_javascript`: guards paint/layout source against package JavaScript, parser, server, or op calls.
@@ -80,6 +85,7 @@ let message = ServerMessage::DecorationSet(set);
 
 - [Protocol Codec](protocol-codec.md)
 - [Rendering Primitives](rendering-primitives.md)
+- [Range Diagnostics](range-diagnostics.md)
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
 - `docs/reference/primitives/rendering-strategy.md`
 - `docs/reference/primitives/package-security.md`

@@ -56,6 +56,10 @@ Phase 18.14 keeps JavaScript editing defaults (2-space indentation, `//` line co
 
 Tier 1 native highlighting uses Clay's compiled `tree-sitter-javascript = 0.25.0` dependency and the package query at `packages/javascript/queries/highlights.scm`. Tier 2 uses the package-root-confined `./grammars/javascript.wasm` through the shared web-tree-sitter host adapter only after explicit `setSyntaxEnginePreference("javascript", "wasm")`; package load order cannot replace native Tier 1. Tier 3 remains the server-side package-JS parse-handler route when `setSyntaxEnginePreference("javascript", "javascript")` is selected or no grammar is available. All routes map captures through the shared `TokenType` + `Modifiers` vocabulary pipeline. Until a WASM binary is committed, `packages/javascript/grammars/PROVENANCE.md` records the reproducible build command and required SHA-256 recording step. Runtime never fetches, builds, shells out, or loads native libraries for this artifact.
 
+## Typography
+
+JavaScript mode declares semantic `defaultFontRole: "monospace"`. User typography owns the selected family fallback stack and size; package metadata supplies no concrete font values. See [Semantic Typography Roles](../primitives/typography.md).
+
 ## Security and Performance
 
 Permissions are limited to `mode-registration`, `command-registration`, `completion-provider`, `parse-document`, and `render-decorations`. The package does not request filesystem, network, shell, AI, WASM-authority, raw-op, native-ui, client-runtime, package-manager, package-control, or workspace mutation authority.

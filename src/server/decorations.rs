@@ -4,7 +4,9 @@ use crate::perf::budgets::{
     DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
     SYNTAX_CACHE_BUDGET_BYTES,
 };
-use crate::protocol::{DecorationChunkKey, DecorationSet, DocumentId, DocumentVersion};
+use crate::protocol::{
+    DecorationChunkKey, DecorationKind, DecorationSet, DocumentId, DocumentVersion,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecorationValidationError {
@@ -18,6 +20,10 @@ pub enum DecorationValidationError {
     InvalidViewportRange,
     InvalidSpanRange {
         index: usize,
+    },
+    FontRoleOnNonLayoutSpan {
+        index: usize,
+        kind: DecorationKind,
     },
     SpanOutsideViewport {
         index: usize,
@@ -90,6 +96,14 @@ pub fn validate_decoration_set(
         }
         if span.byte_start < set.viewport_byte_start || span.byte_end > set.viewport_byte_end {
             return Err(DecorationValidationError::SpanOutsideViewport { index });
+        }
+        if span.font_role.is_some()
+            && !matches!(span.kind, DecorationKind::Syntax | DecorationKind::Semantic)
+        {
+            return Err(DecorationValidationError::FontRoleOnNonLayoutSpan {
+                index,
+                kind: span.kind,
+            });
         }
         // Plan 046 two-axis model: the free-form style-token string now lives in
         // the optional `scope` escape. Production preserves the original string

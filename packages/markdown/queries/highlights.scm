@@ -24,5 +24,6 @@
 [
   (indented_code_block)
   (fenced_code_block)
-  (paragraph)
-] @text
+] @code
+
+(paragraph) @text

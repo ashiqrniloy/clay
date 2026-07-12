@@ -6,6 +6,7 @@
 - `src/protocol/codec.rs`
 - `src/protocol/decorations.rs`
 - `src/protocol/parse.rs`
+- `tests/typography_protocol.rs`
 
 ## Overview
 
@@ -19,6 +20,7 @@ The protocol module defines the shared client/server IPC message contract. It us
 - Represent Phase 12 SDUI bootstrap/update/action messages: `SduiSnapshot`, `SduiUpdate`, and `SduiAction`.
 - Represent Phase 13 runtime diagnostics with severity, stable code, and sanitized message fields.
 - Represent Phase 18 handoff decoration updates as bounded `DecorationSet` messages.
+- Represent Phase 18.16.5 `ActiveTypography` separately from `ActiveTheme`: three bounded fallback-stack/size profiles, a revision, document defaults, and closed semantic roles.
 - Define Phase 18 handoff parse shapes (`ParseEditNotification` and `IncrementalParseUpdate`) as serializable server-side data without adding parse results to hot edit-ack IPC.
 - Encode and decode messages as `rkyv` payloads with a big-endian 4-byte length prefix.
 - Reject oversized, incomplete, mismatched, or invalid frames before callers receive a protocol message.
@@ -38,7 +40,9 @@ Phase 13 adds `RuntimeDiagnostic` and `ServerMessage::RuntimeDiagnostic` for ser
 
 Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
 
-`BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, key bindings, command declarations, routing policies, and editor rules; it is data, not script code.
+`BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, document font role, key bindings, command declarations, routing policies, and editor rules; it is data, not script code. `core.text` defaults proportional and `core.code` defaults monospace.
+
+Phase 18.16.5 adds a separate `ServerMessage::ActiveTypography(ActiveTypography)` wire shape. Each snapshot has a revision and the user-owned `monospace`, `proportional`, and `ui` `FontProfile`s. A profile accepts at most eight non-control family names of at most 128 bytes, requires a final generic fallback, and accepts finite 6–96 logical-pixel sizes. `src/server/connection.rs` sends the current snapshot fifth in bootstrap, after `ActiveTheme`, and broadcasts later revisions. `src/client/mod.rs` revalidates bootstrap/live snapshots before `TypographyRegistry` installation, keeping geometry-affecting updates separate from theme colors.
 
 `Codec` in `src/protocol/codec.rs` serializes a client or server message with `rkyv::to_bytes`, checks the payload against `max_frame_size`, then prefixes the payload with its 32-bit length. Decode first validates the declared length against the configured maximum and the actual payload size. It then copies the payload into an aligned `rkyv::util::AlignedVec` before calling `rkyv::from_bytes`, which performs checked archived-byte validation through `bytecheck` before deserializing to the owned message type. Behavior manifest publications and behavior-version rejection messages cross this same boundary; there is no manifest-specific serialization side channel.
 
@@ -64,6 +68,7 @@ let message = codec.decode_client_message(&frame)?;
 - File/workspace protocol messages carry workspace-relative or selected-file display paths and typed error codes; server-side workspace validation remains the authority for canonical host paths and selected-file grants.
 - SDUI protocol messages are inert declarative state or server-routed action intents; validation lives in server helpers, while codec validation remains byte/frame focused.
 - Decoration protocol messages are inert span data; decoration validation lives in `src/server/decorations.rs`, while codec validation remains byte/frame focused.
+- Typography profile validation runs before publication/installation, not in codec or paint. The codec still validates archived bytes and frame length; it never discovers installed fonts or performs font I/O.
 - Parse protocol shapes are inert server-side data; parse validation/scheduling lives in `src/server/parse_coordinator.rs`, and parse results are not sent over the hot edit-ack path.
 - Runtime diagnostics are status payloads only. They report safe runtime/configuration failure detail and do not grant client-side JavaScript, filesystem, shell, network, package, WASM, AI, or workspace authority.
 
@@ -71,6 +76,8 @@ let message = codec.decode_client_message(&frame)?;
 
 - `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, region-lock rejection metadata, file/workspace commands including `OpenSelectedFile`, workspace result messages, typed file-operation failures, SDUI snapshot/update/action messages, and runtime diagnostic messages.
 - `tests/decoration_transport.rs::decoration_transport_round_trips_through_protocol_codec`: verifies `ServerMessage::DecorationSet` uses the shared codec boundary.
+- `tests/typography_protocol.rs`: codec round trip for all profiles/revision plus invalid profile and role-layer rejection coverage.
+- `src/client/mod.rs` and `src/server/connection.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.
 - `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, and invalid server/manifest archived bytes.
 - Relevant command: `cargo test protocol`.
 

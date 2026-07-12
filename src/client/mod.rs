@@ -21,11 +21,12 @@ use crate::editor::{EditorCompletionRequestEvent, EditorEditEvent};
 use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, ClientId, ClientMessage, CompletionRejection,
-    CompletionRequest, CompletionRequestId, CompletionResultSet, DecorationSet, DocumentAccess,
-    DocumentId, DocumentMetadata, DocumentVersion, EditOperation, EditRejection, FileErrorCode,
-    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
-    SduiTreeUpdate, ServerMessage, TransactionId, WorkspaceRootId,
+    ActiveTypography, BehaviorManifest, BehaviorVersion, ClientId, ClientMessage,
+    CompletionRejection, CompletionRequest, CompletionRequestId, CompletionResultSet,
+    DecorationSet, DiagnosticSet, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion,
+    EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION, ProtocolErrorCode,
+    RuntimeDiagnostic, SduiActionIntent, SduiTree, SduiTreeUpdate, ServerMessage, TransactionId,
+    WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -50,7 +51,7 @@ const PIPE_BUSY_RETRY_ATTEMPTS: usize = 50;
 #[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClientInitialState {
     pub client_id: ClientId,
     pub document_id: DocumentId,
@@ -59,6 +60,7 @@ pub struct ClientInitialState {
     pub access: DocumentAccess,
     pub behavior_manifest: BehaviorManifest,
     pub active_theme: crate::protocol::ActiveTheme,
+    pub active_typography: ActiveTypography,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -395,7 +397,7 @@ pub struct ClientSession {
     pub events: mpsc::Receiver<ClientConnectionEvent>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ClientConnectionEvent {
     EditAck {
         document_id: DocumentId,
@@ -416,6 +418,7 @@ pub enum ClientConnectionEvent {
         reason: String,
     },
     ActiveTheme(crate::protocol::ActiveTheme),
+    ActiveTypography(ActiveTypography),
     ResyncSnapshot(ClientResyncSnapshot),
     DocumentOpened {
         metadata: DocumentMetadata,
@@ -433,6 +436,7 @@ pub enum ClientConnectionEvent {
     },
     SduiUpdate(SduiTreeUpdate),
     DecorationSet(DecorationSet),
+    DiagnosticSet(DiagnosticSet),
     CompletionResult(CompletionResultSet),
     CompletionRejected {
         request_id: CompletionRequestId,
@@ -691,6 +695,23 @@ where
         }
     };
 
+    let active_typography = match codec.read_server_message(&mut *stream).await? {
+        ServerMessage::ActiveTypography(typography) if typography.validate().is_ok() => typography,
+        ServerMessage::ActiveTypography(_) => {
+            return Err(ClientBootstrapError::UnexpectedMessage(
+                "invalid ActiveTypography",
+            ));
+        }
+        ServerMessage::Error { code, message } => {
+            return Err(ClientBootstrapError::ServerError { code, message });
+        }
+        _ => {
+            return Err(ClientBootstrapError::UnexpectedMessage(
+                "expected ActiveTypography",
+            ));
+        }
+    };
+
     Ok(ClientInitialState {
         client_id,
         document_id,
@@ -699,6 +720,7 @@ where
         access,
         behavior_manifest,
         active_theme,
+        active_typography,
     })
 }
 
@@ -825,6 +847,9 @@ async fn run_connection<S>(
                     Ok(ServerMessage::DecorationSet(set)) => {
                         let _ = events.send(ClientConnectionEvent::DecorationSet(set)).await;
                     }
+                    Ok(ServerMessage::DiagnosticSet(set)) => {
+                        let _ = events.send(ClientConnectionEvent::DiagnosticSet(set)).await;
+                    }
                     Ok(ServerMessage::CompletionResult { result }) => {
                         let _ = events.send(ClientConnectionEvent::CompletionResult(result)).await;
                     }
@@ -840,6 +865,10 @@ async fn run_connection<S>(
                     Ok(ServerMessage::ActiveTheme(theme)) => {
                         let _ = events.send(ClientConnectionEvent::ActiveTheme(theme)).await;
                     }
+                    Ok(ServerMessage::ActiveTypography(typography)) if typography.validate().is_ok() => {
+                        let _ = events.send(ClientConnectionEvent::ActiveTypography(typography)).await;
+                    }
+                    Ok(ServerMessage::ActiveTypography(_)) => {}
                     Ok(ServerMessage::BehaviorManifest(manifest)) => {
                         let behavior_version = manifest.behavior_version;
                         let install_result = behavior_state
@@ -906,10 +935,11 @@ mod tests {
     #[cfg(any(unix, windows))]
     use crate::protocol::EditRejection;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, CommandDeclaration, CompletionReplacementRange,
-        CompletionTrigger, DocumentAccess, EditOperation, FileErrorCode, PROTOCOL_VERSION,
-        RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
-        SduiNodeId, SduiNodeKind, SduiTree, ServerMessage, codec::Codec,
+        ActiveTypography, BehaviorManifest, ClientMessage, CommandDeclaration,
+        CompletionReplacementRange, CompletionTrigger, DocumentAccess, EditOperation,
+        FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource,
+        SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage,
+        codec::Codec,
     };
     #[cfg(any(unix, windows))]
     use crate::server::{IpcServer, ServerConfig};
@@ -1031,6 +1061,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
         });
 
         let state = load_initial_state_from_stream(client, codec).await.unwrap();
@@ -1040,6 +1077,7 @@ mod tests {
         assert_eq!(state.document_version, 3);
         assert_eq!(state.text, "Loaded from server 🦀");
         assert_eq!(state.access, DocumentAccess::Editable { lease_id: 1 });
+        assert_eq!(state.active_typography, ActiveTypography::default());
         assert_eq!(
             state.behavior_manifest,
             BehaviorManifest::minimal_text_editing(9)
@@ -1391,6 +1429,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
             let _edit = codec.read_client_message(&mut server).await.unwrap();
             codec
                 .write_server_message(
@@ -1480,6 +1525,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -1579,6 +1631,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -1695,6 +1754,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
         });
 
         let state = load_initial_state_from_stream(client, codec).await.unwrap();
@@ -1747,6 +1813,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -1803,6 +1876,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -1871,6 +1951,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -1954,6 +2041,13 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
                     &ServerMessage::DocumentOpened {
                         metadata,
                         text: "# opened\n".to_string(),
@@ -2028,6 +2122,13 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
                     &ServerMessage::FileOperationFailed {
                         code: FileErrorCode::InvalidUtf8,
                         message: "workspace file <requested path> is not valid UTF-8 text"
@@ -2062,8 +2163,14 @@ mod tests {
             "clay.runtime.syntax_error",
             "JavaScript syntax error while evaluating server-side configuration.",
         );
+        let mut live_typography = ActiveTypography {
+            revision: 1,
+            ..ActiveTypography::default()
+        };
+        live_typography.ui.size = 13.0;
         let server_task = tokio::spawn({
             let expected = expected.clone();
+            let live_typography = live_typography.clone();
             async move {
                 let _hello = codec.read_client_message(&mut server).await.unwrap();
                 codec
@@ -2107,6 +2214,20 @@ mod tests {
                     .await
                     .unwrap();
                 codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                    )
+                    .await
+                    .unwrap();
+                codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::ActiveTypography(live_typography),
+                    )
+                    .await
+                    .unwrap();
+                codec
                     .write_server_message(&mut server, &ServerMessage::RuntimeDiagnostic(expected))
                     .await
                     .unwrap();
@@ -2115,6 +2236,10 @@ mod tests {
 
         let mut session = connect_from_stream(client, codec).await.unwrap();
 
+        assert_eq!(
+            session.events.recv().await.unwrap(),
+            ClientConnectionEvent::ActiveTypography(live_typography)
+        );
         assert_eq!(
             session.events.recv().await.unwrap(),
             ClientConnectionEvent::RuntimeDiagnostic(expected)
@@ -2171,6 +2296,13 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
                     &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(5)),
                 )
                 .await
@@ -2182,6 +2314,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -2245,6 +2384,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
+                )
+                .await
+                .unwrap();
             let mut invalid = BehaviorManifest::minimal_text_editing(5);
             invalid
                 .commands
@@ -2260,6 +2406,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();
@@ -2522,6 +2675,7 @@ mod tests {
                 } if rejected_document_id == document_id => break reason,
                 ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
@@ -2637,6 +2791,7 @@ mod tests {
                 } if rejected_document_id == document_id => break reason,
                 ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
@@ -2722,6 +2877,13 @@ mod tests {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
                     }),
+                )
+                .await
+                .unwrap();
+            codec
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::ActiveTypography(ActiveTypography::default()),
                 )
                 .await
                 .unwrap();

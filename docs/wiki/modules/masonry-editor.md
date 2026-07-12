@@ -30,12 +30,15 @@ Phase 15 adds `SduiStatusObservation`, a `pub(crate)` headless observability str
 - Copy the current non-empty editor selection to the OS clipboard on explicit native copy shortcuts (`Ctrl+C` on Linux/Windows, `Cmd+C` on macOS) using the client-owned `src/client/clipboard.rs` wrapper.
 - Provide `EditorWidget::status_observation()` so tests can assert status chrome state without opening a window or painting.
 - Keep diagnostics sanitized by displaying only the `RuntimeDiagnostic` code/message supplied by the server protocol or client clipboard wrapper.
+- Apply `ClientConnectionEvent::DiagnosticSet` through `EditorSurface::apply_diagnostic_set` for paint-only squiggles; do not conflate range diagnostics with status-bar `RuntimeDiagnostic` text.
 
 ## How It Works
 
-`EditorStatus` stores the current `EditorConnectionStatus`, optional document ID, optional confirmed document version, optional `DocumentAccess`, and optional `RuntimeDiagnostic`. Small label helpers derive the user-visible connection, access, document, version, and diagnostic strings. `EditorStatus::text()` builds the exact status line painted by the widget.
+`EditorStatus` stores the current `EditorConnectionStatus`, optional document ID, optional confirmed document version, optional `DocumentAccess`, and optional `RuntimeDiagnostic`. Small label helpers derive the user-visible connection, access, document, version, and diagnostic strings. `EditorStatus::text()` builds the exact status line painted by the widget. Range diagnostics (`DiagnosticSet`) are a separate client cache and render path; see [Range Diagnostics](range-diagnostics.md).
 
 `EditorSurface` owns the active `StyleRegistry`. During bootstrap, `ClientInitialState.active_theme` is converted with `StyleRegistry::from_active_theme` and installed before first paint. Later `ClientConnectionEvent::ActiveTheme` frames rebuild the registry and call `EditorSurface::set_theme`. The editor paint path reads all colors from this registry: panel/text/placeholder/selection/caret/scrollbar colors in `surface.rs`, and shell/status colors through `EditorWidget`'s `self.editor.theme()` accessor. Decoration spans are rendered by `self.theme.style_for(span.kind, span.token_type, span.modifiers)`, so theme changes never require package JavaScript, raw IPC, or per-language Rust paint branches.
+
+`EditorWidget` also forwards every accepted `ActiveTypography` snapshot to both `EditorSurface` and `SduiNativeState`. `UiTextMetrics` resolves status/body/title/detail variants from the cached UI profile; status paint pushes its resolved `FontStack`/size into Parley and derives its bar height from the same line metric. A UI-profile update resets SDUI client-local geometry, requests Masonry layout/render/accessibility work, and never calls the server, configuration JavaScript, or font discovery from paint/input.
 
 `EditorWidget::status_observation()` delegates to `EditorStatus::observation()`, returning a `SduiStatusObservation` with:
 
@@ -77,9 +80,10 @@ assert_eq!(observation.sync_version, Some(5));
 - Shell layout and pane/slot state do not grant packages native widget handles, raw CSS, raw ops, Vello/Parley callbacks, or client-side JavaScript authority over the editor component.
 - The editor main region reserves the Clay-owned left file-browser slot by SDUI panel presence, not editor-binding match, so a freshly opened workspace file under a new document ID cannot overlap the file browser. `EditorSurface::paint_in_rect` fills the full editor rect with the editor background and paints no decorative accent circle or visible inset card; a small `TEXT_INSET` keeps text from hugging the edges.
 - The main editor paints a slim vertical scrollbar indicator. `EditorSurface::scrollbar_thumb_rect` computes the thumb deterministically: hidden when content fits; thumb height proportional to viewport/content; thumb position tracks total document progress (`first_visible_line * line_height + visual_scroll_y` over `max_first * line_height`) so it advances smoothly across the whole document; for single-page content taller than the viewport (e.g. one wrapped line) it falls back to the visual-only budget. It is shared by paint and tests, never overlaps the file browser or status bar, and adds no second scroll model.
-- Pixel scrolling is continuous: `scroll_vertical_pixels` accumulates a sub-line `visual_scroll_y` offset and advances the logical `first_visible_line` by one each time a full `line_height` is crossed, subtracting `line_height` (not resetting to zero). This avoids the backward jump that the old "exhaust overscan budget then reset" model produced, and the view never snaps back to the top at the end of the document. Line/page deltas (`scroll_lines`) still snap to whole lines.
+- Pixel scrolling is continuous: `scroll_vertical_pixels` accumulates a sub-line `visual_scroll_y` offset and advances the logical `first_visible_line` by one each time the shared `TypographyRegistry::document_line_height()` baseline is crossed, subtracting it (not resetting to zero). The baseline is the largest active monospace/proportional profile times Clay's one line-height multiplier, so mixed inline roles cannot underestimate logical progress. Visible Parley layout height and cursor rectangles remain source of truth for rendered overflow/caret placement. This avoids the backward jump that the old "exhaust overscan budget then reset" model produced; line/page deltas (`scroll_lines`) still snap to whole lines.
 - `EditorSurface` keeps a one-shot `pin_caret_visible` flag. Caret movement sets it so the next paint can fine-tune sub-line scroll to keep the caret visible; explicit scroll clears it so `LayoutState::ensure_rect_visible` does not snap the view back to the caret after the user scrolls away.
 - Syntax/prose decorations are rendered as background tints behind text through `StyleRegistry::style_for`. The Clay default reproduces the old keyword/string/comment/operator/prose family colors, while active themes can override every `TokenType` independently (for example distinct `Heading1` and `Heading2` colors).
+- The editor accessibility root publishes the same profile-derived status rectangle and SDUI/package accessibility children used for native paint/hit geometry; accessibility updates are requested only after accepted UI/profile/tree changes.
 
 ## Tests
 
@@ -90,10 +94,11 @@ assert_eq!(observation.sync_version, Some(5));
 - `src/editor/surface.rs`: `selected_text_returns_forward_backward_unicode_ranges` and `selected_text_returns_none_for_collapsed_selection` validate UTF-8 selection extraction.
 - `src/masonry_editor.rs`: `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, and `copy_selection_failure_reports_runtime_diagnostic` validate clipboard write/no-op/failure behavior with a fake sink.
 - `src/client/clipboard.rs`: `clipboard_sink_accepts_utf8_text` validates the test sink contract without requiring a desktop clipboard.
-- `src/masonry_sdui.rs`: `workspace_browser_reserves_left_slot_after_document_id_changes` validates the editor region still excludes the left slot after the active document ID changes.
+- `src/masonry_sdui.rs`: `workspace_browser_reserves_left_slot_after_document_id_changes` validates the editor region still excludes the left slot after the active document ID changes; `ui_size_change_scales_row_hit_and_accessibility_bounds_together` locks shared UI geometry.
+- `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility` proves an UI-profile live update reaches SDUI and requests one native layout/accessibility refresh.
 - `src/masonry_editor.rs`: `editor_pointer_hit_testing_uses_non_overlapping_editor_region_after_open` validates that clicks in the left file browser do not place a caret after a document opens.
 - `src/editor/surface.rs`: `editor_surface_paint_has_no_decorative_accent_circle` and `editor_surface_uses_full_rect_background_without_visible_card_inset` source-guard the removed decorative chrome.
-- `src/editor/surface.rs`: `scroll_after_caret_move_clears_caret_pin` and `scroll_vertical_pixels_advances_viewport_after_visual_budget` validate that caret pinning is cleared by explicit scroll and that the viewport advances once the visual overflow budget is consumed.
+- `src/editor/surface.rs`: `scroll_after_caret_move_clears_caret_pin`, `scroll_vertical_pixels_advances_viewport_after_visual_budget`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`, and `empty_document_caret_uses_default_document_profile` validate bounded scroll, profile-driven geometry, reset, and placeholder-caret behavior.
 - `src/editor/theme.rs`: theme registry unit tests validate Clay defaults, token/kind dispatch, modifier attributes, hex parsing, override merge, and theme text-attribute defaults.
 - `src/editor/surface.rs`: `syntax_decoration_colors_are_distinct_by_token_family` locks the default per-token-family syntax color mapping through the registry.
 - `src/editor/surface.rs`: `visible_caret_offset_returns_none_when_caret_above_viewport` locks the overflow guard when the caret is above the visible snapshot after scrolling.
@@ -106,6 +111,7 @@ assert_eq!(observation.sync_version, Some(5));
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)
 - [Editor Theme Registry](editor-theme-registry.md)
+- [Range Diagnostics](range-diagnostics.md)
 - [Client Copy Selection Clay JS API](../../reference/clay-js-api/editor/client-copy-selection.md)
 - [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)
 - `src/client/mod.rs`

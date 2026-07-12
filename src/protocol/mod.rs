@@ -1,11 +1,13 @@
 pub mod codec;
 pub mod completion;
 pub mod decorations;
+pub mod diagnostics;
 pub mod parse;
 pub mod sdui;
 
 pub use completion::*;
 pub use decorations::*;
+pub use diagnostics::*;
 pub use parse::*;
 pub use sdui::*;
 
@@ -20,6 +22,54 @@ pub type TransactionId = u64;
 pub type LeaseId = u64;
 pub type RegionLockId = u64;
 pub type WorkspaceRootId = u64;
+
+/// Closed semantic profile selected by Clay-owned typography configuration.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontRole {
+    Monospace,
+    Proportional,
+    Ui,
+}
+
+/// Document-only role used for a document default or syntax/semantic override.
+/// `Inherit` leaves a decoration on its document default; UI is deliberately
+/// absent because diagnostics/search and document syntax cannot select it.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentFontRole {
+    Inherit,
+    Monospace,
+    Proportional,
+}
+
+impl DocumentFontRole {
+    pub const fn font_role(self) -> Option<FontRole> {
+        match self {
+            Self::Inherit => None,
+            Self::Monospace => Some(FontRole::Monospace),
+            Self::Proportional => Some(FontRole::Proportional),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "inherit" => Some(Self::Inherit),
+            "monospace" => Some(Self::Monospace),
+            "proportional" => Some(Self::Proportional),
+            _ => None,
+        }
+    }
+}
+
+impl FontRole {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "monospace" => Some(Self::Monospace),
+            "proportional" => Some(Self::Proportional),
+            "ui" => Some(Self::Ui),
+            _ => None,
+        }
+    }
+}
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct DocumentMetadata {
@@ -83,6 +133,9 @@ pub struct BehaviorManifest {
     pub manifest_id: String,
     pub behavior_version: BehaviorVersion,
     pub scope: BehaviorScope,
+    /// Clay-owned default typography role for this document. Decorations may
+    /// replace it only with a validated syntax/semantic document role.
+    pub document_font_role: DocumentFontRole,
     pub keymaps: Vec<KeyBindingRule>,
     pub commands: Vec<CommandDeclaration>,
     pub editor_rules: EditorBehaviorRules,
@@ -94,6 +147,7 @@ impl BehaviorManifest {
             manifest_id: "clay.default.text".to_string(),
             behavior_version,
             scope: BehaviorScope::GlobalDefault,
+            document_font_role: DocumentFontRole::Proportional,
             keymaps: default_keymaps(),
             commands: default_commands(),
             editor_rules: EditorBehaviorRules::default_text(),
@@ -110,6 +164,7 @@ impl BehaviorManifest {
             manifest_id: "clay.default.code".to_string(),
             behavior_version,
             scope: BehaviorScope::GlobalDefault,
+            document_font_role: DocumentFontRole::Monospace,
             keymaps: default_keymaps(),
             commands: default_commands(),
             editor_rules: EditorBehaviorRules::default_code(),
@@ -617,7 +672,7 @@ pub enum ClientMessage {
     },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
     Info,
     Warning,
@@ -662,6 +717,125 @@ pub struct TextThemeOverride {
     pub provenance: String,
 }
 
+/// A bounded ordered font-family fallback stack and logical-pixel size.
+pub const MAX_FONT_FAMILIES_PER_PROFILE: usize = 8;
+pub const MAX_FONT_FAMILY_BYTES: usize = 128;
+pub const MIN_FONT_SIZE: f32 = 6.0;
+pub const MAX_FONT_SIZE: f32 = 96.0;
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+pub struct FontProfile {
+    pub families: Vec<String>,
+    pub size: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FontProfileValidationError {
+    EmptyFamilyStack,
+    TooManyFamilies,
+    EmptyFamily,
+    FamilyTooLong,
+    ControlCharacter,
+    MissingGenericFallback,
+    InvalidSize,
+}
+
+impl FontProfile {
+    pub fn validate(&self) -> Result<(), FontProfileValidationError> {
+        if self.families.is_empty() {
+            return Err(FontProfileValidationError::EmptyFamilyStack);
+        }
+        if self.families.len() > MAX_FONT_FAMILIES_PER_PROFILE {
+            return Err(FontProfileValidationError::TooManyFamilies);
+        }
+        for family in &self.families {
+            if family.trim().is_empty() {
+                return Err(FontProfileValidationError::EmptyFamily);
+            }
+            if family.len() > MAX_FONT_FAMILY_BYTES {
+                return Err(FontProfileValidationError::FamilyTooLong);
+            }
+            if family.chars().any(char::is_control) {
+                return Err(FontProfileValidationError::ControlCharacter);
+            }
+        }
+        if !self
+            .families
+            .last()
+            .is_some_and(|family| is_generic_font_family(family))
+        {
+            return Err(FontProfileValidationError::MissingGenericFallback);
+        }
+        if !self.size.is_finite() || !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&self.size) {
+            return Err(FontProfileValidationError::InvalidSize);
+        }
+        Ok(())
+    }
+}
+
+fn is_generic_font_family(family: &str) -> bool {
+    matches!(
+        family,
+        "system-ui" | "serif" | "sans-serif" | "monospace" | "cursive" | "fantasy"
+    )
+}
+
+/// Complete typography snapshot transported separately from [`ActiveTheme`].
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+pub struct ActiveTypography {
+    pub revision: u64,
+    pub monospace: FontProfile,
+    pub proportional: FontProfile,
+    pub ui: FontProfile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActiveTypographyValidationError {
+    InvalidProfile {
+        role: FontRole,
+        source: FontProfileValidationError,
+    },
+}
+
+impl ActiveTypography {
+    pub fn profile(&self, role: FontRole) -> &FontProfile {
+        match role {
+            FontRole::Monospace => &self.monospace,
+            FontRole::Proportional => &self.proportional,
+            FontRole::Ui => &self.ui,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ActiveTypographyValidationError> {
+        for role in [FontRole::Monospace, FontRole::Proportional, FontRole::Ui] {
+            self.profile(role).validate().map_err(|source| {
+                ActiveTypographyValidationError::InvalidProfile { role, source }
+            })?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for ActiveTypography {
+    fn default() -> Self {
+        Self {
+            revision: 0,
+            monospace: FontProfile {
+                families: vec!["monospace".to_string()],
+                size: 20.0,
+            },
+            proportional: FontProfile {
+                families: vec!["sans-serif".to_string()],
+                size: 20.0,
+            },
+            ui: FontProfile {
+                families: vec!["system-ui".to_string()],
+                size: 12.0,
+            },
+        }
+    }
+}
+
 /// Resolved active theme snapshot shipped from the server (which owns package
 /// records) to the client (which owns the editor `StyleRegistry`). Sent once
 /// during the welcome handshake when `setTheme("...")` ran in `init.js`; the
@@ -674,7 +848,7 @@ pub struct ActiveTheme {
     pub overrides: Vec<TextThemeOverride>,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
 pub enum ServerMessage {
     Welcome {
         client_id: ClientId,
@@ -704,6 +878,7 @@ pub enum ServerMessage {
         update: SduiTreeUpdate,
     },
     DecorationSet(DecorationSet),
+    DiagnosticSet(DiagnosticSet),
     EditAck {
         document_id: DocumentId,
         confirmed_version: DocumentVersion,
@@ -772,6 +947,9 @@ pub enum ServerMessage {
     /// absent when no theme is selected (Clay default theme applies). The
     /// client reconstructs the `StyleRegistry` from the inert overrides.
     ActiveTheme(ActiveTheme),
+    /// User-owned typography snapshot. It is independently revisioned because
+    /// family/size changes affect shaping and geometry, unlike theme colors.
+    ActiveTypography(ActiveTypography),
     Error {
         code: ProtocolErrorCode,
         message: String,

@@ -5,7 +5,7 @@ use std::{
 };
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language, Parser, Query, QueryCursor, Tree};
+use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
 const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 128;
 
@@ -14,10 +14,14 @@ use crate::{
         modes::{DocumentClassificationInput, MajorModeActivation},
         record::{PackageRecord, SyntaxGrammarContributionDescriptor},
     },
-    perf::budgets::{DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
+    perf::budgets::{
+        DECORATION_PAYLOAD_BUDGET_BYTES, DIAGNOSTIC_MAX_SPANS_PER_SET,
+        INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    },
     protocol::{
-        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentId,
-        IncrementalParseUpdate, Modifiers, ParseEditNotification, ParseUnit, TokenType,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
+        DiagnosticSeverity, DiagnosticSpan, DocumentId, IncrementalParseUpdate, Modifiers,
+        ParseEditNotification, ParseUnit, SyntaxDiagnosticCapture, SyntaxDiagnosticKind, TokenType,
     },
     server::{
         decorations::{DecorationValidationError, SyntaxChunkCache, validate_decoration_set},
@@ -58,7 +62,7 @@ pub struct SyntaxGrammarContribution {
     pub highlights_query_path: String,
     pub locals_query_path: Option<String>,
     pub injections_query_path: Option<String>,
-    pub style_map: BTreeMap<String, String>,
+    pub style_map: BTreeMap<String, crate::packages::record::SyntaxStyleMapEntry>,
     pub timeout_ms: Option<u64>,
     pub max_window_bytes: Option<usize>,
     pub estimated_payload_bytes: usize,
@@ -194,7 +198,11 @@ pub struct NativeGrammarDescriptor {
     file_names: &'static [&'static str],
     grammar_source: &'static str,
     highlights_query_path: &'static str,
-    style_map: &'static [(&'static str, &'static str)],
+    style_map: &'static [(
+        &'static str,
+        &'static str,
+        Option<crate::protocol::DocumentFontRole>,
+    )],
     language: fn() -> Language,
 }
 
@@ -278,17 +286,27 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         file_names: &[],
         grammar_source: "tree-sitter-md-025",
         highlights_query_path: "packages/markdown/queries/highlights.scm",
-        style_map: DEFAULT_NATIVE_STYLE_MAP,
+        style_map: MARKDOWN_NATIVE_STYLE_MAP,
         language: || tree_sitter_md_025::LANGUAGE.into(),
     },
 ];
 
-const DEFAULT_NATIVE_STYLE_MAP: &[(&str, &str)] = &[
-    ("keyword", "keyword.control"),
-    ("string", "string.quoted"),
-    ("comment", "comment.line"),
-    ("punctuation", "punctuation.definition"),
-    ("text", "text"),
+const DEFAULT_NATIVE_STYLE_MAP: &[(&str, &str, Option<crate::protocol::DocumentFontRole>)] = &[
+    ("keyword", "keyword.control", None),
+    ("string", "string.quoted", None),
+    ("comment", "comment.line", None),
+    ("punctuation", "punctuation.definition", None),
+    ("text", "text", None),
+];
+
+const MARKDOWN_NATIVE_STYLE_MAP: &[(&str, &str, Option<crate::protocol::DocumentFontRole>)] = &[
+    ("punctuation", "punctuation.definition", None),
+    ("text", "text", None),
+    (
+        "code",
+        "markup.code-block",
+        Some(crate::protocol::DocumentFontRole::Monospace),
+    ),
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -723,7 +741,15 @@ fn contribution_from_native_descriptor(
         style_map: descriptor
             .style_map
             .iter()
-            .map(|(capture, token)| ((*capture).to_string(), (*token).to_string()))
+            .map(|(capture, token, font_role)| {
+                (
+                    (*capture).to_string(),
+                    crate::packages::record::SyntaxStyleMapEntry {
+                        style_token: (*token).to_string(),
+                        font_role: *font_role,
+                    },
+                )
+            })
             .collect(),
         timeout_ms: Some(5_000),
         max_window_bytes: Some(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES),
@@ -820,6 +846,7 @@ pub struct SyntaxVocabularySpan {
     pub style_token: String,
     pub token_type: TokenType,
     pub modifiers: Modifiers,
+    pub font_role: Option<crate::protocol::DocumentFontRole>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -951,7 +978,7 @@ impl TreeSitterSyntaxHandler {
             });
         }
 
-        let old_tree = self
+        let mut old_tree = self
             .trees
             .lock()
             .expect("syntax tree cache lock poisoned")
@@ -961,6 +988,16 @@ impl TreeSitterSyntaxHandler {
                     && cached.window_start == window.byte_start
             })
             .map(|cached| cached.tree.clone());
+        if let Some(old_tree) = &mut old_tree {
+            old_tree.edit(&InputEdit {
+                start_byte: 0,
+                old_end_byte: old_tree.root_node().end_byte(),
+                new_end_byte: window.text.len(),
+                start_position: Point::new(0, 0),
+                old_end_position: old_tree.root_node().end_position(),
+                new_end_position: end_point(&window.text),
+            });
+        }
 
         let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
         #[allow(deprecated)]
@@ -970,6 +1007,7 @@ impl TreeSitterSyntaxHandler {
         };
 
         let decoration_update = self.decorations_for_window(&notification, window, &tree)?;
+        let diagnostic_update = self.diagnostics_for_window(&notification, window, &tree);
         self.trees
             .lock()
             .expect("syntax tree cache lock poisoned")
@@ -1001,6 +1039,7 @@ impl TreeSitterSyntaxHandler {
                 }
             )),
             decoration_update: Some(decoration_update),
+            diagnostic_update: Some(diagnostic_update),
         })
     }
 
@@ -1014,6 +1053,49 @@ impl TreeSitterSyntaxHandler {
 
     pub fn parser_cache_id(&self) -> usize {
         Arc::as_ptr(&self.parser) as usize
+    }
+
+    fn diagnostics_for_window(
+        &self,
+        notification: &ParseEditNotification,
+        window: &crate::protocol::ParseWindowSnapshot,
+        tree: &Tree,
+    ) -> DiagnosticSet {
+        let captures = collect_syntax_diagnostics(
+            tree.root_node(),
+            &window.text,
+            window.byte_start,
+            notification.viewport,
+            DIAGNOSTIC_MAX_SPANS_PER_SET,
+        );
+        let provenance = self.contribution.provenance();
+        DiagnosticSet {
+            document_id: notification.document_id,
+            document_version: notification.document_version,
+            viewport_byte_start: notification.viewport.start,
+            viewport_byte_end: notification.viewport.end,
+            source: "tree-sitter".to_string(),
+            provenance: provenance.clone(),
+            spans: captures
+                .into_iter()
+                .map(|capture| {
+                    let (code, message) = match capture.kind {
+                        SyntaxDiagnosticKind::Error => ("syntax.error", "syntax error"),
+                        SyntaxDiagnosticKind::Missing => ("syntax.missing", "missing syntax"),
+                    };
+                    DiagnosticSpan {
+                        byte_start: capture.byte_start,
+                        byte_end: capture.byte_end,
+                        severity: DiagnosticSeverity::Error,
+                        code: code.to_string(),
+                        message: message.to_string(),
+                        source: "tree-sitter".to_string(),
+                        provenance: provenance.clone(),
+                    }
+                })
+                .collect(),
+        }
+        .sorted()
     }
 
     fn decorations_for_window(
@@ -1101,6 +1183,110 @@ impl TreeSitterSyntaxHandler {
     }
 }
 
+fn collect_syntax_diagnostics(
+    root: Node<'_>,
+    text: &str,
+    window_start: u64,
+    viewport: crate::protocol::ParseByteRange,
+    limit: usize,
+) -> Vec<SyntaxDiagnosticCapture> {
+    if !root.has_error() || text.is_empty() {
+        return Vec::new();
+    }
+
+    let viewport_start = viewport
+        .start
+        .saturating_sub(window_start)
+        .min(text.len() as u64) as usize;
+    let viewport_end = viewport
+        .end
+        .saturating_sub(window_start)
+        .min(text.len() as u64) as usize;
+    let mut stack = vec![root];
+    let mut captures = Vec::new();
+    while let Some(node) = stack.pop() {
+        if node.is_error() || node.is_missing() {
+            let range = if node.is_missing() {
+                visible_scalar_range(text, node.start_byte())
+            } else {
+                Some(node.byte_range())
+            };
+            if let Some(range) = range {
+                let start = range.start.max(viewport_start);
+                let end = range.end.min(viewport_end);
+                if start < end {
+                    captures.push(SyntaxDiagnosticCapture {
+                        byte_start: window_start.saturating_add(start as u64),
+                        byte_end: window_start.saturating_add(end as u64),
+                        kind: if node.is_missing() {
+                            SyntaxDiagnosticKind::Missing
+                        } else {
+                            SyntaxDiagnosticKind::Error
+                        },
+                    });
+                }
+            }
+        }
+
+        let mut cursor = node.walk();
+        if cursor.goto_first_child() {
+            loop {
+                let child = cursor.node();
+                if child.has_error() || child.is_error() || child.is_missing() {
+                    stack.push(child);
+                }
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+    }
+
+    captures.sort_by_key(|capture| {
+        (
+            capture.byte_end.saturating_sub(capture.byte_start),
+            capture.byte_start,
+            capture.byte_end,
+            match capture.kind {
+                SyntaxDiagnosticKind::Missing => 0,
+                SyntaxDiagnosticKind::Error => 1,
+            },
+        )
+    });
+    let mut deduplicated = Vec::<SyntaxDiagnosticCapture>::new();
+    for capture in captures {
+        if deduplicated
+            .iter()
+            .any(|kept| capture.byte_start <= kept.byte_start && kept.byte_end <= capture.byte_end)
+        {
+            continue;
+        }
+        deduplicated.push(capture);
+        if deduplicated.len() == limit {
+            break;
+        }
+    }
+    deduplicated.sort_by_key(|capture| (capture.byte_start, capture.byte_end));
+    deduplicated
+}
+
+fn end_point(text: &str) -> Point {
+    let row = text.bytes().filter(|byte| *byte == b'\n').count();
+    let column = text
+        .rsplit_once('\n')
+        .map_or(text.len(), |(_, tail)| tail.len());
+    Point::new(row, column)
+}
+
+fn visible_scalar_range(text: &str, byte_offset: usize) -> Option<std::ops::Range<usize>> {
+    if byte_offset < text.len() {
+        let scalar = text.get(byte_offset..)?.chars().next()?;
+        return Some(byte_offset..byte_offset + scalar.len_utf8());
+    }
+    let (start, scalar) = text.char_indices().next_back()?;
+    Some(start..start + scalar.len_utf8())
+}
+
 pub fn map_capture_to_vocabulary(
     contribution: &SyntaxGrammarContribution,
     capture: &SyntaxCapture,
@@ -1111,13 +1297,14 @@ pub fn map_capture_to_vocabulary(
         .ok_or_else(|| TreeSitterSyntaxError::QueryCaptureNotMapped {
             capture: capture.capture_name.clone(),
         })?;
-    let (token_type, modifiers) = TokenType::classify_style_token(style_token);
+    let (token_type, modifiers) = TokenType::classify_style_token(&style_token.style_token);
     Ok(SyntaxVocabularySpan {
         byte_start: capture.byte_start,
         byte_end: capture.byte_end,
-        style_token: style_token.clone(),
+        style_token: style_token.style_token.clone(),
         token_type,
         modifiers,
+        font_role: style_token.font_role,
     })
 }
 
@@ -1137,6 +1324,7 @@ fn captures_to_decoration_set(
             token_type: vocabulary.token_type,
             modifiers: vocabulary.modifiers,
             scope: Some(vocabulary.style_token),
+            font_role: vocabulary.font_role,
             priority: 70,
             provenance: provenance.clone(),
         });
@@ -1173,9 +1361,21 @@ fn empty_update(notification: ParseEditNotification) -> IncrementalParseUpdate {
         invalidated_ranges: notification.invalidated_ranges,
         syntax_tree_delta: None,
         decoration_update: None,
+        diagnostic_update: None,
     }
 }
 
 fn map_decoration_error(error: DecorationValidationError) -> TreeSitterSyntaxError {
     TreeSitterSyntaxError::DecorationInvalid(format!("{error:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible_scalar_range;
+
+    #[test]
+    fn missing_node_anchor_is_utf8_safe_at_middle_and_eof() {
+        assert_eq!(visible_scalar_range("aéb", 1), Some(1..3));
+        assert_eq!(visible_scalar_range("aé", 3), Some(1..3));
+    }
 }

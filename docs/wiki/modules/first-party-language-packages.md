@@ -53,7 +53,7 @@ Phase 18.14 expands the first-party `@clay/rust`, `@clay/typescript`, and `@clay
 
 ## Responsibilities
 
-- Register a package-owned major mode with generic file-extension/file-name probes.
+- Register a package-owned major mode with generic file-extension/file-name probes and semantic `defaultFontRole: "monospace"`.
 - Publish a validated `EditorBehaviorRules` manifest (indentation, delimiter pairs, comment continuation, electric outdent, autocomplete triggers).
 - Register one server-first command (`<lang>.toggleLineComment`).
 - Register one metadata-only completion provider (`<lang>.keywords`) with trigger characters derived from the behavior manifest.
@@ -204,6 +204,7 @@ Hot-path policy: parse/highlight work and completion resolution run as backgroun
 - Active syntax grammar remains selectable independently of active major mode; loading a language package does not change the mode of already-open documents.
 - Grammar artifacts are still first-party `@clay/*` only; arbitrary third-party/native grammar artifact loading is rejected.
 - Package modes always win over built-in `core.code`; built-in fallbacks remain editable with no package loaded.
+- Rust, TypeScript, and JavaScript declare `monospace` through generic mode metadata. No language name is inspected by server/client rendering code, and concrete font families/sizes remain user-owned.
 - Completion provider `triggerCharacters` must be derivable from the major-mode behavior manifest to keep autocomplete triggers consistent.
 - All UI contributions are inert declarations; packages never create Masonry widgets, mutate native layout, provide raw CSS, or run client-side JavaScript.
 - Configuration is deferred: indent size, comment tokens, etc., are package-defined defaults in Phase 18.14. Future user tuning must use package-prefixed `clay.contributions.packageOptions` entries read through `clay.configuration.setPackageOption`.

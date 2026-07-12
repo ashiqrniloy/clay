@@ -104,6 +104,7 @@ export default async function loadTypescriptPackage() {
   await serverRegisterModePattern(typescriptPackageManifest(), {
     modeId: "typescript",
     displayName: "TypeScript",
+    defaultFontRole: "monospace",
     extensions: ["ts", "tsx", "mts", "cts"],
     editorRules: typescriptEditorRules
   });

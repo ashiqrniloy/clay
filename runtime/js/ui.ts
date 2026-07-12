@@ -35,6 +35,7 @@ export type UiStatePersistence = "none" | "client-local" | "server-canonical" | 
 export type UiStateImplementationStatus = "implemented" | "deferred";
 export type UiStateSchemaKind = "boolean" | "number" | "string" | "enum" | "object";
 export type ThemeTokenType = "color-role" | "spacing" | "radius" | "typography" | "opacity";
+export type ComponentFontRole = "ui" | "monospace" | "proportional";
 export type LayoutOverrideProperty = "slot" | "visibility" | "splitRatio" | "themeToken" | "inputDefault" | "actionDefault" | "fallback";
 export type LayoutOverrideSource = "user-config" | "active-major-mode" | "compatible-minor-mode" | "global-package" | "package-default";
 
@@ -54,6 +55,7 @@ export interface ComponentStyleVariables {
   inset?: string;
   radius?: string;
   typography?: string;
+  fontRole?: ComponentFontRole;
   opacity?: string;
   variant?: "default" | "muted" | "primary" | "danger";
 }

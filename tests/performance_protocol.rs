@@ -10,18 +10,19 @@ use clay::{
             BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
             COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
             DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
-            EDIT_ACK_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
-            SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
-            SYNTAX_CACHE_BUDGET_BYTES,
+            DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
+            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
+            SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
         },
         metrics::{PerfConfig, install_global_recorder},
     },
     protocol::{
         BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
         CompletionReplacementRange, CompletionResultSet, CompletionStatus, CompletionTrigger,
-        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentAccess,
-        EditOperation, IncrementalParseUpdate, ParseByteRange, ParseEditNotification, ParsePolicy,
-        ParseUnit, ParseWindowRequest, ParseWindowSnapshot, ServerMessage, SyntaxMemoryBudget,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
+        DiagnosticSeverity, DiagnosticSpan, DocumentAccess, EditOperation, IncrementalParseUpdate,
+        ParseByteRange, ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowRequest,
+        ParseWindowSnapshot, ServerMessage, SyntaxMemoryBudget,
         codec::{Codec, CodecError},
     },
     server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
@@ -77,6 +78,7 @@ fn markdown_parse_update_from_notification(
         invalidated_ranges: notification.invalidated_ranges,
         syntax_tree_delta: Some("windowed:visible".to_string()),
         decoration_update: None,
+        diagnostic_update: None,
     }
 }
 
@@ -232,6 +234,93 @@ fn decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport() {
 }
 
 #[test]
+fn representative_diagnostic_chunk_payload_stays_bounded() {
+    let provenance = DecorationProvenance {
+        package_name: "@clay/rust".to_string(),
+        package_version: "0.1.0".to_string(),
+        package_prefix: "rust".to_string(),
+    };
+    let set = DiagnosticSet {
+        document_id: 7,
+        document_version: 3,
+        viewport_byte_start: 0,
+        viewport_byte_end: 4096,
+        source: "tree-sitter".to_string(),
+        provenance: provenance.clone(),
+        spans: vec![DiagnosticSpan {
+            byte_start: 8,
+            byte_end: 9,
+            severity: DiagnosticSeverity::Error,
+            code: "syntax.error".to_string(),
+            message: "unexpected token".to_string(),
+            source: "tree-sitter".to_string(),
+            provenance,
+        }],
+    };
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&set)
+        .expect("diagnostic chunk serializes")
+        .len();
+
+    assert!(bytes <= DIAGNOSTIC_PAYLOAD_BUDGET_BYTES);
+}
+
+#[test]
+fn combined_parse_update_stays_within_incremental_payload_budget() {
+    let provenance = DecorationProvenance {
+        package_name: "@clay/markdown".to_string(),
+        package_version: "0.1.0".to_string(),
+        package_prefix: "markdown".to_string(),
+    };
+    let update = IncrementalParseUpdate {
+        document_id: 7,
+        document_version: 3,
+        behavior_version: 1,
+        package_prefix: "markdown".to_string(),
+        mode_id: "markdown".to_string(),
+        parse_unit: ParseUnit::LineGroup,
+        viewport: ParseByteRange::new(0, 4096),
+        invalidated_ranges: vec![ParseByteRange::new(8, 9)],
+        syntax_tree_delta: None,
+        decoration_update: Some(DecorationSet {
+            document_id: 7,
+            document_version: 3,
+            viewport_byte_start: 0,
+            viewport_byte_end: 4096,
+            spans: vec![DecorationSpan::from_style_token(
+                8,
+                9,
+                DecorationKind::Syntax,
+                "punctuation.definition",
+                10,
+                provenance.clone(),
+            )],
+        }),
+        diagnostic_update: Some(DiagnosticSet {
+            document_id: 7,
+            document_version: 3,
+            viewport_byte_start: 0,
+            viewport_byte_end: 4096,
+            source: "markdown-parser".to_string(),
+            provenance: provenance.clone(),
+            spans: vec![DiagnosticSpan {
+                byte_start: 8,
+                byte_end: 9,
+                severity: DiagnosticSeverity::Error,
+                code: "syntax.error".to_string(),
+                message: "syntax error".to_string(),
+                source: "markdown-parser".to_string(),
+                provenance,
+            }],
+        }),
+    };
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&update)
+        .expect("combined update serializes")
+        .len();
+
+    assert!(bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
+}
+
+#[test]
 fn representative_completion_result_payload_stays_bounded() {
     // A representative full completion result set (max items, short labels)
     // must stay under `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` so completion
@@ -374,6 +463,97 @@ async fn markdown_large_file_typing_does_not_wait_for_windowed_parse() {
     assert!(
         started.elapsed() < Duration::from_millis(25),
         "local large-file typing must not wait for slow windowed parser"
+    );
+}
+
+#[tokio::test]
+async fn valid_to_invalid_edit_keeps_local_typing_non_blocking() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_parse_permission();
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                let mut update = markdown_parse_update_from_notification(notification.clone());
+                let provenance = DecorationProvenance {
+                    package_name: "@clay/markdown".to_string(),
+                    package_version: "0.1.0".to_string(),
+                    package_prefix: "markdown".to_string(),
+                };
+                update.diagnostic_update = Some(DiagnosticSet {
+                    document_id: notification.document_id,
+                    document_version: notification.document_version,
+                    viewport_byte_start: notification.viewport.start,
+                    viewport_byte_end: notification.viewport.end,
+                    source: "tree-sitter".to_string(),
+                    provenance: provenance.clone(),
+                    spans: vec![DiagnosticSpan {
+                        byte_start: notification.viewport.start,
+                        byte_end: notification.viewport.start + 1,
+                        severity: DiagnosticSeverity::Error,
+                        code: "syntax.error".to_string(),
+                        message: "syntax error".to_string(),
+                        source: "tree-sitter".to_string(),
+                        provenance,
+                    }],
+                });
+                Ok(update)
+            },
+        )
+        .expect("Markdown parse handler registers");
+
+    let mut surface = EditorSurface::default();
+    surface.load_snapshot(
+        7,
+        1,
+        "fn main() {}\n".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    surface.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+    surface.command(EditorCommand::DocumentEnd);
+
+    let window_text = "fn main() {}\n".to_string();
+    let window_end = window_text.len() as u64;
+    let started = Instant::now();
+    coordinator
+        .schedule_parse_with_windows(
+            ParseScheduleRequest {
+                document_id: 7,
+                document_version: 1,
+                behavior_version: 3,
+                package_prefix: "markdown".to_string(),
+                mode_id: "markdown".to_string(),
+                viewport: ParseByteRange::new(0, window_end),
+                invalidated_ranges: vec![ParseByteRange::new(0, window_end)],
+            },
+            vec![ParseWindowSnapshot {
+                document_id: 7,
+                document_version: 1,
+                package_prefix: "markdown".to_string(),
+                mode_id: "markdown".to_string(),
+                byte_start: 0,
+                byte_end: window_end,
+                base_line: 0,
+                text: window_text,
+            }],
+            Some(ParsePolicy::new(
+                64 * 1024,
+                4 * 1024,
+                SYNTAX_CACHE_BUDGET_BYTES as u64,
+                50,
+            )),
+        )
+        .expect("diagnostic parse schedules in background");
+    let outcome = surface.command_with_event(EditorCommand::Insert("!"));
+
+    assert!(outcome.changed);
+    assert_eq!(surface.visible_text(), "fn main() {}\n!");
+    assert_eq!(surface.diagnostic_span_count(), 0);
+    assert!(
+        started.elapsed() < Duration::from_millis(25),
+        "local typing must not wait for slow diagnostic-producing parse"
     );
 }
 

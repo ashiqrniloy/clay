@@ -7,8 +7,8 @@ use serde_json::{Map, Value, json};
 use crate::{
     packages::record::{PackageRecord, assemble_package_record},
     protocol::{
-        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentId,
-        DocumentVersion,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentFontRole,
+        DocumentId, DocumentVersion,
     },
     server::decorations::{DecorationValidationError, validate_decoration_publication},
 };
@@ -103,7 +103,25 @@ fn span_from_value(
             )));
         }
     };
-    Ok(DecorationSpan::from_style_token(
+    let font_role = match object.get("fontRole") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(role)) => match DocumentFontRole::from_name(role) {
+            Some(role @ (DocumentFontRole::Monospace | DocumentFontRole::Proportional)) => {
+                Some(role)
+            }
+            _ => {
+                return Err(clay_error(
+                    "clay.decorations.invalid_span: fontRole must be `monospace` or `proportional`",
+                ));
+            }
+        },
+        Some(_) => {
+            return Err(clay_error(
+                "clay.decorations.invalid_span: fontRole must be a semantic role string",
+            ));
+        }
+    };
+    let mut span = DecorationSpan::from_style_token(
         required_u64(object, "byteStart", "clay.decorations.invalid_span")?,
         required_u64(object, "byteEnd", "clay.decorations.invalid_span")?,
         kind,
@@ -114,7 +132,9 @@ fn span_from_value(
             package_version: package.manifest.version.clone(),
             package_prefix: package.manifest.clay.api_prefix.clone(),
         },
-    ))
+    );
+    span.font_role = font_role;
+    Ok(span)
 }
 
 pub(super) fn package_from_options(

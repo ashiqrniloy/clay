@@ -22,7 +22,9 @@
       "parse-document",
       "render-decorations"
     ],
-    "modes": ["markdown"],
+    "modes": [
+      "markdown"
+    ],
     "docs": "./docs/index.md",
     "apiDependencies": [
       "clay.modes.serverRegisterModePattern",
@@ -40,8 +42,15 @@
         {
           "mode": "markdown",
           "displayName": "Markdown",
-          "extensions": ["md", "markdown", "mdown"],
-          "mimeTypes": ["text/markdown"]
+          "extensions": [
+            "md",
+            "markdown",
+            "mdown"
+          ],
+          "mimeTypes": [
+            "text/markdown"
+          ],
+          "defaultFontRole": "proportional"
         }
       ],
       "commands": [

@@ -120,6 +120,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
   await clay.modes.serverRegisterModePattern(packageManifest, {
     modeId,
     displayName: "Markdown",
+    defaultFontRole: "proportional",
     extensions: supportedExtensions,
     mimeTypes: supportedMimeTypes,
     editorRules: MARKDOWN_EDITOR_RULES,

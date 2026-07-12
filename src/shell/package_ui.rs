@@ -16,6 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use masonry::kurbo::Rect;
 use serde_json::{Map, Value};
 
+use crate::{editor::typography::UiTextVariant, protocol::FontRole};
+
 use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
 use super::transient_menu::{
     TransientMenuFocusPolicy, TransientMenuItem, TransientMenuSession, TransientMenuStatus,
@@ -99,6 +101,8 @@ pub(crate) struct PackageInputRouting {
 pub(crate) struct PackageUiComponentTree {
     pub(crate) id: String,
     pub(crate) kind: String,
+    pub(crate) font_role: FontRole,
+    pub(crate) text_variant: Option<UiTextVariant>,
     pub(crate) title: Option<String>,
     pub(crate) text: Option<String>,
     pub(crate) label: Option<String>,
@@ -425,6 +429,8 @@ impl TransientPackageOverlay {
             PackageUiComponentTree {
                 id: prompt_id,
                 kind: "label".to_string(),
+                font_role: FontRole::Ui,
+                text_variant: None,
                 title: None,
                 text: Some(session.prompt().to_string()),
                 label: Some(session.prompt().to_string()),
@@ -435,6 +441,8 @@ impl TransientPackageOverlay {
             PackageUiComponentTree {
                 id: query_id,
                 kind: "label".to_string(),
+                font_role: FontRole::Ui,
+                text_variant: None,
                 title: None,
                 text: Some(session.query().to_string()),
                 label: Some(session.query().to_string()),
@@ -449,6 +457,8 @@ impl TransientPackageOverlay {
                 children.push(PackageUiComponentTree {
                     id: status_id,
                     kind: "statusItem".to_string(),
+                    font_role: FontRole::Ui,
+                    text_variant: Some(UiTextVariant::Status),
                     title: None,
                     text: Some(message.clone()),
                     label: Some(message.clone()),
@@ -474,6 +484,8 @@ impl TransientPackageOverlay {
                 children.push(PackageUiComponentTree {
                     id: list_id,
                     kind: "list".to_string(),
+                    font_role: FontRole::Ui,
+                    text_variant: None,
                     title: None,
                     text: None,
                     label: None,
@@ -492,6 +504,8 @@ impl TransientPackageOverlay {
                     component: PackageUiComponentTree {
                         id: format!("clay.menu.{}.root", session.session_id().0),
                         kind: "stack".to_string(),
+                        font_role: FontRole::Ui,
+                        text_variant: None,
                         title: Some(session.prompt().to_string()),
                         text: None,
                         label: Some(session.prompt().to_string()),
@@ -515,6 +529,8 @@ impl TransientPackageOverlay {
             component: PackageUiComponentTree {
                 id: format!("clay.menu.{}.root", session.session_id().0),
                 kind: "stack".to_string(),
+                font_role: FontRole::Ui,
+                text_variant: None,
                 title: Some(session.prompt().to_string()),
                 text: None,
                 label: Some(session.prompt().to_string()),
@@ -587,6 +603,19 @@ impl PackageUiComponentTree {
     fn from_object(object: &Map<String, Value>) -> Result<Self, String> {
         let id = required_text(object, "id")?.to_string();
         let kind = required_text(object, "kind")?.to_string();
+        let font_role = object
+            .get("style")
+            .and_then(Value::as_object)
+            .and_then(|style| style.get("fontRole"))
+            .and_then(Value::as_str)
+            .and_then(FontRole::from_name)
+            .unwrap_or(FontRole::Ui);
+        let text_variant = object
+            .get("style")
+            .and_then(Value::as_object)
+            .and_then(|style| style.get("typography"))
+            .and_then(Value::as_str)
+            .map(UiTextVariant::from_typography_token);
         let title = optional_text(object, "title").map(ToOwned::to_owned);
         let text = optional_text(object, "text").map(ToOwned::to_owned);
         let label = optional_text(object, "label").map(ToOwned::to_owned);
@@ -620,6 +649,8 @@ impl PackageUiComponentTree {
         Ok(Self {
             id,
             kind,
+            font_role,
+            text_variant,
             title,
             text,
             label,
@@ -723,6 +754,25 @@ mod tests {
             }]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn package_components_default_to_ui_typography() {
+        let component = PackageUiComponentTree::from_declaration(&json!({
+            "kind": "panel",
+            "id": "markdown.preview.root",
+            "title": "Preview",
+            "children": [{
+                "kind": "label",
+                "id": "markdown.preview.label",
+                "text": "Ready"
+            }]
+        }))
+        .unwrap();
+
+        assert_eq!(component.font_role, FontRole::Ui);
+        assert_eq!(component.children[0].font_role, FontRole::Ui);
+        assert_eq!(component.children[0].text_variant, None);
     }
 
     #[test]

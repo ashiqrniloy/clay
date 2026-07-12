@@ -5,6 +5,7 @@ mod configuration;
 mod connection;
 pub(crate) mod control_center;
 pub mod decorations;
+pub mod diagnostics;
 pub(crate) mod document;
 #[allow(dead_code)]
 pub(crate) mod git;
@@ -33,7 +34,10 @@ use std::{
 #[cfg(unix)]
 use std::{fs, os::unix::fs::FileTypeExt, path::Path};
 
-use tokio::{sync::Mutex, task::JoinSet};
+use tokio::{
+    sync::{Mutex, broadcast},
+    task::JoinSet,
+};
 
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -106,13 +110,86 @@ impl RuntimeGeneration {
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeGenerationStore {
     current: Arc<Mutex<RuntimeGeneration>>,
+    typography: ActiveTypographyState,
+}
+
+/// Server-owned active typography and bounded live-update channel.
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveTypographyState {
+    current: Arc<Mutex<crate::protocol::ActiveTypography>>,
+    updates: broadcast::Sender<crate::protocol::ActiveTypography>,
+}
+
+impl Default for ActiveTypographyState {
+    fn default() -> Self {
+        let (updates, _) = broadcast::channel(16);
+        Self {
+            current: Arc::new(Mutex::new(crate::protocol::ActiveTypography::default())),
+            updates,
+        }
+    }
+}
+
+impl ActiveTypographyState {
+    pub(crate) async fn snapshot(&self) -> crate::protocol::ActiveTypography {
+        self.current.lock().await.clone()
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<crate::protocol::ActiveTypography> {
+        self.updates.subscribe()
+    }
+
+    /// Replace all profiles only after complete validation. Equal profiles keep
+    /// their revision and emit no duplicate client event.
+    pub(crate) async fn replace(
+        &self,
+        mut typography: crate::protocol::ActiveTypography,
+    ) -> Result<
+        Option<crate::protocol::ActiveTypography>,
+        crate::protocol::ActiveTypographyValidationError,
+    > {
+        typography.validate()?;
+        let mut current = self.current.lock().await;
+        if current.monospace == typography.monospace
+            && current.proportional == typography.proportional
+            && current.ui == typography.ui
+        {
+            return Ok(None);
+        }
+        typography.revision = current.revision.saturating_add(1);
+        *current = typography.clone();
+        drop(current);
+        let _ = self.updates.send(typography.clone());
+        Ok(Some(typography))
+    }
 }
 
 impl RuntimeGenerationStore {
     fn initial() -> Self {
         Self {
             current: Arc::new(Mutex::new(RuntimeGeneration::initial())),
+            typography: ActiveTypographyState::default(),
         }
+    }
+
+    pub(crate) async fn active_typography(&self) -> crate::protocol::ActiveTypography {
+        self.typography.snapshot().await
+    }
+
+    pub(crate) fn subscribe_typography(
+        &self,
+    ) -> broadcast::Receiver<crate::protocol::ActiveTypography> {
+        self.typography.subscribe()
+    }
+
+    pub(crate) async fn replace_typography(
+        &self,
+        typography: crate::protocol::ActiveTypography,
+    ) -> Result<
+        Option<crate::protocol::ActiveTypography>,
+        crate::protocol::ActiveTypographyValidationError,
+    > {
+        self.typography.replace(typography).await
     }
 
     pub(crate) async fn generation_id(&self) -> u64 {
@@ -137,14 +214,14 @@ impl RuntimeGenerationStore {
 }
 
 #[doc(hidden)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReloadedDocumentRefresh {
     pub document_id: DocumentId,
     pub messages: Vec<ServerMessage>,
 }
 
 #[doc(hidden)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeReloadOutcome {
     pub previous_generation_id: u64,
     pub active_generation_id: u64,
@@ -327,6 +404,9 @@ impl IpcServer {
                 if let Some(evaluation) = evaluation {
                     self.apply_runtime_evaluation(next_generation_id, &next_service, evaluation)
                         .await;
+                } else {
+                    self.install_active_typography(crate::protocol::ActiveTypography::default())
+                        .await;
                 }
                 self.parse_coordinator
                     .cancel_generation(previous_generation_id);
@@ -423,6 +503,8 @@ impl IpcServer {
         // `init.js` onto the shared slot the welcome handshake ships to the
         // client. `None` clears any previously selected theme on reload.
         *self.active_theme.lock().await = evaluation.active_theme.clone();
+        self.install_active_typography(evaluation.active_typography.clone().unwrap_or_default())
+            .await;
 
         if let Err(error) =
             service.register_parse_handlers(&self.parse_coordinator, generation_id, &evaluation)
@@ -445,6 +527,18 @@ impl IpcServer {
                 diagnostic.code, diagnostic.message
             );
             self.runtime_diagnostics.lock().await.push(diagnostic);
+        }
+    }
+
+    async fn install_active_typography(&self, typography: crate::protocol::ActiveTypography) {
+        if let Err(error) = self.runtime_generation.replace_typography(typography).await {
+            self.runtime_diagnostics
+                .lock()
+                .await
+                .push(RuntimeDiagnostic::error(
+                    "clay.typography.invalid_configuration",
+                    format!("Typography configuration failed validation: {error:?}"),
+                ));
         }
     }
 
@@ -510,6 +604,12 @@ pub(crate) struct RuntimeOutputApplication {
         reason = "selected-file activation consumes decoration output directly; startup config keeps it for future caller parity"
     )]
     pub(crate) decorations: Option<crate::protocol::DecorationSet>,
+    /// Published range-diagnostic set, passed through for the caller to emit.
+    #[allow(
+        dead_code,
+        reason = "package diagnostic publication is observed via evaluation; live delivery uses protocol DiagnosticSet"
+    )]
+    pub(crate) diagnostic_set: Option<crate::protocol::DiagnosticSet>,
 }
 
 impl RuntimeOutputApplication {
@@ -576,6 +676,7 @@ pub(crate) async fn apply_runtime_outputs(
         behavior: behavior_out,
         sdui: sdui_out,
         decorations: evaluation.published_decoration_set.clone(),
+        diagnostic_set: evaluation.published_diagnostic_set.clone(),
     }
 }
 
@@ -603,6 +704,7 @@ pub(crate) async fn apply_runtime_outputs_without_sdui(
         behavior: behavior_out,
         sdui: None,
         decorations: evaluation.published_decoration_set.clone(),
+        diagnostic_set: evaluation.published_diagnostic_set.clone(),
     }
 }
 
@@ -969,6 +1071,7 @@ mod runtime_outputs_tests {
             op_records: vec![],
             published_sdui_tree: Some(default_document_tree(1, 1)),
             published_decoration_set: None,
+            published_diagnostic_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: Some(valid_manifest()),
@@ -976,6 +1079,7 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             completion_providers: vec![],
             active_theme: None,
+            active_typography: None,
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -1004,6 +1108,7 @@ mod runtime_outputs_tests {
             op_records: vec![],
             published_sdui_tree: Some(default_document_tree(2, 1)),
             published_decoration_set: Some(empty_decoration_set(1)),
+            published_diagnostic_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: Some(valid_manifest()),
@@ -1011,6 +1116,7 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             completion_providers: vec![],
             active_theme: None,
+            active_typography: None,
         };
 
         let application = apply_runtime_outputs_without_sdui(&evaluation, &behavior).await;
@@ -1041,6 +1147,7 @@ mod runtime_outputs_tests {
             op_records: vec![],
             published_sdui_tree: Some(default_document_tree(2, 1)),
             published_decoration_set: None,
+            published_diagnostic_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: None,
@@ -1048,6 +1155,7 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             completion_providers: vec![],
             active_theme: None,
+            active_typography: None,
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -1077,6 +1185,7 @@ mod runtime_outputs_tests {
             op_records: vec![],
             published_sdui_tree: None,
             published_decoration_set: Some(set.clone()),
+            published_diagnostic_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: None,
@@ -1084,6 +1193,7 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             completion_providers: vec![],
             active_theme: None,
+            active_typography: None,
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -1125,6 +1235,61 @@ mod runtime_generation_tests {
         let mut config = ServerConfig::new(IpcEndpoint::from_argument("runtime-generation-test"));
         config.configuration_root = Some(root);
         IpcServer::new(config)
+    }
+
+    #[tokio::test]
+    async fn typography_defaults_exist_without_init_configuration() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "typography-defaults",
+        )));
+
+        assert_eq!(
+            server.runtime_generation.active_typography().await,
+            crate::protocol::ActiveTypography::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn typography_update_reaches_connected_clients_once() {
+        let root = temp_config_root(
+            "typography-live-update",
+            r#"import { setTypography } from "clay:theme";
+            setTypography({
+              monospace: { families: ["monospace"], size: 16 },
+              proportional: { families: ["sans-serif"], size: 17 },
+              ui: { families: ["system-ui"], size: 13 },
+            });"#,
+        );
+        let server = server_with_config(root.clone());
+        let mut updates = server.runtime_generation.subscribe_typography();
+
+        assert!(server.reload_runtime_generation().await.reloaded);
+        let update = tokio::time::timeout(std::time::Duration::from_millis(100), updates.recv())
+            .await
+            .expect("connected client receives typography update")
+            .expect("typography channel remains open");
+        assert_eq!(update.revision, 1);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), updates.recv())
+                .await
+                .is_err(),
+            "one atomic replacement emits one update"
+        );
+
+        fs::write(
+            root.join("init.js"),
+            r#"import { setTypography } from "clay:theme";
+            setTypography({
+              monospace: { families: ["monospace"], size: 16 },
+              proportional: { families: ["sans-serif"], size: 17 },
+            });"#,
+        )
+        .unwrap();
+        assert!(!server.reload_runtime_generation().await.reloaded);
+        assert_eq!(
+            server.runtime_generation.active_typography().await.revision,
+            1
+        );
     }
 
     #[tokio::test]
@@ -1437,6 +1602,7 @@ mod tests {
             };
         let _manifest = codec.read_server_message(&mut stream).await.unwrap();
         let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
         assert!(matches!(
             codec.read_server_message(&mut stream).await.unwrap(),
             ServerMessage::FileOpenCapabilityIssued { .. }

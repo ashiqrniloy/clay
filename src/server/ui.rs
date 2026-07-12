@@ -1155,7 +1155,7 @@ impl<'a> ComponentValidationContext<'a> {
             UiContributionRule::InvalidComponent,
             &context,
         )?;
-        validate_component_kind(kind).map_err(|error| {
+        let component_kind = validate_component_kind(kind).map_err(|error| {
             context.error(
                 UiContributionRule::InvalidComponent,
                 Some(&error.field),
@@ -1187,6 +1187,17 @@ impl<'a> ComponentValidationContext<'a> {
                 };
                 context.error(rule, Some(&error.field), error.message)
             })?;
+        if style_variables
+            .iter()
+            .any(|variable| variable.name == "fontRole")
+            && !component_kind.supports_text_font_role()
+        {
+            return Err(context.error(
+                UiContributionRule::InvalidComponent,
+                Some(&id),
+                "style.fontRole is only supported by text-bearing panel, label, button, list, and statusItem components",
+            ));
+        }
         self.style_variable_count += style_variables.len();
         if let Some(action) = object.get("action").and_then(Value::as_object) {
             let command_id = required_str(
@@ -1851,6 +1862,61 @@ mod tests {
                 .clay
                 .permissions
                 .contains(&PackagePermission::CommandRegistration)
+        );
+    }
+
+    #[test]
+    fn package_component_font_role_is_semantic_and_text_only() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let commands = Vec::new();
+
+        let accepted = registry
+            .register_component(
+                &package,
+                &json!({
+                    "kind": "label",
+                    "id": "markdown.preview.code",
+                    "text": "cargo test",
+                    "style": { "fontRole": "monospace" }
+                }),
+                &commands,
+            )
+            .unwrap();
+        assert_eq!(accepted.style_variable_count, 1);
+
+        for style in [
+            json!({ "fontRole": "serif" }),
+            json!({ "fontFamily": "JetBrains Mono" }),
+            json!({ "fontSize": 18 }),
+        ] {
+            assert!(
+                registry
+                    .register_component(
+                        &package,
+                        &json!({
+                            "kind": "label",
+                            "id": format!("markdown.preview.invalid{}", registry.components.len()),
+                            "text": "bad",
+                            "style": style
+                        }),
+                        &commands,
+                    )
+                    .is_err()
+            );
+        }
+        assert!(
+            registry
+                .register_component(
+                    &package,
+                    &json!({
+                        "kind": "stack",
+                        "id": "markdown.preview.stack",
+                        "style": { "fontRole": "monospace" }
+                    }),
+                    &commands,
+                )
+                .is_err()
         );
     }
 

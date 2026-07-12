@@ -1092,6 +1092,29 @@ current_rust_owner = "src/server/decorations.rs::validate_decoration_publication
 registry_public = true
 
 [[api]]
+id = "clay.diagnostics.serverPublishDiagnostics"
+category = "range-diagnostic-publication"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:diagnostics"
+js_export = "serverPublishDiagnostics"
+user_facing_name = "Publish Diagnostics"
+authority = "server-first-diagnostic-publication"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Diagnostic publication is background and viewport-prioritized; it must not block ordinary typing, and the client paints validated inert severity marks locally without package JavaScript in paint or text-event handlers."
+facade_path = "runtime/js/diagnostics.ts::serverPublishDiagnostics"
+backing_rust = "src/server/diagnostics.rs::validate_diagnostic_publication"
+deno_op = "op_clay_diagnostics_publish_diagnostics"
+deno_op_path = "src/server/ops/diagnostics.rs::op_clay_diagnostics_publish_diagnostics"
+documentation_path = "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md"
+key_bindings = []
+custom_properties = ["documentId:number=required", "documentVersion:number=required", "viewport:range=required", "source:string=required", "spans:DiagnosticSpan[]=bounded", "packagePrefix:string=required"]
+permissions = ["render-decorations"]
+security_notes = "Requires render-decorations permission plus server validation of document version, byte ranges, payload size, source/code/message bounds, package provenance, and viewport bounds; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
+current_rust_owner = "src/server/diagnostics.rs::validate_diagnostic_publication; src/protocol/diagnostics.rs::DiagnosticSet"
+registry_public = true
+
+[[api]]
 id = "clay.parse.serverRegisterParseHandler"
 category = "incremental-parse-handler"
 visibility = "public"
@@ -2117,4 +2140,27 @@ custom_properties = ["specifier:string=required"]
 permissions = []
 security_notes = "Accepts only bundled first-party @clay/* theme specifiers and static inert textStyles data; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, renderer callbacks, client hooks, or arbitrary third-party theme execution authority."
 current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_theme"
+registry_public = true
+
+[[api]]
+id = "clay.theme.setTypography"
+category = "typography"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:theme"
+js_export = "setTypography"
+user_facing_name = "Set Typography"
+authority = "user-owned-inert-typography-configuration"
+runtime_path = "init-js-op-to-active-typography-bootstrap-and-live-update"
+hot_path_policy = "Configuration-time only; one complete bounded profile set becomes cached client typography/layout state. Keypress, text-event, paint, layout, pointer, and scroll paths run no JavaScript, IPC, filesystem, network, shell, or font-discovery work."
+facade_path = "runtime/js/theme.ts::setTypography"
+backing_rust = "src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography"
+deno_op = "op_clay_theme_set_typography"
+deno_op_path = "src/server/ops/typography.rs::op_clay_theme_set_typography"
+documentation_path = "docs/reference/clay-js-api/theme/set-typography.md"
+key_bindings = []
+custom_properties = ["monospace.families:string[]=[monospace]", "monospace.size:number=20", "proportional.families:string[]=[sans-serif]", "proportional.size:number=20", "ui.families:string[]=[system-ui]", "ui.size:number=12"]
+permissions = []
+security_notes = "Accepts one bounded inert three-profile value; performs no installed-font validation, font-file access, URL fetch, or download and does not grant filesystem, network, shell, package, extension loading, workspace mutation, AI mutation, native widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Packages may select semantic roles but cannot override concrete user values."
+current_rust_owner = "src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography"
 registry_public = true

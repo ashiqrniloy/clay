@@ -56,6 +56,10 @@ Phase 18.14 keeps TypeScript editing defaults (2-space indentation, `//` line co
 
 Tier 1 native highlighting uses Clay's compiled `tree-sitter-typescript = 0.23.2` dependency for TypeScript and TSX plus the package query at `packages/typescript/queries/highlights.scm`. Tier 2 uses the package-root-confined `./grammars/typescript.wasm` through the shared web-tree-sitter host adapter only after explicit `setSyntaxEnginePreference("typescript", "wasm")`; package load order cannot replace native Tier 1. Tier 3 remains the server-side package-JS parse-handler route when `setSyntaxEnginePreference("typescript", "javascript")` is selected or no grammar is available. All routes map captures through the shared `TokenType` + `Modifiers` vocabulary pipeline. Until a WASM binary is committed, `packages/typescript/grammars/PROVENANCE.md` records the reproducible build command and required SHA-256 recording step. Runtime never fetches, builds, shells out, or loads native libraries for this artifact.
 
+## Typography
+
+TypeScript mode declares semantic `defaultFontRole: "monospace"`. User typography owns the selected family fallback stack and size; package metadata supplies no concrete font values. See [Semantic Typography Roles](../primitives/typography.md).
+
 ## Security and Performance
 
 Permissions are limited to `mode-registration`, `command-registration`, `completion-provider`, `parse-document`, and `render-decorations`. The package does not request filesystem, network, shell, AI, WASM-authority, raw-op, native-ui, client-runtime, package-manager, package-control, or workspace mutation authority.

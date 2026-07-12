@@ -4,9 +4,11 @@
 
 - `src/client/mod.rs`
 - `src/editor/surface.rs`
+- `src/editor/typography.rs`
 - `src/editor/buffer.rs`
 - `src/masonry_editor.rs`
 - `src/main.rs`
+- `src/server/connection.rs`
 - `src/ipc.rs`
 
 ## Overview
@@ -16,7 +18,7 @@ The native app starts as a client unit that initializes the Masonry editor from 
 ## Responsibilities
 
 - `src/ipc.rs` models the configured local IPC endpoint as a Unix socket path on Unix or a Windows local named pipe name on Windows.
-- `src/client/mod.rs` connects to Unix socket endpoints on Unix and Windows named-pipe endpoints on Windows, while its shared handshake and background connection loop operate on any `AsyncRead + AsyncWrite` stream; the expected `Welcome`, `InitialDocument`, and `BehaviorManifest` messages become `ClientInitialState`, and later runtime diagnostics become client connection events.
+- `src/client/mod.rs` connects to Unix socket endpoints on Unix and Windows named-pipe endpoints on Windows, while its shared handshake and background connection loop operate on any `AsyncRead + AsyncWrite` stream; the expected `Welcome`, `InitialDocument`, `BehaviorManifest`, `ActiveTheme`, and validated `ActiveTypography` messages become `ClientInitialState`, and later runtime diagnostics/typography updates become client connection events.
 - `ClientEditQueue` is created after bootstrap with the server-confirmed document version, client ID, and optional editable lease.
 - `EditorSurface::load_snapshot` replaces the local shadow buffer at startup or resync and resets caret, selection, viewport, layout cache, and scroll state.
 - `EditorSurface::install_behavior_manifest` stores the behavior version and manifest data without executing scripts.
@@ -32,8 +34,10 @@ The bootstrap expects messages in this order:
 1. `Welcome` with the current protocol version.
 2. `InitialDocument` with document ID, server version, text, editable/read-only access mode, and optional lease ID.
 3. `BehaviorManifest` with the server-issued behavior version and inert client-first text editing capabilities.
+4. `ActiveTheme` with colors/text attributes.
+5. `ActiveTypography` with all three bounded family-stack/size profiles and its authoritative revision.
 
-The returned `ClientInitialState` is passed to `EditorWidget::with_initial_state`. That constructor calls `EditorSurface::load_snapshot` and `EditorSurface::install_behavior_manifest`, keeping Masonry responsible only for widget lifecycle and native input/rendering. `connect_from_stream` also returns a `ClientEditQueue` and event receiver so later edits, acknowledgements, rejections, and resync snapshots stay on background tasks instead of in the GUI hot path.
+The returned `ClientInitialState` is passed to `EditorWidget::with_initial_state`. That constructor calls `EditorSurface::load_snapshot`, `EditorSurface::install_behavior_manifest`, and installs `TypographyRegistry` before first paint, keeping Masonry responsible only for widget lifecycle and native input/rendering. `TypographyRegistry` parses each bounded family name once into Parley `FontFamily` values; generic fallback stays local and no paint/layout path performs IPC, JavaScript, filesystem scans, or font-name parsing. `connect_from_stream` also returns a `ClientEditQueue` and event receiver so later edits, acknowledgements, rejections, and resync snapshots stay on background tasks instead of in the GUI hot path.
 
 ## Code Examples
 
@@ -56,10 +60,13 @@ let widget = clay::masonry_editor::EditorWidget::with_initial_state(state);
 - Client bootstrap connects only to the configured local IPC endpoint: Unix sockets on Unix and local named pipes on Windows. Failed decodes, unexpected messages, server errors, connection failures, endpoint validation errors, and timeouts are returned as categorized `ClientBootstrapError` values instead of panicking.
 - Editable/read-only access from the server is authoritative. Read-only snapshots allow navigation/selection but block local text mutation and edit queue emission.
 - Runtime diagnostics are asynchronous status events. They update UI status text but do not block bootstrap, rendering, typing, edit queueing, or behavior routing.
+- `ActiveTypography` is revalidated both during bootstrap and when received live. Invalid/stale snapshots are ignored without changing cached typography, layout, or scroll state. A newer revision resets stale editor layout/visual-scroll state; `src/main.rs` requests Masonry layout, render, and accessibility updates exactly for that changed event.
 
 ## Tests
 
-- `src/client/mod.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState` with version and access metadata over a generic in-memory async stream.
+- `src/client/mod.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState` with version, access, and default `ActiveTypography` metadata over a generic in-memory async stream.
+- `src/editor/typography.rs`: registry tests cover role/size/revision resolution, equal-revision no-op behavior, and preservation of a generic fallback after a missing named font.
+- `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility` verifies a newer live snapshot changes the widget once and raises one layout invalidation.
 - `src/main.rs`: `connect_retry_reports_last_error` verifies bounded startup retry returns an actionable readiness error with the last categorized connection failure, and `client_mode_falls_back_with_status_when_server_missing` verifies fallback diagnostics include endpoint and error category.
 - `src/client/mod.rs`: behavior-manifest tests verify manifest version/access data is preserved, and `client_receives_runtime_diagnostic_event` verifies runtime diagnostic protocol events reach the client event queue.
 - `src/editor/surface.rs`: `editor_load_snapshot_replaces_text_and_resets_caret` verifies snapshot text, metadata, caret, selection, and scroll reset.

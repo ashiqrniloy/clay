@@ -232,6 +232,36 @@ Security/performance contract: engine selection, package loading, query compilat
 
 Automated coverage: `first_party_language_fixtures_produce_themed_vocabulary_decorations`, `first_party_artifact_provenance_is_recorded`, `user_forced_tier_is_honored_and_recorded_in_provenance`, `tier2_wasm_override_suppresses_tier1_when_user_selected`, `js_parser_fallback_still_runs_without_tree_sitter_grammar`, `package_cannot_silently_override_native_tier`, `finish_task_publishes_runtime_diagnostic_for_handler_error`, and `open_document_renders_before_background_parse_completes` cover the tier choices, provenance, fallback, diagnostics, and non-blocking open contract.
 
+### Phase 18.16.5 typography smoke
+
+Use one complete `setTypography` call in `~/.config/clay/init.js`, then launch with `cargo run`. Repeat with Gruvbox Material dark and light themes and UI/document sizes 6 px, defaults, and 40 px.
+
+Manual matrix:
+
+1. Open plain prose, Rust/TypeScript/JavaScript code, and Markdown containing inline code, fenced code, Unicode (`Hé`, `漢字`), and emoji (`🦀`). Prose/Markdown body should use proportional; code documents/ranges should use monospace.
+2. Set each profile stack to an unavailable name followed by its generic fallback (`monospace`, `sans-serif`, or `system-ui`). Text, caret, selection, wrapping, hit testing, and scrolling must remain usable; Clay must not fetch or open font files/URLs.
+3. Compare minimum, default, and large sizes. Confirm wrapped lines do not clip, caret/selection stay aligned, scrollbar remains bounded, and a live typography reload resets/clamps stale scroll geometry once.
+4. Check status text, Workspace file browser, runtime SDUI, package status items, buttons, and lists. Text, row hit regions, and accessibility bounds must scale together without overlap.
+5. Keep focus in editor while typing, selecting, clicking, scrolling, and opening/closing UI. Input remains local; typography changes arrive asynchronously without package JavaScript, IPC, font discovery, filesystem, network, or shell work in paint/input/layout.
+6. Remove typography configuration and reconnect. Defaults must return. Try an invalid partial profile or invalid size and confirm one sanitized runtime diagnostic while previous complete typography remains active.
+
+Automated coverage: `unicode_and_emoji_shape_with_unavailable_named_font_fallback`, `live_typography_update_requests_layout_render_and_accessibility`, `ui_size_change_scales_row_hit_and_accessibility_bounds_together`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`, `typography_updates_do_not_enter_editor_hot_paths`, protocol/configuration rejection tests, viewport-bounded editor benchmarks, and large-file Markdown decoration budgets.
+
+### Phase 18.17 range diagnostics and syntax-error smoke
+
+Phase 18.17 adds viewport-bounded `DiagnosticSet` squiggles from Tree-sitter `ERROR`/`MISSING` nodes and package `clay:diagnostics.serverPublishDiagnostics`. Status-level `RuntimeDiagnostic` stays in the chrome; range diagnostics stay paint-only.
+
+Manual matrix:
+
+1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` (or load `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` in `~/.config/clay/init.js`).
+2. Open invalid `.rs`, `.ts`, `.tsx`, `.js`, and `.md` snippets (for example incomplete `fn main() { let = ;`, `const = ;`, or broken Markdown fence). Confirm text paints first, then a themed squiggle arrives asynchronously under the bad range.
+3. Repair each file to valid syntax. Confirm the current `tree-sitter` source chunk clears and the squiggle disappears after the next accepted parse.
+4. Type and scroll while a slow reparse is outstanding. Local typing/scroll remain responsive; diagnostics never block keypress paint.
+5. Confirm syntax/semantic token tints remain visible under/around squiggles, and a status-level runtime diagnostic (if present) does not become an inline mark.
+6. Unload language packages and reopen. Documents stay editable with no syntax highlights and no Tree-sitter squiggles.
+
+Automated coverage (no manual execution needed): `invalid_to_valid_edit_clears_squiggle_after_current_parse`, `valid_to_invalid_edit_keeps_local_typing_non_blocking`, `runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline`, `valid_tree_fast_path_skips_error_node_traversal`, `range_diagnostics_do_not_enter_editor_hot_paths`, plus prior Phase 18.17 suite coverage in `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, and `tests/performance_protocol.rs`.
+
 ### Phase 18.14 language package expansion smoke
 
 Phase 18.14 upgrades the first-party grammar packages into full language packages. They remain explicit opt-in:

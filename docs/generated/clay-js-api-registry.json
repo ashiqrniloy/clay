@@ -706,6 +706,70 @@
       "async": false
     },
     {
+      "id": "clay.diagnostics.serverPublishDiagnostics",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md",
+      "js_module": "clay:diagnostics",
+      "js_export": "serverPublishDiagnostics",
+      "js_facade": "runtime/js/diagnostics.ts::serverPublishDiagnostics",
+      "backing_rust": "src/server/diagnostics.rs::validate_diagnostic_publication",
+      "deno_op": "op_clay_diagnostics_publish_diagnostics",
+      "deno_op_path": "src/server/ops/diagnostics.rs::op_clay_diagnostics_publish_diagnostics",
+      "name": "serverPublishDiagnostics",
+      "user_facing_name": "Publish Diagnostics",
+      "summary": "Publish viewport-bounded, inert range diagnostics from server-side package code.",
+      "owner": "server",
+      "phase": "Phase 18.17",
+      "visibility": "public",
+      "permissions": ["render-decorations"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "number",
+          "default": "required",
+          "description": "Target open document ID."
+        },
+        {
+          "name": "documentVersion",
+          "type": "number",
+          "default": "required",
+          "description": "Server document version the diagnostics were produced for."
+        },
+        {
+          "name": "viewport",
+          "type": "byte-range",
+          "default": "required",
+          "description": "Visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded."
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "default": "required",
+          "description": "Source key for chunk replacement (for example `tree-sitter` or a package analyzer id)."
+        },
+        {
+          "name": "spans",
+          "type": "DiagnosticSpan[]",
+          "default": "[]",
+          "description": "Bounded inert byte-range diagnostics with severity, code, and message; empty clears the source chunk."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "package context",
+          "description": "Package API prefix retained as provenance."
+        }
+      ],
+      "security": "Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, source/code/message bounds, and DIAGNOSTIC_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.",
+      "agent_guidance": "Use `clay.diagnostics.serverPublishDiagnostics` from server-side package code only. Publish inert DiagnosticSpan records; never invent renderer callbacks, CSS, raw ops, LSP process spawning, or client-side JavaScript hooks. Prefer this over stuffing diagnostic metadata into `serverPublishDecorations`.",
+      "lookup_tags": ["js-api", "diagnostics", "syntax-error", "range-diagnostic", "lsp-ready", "phase18.17"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.documents.clientOpenFileDialog",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/client-open-file-dialog.md",
@@ -2350,6 +2414,70 @@
       "security": "Accepts only bundled first-party @clay/* theme specifiers, reads static package.json textStyles contributions, and sends inert RGBA/style-attribute data to the client; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
       "agent_guidance": "Use setTheme(\"@clay/theme-gruvbox-material-dark\") or setTheme(\"@clay/theme-gruvbox-material-light\") from init.js. Do not expose arbitrary CSS, theme code execution, raw color ops, or third-party theme loading through this API.",
       "lookup_tags": ["theme", "syntax", "colors", "gruvbox", "init"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.theme.setTypography",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/theme/set-typography.md",
+      "js_module": "clay:theme",
+      "js_export": "setTypography",
+      "js_facade": "runtime/js/theme.ts::setTypography",
+      "backing_rust": "src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography",
+      "deno_op": "op_clay_theme_set_typography",
+      "deno_op_path": "src/server/ops/typography.rs::op_clay_theme_set_typography",
+      "name": "setTypography",
+      "user_facing_name": "Set Typography",
+      "summary": "Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks and logical-pixel sizes.",
+      "owner": "server",
+      "phase": "Phase 18.16.5",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "monospace.families",
+          "type": "string[]",
+          "default": "[\"monospace\"]",
+          "description": "Ordered code-text family stack ending in a generic fallback; 1 to 8 entries, each at most 128 bytes."
+        },
+        {
+          "name": "monospace.size",
+          "type": "number",
+          "default": "20",
+          "description": "Monospace base size in logical pixels, from 6 through 96 inclusive."
+        },
+        {
+          "name": "proportional.families",
+          "type": "string[]",
+          "default": "[\"sans-serif\"]",
+          "description": "Ordered prose family stack ending in a generic fallback; 1 to 8 entries, each at most 128 bytes."
+        },
+        {
+          "name": "proportional.size",
+          "type": "number",
+          "default": "20",
+          "description": "Proportional base size in logical pixels, from 6 through 96 inclusive."
+        },
+        {
+          "name": "ui.families",
+          "type": "string[]",
+          "default": "[\"system-ui\"]",
+          "description": "Ordered Clay UI family stack ending in a generic fallback; 1 to 8 entries, each at most 128 bytes."
+        },
+        {
+          "name": "ui.size",
+          "type": "number",
+          "default": "12",
+          "description": "UI base size in logical pixels, from 6 through 96 inclusive."
+        }
+      ],
+      "security": "Accepts one bounded inert three-profile value and does not grant filesystem, network, shell, font-download, package, extension loading, workspace mutation, AI mutation, native-widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Clay does not inspect installed fonts; packages may select semantic roles but cannot override these concrete user values.",
+      "agent_guidance": "Call once with all three profiles from init.js or a local configuration module. End every family stack with monospace, sans-serif, serif, system-ui, cursive, or fantasy. Never suggest font URLs, paths, bytes, downloads, package-controlled families, or partial profile updates.",
+      "lookup_tags": ["js-api", "typography", "fonts", "monospace", "proportional", "ui", "configuration", "init", "phase18.16.5"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",

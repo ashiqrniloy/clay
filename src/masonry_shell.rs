@@ -192,6 +192,7 @@ mod tests {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
             },
+            active_typography: crate::protocol::ActiveTypography::default(),
         }
     }
 

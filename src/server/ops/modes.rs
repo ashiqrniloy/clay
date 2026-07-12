@@ -10,9 +10,9 @@ use crate::{
         modes::{DocumentClassificationInput, ModeDeclaration, ModeDiagnostic},
     },
     protocol::{
-        AutocompleteTrigger, BehaviorScope, CommentContinuationRule, EditorBehaviorRules,
-        ElectricCharacterRule, ElectricEffect, EnterRule, PairRule, PairRuleContext, RoutingPolicy,
-        TabMode, TabRule, TextEditCapability,
+        AutocompleteTrigger, CommentContinuationRule, EditorBehaviorRules, ElectricCharacterRule,
+        ElectricEffect, EnterRule, PairRule, PairRuleContext, RoutingPolicy, TabMode, TabRule,
+        TextEditCapability,
     },
 };
 
@@ -206,11 +206,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
 
         op_state
             .publish_mode_behavior_manifest(
-                activation.behavior_version,
-                BehaviorScope::Document {
-                    document_id: activation.document_id,
-                },
-                format!("{}.{}", activation.api_prefix, activation.mode_id),
+                &activation,
                 rules,
                 commands_for_activation,
                 keymaps_for_activation,
@@ -490,6 +486,19 @@ fn parse_declaration(
         api_prefix: string_or(value, "apiPrefix", &package.clay.api_prefix),
         mode_id: required_string(value, "modeId", "clay.modes.invalid_declaration")?,
         display_name: string_or(value, "displayName", "Mode"),
+        document_font_role: match value
+            .get("defaultFontRole")
+            .and_then(Value::as_str)
+            .unwrap_or("proportional")
+        {
+            "monospace" => crate::protocol::DocumentFontRole::Monospace,
+            "proportional" => crate::protocol::DocumentFontRole::Proportional,
+            _ => {
+                return Err(JsErrorBox::generic(
+                    "clay.modes.invalid_declaration: defaultFontRole must be `monospace` or `proportional`",
+                ));
+            }
+        },
         extensions: string_array(
             value.get("extensions"),
             "extensions",

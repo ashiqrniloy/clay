@@ -27,7 +27,7 @@ Phase 18.15 replaces the free-form `style_token: String` on `DecorationSpan` wit
 
 ### SDUI theme token system (typed scalars)
 
-`ThemeTokenType { ColorRole, Spacing, Radius, Typography, Opacity }`, `PackageThemeToken`, `ThemeTokenResolver`, `ResolvedThemeToken`, and `SduiThemeStyle` in `src/shell/theme.rs`. `core_theme_value` holds the core token table (`surface.panel`, `text.primary`, `spacing.row`, `typography.body`, `opacity.disabled`, …). The resolver maps a package-prefixed token to a same-typed core fallback. This system is **SDUI-component oriented** (panel backgrounds, spacing, typography sizes, opacities) — it does not model text-decoration styling. `core_token_type` / `core_fallback_matches_type` enforce type agreement. Source/test: `src/shell/theme.rs`.
+`ThemeTokenType { ColorRole, Spacing, Radius, Typography, Opacity }`, `PackageThemeToken`, `ThemeTokenResolver`, `ResolvedThemeToken`, and `SduiThemeStyle` in `src/shell/theme.rs`. `core_theme_value` holds the core token table (`surface.panel`, `text.primary`, `spacing.row`, `typography.body`, `opacity.disabled`, …). The resolver maps a package-prefixed token to a same-typed core fallback. This system is **SDUI-component oriented**: colors/spacing/opacities resolve as native values, while `typography.body`/`title`/`status` resolve to semantic UI variants. `TypographyRegistry` supplies the configured profile size/family stack, so package tokens never become absolute sizes. It does not model text-decoration styling. `core_token_type` / `core_fallback_matches_type` enforce type agreement. Source/test: `src/shell/theme.rs`.
 
 ### Theme token contribution declaration and validation
 
@@ -90,7 +90,7 @@ Plan 046 completed the generic primitives described by this review:
 - `DecorationSpan` now carries `token_type: TokenType`, `modifiers: Modifiers`, and optional `scope` compatibility metadata. Legacy `styleToken` producers use `DecorationSpan::from_style_token`.
 - `src/editor/theme.rs::StyleRegistry` is the paint-time style source. It stores base UI colors, layer colors, a per-`TokenType` `[Color; 35]` syntax table, and per-token text-attribute defaults.
 - `clay.contributions.textStyles` is parsed as inert `TextStyleOverrideDescriptor` data in `src/packages/record.rs`; `reject_ui_prohibited_authority` rejects raw CSS, raw ops, callbacks, native handles, and client JavaScript.
-- `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light` ship as first-party inert packages with full 45-entry mappings (10 base UI keys + 35 token types).
+- `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light` ship as first-party inert packages with full 48-entry mappings (13 base UI keys + 35 token types).
 - `clay.theme.setTheme` selects one active first-party theme from `init.js`, stores an `ActiveTheme` snapshot, and the client converts it to `StyleRegistry` before first paint.
 
 Implementation details live in [Editor Theme Registry](editor-theme-registry.md). Public authoring docs live in [Text Vocabulary and Two-Axis Decoration Contract](../../reference/primitives/syntax-vocabulary.md) and [Phase 18.15 theme authoring](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme).

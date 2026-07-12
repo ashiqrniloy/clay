@@ -1,7 +1,8 @@
 use clay::perf::baselines::{
     LARGE_BENCH_BYTES, SMALL_BENCH_BYTES, editor_insert_at_end, editor_render_adjacent_update,
     editor_resize_viewport_visible_text_len, editor_scroll_visible_text_len,
-    editor_scroll_window_signature, editor_visible_text_len,
+    editor_scroll_window_signature, editor_typography_viewport_visible_text_len,
+    editor_visible_text_len,
 };
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
@@ -80,6 +81,27 @@ fn editor_layout_viewport_bounds(c: &mut Criterion) {
     group.finish();
 }
 
+fn editor_typography_viewport_bounds(c: &mut Criterion) {
+    let mut group = c.benchmark_group("editor_typography_viewport_bounds");
+    for bytes in [SMALL_BENCH_BYTES, LARGE_BENCH_BYTES] {
+        group.throughput(Throughput::Bytes(bytes as u64));
+        for font_size in [10.0_f32, 40.0] {
+            group.bench_with_input(
+                BenchmarkId::new(format!("{font_size}px"), bytes),
+                &bytes,
+                |b, &bytes| {
+                    b.iter_batched(
+                        || bytes,
+                        |size| editor_typography_viewport_visible_text_len(size, font_size),
+                        BatchSize::LargeInput,
+                    );
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
 fn editor_render_adjacent(c: &mut Criterion) {
     let mut group = c.benchmark_group("editor_render_adjacent");
     for bytes in [SMALL_BENCH_BYTES, LARGE_BENCH_BYTES] {
@@ -105,6 +127,7 @@ criterion_group!(
     editor_editing,
     editor_scroll_viewport,
     editor_layout_viewport_bounds,
+    editor_typography_viewport_bounds,
     editor_render_adjacent
 );
 criterion_main!(benches);

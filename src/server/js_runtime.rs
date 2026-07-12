@@ -22,8 +22,9 @@ use tokio::{sync::oneshot, task};
 use crate::perf::budgets::{JS_RUNTIME_EVALUATION_TIMEOUT_MS, JS_RUNTIME_HEAP_LIMIT_BYTES};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
-    DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, IncrementalParseUpdate,
-    ParseByteRange, ParseEditNotification, RuntimeDiagnostic,
+    DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
+    DiagnosticSeverity, DiagnosticSpan, IncrementalParseUpdate, ParseByteRange,
+    ParseEditNotification, RuntimeDiagnostic,
 };
 
 use super::{
@@ -49,6 +50,7 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
         "clay:modes" => Some(CLAY_FACADE_MODES),
         "clay:commands" => Some(CLAY_FACADE_COMMANDS),
         "clay:decorations" => Some(CLAY_FACADE_DECORATIONS),
+        "clay:diagnostics" => Some(CLAY_FACADE_DIAGNOSTICS),
         "clay:parse" => Some(CLAY_FACADE_PARSE),
         "clay:syntax" => Some(CLAY_FACADE_SYNTAX),
         "clay:completion" => Some(CLAY_FACADE_COMPLETION),
@@ -379,6 +381,20 @@ export function serverPublishDecorations(options) {
 }
 "#;
 
+const CLAY_FACADE_DIAGNOSTICS: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+const FORBIDDEN = ["handler", "callback", "onDiagnostic", "function", "clientJavaScript", "nativeHandle", "rawOps", "draw", "css", "render"];
+export function serverPublishDiagnostics(options) {
+  for (const key of FORBIDDEN) {
+    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
+      throw new Error(`clay.diagnostics.invalid_publication: executable or raw authority field ${key} is not accepted`);
+    }
+  }
+  return parse(ops.op_clay_diagnostics_publish_diagnostics(JSON.stringify(options ?? null)));
+}
+"#;
+
 const CLAY_FACADE_PARSE: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
@@ -473,6 +489,12 @@ export function setTheme(options) {
     throw new Error("clay.theme.invalid_request: setTheme requires a theme specifier");
   }
   return JSON.parse(Deno.core.ops.op_clay_theme_set_theme(JSON.stringify({ specifier })));
+}
+export function setTypography(options) {
+  if (options === null || typeof options !== "object") {
+    throw new Error("clay.theme.invalid_typography: setTypography requires complete typography profiles");
+  }
+  return JSON.parse(Deno.core.ops.op_clay_theme_set_typography(JSON.stringify(options)));
 }
 "#;
 
@@ -758,11 +780,12 @@ impl crate::server::parse_coordinator::ParseHandler for JsParseHandler {
 }
 
 /// Result of one JavaScript evaluation returned across the Rust boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) op_records: Vec<String>,
     pub(crate) published_sdui_tree: Option<crate::protocol::SduiTree>,
     pub(crate) published_decoration_set: Option<crate::protocol::DecorationSet>,
+    pub(crate) published_diagnostic_set: Option<crate::protocol::DiagnosticSet>,
     pub(crate) parse_handlers: Vec<crate::server::parse_coordinator::ParseHandlerMeta>,
     pub(crate) js_parse_handlers: Vec<crate::server::parse_coordinator::JsParseHandlerRegistration>,
     pub(crate) behavior_manifest: Option<crate::protocol::BehaviorManifest>,
@@ -773,6 +796,10 @@ pub(crate) struct ClayRuntimeEvaluation {
     /// when `init.js` did not select a theme (Clay default applies). Applied to
     /// the shared server slot at load/reload so the welcome handshake ships it.
     pub(crate) active_theme: Option<crate::protocol::ActiveTheme>,
+    /// Complete typography candidate from `setTypography`, if this evaluation
+    /// configured one. The server assigns its authoritative revision only after
+    /// the evaluation succeeds.
+    pub(crate) active_typography: Option<crate::protocol::ActiveTypography>,
 }
 
 #[derive(Debug)]
@@ -1173,6 +1200,7 @@ async fn evaluate_loaded_module(
             op_records: op_state.records(),
             published_sdui_tree: op_state.published_sdui_tree(),
             published_decoration_set: op_state.published_decoration_set(),
+            published_diagnostic_set: op_state.published_diagnostic_set(),
             parse_handlers: op_state.parse_handlers(),
             js_parse_handlers: op_state.js_parse_handlers(),
             behavior_manifest: (behavior_manifest.behavior_version > 1)
@@ -1181,6 +1209,7 @@ async fn evaluate_loaded_module(
             syntax_grammars: op_state.syntax_grammars(),
             completion_providers: op_state.completion_providers(),
             active_theme: op_state.active_theme(),
+            active_typography: op_state.active_typography(),
         })
     }
     .await;
@@ -1298,6 +1327,10 @@ fn parse_update_json(
                 .collect()
         })
         .transpose()?;
+    let diagnostics = object
+        .get("diagnostics")
+        .map(|value| diagnostic_set_from_value(value, registration, &fallback, viewport))
+        .transpose()?;
     Ok(IncrementalParseUpdate {
         document_id: object
             .get("documentId")
@@ -1335,7 +1368,108 @@ fn parse_update_json(
             viewport_byte_end: viewport.end,
             spans,
         }),
+        diagnostic_update: diagnostics,
     })
+}
+
+fn diagnostic_set_from_value(
+    value: &serde_json::Value,
+    registration: &crate::server::parse_coordinator::JsParseHandlerRegistration,
+    fallback: &ParseEditNotification,
+    viewport: ParseByteRange,
+) -> Result<DiagnosticSet, ClayRuntimeError> {
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.parse.invalid_update: diagnostics must be an object".to_string(),
+        )
+    })?;
+    let source = required_string(object, "source", "diagnostics")?;
+    let provenance = DecorationProvenance {
+        package_name: registration.package.manifest.name.clone(),
+        package_version: registration.package.manifest.version.clone(),
+        package_prefix: registration.package.manifest.clay.api_prefix.clone(),
+    };
+    let spans = object
+        .get("spans")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(
+                "clay.parse.invalid_update: diagnostics.spans must be an array".to_string(),
+            )
+        })?
+        .iter()
+        .map(|value| diagnostic_span_from_value(value, source, &provenance))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DiagnosticSet {
+        document_id: fallback.document_id,
+        document_version: fallback.document_version,
+        viewport_byte_start: viewport.start,
+        viewport_byte_end: viewport.end,
+        source: source.to_string(),
+        provenance,
+        spans,
+    })
+}
+
+fn diagnostic_span_from_value(
+    value: &serde_json::Value,
+    source: &str,
+    provenance: &DecorationProvenance,
+) -> Result<DiagnosticSpan, ClayRuntimeError> {
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.parse.invalid_update: diagnostic span must be an object".to_string(),
+        )
+    })?;
+    let severity = match required_string(object, "severity", "diagnostic span")? {
+        "error" => DiagnosticSeverity::Error,
+        "warning" => DiagnosticSeverity::Warning,
+        "info" => DiagnosticSeverity::Info,
+        other => {
+            return Err(ClayRuntimeError::Runtime(format!(
+                "clay.parse.invalid_update: unsupported diagnostic severity `{other}`"
+            )));
+        }
+    };
+    Ok(DiagnosticSpan {
+        byte_start: required_u64(object, "byteStart", "diagnostic span")?,
+        byte_end: required_u64(object, "byteEnd", "diagnostic span")?,
+        severity,
+        code: required_string(object, "code", "diagnostic span")?.to_string(),
+        message: required_string(object, "message", "diagnostic span")?.to_string(),
+        source: source.to_string(),
+        provenance: provenance.clone(),
+    })
+}
+
+fn required_string<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    context: &str,
+) -> Result<&'a str, ClayRuntimeError> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(format!(
+                "clay.parse.invalid_update: {context}.{field} must be a string"
+            ))
+        })
+}
+
+fn required_u64(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    context: &str,
+) -> Result<u64, ClayRuntimeError> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(format!(
+                "clay.parse.invalid_update: {context}.{field} must be an unsigned integer"
+            ))
+        })
 }
 
 fn parse_range_value(value: &serde_json::Value) -> Option<ParseByteRange> {
@@ -1856,6 +1990,65 @@ mod tests {
                 .is_some_and(|set| !set.spans.is_empty()),
             "markdown parser produced syntax decorations"
         );
+    }
+
+    #[tokio::test]
+    async fn js_parse_handler_bridge_accepts_inert_diagnostic_records() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterParseHandler } from "clay:parse";
+                const parser = { default: async (notification) => ({
+                  diagnostics: {
+                    source: "fixture-parser",
+                    spans: [{
+                      byteStart: 0,
+                      byteEnd: 1,
+                      severity: "error",
+                      code: "syntax.error",
+                      message: "syntax error",
+                    }],
+                  },
+                  viewport: notification.viewport,
+                }) };
+                serverRegisterParseHandler({
+                  module: parser,
+                  packageName: "@clay/fixture-parser",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "fixture",
+                  permissions: ["parse-document"],
+                  mode: "fixture",
+                });
+                "#,
+            )
+            .await
+            .unwrap();
+        let coordinator = ParseCoordinator::new();
+        service
+            .register_parse_handlers(&coordinator, 1, &evaluation)
+            .unwrap();
+        coordinator
+            .schedule_parse(ParseScheduleRequest {
+                document_id: 9,
+                document_version: 2,
+                behavior_version: 1,
+                package_prefix: "fixture".to_string(),
+                mode_id: "fixture".to_string(),
+                viewport: ParseByteRange::new(0, 8),
+                invalidated_ranges: vec![ParseByteRange::new(0, 1)],
+            })
+            .unwrap();
+
+        let update = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+            .await
+            .unwrap()
+            .unwrap();
+        let diagnostics = update.diagnostic_update.unwrap();
+
+        assert_eq!(diagnostics.source, "fixture-parser");
+        assert_eq!(diagnostics.spans[0].severity, DiagnosticSeverity::Error);
     }
 
     #[tokio::test]
@@ -3594,6 +3787,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_mode_font_role_fails_before_registration_and_keeps_core_fallback() {
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverClassifyDocument, serverRegisterModePattern } from "clay:modes";
+                const manifest = {
+                  name: "@clay/example", version: "0.1.0", type: "module",
+                  exports: { ".": "./index.js" },
+                  clay: {
+                    apiPrefix: "example", entry: "./index.js",
+                    permissions: ["mode-registration", "mode-activation"],
+                    modes: ["example"], docs: "./docs/index.md"
+                  }
+                };
+                try {
+                  serverRegisterModePattern(manifest, {
+                    modeId: "example", extensions: ["rs"], defaultFontRole: "serif"
+                  });
+                } catch {}
+                const classification = serverClassifyDocument({ documentId: 9, path: "main.rs" });
+                Deno.core.ops.op_clay_runtime_record(classification.modeId);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["core.code"]);
+    }
+
+    #[tokio::test]
     async fn rust_package_expansion_registers_mode_command_completion_and_status() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let result = ClayJsRuntimeService::default()
@@ -4070,7 +4293,7 @@ mod tests {
                   documentVersion: 1,
                   behaviorVersion: 1,
                   viewport: { byteStart: 0, byteEnd: 12 },
-                  spans: [{ byteStart: 0, byteEnd: 5, kind: "syntax", styleToken: "markup.heading.1", priority: 10 }],
+                  spans: [{ byteStart: 0, byteEnd: 5, kind: "syntax", styleToken: "markup.inline-code", fontRole: "monospace", priority: 10 }],
                 });
                 Deno.core.ops.op_clay_runtime_record(`${handler.mode}:${decorations.publishedSpanCount}`);
                 "#,
@@ -4080,7 +4303,176 @@ mod tests {
 
         assert_eq!(result.op_records, vec!["markdown:1"]);
         assert_eq!(result.parse_handlers.len(), 1);
-        assert!(result.published_decoration_set.is_some());
+        assert_eq!(
+            result.published_decoration_set.unwrap().spans[0].font_role,
+            Some(crate::protocol::DocumentFontRole::Monospace)
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnostics_facade_publishes_validated_range_diagnostics() {
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverPublishDiagnostics } from "clay:diagnostics";
+                const manifest = {
+                  name: "@clay/rust",
+                  version: "0.1.0",
+                  type: "module",
+                  exports: { ".": "./dist/index.js" },
+                  clay: {
+                    apiPrefix: "rust",
+                    entry: "./dist/index.js",
+                    permissions: ["render-decorations"],
+                    modes: ["rust"],
+                    docs: "./docs/index.md"
+                  }
+                };
+                const published = serverPublishDiagnostics({
+                  packageManifest: manifest,
+                  documentId: 7,
+                  documentVersion: 3,
+                  viewport: { byteStart: 0, byteEnd: 64 },
+                  source: "my-parser",
+                  spans: [{
+                    byteStart: 4,
+                    byteEnd: 5,
+                    severity: "error",
+                    code: "parser.syntax-error",
+                    message: "Syntax error",
+                  }],
+                });
+                Deno.core.ops.op_clay_runtime_record(`${published.source}:${published.publishedSpanCount}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["my-parser:1"]);
+        let set = result.published_diagnostic_set.expect("diagnostic set");
+        assert_eq!(set.source, "my-parser");
+        assert_eq!(set.spans.len(), 1);
+        assert_eq!(
+            set.spans[0].severity,
+            crate::protocol::DiagnosticSeverity::Error
+        );
+        assert_eq!(set.provenance.package_prefix, "rust");
+    }
+
+    #[tokio::test]
+    async fn diagnostics_publication_rejects_missing_permission_or_bad_provenance() {
+        let missing = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverPublishDiagnostics } from "clay:diagnostics";
+                serverPublishDiagnostics({
+                  packageName: "@clay/rust",
+                  packagePrefix: "rust",
+                  permissions: [],
+                  documentId: 1,
+                  documentVersion: 1,
+                  viewport: { byteStart: 0, byteEnd: 8 },
+                  source: "my-parser",
+                  spans: [{ byteStart: 1, byteEnd: 2, severity: "error", code: "x", message: "y" }],
+                });
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            missing
+                .to_string()
+                .contains("clay.packages.missing_permission"),
+            "missing render-decorations must fail, got {missing}"
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnostics_publication_rejects_stale_oversized_or_executable_data() {
+        let stale = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverPublishDiagnostics } from "clay:diagnostics";
+                serverPublishDiagnostics({
+                  packageName: "@clay/rust",
+                  packagePrefix: "rust",
+                  permissions: ["render-decorations"],
+                  documentId: 1,
+                  documentVersion: 1,
+                  currentDocumentVersion: 2,
+                  viewport: { byteStart: 0, byteEnd: 8 },
+                  source: "my-parser",
+                  spans: [{ byteStart: 1, byteEnd: 2, severity: "error", code: "x", message: "y" }],
+                });
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            stale
+                .to_string()
+                .contains("clay.diagnostics.publish_failed"),
+            "stale version must fail, got {stale}"
+        );
+
+        let executable = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverPublishDiagnostics } from "clay:diagnostics";
+                serverPublishDiagnostics({
+                  packageName: "@clay/rust",
+                  packagePrefix: "rust",
+                  permissions: ["render-decorations"],
+                  documentId: 1,
+                  documentVersion: 1,
+                  viewport: { byteStart: 0, byteEnd: 8 },
+                  source: "my-parser",
+                  spans: [],
+                  callback: () => {},
+                });
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            executable
+                .to_string()
+                .contains("clay.diagnostics.invalid_publication"),
+            "executable callback must fail, got {executable}"
+        );
+
+        let oversized_source = format!(
+            r#"
+                import {{ serverPublishDiagnostics }} from "clay:diagnostics";
+                serverPublishDiagnostics({{
+                  packageName: "@clay/rust",
+                  packagePrefix: "rust",
+                  permissions: ["render-decorations"],
+                  documentId: 1,
+                  documentVersion: 1,
+                  viewport: {{ byteStart: 0, byteEnd: 8 }},
+                  source: "my-parser",
+                  spans: [{{
+                    byteStart: 1,
+                    byteEnd: 2,
+                    severity: "error",
+                    code: "x",
+                    message: "{}",
+                  }}],
+                }});
+                "#,
+            "m".repeat(2048)
+        );
+        let oversized = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(oversized_source)
+            .await
+            .unwrap_err();
+        assert!(
+            oversized
+                .to_string()
+                .contains("clay.diagnostics.publish_failed"),
+            "oversized message must fail, got {oversized}"
+        );
     }
 
     #[tokio::test]
@@ -4167,6 +4559,9 @@ mod tests {
             const fenceStart = byteRangeFor("```js");
             const fenceTerminator = byteRangeFor("\n\n1. item");
             assertSpan("markup.code-block", { byteStart: fenceStart.byteStart, byteEnd: utf8ByteLength(text.slice(0, fenceTerminator.codeUnitEnd - "\n1. item".length)) });
+            if (requireSpan("markup.inline-code").fontRole !== "monospace" || requireSpan("markup.code-block").fontRole !== "monospace") {
+              throw new Error("Markdown code spans must declare the generic monospace role");
+            }
 
             const listMarker = requireSpan("markup.list-marker");
             const viewportOnlyList = await parseMarkdownDecorations({
@@ -5574,13 +5969,134 @@ mod tests {
 
         let theme = result.active_theme.expect("active theme snapshot emitted");
         assert_eq!(theme.specifier, "@clay/theme-gruvbox-material-dark");
-        assert_eq!(theme.overrides.len(), 45);
+        assert_eq!(theme.overrides.len(), 48);
         assert!(
             result
                 .op_records
                 .iter()
-                .any(|record| record == "theme:@clay/theme-gruvbox-material-dark:overrides:45"),
+                .any(|record| record == "theme:@clay/theme-gruvbox-material-dark:overrides:48"),
             "setTheme summary must reach init.js"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_typography_replaces_all_profiles_atomically() {
+        let root = config_fixture("set-typography-e2e");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setTypography } from "clay:theme";
+            const summary = setTypography({
+              monospace: { families: ["JetBrains Mono", "monospace"], size: 16 },
+              proportional: { families: ["Inter", "sans-serif"], size: 17 },
+              ui: { families: ["system-ui"], size: 13 },
+            });
+            Deno.core.ops.op_clay_runtime_record(`typography:${summary.revision}`);
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("setTypography must accept one complete valid replacement");
+        let typography = result
+            .active_typography
+            .expect("complete typography candidate emitted");
+        assert_eq!(typography.revision, 1);
+        assert_eq!(typography.monospace.families[0], "JetBrains Mono");
+        assert_eq!(typography.proportional.size, 17.0);
+        assert_eq!(typography.ui.families, ["system-ui"]);
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|record| record == "typography:1")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_typography_failure_preserves_previous_revision() {
+        let service = ClayJsRuntimeService::default();
+        let first = service
+            .evaluate_controlled_module(
+                r#"import { setTypography } from "clay:theme";
+                setTypography({
+                  monospace: { families: ["monospace"], size: 16 },
+                  proportional: { families: ["sans-serif"], size: 17 },
+                  ui: { families: ["system-ui"], size: 13 },
+                });"#,
+            )
+            .await
+            .expect("initial typography succeeds");
+        assert_eq!(first.active_typography.unwrap().revision, 1);
+
+        assert!(
+            service
+                .evaluate_controlled_module(
+                    r#"import { setTypography } from "clay:theme";
+                    setTypography({
+                      monospace: { families: ["monospace"], size: 16 },
+                      proportional: { families: ["sans-serif"], size: 17 },
+                    });"#,
+                )
+                .await
+                .is_err(),
+            "incomplete candidate fails before state replacement"
+        );
+
+        let second = service
+            .evaluate_controlled_module(
+                r#"import { setTypography } from "clay:theme";
+                setTypography({
+                  monospace: { families: ["monospace"], size: 18 },
+                  proportional: { families: ["sans-serif"], size: 19 },
+                  ui: { families: ["system-ui"], size: 14 },
+                });"#,
+            )
+            .await
+            .expect("valid replacement after failure succeeds");
+        let typography = second.active_typography.unwrap();
+        assert_eq!(typography.revision, 2);
+        assert_eq!(typography.monospace.size, 18.0);
+    }
+
+    #[tokio::test]
+    async fn typography_configuration_rejects_oversized_snapshot() {
+        let service = ClayJsRuntimeService::default();
+        assert!(
+            service
+                .evaluate_controlled_module(
+                    r#"import { setTypography } from "clay:theme";
+                    const named = "x".repeat(128);
+                    setTypography({
+                      monospace: { families: [named, named, named, named, named, named, named, "monospace"], size: 16 },
+                      proportional: { families: [named, named, named, named, named, named, named, "sans-serif"], size: 17 },
+                      ui: { families: [named, named, named, named, named, named, named, "system-ui"], size: 13 },
+                    });"#,
+                )
+                .await
+                .is_err(),
+            "one typography update remains bounded even when individual fields are valid"
+        );
+    }
+
+    #[tokio::test]
+    async fn typography_configuration_grants_no_additional_authority() {
+        let service = ClayJsRuntimeService::default();
+        assert!(
+            service
+                .evaluate_controlled_module(
+                    r#"import { setTypography } from "clay:theme";
+                    setTypography({
+                      monospace: { families: ["monospace"], size: 16, fontUrl: "https://example.com/font" },
+                      proportional: { families: ["sans-serif"], size: 17 },
+                      ui: { families: ["system-ui"], size: 13 },
+                    });"#,
+                )
+                .await
+                .is_err(),
+            "font URLs and all unrecognized authority fields are rejected"
         );
     }
 

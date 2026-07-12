@@ -9,22 +9,27 @@ use crate::client::behavior::{
     RoutedBehavior, ServerIntentRoute,
 };
 use crate::perf::{
-    budgets::{DECORATION_NEAR_VIEWPORT_GUARD_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
+    budgets::{
+        DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DIAGNOSTIC_CACHE_BUDGET_BYTES,
+        SYNTAX_CACHE_BUDGET_BYTES,
+    },
     metrics::PerfRecorder,
 };
 use crate::protocol::{
     BehaviorManifest, BehaviorVersion, CompletionReplacementRange, CompletionTrigger,
-    DecorationChunkKey, DecorationSet, DecorationSpan, DocumentAccess, DocumentId, DocumentVersion,
-    EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule, KeyStroke, PairRule,
+    DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan, DiagnosticChunkKey,
+    DiagnosticSet, DiagnosticSpan, DocumentAccess, DocumentFontRole, DocumentId, DocumentVersion,
+    EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule, FontRole, KeyStroke, PairRule,
 };
 use crate::shell::CompletionMenuAcceptAction;
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
 use super::cursor::CursorState;
 use super::is_printable_text;
-use super::layout::{LayoutCacheKey, LayoutState};
+use super::layout::{LayoutCacheKey, LayoutState, VisibleTextStyleRun};
 use super::selection::SelectionState;
-use super::theme::StyleRegistry;
+use super::theme::{StyleRegistry, TextAttributes};
+use super::typography::TypographyRegistry;
 use super::viewport::{Viewport, visible_line_count_from_height};
 
 // All color now comes from the single source of color, `StyleRegistry`
@@ -37,9 +42,7 @@ const SCROLLBAR_WIDTH: f64 = 8.0;
 const SCROLLBAR_MARGIN: f64 = 4.0;
 const SCROLLBAR_MIN_THUMB: f64 = 24.0;
 pub(super) const TEXT_INSET: f64 = 48.0;
-pub(super) const TEXT_FONT_SIZE: f32 = 20.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
-const LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorCommand<'a> {
@@ -305,8 +308,285 @@ impl EditorDecorationState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EditorDiagnosticChunk {
+    key: DiagnosticChunkKey,
+    spans: Vec<DiagnosticSpan>,
+    byte_size: usize,
+    last_access: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EditorDiagnosticState {
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+    chunks: Vec<EditorDiagnosticChunk>,
+    retained_bytes: usize,
+    access_counter: u64,
+}
+
+impl EditorDiagnosticState {
+    fn apply_set(&mut self, set: DiagnosticSet) -> bool {
+        if self.document_id != set.document_id || self.document_version != set.document_version {
+            *self = Self {
+                document_id: set.document_id,
+                document_version: set.document_version,
+                ..Self::default()
+            };
+        }
+
+        let Ok(bytes) = rkyv::to_bytes::<rkyv::rancor::Error>(&set).map(|bytes| bytes.len()) else {
+            return false;
+        };
+        if bytes > DIAGNOSTIC_CACHE_BUDGET_BYTES {
+            return false;
+        }
+
+        let key = set.chunk_key();
+        let viewport_start = set.viewport_byte_start;
+        let viewport_end = set.viewport_byte_end;
+        self.remove_key(&key);
+        if set.spans.is_empty() {
+            return true;
+        }
+        let last_access = self.next_access();
+        self.retained_bytes = self.retained_bytes.saturating_add(bytes);
+        self.chunks.push(EditorDiagnosticChunk {
+            key,
+            spans: set.spans,
+            byte_size: bytes,
+            last_access,
+        });
+        self.evict_outside_near_viewport(viewport_start, viewport_end);
+        self.evict_lru_until_budget();
+        true
+    }
+
+    fn span_count(&self) -> usize {
+        self.chunks.iter().map(|chunk| chunk.spans.len()).sum()
+    }
+
+    fn visible_spans(
+        &self,
+        visible_start: u64,
+        visible_end: u64,
+    ) -> impl Iterator<Item = &DiagnosticSpan> {
+        self.chunks
+            .iter()
+            .filter(move |chunk| {
+                ranges_intersect(
+                    chunk.key.byte_start,
+                    chunk.key.byte_end,
+                    visible_start,
+                    visible_end,
+                )
+            })
+            .flat_map(|chunk| chunk.spans.iter())
+    }
+
+    fn next_access(&mut self) -> u64 {
+        self.access_counter = self.access_counter.saturating_add(1);
+        self.access_counter
+    }
+
+    fn remove_key(&mut self, key: &DiagnosticChunkKey) {
+        self.retain_chunks(|chunk| &chunk.key != key);
+    }
+
+    fn evict_outside_near_viewport(&mut self, viewport_start: u64, viewport_end: u64) {
+        let near_start = viewport_start.saturating_sub(DECORATION_NEAR_VIEWPORT_GUARD_BYTES);
+        let near_end = viewport_end.saturating_add(DECORATION_NEAR_VIEWPORT_GUARD_BYTES);
+        self.retain_chunks(|chunk| {
+            ranges_intersect(
+                chunk.key.byte_start,
+                chunk.key.byte_end,
+                near_start,
+                near_end,
+            )
+        });
+    }
+
+    fn evict_lru_until_budget(&mut self) {
+        while self.retained_bytes > DIAGNOSTIC_CACHE_BUDGET_BYTES {
+            let Some((oldest_index, _)) = self
+                .chunks
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, chunk)| chunk.last_access)
+            else {
+                break;
+            };
+            let removed = self.chunks.remove(oldest_index);
+            self.retained_bytes = self.retained_bytes.saturating_sub(removed.byte_size);
+        }
+    }
+
+    fn retain_chunks(&mut self, mut keep: impl FnMut(&EditorDiagnosticChunk) -> bool) {
+        self.chunks.retain(|chunk| keep(chunk));
+        self.retained_bytes = self.chunks.iter().map(|chunk| chunk.byte_size).sum();
+    }
+}
+
 fn ranges_intersect(left_start: u64, left_end: u64, right_start: u64, right_end: u64) -> bool {
     left_start < right_end && left_end > right_start
+}
+
+fn normalize_visible_text_style_runs(
+    decorations: &EditorDecorationState,
+    document: &EditorDocumentState,
+    document_end: usize,
+    snapshot: &VisibleSnapshot,
+    default_font_role: FontRole,
+    theme: StyleRegistry,
+) -> Vec<VisibleTextStyleRun> {
+    if snapshot.text.is_empty()
+        || decorations.document_id != document.document_id
+        || decorations.document_version != document.document_version
+    {
+        return Vec::new();
+    }
+
+    let visible_start = snapshot.start_byte_offset;
+    let visible_end = visible_start + snapshot.text.len();
+    let mut spans = Vec::new();
+    for span in decorations.visible_spans(visible_start as u64, visible_end as u64) {
+        let (Ok(start), Ok(end)) = (
+            usize::try_from(span.byte_start),
+            usize::try_from(span.byte_end),
+        ) else {
+            continue;
+        };
+        if start >= end || end > document_end {
+            continue;
+        }
+        let start = start.max(visible_start) - visible_start;
+        let end = end.min(visible_end) - visible_start;
+        if start >= end
+            || !snapshot.text.is_char_boundary(start)
+            || !snapshot.text.is_char_boundary(end)
+        {
+            continue;
+        }
+        spans.push(VisibleDecorationStyle {
+            range: start..end,
+            span,
+            attributes: theme
+                .style_for(span.kind, span.token_type, span.modifiers)
+                .attributes(),
+        });
+    }
+
+    let mut boundaries = Vec::with_capacity(spans.len().saturating_mul(2).saturating_add(2));
+    boundaries.extend([0, snapshot.text.len()]);
+    for style in &spans {
+        boundaries.extend([style.range.start, style.range.end]);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let mut runs: Vec<VisibleTextStyleRun> = Vec::new();
+    for boundary in boundaries.windows(2) {
+        let range = boundary[0]..boundary[1];
+        if range.start == range.end {
+            continue;
+        }
+        let active = spans
+            .iter()
+            .filter(|style| style.range.start <= range.start && style.range.end >= range.end);
+        let mut attributes = TextAttributes::default();
+        let mut font_span = None;
+        for style in active {
+            attributes.bold |= style.attributes.bold;
+            attributes.italic |= style.attributes.italic;
+            attributes.underline |= style.attributes.underline;
+            attributes.strike |= style.attributes.strike;
+            if span_font_role(style.span).is_some()
+                && font_span.is_none_or(|current| font_role_precedes(style.span, current))
+            {
+                font_span = Some(style.span);
+            }
+        }
+        let font_role = font_span
+            .and_then(span_font_role)
+            .unwrap_or(default_font_role);
+        if let Some(previous) = runs.last_mut()
+            && previous.range.end == range.start
+            && previous.font_role == font_role
+            && previous.attributes == attributes
+        {
+            previous.range.end = range.end;
+        } else {
+            runs.push(VisibleTextStyleRun {
+                range,
+                font_role,
+                attributes,
+            });
+        }
+    }
+    runs
+}
+
+struct VisibleDecorationStyle<'a> {
+    range: Range<usize>,
+    span: &'a DecorationSpan,
+    attributes: TextAttributes,
+}
+
+fn span_font_role(span: &DecorationSpan) -> Option<FontRole> {
+    matches!(span.kind, DecorationKind::Syntax | DecorationKind::Semantic)
+        .then(|| span.font_role)
+        .flatten()
+        .and_then(DocumentFontRole::font_role)
+}
+
+/// Higher priority wins; a semantic layer wins an equal-priority syntax layer;
+/// then package provenance and role make equal input deterministic without
+/// trusting source arrival order.
+fn font_role_precedes(candidate: &DecorationSpan, current: &DecorationSpan) -> bool {
+    candidate
+        .priority
+        .cmp(&current.priority)
+        .then_with(|| {
+            decoration_layer_rank(candidate.kind).cmp(&decoration_layer_rank(current.kind))
+        })
+        .then_with(|| {
+            current
+                .provenance
+                .package_prefix
+                .cmp(&candidate.provenance.package_prefix)
+        })
+        .then_with(|| {
+            current
+                .provenance
+                .package_name
+                .cmp(&candidate.provenance.package_name)
+        })
+        .then_with(|| {
+            current
+                .provenance
+                .package_version
+                .cmp(&candidate.provenance.package_version)
+        })
+        .then_with(|| {
+            font_role_rank(span_font_role(candidate)).cmp(&font_role_rank(span_font_role(current)))
+        })
+        .is_gt()
+}
+
+const fn decoration_layer_rank(kind: DecorationKind) -> u8 {
+    match kind {
+        DecorationKind::Semantic => 2,
+        DecorationKind::Syntax => 1,
+        DecorationKind::Diagnostic | DecorationKind::SearchMatch => 0,
+    }
+}
+
+const fn font_role_rank(role: Option<FontRole>) -> u8 {
+    match role {
+        Some(FontRole::Monospace) => 2,
+        Some(FontRole::Proportional) => 1,
+        Some(FontRole::Ui) | None => 0,
+    }
 }
 
 fn is_completion_word_character(character: char) -> bool {
@@ -322,6 +602,7 @@ pub struct EditorSurface {
     viewport: Viewport,
     layout: LayoutState,
     decorations: EditorDecorationState,
+    diagnostics: EditorDiagnosticState,
     visual_scroll_y: f64,
     last_visual_max_scroll_y: f64,
     follow_visual_end: bool,
@@ -334,6 +615,13 @@ pub struct EditorSurface {
     /// 4). Defaults to the Clay theme; task 5 swaps in the active theme at
     /// load/reload. Immutable during paint.
     theme: StyleRegistry,
+    /// Client-owned cached profiles, replaced outside paint by bootstrap/live
+    /// typography updates and read by the cached Parley layout builder.
+    typography: TypographyRegistry,
+    /// Bumped only when validated attributes, document role, or decoration data
+    /// that can change shaping changes. Color-only rectangle paint stays out of
+    /// the layout cache key.
+    layout_style_revision: u64,
     perf: PerfRecorder,
 }
 
@@ -354,6 +642,8 @@ impl EditorSurface {
         self.viewport = Viewport::default();
         self.layout = LayoutState::default();
         self.decorations = EditorDecorationState::default();
+        self.diagnostics = EditorDiagnosticState::default();
+        self.layout_style_revision = self.layout_style_revision.saturating_add(1);
         self.visual_scroll_y = 0.0;
         self.last_visual_max_scroll_y = 0.0;
         self.follow_visual_end = false;
@@ -362,8 +652,12 @@ impl EditorSurface {
 
     pub fn install_behavior_manifest(&mut self, manifest: BehaviorManifest) {
         if ClientBehaviorState::new(manifest.clone()).is_ok() {
+            let previous_role = self.document_font_role();
             self.document.behavior_version = manifest.behavior_version;
             self.document.behavior_manifest = Some(manifest);
+            if self.document_font_role() != previous_role {
+                self.bump_layout_style_revision();
+            }
         }
     }
 
@@ -373,11 +667,48 @@ impl EditorSurface {
         {
             return false;
         }
-        self.decorations.apply_set(set)
+        let applied = self.decorations.apply_set(set);
+        if applied {
+            self.bump_layout_style_revision();
+        }
+        applied
+    }
+
+    pub fn apply_diagnostic_set(&mut self, set: DiagnosticSet) -> bool {
+        if set.document_id != self.document.document_id
+            || set.document_version != self.document.document_version
+        {
+            return false;
+        }
+        self.diagnostics.apply_set(set)
+    }
+
+    pub fn layout_style_revision_for_test(&self) -> u64 {
+        self.layout_style_revision
+    }
+
+    pub fn visible_diagnostic_paint_ranges_for_test(&self) -> Vec<(Range<usize>, Color)> {
+        self.visible_diagnostic_ranges(&self.visible_snapshot())
+    }
+
+    pub fn visible_decoration_paint_ranges_for_test(&self) -> Vec<(Range<usize>, Color)> {
+        self.visible_decoration_ranges(&self.visible_snapshot())
     }
 
     pub fn decoration_span_count(&self) -> usize {
         self.decorations.span_count()
+    }
+
+    pub fn diagnostic_span_count(&self) -> usize {
+        self.diagnostics.span_count()
+    }
+
+    pub fn visible_diagnostic_spans(
+        &self,
+        visible_start: u64,
+        visible_end: u64,
+    ) -> impl Iterator<Item = &DiagnosticSpan> {
+        self.diagnostics.visible_spans(visible_start, visible_end)
     }
 
     pub fn decoration_state_version(&self) -> Option<DocumentVersion> {
@@ -390,13 +721,47 @@ impl EditorSurface {
         self.theme
     }
 
+    pub(crate) fn typography(&self) -> &TypographyRegistry {
+        &self.typography
+    }
+
     /// Swap the active theme registry. Called by the task-7 `setTheme` flow at
     /// load/reload (never during paint); the resolved registry is then
     /// immutable until the next swap. This is the only sanctioned way to mutate
     /// `theme` after construction.
     #[allow(dead_code)] // wired by Plan 046 task 7 (setTheme) — keep the hook live.
     pub(crate) fn set_theme(&mut self, theme: StyleRegistry) {
-        self.theme = theme;
+        if self.theme != theme {
+            self.theme = theme;
+            self.bump_layout_style_revision();
+        }
+    }
+
+    /// Install newer validated typography and discard geometry derived from the
+    /// old profiles. Invalid/stale snapshots leave the current layout intact.
+    pub(crate) fn set_typography(&mut self, typography: crate::protocol::ActiveTypography) -> bool {
+        let Ok(changed) = self.typography.install(typography) else {
+            return false;
+        };
+        if changed {
+            self.layout = LayoutState::default();
+            self.visual_scroll_y = 0.0;
+            self.last_visual_max_scroll_y = 0.0;
+            self.pin_caret_visible = false;
+        }
+        changed
+    }
+
+    fn document_font_role(&self) -> FontRole {
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.document_font_role.font_role())
+            .unwrap_or(FontRole::Proportional)
+    }
+
+    fn bump_layout_style_revision(&mut self) {
+        self.layout_style_revision = self.layout_style_revision.saturating_add(1);
     }
 
     pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
@@ -452,6 +817,8 @@ impl EditorSurface {
 
         self.document.document_version = version;
         self.decorations = EditorDecorationState::default();
+        self.diagnostics = EditorDiagnosticState::default();
+        self.bump_layout_style_revision();
         true
     }
 
@@ -760,7 +1127,7 @@ impl EditorSurface {
 
     pub fn scroll_vertical_pixels(&mut self, delta_pixels: f64) -> bool {
         self.pin_caret_visible = false;
-        let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
+        let line_height = self.typography.document_line_height();
         let document_lines = self.buffer.line_len();
         let previous_line = self.viewport.first_visible_line();
         let previous_visual = self.visual_scroll_y;
@@ -804,7 +1171,7 @@ impl EditorSurface {
 
     pub fn update_visible_line_count_for_height(&mut self, height: f64) -> bool {
         let available_height = (height - (TEXT_INSET * 2.0)).max(0.0);
-        let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
+        let line_height = self.typography.document_line_height();
         let visible_line_count = visible_line_count_from_height(available_height, line_height);
         self.viewport
             .set_visible_line_count(visible_line_count, self.buffer.line_len())
@@ -852,7 +1219,7 @@ impl EditorSurface {
     /// paint and tests so the thumb position is deterministic and never depends
     /// on rendered pixels.
     pub(crate) fn scrollbar_thumb_rect(&self, rect: Rect) -> Option<Rect> {
-        let line_height = TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER;
+        let line_height = self.typography.document_line_height();
         let document_lines = self.buffer.line_len();
         let visible = self.viewport.visible_line_count();
         let max_first = document_lines.saturating_sub(visible);
@@ -946,7 +1313,18 @@ impl EditorSurface {
         let caret_visible_offset = self.visible_caret_offset(&snapshot);
         let selection_visible_range = self.visible_selection_range(&snapshot);
         let decoration_visible_ranges = self.visible_decoration_ranges(&snapshot);
-        let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width);
+        let diagnostic_visible_ranges = self.visible_diagnostic_ranges(&snapshot);
+        let document_font_role = self.document_font_role();
+        let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width)
+            .with_presentation(
+                self.typography.revision(),
+                self.layout_style_revision,
+                document_font_role,
+            );
+        let decorations = &self.decorations;
+        let document = &self.document;
+        let document_end = self.buffer.document_end_byte();
+        let theme = self.theme;
         let pin_caret_visible = std::mem::take(&mut self.pin_caret_visible);
         let metrics = self.layout.paint_text(
             ctx,
@@ -962,8 +1340,21 @@ impl EditorSurface {
             selection_visible_range,
             self.theme.base.selection,
             &decoration_visible_ranges,
+            &diagnostic_visible_ranges,
             origin,
             pin_caret_visible,
+            &self.typography,
+            document_font_role,
+            || {
+                normalize_visible_text_style_runs(
+                    decorations,
+                    document,
+                    document_end,
+                    &snapshot,
+                    document_font_role,
+                    theme,
+                )
+            },
         );
         if current_text.is_empty() {
             self.visual_scroll_y = 0.0;
@@ -974,7 +1365,6 @@ impl EditorSurface {
         if focused {
             self.paint_caret(
                 scene,
-                current_text.is_empty(),
                 max_width,
                 available_height,
                 caret_visible_offset,
@@ -987,37 +1377,26 @@ impl EditorSurface {
     fn paint_caret(
         &self,
         scene: &mut masonry::vello::Scene,
-        text_is_empty: bool,
         max_width: f32,
         available_height: f64,
         caret_visible_offset: Option<usize>,
         origin: (f64, f64),
     ) {
-        let caret = if text_is_empty {
-            Rect::new(
-                origin.0 + TEXT_INSET,
-                origin.1 + TEXT_INSET,
-                origin.0 + TEXT_INSET + CARET_WIDTH,
-                origin.1
-                    + (TEXT_INSET + TEXT_FONT_SIZE as f64 * LINE_HEIGHT_MULTIPLIER)
-                        .min(TEXT_INSET + available_height),
-            )
-        } else if let Some(visible_offset) = caret_visible_offset {
-            let Some(geometry) = self
-                .layout
-                .caret_geometry_for_visible_byte_offset(visible_offset, CARET_WIDTH as f32)
-            else {
-                return;
-            };
-            Rect::new(
-                origin.0 + geometry.rect.x0 + TEXT_INSET,
-                origin.1 + geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
-                origin.0 + geometry.rect.x1 + TEXT_INSET,
-                origin.1 + geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
-            )
-        } else {
+        let Some(visible_offset) = caret_visible_offset else {
             return;
         };
+        let Some(geometry) = self
+            .layout
+            .caret_geometry_for_visible_byte_offset(visible_offset, CARET_WIDTH as f32)
+        else {
+            return;
+        };
+        let caret = Rect::new(
+            origin.0 + geometry.rect.x0 + TEXT_INSET,
+            origin.1 + geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
+            origin.0 + geometry.rect.x1 + TEXT_INSET,
+            origin.1 + geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
+        );
 
         let clip = Rect::new(
             origin.0 + TEXT_INSET,
@@ -1083,20 +1462,58 @@ impl EditorSurface {
             return Vec::new();
         }
         let visible_start = snapshot.start_byte_offset;
-        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        let visible_end = visible_start + snapshot.text.len();
+        let document_end = self.buffer.document_end_byte();
         self.decorations
             .visible_spans(visible_start as u64, visible_end as u64)
             .filter_map(|span| {
-                let start = (span.byte_start as usize).max(visible_start);
-                let end = (span.byte_end as usize).min(visible_end);
-                (start < end).then(|| {
+                let start = usize::try_from(span.byte_start).ok()?;
+                let end = usize::try_from(span.byte_end).ok()?;
+                if start >= end || end > document_end {
+                    return None;
+                }
+                let start = start.max(visible_start);
+                let end = end.min(visible_end);
+                let range = (start - visible_start)..(end - visible_start);
+                (range.start < range.end
+                    && snapshot.text.is_char_boundary(range.start)
+                    && snapshot.text.is_char_boundary(range.end))
+                .then(|| {
                     (
-                        (start - visible_start)..(end - visible_start),
+                        range,
                         self.theme
                             .style_for(span.kind, span.token_type, span.modifiers)
                             .color,
                     )
                 })
+            })
+            .collect()
+    }
+
+    fn visible_diagnostic_ranges(&self, snapshot: &VisibleSnapshot) -> Vec<(Range<usize>, Color)> {
+        if self.diagnostics.document_id != self.document.document_id
+            || self.diagnostics.document_version != self.document.document_version
+        {
+            return Vec::new();
+        }
+        let visible_start = snapshot.start_byte_offset;
+        let visible_end = visible_start + snapshot.text.len();
+        let document_end = self.buffer.document_end_byte();
+        self.diagnostics
+            .visible_spans(visible_start as u64, visible_end as u64)
+            .filter_map(|span| {
+                let start = usize::try_from(span.byte_start).ok()?;
+                let end = usize::try_from(span.byte_end).ok()?;
+                if start > end || end > document_end {
+                    return None;
+                }
+                let start = start.max(visible_start);
+                let end = end.min(visible_end);
+                let range = (start - visible_start)..(end - visible_start);
+                (range.start <= range.end
+                    && snapshot.text.is_char_boundary(range.start)
+                    && snapshot.text.is_char_boundary(range.end))
+                .then(|| (range, self.theme.diagnostic_style(span.severity).color))
             })
             .collect()
     }
@@ -1444,7 +1861,17 @@ impl EditorSurface {
     #[cfg(test)]
     fn build_visible_layout_for_test(&mut self, max_width: f32) {
         let text = self.visible_text();
-        self.layout.set_cached_layout_for_test(&text, max_width);
+        let display_text = if text.is_empty() {
+            PLACEHOLDER_TEXT
+        } else {
+            text.as_str()
+        };
+        self.layout.set_cached_layout_with_typography_for_test(
+            display_text,
+            max_width,
+            &self.typography,
+            self.document_font_role(),
+        );
     }
 
     #[cfg(test)]
@@ -1536,16 +1963,205 @@ fn dedent_leading_one_level(
 mod tests {
     use std::fmt::Write as _;
 
-    use super::{Color, EditorCommand, EditorSurface, TEXT_INSET};
+    use super::{
+        CARET_WIDTH, Color, EditorCommand, EditorSurface, TEXT_INSET,
+        normalize_visible_text_style_runs,
+    };
     use crate::editor::layout::LayoutCacheKey;
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
-        BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration, CompletionTrigger,
-        DecorationKind, DocumentAccess, EditOperation, KeyBindingContext, KeyBindingRule, KeyCode,
-        KeyModifiers, KeyStroke, Modifiers, RoutingPolicy, TabMode, TokenType,
+        ActiveTypography, BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration,
+        CompletionTrigger, DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan,
+        DocumentAccess, DocumentFontRole, EditOperation, KeyBindingContext, KeyBindingRule,
+        KeyCode, KeyModifiers, KeyStroke, Modifiers, RoutingPolicy, TabMode, TokenType,
     };
     use crate::shell::CompletionMenuAcceptAction;
     use masonry::kurbo::Rect;
+
+    fn span(
+        byte_start: u64,
+        byte_end: u64,
+        kind: DecorationKind,
+        font_role: Option<DocumentFontRole>,
+        priority: u16,
+        modifiers: Modifiers,
+    ) -> DecorationSpan {
+        DecorationSpan {
+            byte_start,
+            byte_end,
+            kind,
+            token_type: TokenType::CodeSpan,
+            modifiers,
+            scope: None,
+            font_role,
+            priority,
+            provenance: DecorationProvenance {
+                package_name: "test".to_string(),
+                package_version: "1.0.0".to_string(),
+                package_prefix: "test".to_string(),
+            },
+        }
+    }
+
+    fn normalized_runs(editor: &EditorSurface) -> Vec<super::VisibleTextStyleRun> {
+        let snapshot = editor.visible_snapshot();
+        normalize_visible_text_style_runs(
+            &editor.decorations,
+            &editor.document,
+            editor.buffer.document_end_byte(),
+            &snapshot,
+            editor.document_font_role(),
+            editor.theme,
+        )
+    }
+
+    #[test]
+    fn markdown_code_range_uses_monospace_inside_proportional_layout() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "text code".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        assert!(editor.apply_decoration_set(DecorationSet {
+            document_id: 1,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: 9,
+            spans: vec![span(
+                5,
+                9,
+                DecorationKind::Syntax,
+                Some(DocumentFontRole::Monospace),
+                70,
+                Modifiers::NONE,
+            )],
+        }));
+
+        let runs = normalized_runs(&editor);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].font_role, crate::protocol::FontRole::Proportional);
+        assert_eq!(runs[1].range, 5..9);
+        assert_eq!(runs[1].font_role, crate::protocol::FontRole::Monospace);
+    }
+
+    #[test]
+    fn overlapping_style_runs_resolve_deterministically_and_merge_adjacent_runs() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "abcde".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.apply_decoration_set(DecorationSet {
+            document_id: 1,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: 5,
+            spans: vec![
+                span(
+                    1,
+                    4,
+                    DecorationKind::Syntax,
+                    Some(DocumentFontRole::Monospace),
+                    10,
+                    Modifiers::BOLD,
+                ),
+                span(
+                    2,
+                    5,
+                    DecorationKind::Semantic,
+                    Some(DocumentFontRole::Proportional),
+                    10,
+                    Modifiers::ITALIC,
+                ),
+            ],
+        }));
+
+        let runs = normalized_runs(&editor);
+        assert_eq!(runs.len(), 4);
+        assert_eq!(runs[1].range, 1..2);
+        assert_eq!(runs[1].font_role, crate::protocol::FontRole::Monospace);
+        assert!(runs[1].attributes.bold);
+        assert_eq!(runs[2].range, 2..4);
+        assert_eq!(runs[2].font_role, crate::protocol::FontRole::Proportional);
+        assert!(runs[2].attributes.bold && runs[2].attributes.italic);
+        assert_eq!(runs[3].range, 4..5);
+    }
+
+    #[test]
+    fn mixed_role_normalization_stays_bounded_by_visible_span_boundaries() {
+        let text = "x".repeat(1_000);
+        let spans = (0..500)
+            .map(|index| {
+                span(
+                    index * 2,
+                    index * 2 + 1,
+                    DecorationKind::Syntax,
+                    Some(DocumentFontRole::Monospace),
+                    10,
+                    Modifiers::NONE,
+                )
+            })
+            .collect();
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 1, text, DocumentAccess::Editable { lease_id: 1 });
+        assert!(editor.apply_decoration_set(DecorationSet {
+            document_id: 1,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: 1_000,
+            spans,
+        }));
+
+        let runs = normalized_runs(&editor);
+        assert_eq!(runs.len(), 1_000);
+        assert_eq!(runs.first().unwrap().range, 0..1);
+        assert_eq!(runs.last().unwrap().range, 999..1_000);
+    }
+
+    #[test]
+    fn diagnostic_and_invalid_utf8_spans_cannot_change_font_role() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "éx".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.apply_decoration_set(DecorationSet {
+            document_id: 1,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: 3,
+            spans: vec![
+                span(
+                    0,
+                    2,
+                    DecorationKind::Diagnostic,
+                    Some(DocumentFontRole::Monospace),
+                    99,
+                    Modifiers::NONE,
+                ),
+                span(
+                    1,
+                    2,
+                    DecorationKind::Syntax,
+                    Some(DocumentFontRole::Monospace),
+                    99,
+                    Modifiers::NONE,
+                ),
+            ],
+        }));
+
+        let runs = normalized_runs(&editor);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].range, 0..3);
+        assert_eq!(runs[0].font_role, crate::protocol::FontRole::Proportional);
+    }
 
     #[test]
     fn editor_surface_paint_has_no_decorative_accent_circle() {
@@ -2550,6 +3166,60 @@ mod tests {
         assert!(editor.move_left());
         assert_eq!(editor.caret_for_test(), 1);
         assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn empty_document_caret_uses_default_document_profile() {
+        let mut editor = EditorSurface::default();
+        editor.build_visible_layout_for_test(300.0);
+        let default_height = editor
+            .caret_geometry(CARET_WIDTH as f32)
+            .expect("placeholder layout should provide a caret")
+            .height();
+
+        let mut typography = ActiveTypography {
+            revision: 1,
+            ..ActiveTypography::default()
+        };
+        typography.proportional.size = 40.0;
+        assert!(editor.set_typography(typography));
+        editor.build_visible_layout_for_test(300.0);
+        let configured_height = editor
+            .caret_geometry(CARET_WIDTH as f32)
+            .expect("configured placeholder layout should provide a caret")
+            .height();
+
+        assert!(configured_height > default_height);
+    }
+
+    #[test]
+    fn custom_typography_keeps_scrollbar_and_viewport_geometry_bounded() {
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(&"line\n".repeat(10_000));
+        let mut typography = ActiveTypography {
+            revision: 1,
+            ..ActiveTypography::default()
+        };
+        typography.monospace.size = 40.0;
+        typography.proportional.size = 10.0;
+        assert!(editor.set_typography(typography));
+        assert!(editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 112.0));
+        assert_eq!(editor.viewport.visible_line_count(), 2);
+        editor.set_visual_scroll_bounds_for_test(2_000.0);
+        assert!(editor.scroll_vertical_pixels(400.0));
+
+        let rect = Rect::new(0.0, 0.0, 900.0, 600.0);
+        let thumb = editor.scrollbar_thumb_rect(rect).expect("scrollable thumb");
+        assert!(thumb.y0 >= rect.y0 + TEXT_INSET);
+        assert!(thumb.y1 <= rect.y1 - TEXT_INSET);
+        assert!(editor.visible_text().len() < 10_000);
+
+        let typography = ActiveTypography {
+            revision: 2,
+            ..ActiveTypography::default()
+        };
+        assert!(editor.set_typography(typography));
+        assert_eq!(editor.visual_scroll_y(), 0.0);
     }
 
     #[test]

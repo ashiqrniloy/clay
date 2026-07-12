@@ -106,7 +106,7 @@ serverRegisterPanelContribution(manifest, {
   - Public docs: `docs/reference/clay-js-api/ui/server-register-component-contribution.md`.
   - Supported Phase 18.3 component kinds: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, and `statusItem`.
   - Deferred component kinds: `table`, `dropdown`, `collapse`, and `modal` fail with planned/deferred diagnostics instead of partially working semantics.
-  - Style variables must reference typed Clay tokens or allowed enum values such as `variant`; raw CSS, raw colors, and unsupported style keys are rejected.
+  - Style variables must reference typed Clay tokens or allowed enum values such as `variant` and `fontRole`; raw CSS, raw colors, concrete font families/sizes, and unsupported style keys are rejected. `fontRole` defaults to user-owned `ui`; only text-bearing panel, label, button, list, and statusItem components may select semantic `monospace` or `proportional`.
 
 - `TransientOverlayContribution`
   - Owner/source: `runtime/js/ui.ts`, `src/server/ui.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`.
@@ -135,7 +135,7 @@ serverRegisterPanelContribution(manifest, {
 ## Invariants and Constraints
 
 - Registration and validation are package load/config/update or explicit UI update work, not Masonry paint/layout, pointer, scroll, keypress, text-event, or ordinary editor hot-path work.
-- Masonry hot paths read already-validated inert package UI state only; they do not parse manifests, run package JavaScript, perform schema validation, wait on IPC, serialize full documents, or mutate the child tree.
+- Masonry hot paths read already-validated inert package UI state only; they do not parse manifests, run package JavaScript, perform schema validation, wait on IPC, serialize full documents, or mutate the child tree. Resolved profile stacks and UI metrics are client-local cached data; font discovery never occurs in paint, layout, pointer, or accessibility traversal.
 - Package UI declarations grant no filesystem, network, shell, AI mutation, WASM, package-manager execution, package enable/disable, workspace mutation, raw Deno op, native widget, client-side JavaScript, renderer callback, raw CSS, or raw style authority.
 - Package-owned IDs and tokens must use the package `apiPrefix`; packages cannot claim `clay.*` names.
 - Action authority comes only from separately registered command IDs. UI declarations do not create command authority by themselves.
@@ -151,7 +151,8 @@ serverRegisterPanelContribution(manifest, {
 - `src/shell/components.rs` unit tests: validate supported/deferred component kinds and typed style variables.
 - `src/shell/theme.rs` unit tests: validate core token resolution, package-token fallback resolution, and type mismatch rejection.
 - `src/shell/package_ui.rs` unit tests: validate fixed panel slot composition, duplicate exclusive slot rejection, and transient overlay geometry.
-- `src/masonry_sdui.rs` unit tests: validate package fixed-panel geometry, transient overlay geometry, action routing, observation privacy, and resolved theme-token rendering.
+- `src/masonry_sdui.rs` unit tests: validate package fixed-panel geometry, transient overlay geometry, action routing, observation privacy, resolved theme-token rendering, semantic package font-role selection, and shared row/hit/accessibility geometry.
+- `src/server/ui.rs::package_component_font_role_is_semantic_and_text_only`: accepts allowed enum roles and rejects unsupported roles, concrete family/size fields, and structural-component use.
 - `src/masonry_editor.rs::fixed_package_panel_shrinks_editor_hit_region`: validates editor hit-testing uses the fixed-panel-reduced `main` rect.
 - `tests/package_loading.rs`: validates package manifest UI/input/state/layout/configuration metadata, contribution counts, deterministic conflicts, prefix/provenance rules, and invalid contribution rejection.
 - `tests/package_primitive_gate.rs`: keeps package permission/prohibited-authority gates aligned with UI contribution rules.

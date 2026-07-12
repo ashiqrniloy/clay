@@ -27,7 +27,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 - Abort superseded in-flight tasks when a newer version for the same document/package/mode is scheduled.
 - Replace parse handlers by runtime generation during hot reload and cancel old-generation parse tasks before they can publish.
 - Sort invalidated ranges so viewport-intersecting work is handled first, using only generic byte-range metadata that token-stream adapters for Markdown, Python, or other modes can consume.
-- Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, optional parse-produced decoration metadata, known decoration style tokens, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
+- Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, optional parse-produced decoration and range-diagnostic metadata, their viewport/provenance identity, component payload budgets, and `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
 - Instrument scheduled, cancelled, published, stale, and failed parse tasks through `ParseCoordinatorStats`.
 - Expose internal update and diagnostic receivers for later decoration/folding/runtime diagnostic publication paths through `next_update()` and `next_diagnostic()`.
 
@@ -41,7 +41,7 @@ The live JS bridge is deliberately split across the facade and the op. Package l
 
 `ParseCoordinator::schedule_parse_with_windows` is the Phase 18.5 large-file path. The caller prepares bounded server-canonical snapshots from already-open document text, then the coordinator validates each snapshot before any package handler can observe it: document ID and version must match the request, package prefix and mode ID must match handler provenance, `byte_end - byte_start` must equal the UTF-8 byte length of `text`, every window must fit `ParsePolicy::max_window_bytes`, and total retained window text must fit `ParsePolicy::memory_budget_bytes` and `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB). Valid windows are delivered in `ParseEditNotification::parse_windows` with `SyntaxMemoryBudget` metadata.
 
-The spawned task calls the handler with a compact `ParseEditNotification`. For metadata-only requests `parse_windows` is empty; for windowed requests it contains only the bounded snapshots selected for the viewport/invalidated ranges. JS-backed handlers are invoked on the persistent runtime worker by token; the runtime calls the registered package function under the smaller of the service timeout and the handler's registered `timeoutMs`, stores the returned update through `op_clay_parse_store_update`, converts it into `IncrementalParseUpdate`, then returns it to the coordinator task. Phase 18.10 Tree-sitter highlighting uses the same handler trait through `TreeSitterSyntaxHandler`: package grammar metadata is validated before registration, the handler receives only bounded server-prepared windows, compiles/caches its query and tree server-side, and returns an inert `DecorationSet` inside `IncrementalParseUpdate` for normal coordinator validation. When the handler resolves, `finish_task` first verifies that the task generation still matches the active handler generation for that package/mode; old-generation results are counted as stale and never published. It then runs normal update validation before sending an `IncrementalParseUpdate` on the coordinator's internal update channel. If the result document version no longer matches the latest recorded document version, the coordinator drops it and increments stale-result stats instead of publishing. Handler errors, parse timeouts, invalid updates, and payload-budget failures increment failed-task stats, publish no half-updated result, and enqueue sanitized `RuntimeDiagnostic` values on the diagnostic receiver (`clay.parse.open_failed`) without leaking handler messages, file paths, or source text.
+The spawned task calls the handler with a compact `ParseEditNotification`. For metadata-only requests `parse_windows` is empty; for windowed requests it contains only the bounded snapshots selected for the viewport/invalidated ranges. JS-backed handlers are invoked on the persistent runtime worker by token; the runtime calls the registered package function under the smaller of the service timeout and the handler's registered `timeoutMs`, stores the returned update through `op_clay_parse_store_update`, converts it into `IncrementalParseUpdate`, then returns it to the coordinator task. Phase 18.10 Tree-sitter highlighting uses the same handler trait through `TreeSitterSyntaxHandler`: package grammar metadata is validated before registration, the handler receives only bounded server-prepared windows, compiles/caches its query and tree server-side, and returns an inert `DecorationSet` inside `IncrementalParseUpdate` for normal coordinator validation. When the handler resolves, `finish_task` first verifies that the task generation still matches the active handler generation for that package/mode; old-generation results are counted as stale and never published. It then validates optional decoration and diagnostic side channels together before sending one `IncrementalParseUpdate` on the coordinator's internal update channel. Diagnostic document/version/viewport and package-prefix provenance must match the enclosing update, and `validate_diagnostic_set` enforces bounded sanitized metadata. Any side-channel failure rejects the whole update, so consumers never observe decoration-only half-state. If the result document version no longer matches the latest recorded document version, the coordinator drops it and increments stale-result stats instead of publishing. Handler errors, parse timeouts, invalid updates, and payload-budget failures increment failed-task stats, publish no half-updated result, and enqueue sanitized `RuntimeDiagnostic` values on the diagnostic receiver (`clay.parse.open_failed`) without leaking handler messages, file paths, or source text.
 
 `src/protocol/parse.rs` defines the inert parse shapes:
 
@@ -52,7 +52,10 @@ The spawned task calls the handler with a compact `ParseEditNotification`. For m
 - `ParseWindowRequest`
 - `ParsePolicy`
 - `SyntaxMemoryBudget`
-- `IncrementalParseUpdate`
+- `SyntaxDiagnosticCapture` / `SyntaxDiagnosticKind`
+- `IncrementalParseUpdate`, including optional `decoration_update` and `diagnostic_update`
+
+`SyntaxDiagnosticCapture` is the engine-neutral local recovery shape (`byte_start`, `byte_end`, and `Error`/`Missing`) used before a syntax engine translates captures into a source-associated `DiagnosticSet`. JavaScript handlers return inert `{ diagnostics: { source, spans } }` records; Rust supplies package provenance from the accepted registration rather than trusting handler JSON.
 
 These types are `rkyv`-serializable for future protocol/cache use, but the current coordinator keeps parse updates server-side for downstream decoration/folding consumption rather than adding them to hot edit-ack IPC messages.
 
@@ -73,7 +76,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - Stale results are discarded before publication, including old-runtime-generation task results after hot reload.
 - Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; over-budget updates increment failed-task stats, emit sanitized diagnostics, and are not published.
 - Windowed parser input is bounded by `ParsePolicy::max_window_bytes` per snapshot and `SYNTAX_CACHE_BUDGET_BYTES`/`SyntaxMemoryBudget` across retained syntax windows.
-- Optional parse-produced decorations are validated through the shared decoration validation path before client publication, including range/style-token, document-version, viewport, and decoration payload-budget checks.
+- Optional parse-produced decorations and diagnostics are validated atomically. Both must match the enclosing update's document, version, viewport, and package provenance; diagnostics additionally use centralized field/count/range/payload sanitization.
 - The Markdown parser adapter and the Tree-sitter syntax handler publish decoration updates as generic `DecorationSet` values; the coordinator validates them without knowing markdown-it tokens, Markdown syntax, Rust syntax, TypeScript syntax, or JavaScript syntax.
 - Token-stream adapters receive package-neutral parse metadata (`document_id`, versions, package prefix, mode ID, viewport, invalidated byte ranges, and optional bounded parse windows). If a future adapter needs line-start tables beyond `base_line`, those must be added as generic parse-input primitives, not mode-specific Rust parser branches.
 
@@ -124,6 +127,7 @@ cargo test js_parse_handler_bridge_runs_registered_markdown_handler --lib
 
 - [Parse Task Lifecycle](parse-task-lifecycle.md)
 - [Decoration Transport](decoration-transport.md)
+- [Range Diagnostics](range-diagnostics.md)
 - [Protocol Codec](protocol-codec.md)
 - `docs/reference/primitives/parse-update-strategy.md`
 - `plans/019-Phase17-Package-System-and-Mode-Loading-Foundation.md`

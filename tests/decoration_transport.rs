@@ -234,6 +234,7 @@ fn markdown_representative_decoration_payload_fits_budget_and_client_applies() {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
         },
+        active_typography: clay::protocol::ActiveTypography::default(),
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
     assert!(widget.apply_connection_event(ClientConnectionEvent::DecorationSet(validated)));
@@ -388,6 +389,7 @@ fn decoration_render_hook_applies_validated_spans_without_package_js() {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
         },
+        active_typography: clay::protocol::ActiveTypography::default(),
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
 

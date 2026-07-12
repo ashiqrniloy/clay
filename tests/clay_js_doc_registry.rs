@@ -34,6 +34,70 @@ fn generated_registry_is_current() {
 }
 
 #[test]
+fn set_typography_api_doc_has_required_configuration_metadata() {
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+    let typography = registry
+        .by_id("clay.theme.setTypography")
+        .expect("setTypography API is generated from docs");
+
+    assert_eq!(typography.js_module, "clay:theme");
+    assert_eq!(typography.js_export, "setTypography");
+    assert_eq!(typography.key_bindings, Vec::<String>::new());
+    assert_eq!(typography.permissions, Vec::<String>::new());
+    for property in [
+        "monospace.families",
+        "monospace.size",
+        "proportional.families",
+        "proportional.size",
+        "ui.families",
+        "ui.size",
+    ] {
+        assert!(
+            typography
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "setTypography registry entry must preserve custom property {property}"
+        );
+    }
+}
+
+#[test]
+fn set_typography_api_is_linked_and_generated_registry_is_current() {
+    let root = repository_root();
+    let indexed_paths: BTreeSet<_> = registry_source_paths(&root)
+        .expect("registry source paths")
+        .into_iter()
+        .collect();
+    assert!(indexed_paths.contains("docs/reference/clay-js-api/theme/set-typography.md"));
+
+    check_generated_registry_current(&root).unwrap_or_else(|error| {
+        panic!("{error}\nRepair command: {UPDATE_COMMAND}");
+    });
+}
+
+#[test]
+fn invalid_init_typography_reports_actionable_validation_error() {
+    let root = repository_root();
+    let doc =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/theme/set-typography.md"))
+            .expect("read setTypography API doc");
+    for phrase in [
+        "clay.theme.invalid_typography",
+        "does not partially install",
+        "previous complete server state active",
+        "generic fallback",
+        "Removing the call",
+    ] {
+        assert!(
+            doc.contains(phrase),
+            "setTypography docs must explain {phrase:?}"
+        );
+    }
+}
+
+#[test]
 fn generated_registry_contains_all_indexed_public_apis() {
     let root = repository_root();
     let indexed_paths: BTreeSet<_> = registry_source_paths(&root)
@@ -383,6 +447,35 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
         );
     }
 
+    let diagnostics = registry
+        .by_id("clay.diagnostics.serverPublishDiagnostics")
+        .expect("range diagnostic publication API is generated");
+    assert_eq!(diagnostics.js_module, "clay:diagnostics");
+    assert_eq!(diagnostics.js_export, "serverPublishDiagnostics");
+    assert_eq!(diagnostics.key_bindings, Vec::<String>::new());
+    assert!(
+        diagnostics
+            .permissions
+            .iter()
+            .any(|permission| permission == "render-decorations")
+    );
+    for property in [
+        "documentId",
+        "documentVersion",
+        "viewport",
+        "source",
+        "spans",
+        "packagePrefix",
+    ] {
+        assert!(
+            diagnostics
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "diagnostics API registry entry must preserve custom property {property}"
+        );
+    }
+
     for (path, required) in [
         (
             "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
@@ -406,6 +499,18 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
                 "Do not expose or call internal chunk-cache helpers",
                 "DECORATION_PAYLOAD_BUDGET_BYTES",
                 "server-side package code",
+            ],
+        ),
+        (
+            "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md",
+            [
+                "DIAGNOSTIC_PAYLOAD_BUDGET_BYTES",
+                "DIAGNOSTIC_CACHE_BUDGET_BYTES",
+                "render-decorations",
+                "source-keyed",
+                "server-side package code",
+                "language-server process",
+                "Do not expose or call internal chunk-cache helpers",
             ],
         ),
     ] {
@@ -496,6 +601,7 @@ fn large_file_api_docs_are_linked_from_index() {
     for path in [
         "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
         "docs/reference/clay-js-api/decorations/server-publish-decorations.md",
+        "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md",
     ] {
         assert!(
             indexed_paths.contains(path),
@@ -515,6 +621,7 @@ fn large_file_generated_registry_is_fresh() {
     for id in [
         "clay.parse.serverRegisterParseHandler",
         "clay.decorations.serverPublishDecorations",
+        "clay.diagnostics.serverPublishDiagnostics",
     ] {
         assert!(
             registry.by_id(id).is_some(),
@@ -1394,6 +1501,76 @@ fn generated_registry_security_matches_source_docs() {
             "{} {} generated registry security must preserve frontmatter exactly",
             generated_entry.id,
             generated_entry.documentation_path
+        );
+    }
+}
+
+#[test]
+fn diagnostics_api_docs_and_generated_registry_are_fresh() {
+    let root = repository_root();
+    let indexed_paths: BTreeSet<_> = registry_source_paths(&root)
+        .expect("registry source paths")
+        .into_iter()
+        .collect();
+    assert!(
+        indexed_paths
+            .contains("docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md"),
+        "docs/index.md must link serverPublishDiagnostics"
+    );
+
+    check_generated_registry_current(&root).unwrap_or_else(|error| {
+        panic!("{error}\nRepair command: {UPDATE_COMMAND}");
+    });
+
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let diagnostics = registry
+        .by_id("clay.diagnostics.serverPublishDiagnostics")
+        .expect("serverPublishDiagnostics is generated");
+    assert_eq!(diagnostics.js_module, "clay:diagnostics");
+    assert_eq!(diagnostics.js_export, "serverPublishDiagnostics");
+    assert_eq!(diagnostics.user_facing_name, "Publish Diagnostics");
+    assert_eq!(diagnostics.key_bindings, Vec::<String>::new());
+    assert!(
+        diagnostics
+            .permissions
+            .iter()
+            .any(|permission| permission == "render-decorations")
+    );
+    for property in [
+        "documentId",
+        "documentVersion",
+        "viewport",
+        "source",
+        "spans",
+        "packagePrefix",
+    ] {
+        assert!(
+            diagnostics
+                .custom_properties
+                .iter()
+                .any(|custom_property| custom_property.name == property),
+            "diagnostics registry must preserve custom property {property}"
+        );
+    }
+
+    let doc = std::fs::read_to_string(
+        root.join("docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md"),
+    )
+    .expect("read diagnostics API doc");
+    for phrase in [
+        "background parse/analyze",
+        "must not be called from ordinary typing, paint, layout, scroll, pointer, or text-event paths",
+        "DIAGNOSTIC_PAYLOAD_BUDGET_BYTES",
+        "render-decorations",
+        "language-server process",
+        "raw `Deno.core.ops`",
+        "runtime/js/diagnostics.ts::serverPublishDiagnostics",
+        "op_clay_diagnostics_publish_diagnostics",
+        "src/server/diagnostics.rs::validate_diagnostic_publication",
+    ] {
+        assert!(
+            doc.contains(phrase),
+            "diagnostics API docs must include {phrase:?}"
         );
     }
 }

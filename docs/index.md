@@ -26,6 +26,8 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [@clay/javascript Package](reference/packages/javascript.md) — first-party grammar-only JavaScript syntax package contract, permissions, file patterns, and runtime boundary.
 - [Primitive Implementation Gate](reference/primitives/implementation-gate.md) — Phase 16.5 package/mode validation gate, fixture format, deterministic failure coverage, and Phase 17/18 handoff.
 - [Text Vocabulary and Two-Axis Decoration Contract](reference/primitives/syntax-vocabulary.md) — Phase 18.15 locked LSP-based `TokenType` + `Modifiers` vocabulary, Clay prose/text-attribute extensions, open-string scope escape, compatibility mapping from free-form `style_token`, and single-source-of-color `StyleRegistry` invariant.
+- [Semantic Typography Roles](reference/primitives/typography.md) — Phase 18.16.5 package/mode authoring contract for semantic document, range, and component roles with user-owned concrete typography.
+- [Range Diagnostics](reference/primitives/diagnostics.md) — Phase 18.17 byte-range diagnostic primitive for Tree-sitter recovery, package analyzers, theme-owned squiggles, and future LSP bridges.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, tiered syntax-engine smoke, `smoke-gui`, foreground server/client, GUI status, and local IPC validation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
@@ -46,6 +48,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterCommand](reference/clay-js-api/commands/server-register-command.md) — `clay.commands.serverRegisterCommand`
 - [serverRevealInTree](reference/clay-js-api/commands/server-reveal-in-tree.md) — `clay.commands.serverRevealInTree`
 - [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `clay.decorations.serverPublishDecorations`
+- [serverPublishDiagnostics](reference/clay-js-api/diagnostics/server-publish-diagnostics.md) — `clay.diagnostics.serverPublishDiagnostics`
 - [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `clay.configuration.getConfigurationState`
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `clay.configuration.loadConfigurationModule`
 - [clientOpenFileDialog](reference/clay-js-api/documents/client-open-file-dialog.md) — `clay.documents.clientOpenFileDialog`
@@ -79,6 +82,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `clay.syntax.serverRegisterSyntaxGrammar`
 - [setSyntaxEnginePreference](reference/clay-js-api/syntax/set-syntax-engine-preference.md) — `clay.syntax.setSyntaxEnginePreference`
 - [setTheme](reference/clay-js-api/theme/set-theme.md) — `clay.theme.setTheme`
+- [setTypography](reference/clay-js-api/theme/set-typography.md) — `clay.theme.setTypography`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `clay.completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `clay.completion.serverListCompletionProvidersForTrigger`
 - [serverRegisterCompletionProvider](reference/clay-js-api/completion/server-register-completion-provider.md) — `clay.completion.serverRegisterCompletionProvider`

@@ -19,16 +19,20 @@ use masonry::parley::style::{LineHeight, StyleProperty};
 use masonry::peniko::{Color, Fill};
 use masonry::vello::Scene;
 
-use crate::perf::metrics::global_recorder;
-use crate::protocol::{
-    DocumentId, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiNode,
-    SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
-};
-use crate::shell::{
-    CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiComponentTree,
-    PackageUiOverlayObservation, PackageUiPanelObservation, PackageUiRuntimeError,
-    PackageUiRuntimeState, PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession,
-    layout::PaneSlotId, theme::SduiThemeStyle,
+use crate::{
+    editor::typography::{TypographyRegistry, UiTextMetrics, UiTextVariant},
+    perf::metrics::global_recorder,
+    protocol::{
+        DocumentId, FontRole, SduiActionIntent, SduiActionSource, SduiEditorBinding,
+        SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation,
+        SduiTreeUpdate, SduiVersion,
+    },
+    shell::{
+        CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiComponentTree,
+        PackageUiOverlayObservation, PackageUiPanelObservation, PackageUiRuntimeError,
+        PackageUiRuntimeState, PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession,
+        layout::PaneSlotId, theme::SduiThemeStyle,
+    },
 };
 
 #[cfg(test)]
@@ -48,6 +52,13 @@ pub(crate) struct SduiObservableListItem {
 pub(crate) struct SduiAccessibleNode {
     pub role: Role,
     pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SduiAccessibilityEntry {
+    role: Role,
+    label: Option<String>,
+    bounds: Rect,
 }
 
 // Internal test/agent observability surface only. If SDUI state becomes a public
@@ -75,6 +86,7 @@ pub struct SduiNativeState {
     editor_binding: Option<SduiEditorBinding>,
     actions: Vec<SduiVisibleAction>,
     package_ui: PackageUiRuntimeState,
+    typography: TypographyRegistry,
     active_menu: Option<TransientMenuSession>,
     // Client-local vertical scroll offset (pixels) for the Clay-owned left
     // file-browser panel. Scroll reveals already-listed rows only; it never
@@ -95,6 +107,7 @@ impl SduiNativeState {
             editor_binding: None,
             actions: Vec::new(),
             package_ui: PackageUiRuntimeState::new(),
+            typography: TypographyRegistry::default(),
             active_menu: None,
             scroll_offset: 0.0,
             content_height: 0.0,
@@ -104,6 +117,43 @@ impl SduiNativeState {
 
     pub(crate) fn active_menu(&self) -> Option<&TransientMenuSession> {
         self.active_menu.as_ref()
+    }
+
+    pub(crate) fn set_typography(&mut self, typography: TypographyRegistry) {
+        if self.typography == typography {
+            return;
+        }
+        self.typography = typography;
+        self.scroll_offset = 0.0;
+        self.content_height = 0.0;
+        self.viewport_height = 0.0;
+        self.actions.clear();
+    }
+
+    fn text_metrics(&self, role: FontRole, variant: UiTextVariant) -> UiTextMetrics {
+        self.typography.ui_text_metrics(role, variant)
+    }
+
+    fn body_metrics(&self) -> UiTextMetrics {
+        self.text_metrics(FontRole::Ui, sdui_theme_style().body_text)
+    }
+
+    fn component_variant(
+        component: &PackageUiComponentTree,
+        fallback: UiTextVariant,
+    ) -> UiTextVariant {
+        component.text_variant.unwrap_or(fallback)
+    }
+
+    fn component_metrics(
+        &self,
+        component: &PackageUiComponentTree,
+        fallback: UiTextVariant,
+    ) -> UiTextMetrics {
+        self.text_metrics(
+            component.font_role,
+            Self::component_variant(component, fallback),
+        )
     }
 
     pub(crate) fn set_active_menu(&mut self, menu: TransientMenuSession) {
@@ -198,6 +248,10 @@ impl SduiNativeState {
         self.ui_version
     }
 
+    pub(crate) fn typography_revision(&self) -> u64 {
+        self.typography.revision()
+    }
+
     pub(crate) fn apply_package_ui_update(
         &mut self,
         update: PackageUiRuntimeUpdate,
@@ -256,7 +310,7 @@ impl SduiNativeState {
 
     /// Scroll the left file browser by whole rows (positive = down).
     pub(crate) fn scroll_lines(&mut self, size: Size, lines: isize) -> bool {
-        self.scroll_vertical_pixels(size, lines as f64 * sdui_theme_style().row_height)
+        self.scroll_vertical_pixels(size, lines as f64 * self.body_metrics().row_height)
     }
 
     pub(crate) fn scroll_offset(&self) -> f64 {
@@ -339,6 +393,283 @@ impl SduiNativeState {
             self.collect_accessibility_nodes(root_id, &mut visited, &mut nodes);
         }
         nodes
+    }
+
+    pub(crate) fn append_accessibility_children(&self, ctx: &mut AccessCtx<'_>) -> Vec<NodeId> {
+        self.accessibility_entries(ctx.size())
+            .into_iter()
+            .map(|entry| {
+                let id = NodeId::from(WidgetId::next());
+                let mut node = Node::new(entry.role);
+                if let Some(label) = entry.label {
+                    node.set_label(label);
+                }
+                node.set_bounds(masonry::accesskit::Rect {
+                    x0: entry.bounds.x0,
+                    y0: entry.bounds.y0,
+                    x1: entry.bounds.x1,
+                    y1: entry.bounds.y1,
+                });
+                ctx.tree_update().nodes.push((id, node));
+                id
+            })
+            .collect()
+    }
+
+    fn accessibility_entries(&self, size: Size) -> Vec<SduiAccessibilityEntry> {
+        let mut entries = Vec::new();
+        if let Some(root_id) = self.root_id
+            && let Some(sidebar) = sdui_panel_left_slot_rect(size, self)
+        {
+            let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding - self.scroll_offset;
+            self.collect_accessibility_entries(
+                root_id,
+                0,
+                &mut cursor_y,
+                sidebar.width(),
+                sidebar.x0,
+                &mut entries,
+            );
+        }
+        for (rect, panel) in self.package_ui.visible_fixed_panels(size.to_rect()) {
+            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            self.collect_package_accessibility_entries(
+                &panel.component,
+                0,
+                &mut cursor_y,
+                rect.width(),
+                rect.x0,
+                &mut entries,
+            );
+        }
+        let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
+        for overlay in self.package_ui.overlays() {
+            let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
+            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            self.collect_package_accessibility_entries(
+                &overlay.component,
+                0,
+                &mut cursor_y,
+                rect.width(),
+                rect.x0,
+                &mut entries,
+            );
+        }
+        entries
+    }
+
+    fn collect_accessibility_entries(
+        &self,
+        node_id: SduiNodeId,
+        depth: usize,
+        cursor_y: &mut f64,
+        width: f64,
+        origin_x: f64,
+        entries: &mut Vec<SduiAccessibilityEntry>,
+    ) {
+        let Some(node) = self.nodes.get(&node_id) else {
+            return;
+        };
+        let body = self.body_metrics();
+        match &node.kind {
+            SduiNodeKind::Panel { title, children } => {
+                let height = self
+                    .text_metrics(FontRole::Ui, sdui_theme_style().title_text)
+                    .row_height;
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::Pane,
+                    label: Some(title.clone()),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                });
+                *cursor_y += height;
+                for child_id in children {
+                    self.collect_accessibility_entries(
+                        *child_id,
+                        depth + 1,
+                        cursor_y,
+                        width,
+                        origin_x,
+                        entries,
+                    );
+                }
+            }
+            SduiNodeKind::Label { text } => {
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::Label,
+                    label: Some(text.clone()),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                });
+                *cursor_y += body.row_height;
+            }
+            SduiNodeKind::Button { label, .. } => {
+                let height = body.button_height();
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::Button,
+                    label: Some(label.clone()),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                });
+                *cursor_y += height;
+            }
+            SduiNodeKind::List { items } => {
+                let row_height =
+                    body.list_height(self.text_metrics(FontRole::Ui, UiTextVariant::Detail));
+                let list_start = *cursor_y;
+                for item in items {
+                    entries.push(SduiAccessibilityEntry {
+                        role: Role::ListItem,
+                        label: Some(item.label.clone()),
+                        bounds: row_rect(depth, *cursor_y, width, origin_x, row_height),
+                    });
+                    *cursor_y += row_height;
+                }
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::List,
+                    label: None,
+                    bounds: row_rect(depth, list_start, width, origin_x, *cursor_y - list_start),
+                });
+            }
+            SduiNodeKind::EditorView { binding } => {
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::MultilineTextInput,
+                    label: Some(format!("Editor document {}", binding.document_id)),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                });
+                *cursor_y += body.row_height;
+            }
+            SduiNodeKind::Flex {
+                direction,
+                children,
+            } => match direction {
+                SduiFlexDirection::Row => {
+                    for child_id in children {
+                        if !matches!(
+                            self.nodes.get(child_id).map(|node| &node.kind),
+                            Some(SduiNodeKind::EditorView { .. })
+                        ) {
+                            self.collect_accessibility_entries(
+                                *child_id, depth, cursor_y, width, origin_x, entries,
+                            );
+                        }
+                    }
+                }
+                SduiFlexDirection::Column => {
+                    for child_id in children {
+                        self.collect_accessibility_entries(
+                            *child_id, depth, cursor_y, width, origin_x, entries,
+                        );
+                    }
+                }
+            },
+            SduiNodeKind::Stack { children } => {
+                for child_id in children {
+                    self.collect_accessibility_entries(
+                        *child_id, depth, cursor_y, width, origin_x, entries,
+                    );
+                }
+            }
+        }
+    }
+
+    fn collect_package_accessibility_entries(
+        &self,
+        component: &PackageUiComponentTree,
+        depth: usize,
+        cursor_y: &mut f64,
+        width: f64,
+        origin_x: f64,
+        entries: &mut Vec<SduiAccessibilityEntry>,
+    ) {
+        let body = self.component_metrics(component, sdui_theme_style().body_text);
+        match component.kind.as_str() {
+            "panel" => {
+                if let Some(title) = &component.title {
+                    let variant = Self::component_variant(component, sdui_theme_style().title_text);
+                    let height = self.text_metrics(component.font_role, variant).row_height;
+                    entries.push(SduiAccessibilityEntry {
+                        role: Role::Pane,
+                        label: Some(title.clone()),
+                        bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                    });
+                    *cursor_y += height;
+                }
+                for child in &component.children {
+                    self.collect_package_accessibility_entries(
+                        child,
+                        depth + 1,
+                        cursor_y,
+                        width,
+                        origin_x,
+                        entries,
+                    );
+                }
+            }
+            "label" | "statusItem" => {
+                let label = component
+                    .text
+                    .as_deref()
+                    .or(component.label.as_deref())
+                    .unwrap_or(&component.id)
+                    .to_string();
+                entries.push(SduiAccessibilityEntry {
+                    role: if component.kind == "statusItem" {
+                        Role::Status
+                    } else {
+                        Role::Label
+                    },
+                    label: Some(label),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                });
+                *cursor_y += body.row_height;
+            }
+            "button" => {
+                let height = body.button_height();
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::Button,
+                    label: Some(
+                        component
+                            .label
+                            .clone()
+                            .unwrap_or_else(|| component.id.clone()),
+                    ),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                });
+                *cursor_y += height;
+            }
+            "list" => {
+                let row_height =
+                    body.list_height(self.text_metrics(component.font_role, UiTextVariant::Detail));
+                let list_start = *cursor_y;
+                for item in &component.items {
+                    entries.push(SduiAccessibilityEntry {
+                        role: Role::ListItem,
+                        label: Some(item.label.clone()),
+                        bounds: row_rect(depth, *cursor_y, width, origin_x, row_height),
+                    });
+                    *cursor_y += row_height;
+                }
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::List,
+                    label: None,
+                    bounds: row_rect(depth, list_start, width, origin_x, *cursor_y - list_start),
+                });
+            }
+            "editorView" => {
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::MultilineTextInput,
+                    label: Some(format!("Editor view · {}", component.id)),
+                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                });
+                *cursor_y += body.row_height;
+            }
+            "flex" | "stack" | "overlay" | "scroll" | "portal" => {
+                for child in &component.children {
+                    self.collect_package_accessibility_entries(
+                        child, depth, cursor_y, width, origin_x, entries,
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 
     #[cfg(test)]
@@ -596,32 +927,37 @@ impl SduiNativeState {
         let Some(node) = self.nodes.get(&node_id).cloned() else {
             return;
         };
+        let body = self.body_metrics();
         match node.kind {
             SduiNodeKind::Panel { children, .. } => {
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += self
+                    .text_metrics(FontRole::Ui, sdui_theme_style().title_text)
+                    .row_height;
                 for child_id in children {
                     self.collect_action_regions(child_id, depth + 1, cursor_y, width, origin_x);
                 }
             }
             SduiNodeKind::Label { .. } | SduiNodeKind::EditorView { .. } => {
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += body.row_height;
             }
             SduiNodeKind::Button { action, .. } => {
                 self.actions.push(SduiVisibleAction {
-                    rect: row_rect(depth, *cursor_y, width, origin_x),
+                    rect: row_rect(depth, *cursor_y, width, origin_x, body.button_height()),
                     intent: action,
                 });
-                *cursor_y += sdui_theme_style().row_height + 6.0;
+                *cursor_y += body.button_height();
             }
             SduiNodeKind::List { items } => {
+                let row_height =
+                    body.list_height(self.text_metrics(FontRole::Ui, UiTextVariant::Detail));
                 for item in items {
                     if let Some(action) = item.action {
                         self.actions.push(SduiVisibleAction {
-                            rect: row_rect(depth, *cursor_y, width, origin_x),
+                            rect: row_rect(depth, *cursor_y, width, origin_x, row_height),
                             intent: action,
                         });
                     }
-                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                    *cursor_y += row_height;
                 }
             }
             SduiNodeKind::Flex {
@@ -661,9 +997,14 @@ impl SduiNativeState {
         width: f64,
         origin_x: f64,
     ) {
+        let metrics = self.component_metrics(component, sdui_theme_style().body_text);
         match component.kind.as_str() {
             "panel" => {
-                *cursor_y += sdui_theme_style().row_height;
+                if component.title.is_some() {
+                    *cursor_y += self
+                        .component_metrics(component, sdui_theme_style().title_text)
+                        .row_height;
+                }
                 for child in &component.children {
                     self.collect_package_action_regions(
                         child,
@@ -677,28 +1018,30 @@ impl SduiNativeState {
             "button" => {
                 if let Some(command_id) = &component.action_command_id {
                     self.actions.push(SduiVisibleAction {
-                        rect: row_rect(depth, *cursor_y, width, origin_x),
+                        rect: row_rect(depth, *cursor_y, width, origin_x, metrics.button_height()),
                         intent: package_action_intent(command_id, &component.id),
                     });
                 }
-                *cursor_y += sdui_theme_style().row_height + 6.0;
+                *cursor_y += metrics.button_height();
             }
             "list" => {
+                let row_height = metrics
+                    .list_height(self.text_metrics(component.font_role, UiTextVariant::Detail));
                 for item in &component.items {
                     if let Some(command_id) = &item.action_command_id {
                         self.actions.push(SduiVisibleAction {
-                            rect: row_rect(depth, *cursor_y, width, origin_x),
+                            rect: row_rect(depth, *cursor_y, width, origin_x, row_height),
                             intent: package_action_intent(
                                 command_id,
                                 &format!("{}.{}", component.id, item.id),
                             ),
                         });
                     }
-                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                    *cursor_y += row_height;
                 }
             }
             "label" | "statusItem" | "editorView" => {
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += metrics.row_height;
             }
             "flex" | "stack" | "overlay" | "scroll" | "portal" => {
                 for child in &component.children {
@@ -707,53 +1050,6 @@ impl SduiNativeState {
             }
             _ => {}
         }
-    }
-
-    fn build_accessibility_subtree(
-        &self,
-        node_id: SduiNodeId,
-        visited: &mut BTreeSet<SduiNodeId>,
-        tree_update: &mut masonry::accesskit::TreeUpdate,
-    ) -> Option<NodeId> {
-        if !visited.insert(node_id) {
-            return None;
-        }
-        let node = self.nodes.get(&node_id)?;
-        let id = NodeId::from(WidgetId::next());
-        let mut access_node = Node::new(sdui_accessibility_role(&node.kind));
-        if let Some(label) = sdui_accessibility_label(&node.kind) {
-            access_node.set_label(label);
-        }
-
-        let mut child_ids = Vec::new();
-        match &node.kind {
-            SduiNodeKind::Panel { children, .. }
-            | SduiNodeKind::Flex { children, .. }
-            | SduiNodeKind::Stack { children } => {
-                for child_id in children {
-                    if let Some(access_child_id) =
-                        self.build_accessibility_subtree(*child_id, visited, tree_update)
-                    {
-                        child_ids.push(access_child_id);
-                    }
-                }
-            }
-            SduiNodeKind::List { items } => {
-                for item in items {
-                    let item_id = NodeId::from(WidgetId::next());
-                    let mut item_node = Node::new(Role::ListItem);
-                    item_node.set_label(item.label.clone());
-                    tree_update.nodes.push((item_id, item_node));
-                    child_ids.push(item_id);
-                }
-            }
-            SduiNodeKind::Label { .. }
-            | SduiNodeKind::Button { .. }
-            | SduiNodeKind::EditorView { .. } => {}
-        }
-        access_node.set_children(child_ids);
-        tree_update.nodes.push((id, access_node));
-        Some(id)
     }
 
     fn paint_node(
@@ -771,36 +1067,44 @@ impl SduiNativeState {
         };
         match node.kind {
             SduiNodeKind::Panel { title, children } => {
+                let variant = sdui_theme_style().title_text;
                 self.paint_text(
                     ctx,
                     scene,
                     &title,
                     depth,
                     *cursor_y,
-                    sdui_theme_style().title_text_size,
-                    sdui_theme_style().text_color,
+                    width,
                     origin_x,
+                    FontRole::Ui,
+                    variant,
+                    sdui_theme_style().text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
                 for child_id in children {
                     self.paint_node(ctx, scene, child_id, depth + 1, cursor_y, width, origin_x);
                 }
             }
             SduiNodeKind::Label { text } => {
+                let variant = sdui_theme_style().body_text;
                 self.paint_text(
                     ctx,
                     scene,
                     &text,
                     depth,
                     *cursor_y,
-                    sdui_theme_style().body_text_size,
-                    sdui_theme_style().muted_text_color,
+                    width,
                     origin_x,
+                    FontRole::Ui,
+                    variant,
+                    sdui_theme_style().muted_text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
             }
             SduiNodeKind::Button { label, action } => {
-                let rect = row_rect(depth, *cursor_y, width, origin_x);
+                let variant = sdui_theme_style().body_text;
+                let metrics = self.text_metrics(FontRole::Ui, variant);
+                let rect = row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
                 scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
@@ -817,16 +1121,22 @@ impl SduiNativeState {
                     scene,
                     &label,
                     depth,
-                    *cursor_y + 4.0,
-                    sdui_theme_style().body_text_size,
-                    sdui_theme_style().text_color,
+                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
+                    width,
                     origin_x,
+                    FontRole::Ui,
+                    variant,
+                    sdui_theme_style().text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height + 6.0;
+                *cursor_y += metrics.button_height();
             }
             SduiNodeKind::List { items } => {
+                let variant = sdui_theme_style().body_text;
+                let metrics = self.text_metrics(FontRole::Ui, variant);
+                let detail_metrics = self.text_metrics(FontRole::Ui, UiTextVariant::Detail);
+                let row_height = metrics.list_height(detail_metrics);
                 for item in items {
-                    let rect = row_rect(depth, *cursor_y, width, origin_x);
+                    let rect = row_rect(depth, *cursor_y, width, origin_x, row_height);
                     scene.fill(
                         Fill::NonZero,
                         Affine::IDENTITY,
@@ -845,10 +1155,12 @@ impl SduiNativeState {
                         scene,
                         &item.label,
                         depth,
-                        *cursor_y + 2.0,
-                        sdui_theme_style().body_text_size,
-                        sdui_theme_style().text_color,
+                        *cursor_y,
+                        width,
                         origin_x,
+                        FontRole::Ui,
+                        variant,
+                        sdui_theme_style().text_color,
                     );
                     if let Some(detail) = item.detail {
                         self.paint_text(
@@ -856,27 +1168,32 @@ impl SduiNativeState {
                             scene,
                             &detail,
                             depth,
-                            *cursor_y + 15.0,
-                            10.0,
-                            sdui_theme_style().muted_text_color,
+                            *cursor_y + metrics.line_height,
+                            width,
                             origin_x,
+                            FontRole::Ui,
+                            UiTextVariant::Detail,
+                            sdui_theme_style().muted_text_color,
                         );
                     }
-                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                    *cursor_y += row_height;
                 }
             }
             SduiNodeKind::EditorView { binding } => {
+                let variant = sdui_theme_style().body_text;
                 self.paint_text(
                     ctx,
                     scene,
                     &format!("Editor view · doc {}", binding.document_id),
                     depth,
                     *cursor_y,
-                    sdui_theme_style().body_text_size,
-                    sdui_theme_style().muted_text_color,
+                    width,
                     origin_x,
+                    FontRole::Ui,
+                    variant,
+                    sdui_theme_style().muted_text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
             }
             SduiNodeKind::Flex {
                 direction,
@@ -982,17 +1299,20 @@ impl SduiNativeState {
         match component.kind.as_str() {
             "panel" => {
                 if let Some(title) = &component.title {
+                    let variant = Self::component_variant(component, sdui_theme_style().title_text);
                     self.paint_text(
                         ctx,
                         scene,
                         title,
                         depth,
                         *cursor_y,
-                        sdui_theme_style().title_text_size,
-                        sdui_theme_style().text_color,
+                        width,
                         origin_x,
+                        component.font_role,
+                        variant,
+                        sdui_theme_style().text_color,
                     );
-                    *cursor_y += sdui_theme_style().row_height;
+                    *cursor_y += self.text_metrics(component.font_role, variant).row_height;
                 }
                 for child in &component.children {
                     self.paint_package_component(
@@ -1012,20 +1332,31 @@ impl SduiNativeState {
                     .as_deref()
                     .or(component.label.as_deref())
                     .unwrap_or(&component.id);
+                let fallback = if component.kind == "statusItem" {
+                    sdui_theme_style().status_text
+                } else {
+                    sdui_theme_style().body_text
+                };
+                let variant = Self::component_variant(component, fallback);
+                let metrics = self.text_metrics(component.font_role, variant);
                 self.paint_text(
                     ctx,
                     scene,
                     text,
                     depth,
                     *cursor_y,
-                    sdui_theme_style().body_text_size,
-                    sdui_theme_style().muted_text_color,
+                    width,
                     origin_x,
+                    component.font_role,
+                    variant,
+                    sdui_theme_style().muted_text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += metrics.row_height;
             }
             "button" => {
-                let rect = row_rect(depth, *cursor_y, width, origin_x);
+                let variant = Self::component_variant(component, sdui_theme_style().body_text);
+                let metrics = self.text_metrics(component.font_role, variant);
+                let rect = row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
                 scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
@@ -1045,16 +1376,22 @@ impl SduiNativeState {
                     scene,
                     label,
                     depth,
-                    *cursor_y + 4.0,
-                    sdui_theme_style().body_text_size,
-                    sdui_theme_style().text_color,
+                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
+                    width,
                     origin_x,
+                    component.font_role,
+                    variant,
+                    sdui_theme_style().text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height + 6.0;
+                *cursor_y += metrics.button_height();
             }
             "list" => {
+                let variant = Self::component_variant(component, sdui_theme_style().body_text);
+                let metrics = self.text_metrics(component.font_role, variant);
+                let detail_metrics = self.text_metrics(component.font_role, UiTextVariant::Detail);
+                let row_height = metrics.list_height(detail_metrics);
                 for item in &component.items {
-                    let rect = row_rect(depth, *cursor_y, width, origin_x);
+                    let rect = row_rect(depth, *cursor_y, width, origin_x, row_height);
                     let background = if item.selected {
                         sdui_theme_style().selected_background
                     } else {
@@ -1075,10 +1412,12 @@ impl SduiNativeState {
                         scene,
                         &item.label,
                         depth,
-                        *cursor_y + 2.0,
-                        sdui_theme_style().body_text_size,
-                        sdui_theme_style().text_color,
+                        *cursor_y,
+                        width,
                         origin_x,
+                        component.font_role,
+                        variant,
+                        sdui_theme_style().text_color,
                     );
                     if let Some(detail) = &item.detail {
                         self.paint_text(
@@ -1086,27 +1425,32 @@ impl SduiNativeState {
                             scene,
                             detail,
                             depth,
-                            *cursor_y + 15.0,
-                            10.0,
-                            sdui_theme_style().muted_text_color,
+                            *cursor_y + metrics.line_height,
+                            width,
                             origin_x,
+                            component.font_role,
+                            UiTextVariant::Detail,
+                            sdui_theme_style().muted_text_color,
                         );
                     }
-                    *cursor_y += sdui_theme_style().row_height + 10.0;
+                    *cursor_y += row_height;
                 }
             }
             "editorView" => {
+                let variant = sdui_theme_style().body_text;
                 self.paint_text(
                     ctx,
                     scene,
                     &format!("Editor view · {}", component.id),
                     depth,
                     *cursor_y,
-                    sdui_theme_style().body_text_size,
-                    sdui_theme_style().muted_text_color,
+                    width,
                     origin_x,
+                    FontRole::Ui,
+                    variant,
+                    sdui_theme_style().muted_text_color,
                 );
-                *cursor_y += sdui_theme_style().row_height;
+                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
             }
             "flex" | "stack" | "overlay" | "scroll" | "portal" => {
                 for child in &component.children {
@@ -1126,17 +1470,24 @@ impl SduiNativeState {
         text: &str,
         depth: usize,
         y: f64,
-        size: f32,
-        color: Color,
+        width: f64,
         origin_x: f64,
+        role: FontRole,
+        variant: UiTextVariant,
+        color: Color,
     ) {
         let max_width =
-            (SIDEBAR_WIDTH - sdui_theme_style().panel_padding * 2.0 - depth as f64 * 10.0).max(1.0)
-                as f32;
+            (width - sdui_theme_style().panel_padding * 2.0 - depth as f64 * 10.0).max(1.0) as f32;
+        let metrics = self.text_metrics(role, variant);
         let (font_context, layout_context) = ctx.text_contexts();
         let mut builder = layout_context.ranged_builder(font_context, text, 1.0, true);
-        builder.push_default(StyleProperty::FontSize(size));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.2)));
+        builder.push_default(StyleProperty::FontStack(
+            self.typography.profile(role).font_stack(),
+        ));
+        builder.push_default(StyleProperty::FontSize(metrics.font_size));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+            UiTextMetrics::LINE_HEIGHT_MULTIPLIER as f32,
+        )));
         builder.push_default(StyleProperty::Brush(BrushIndex(0)));
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(max_width));
@@ -1192,15 +1543,7 @@ impl Widget for SduiNativeState {
         node: &mut Node,
     ) {
         node.set_label("Server-driven UI");
-        let mut visited = BTreeSet::new();
-        let mut children = Vec::new();
-        if let Some(root_id) = self.root_id
-            && let Some(root_access_id) =
-                self.build_accessibility_subtree(root_id, &mut visited, ctx.tree_update())
-        {
-            children.push(root_access_id);
-        }
-        node.set_children(children);
+        node.set_children(self.append_accessibility_children(ctx));
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -1289,13 +1632,13 @@ fn sdui_theme_style() -> SduiThemeStyle {
     SduiThemeStyle::default()
 }
 
-fn row_rect(depth: usize, y: f64, width: f64, origin_x: f64) -> Rect {
+fn row_rect(depth: usize, y: f64, width: f64, origin_x: f64, height: f64) -> Rect {
     let x0 = origin_x + sdui_theme_style().panel_padding + depth as f64 * 10.0;
     Rect::new(
         x0,
         y,
         (origin_x + width - sdui_theme_style().panel_padding).max(x0),
-        y + sdui_theme_style().row_height,
+        y + height,
     )
 }
 
@@ -1315,30 +1658,6 @@ fn stable_package_source_id(source_id: &str) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash.max(1)
-}
-
-fn sdui_accessibility_role(kind: &SduiNodeKind) -> Role {
-    match kind {
-        SduiNodeKind::Panel { .. } | SduiNodeKind::Flex { .. } | SduiNodeKind::Stack { .. } => {
-            Role::Pane
-        }
-        SduiNodeKind::Label { .. } => Role::Label,
-        SduiNodeKind::Button { .. } => Role::Button,
-        SduiNodeKind::List { .. } => Role::List,
-        SduiNodeKind::EditorView { .. } => Role::MultilineTextInput,
-    }
-}
-
-fn sdui_accessibility_label(kind: &SduiNodeKind) -> Option<String> {
-    match kind {
-        SduiNodeKind::Panel { title, .. } => Some(title.clone()),
-        SduiNodeKind::Label { text } => Some(text.clone()),
-        SduiNodeKind::Button { label, .. } => Some(label.clone()),
-        SduiNodeKind::EditorView { binding } => {
-            Some(format!("Editor document {}", binding.document_id))
-        }
-        SduiNodeKind::List { .. } | SduiNodeKind::Flex { .. } | SduiNodeKind::Stack { .. } => None,
-    }
 }
 
 fn sdui_node_kind_name(kind: &SduiNodeKind) -> &'static str {
@@ -1644,12 +1963,107 @@ mod tests {
         let style = sdui_theme_style();
 
         assert_eq!(style.panel_padding, 14.0);
-        assert_eq!(style.row_height, 26.0);
-        assert_eq!(style.title_text_size, 14.0);
-        assert_eq!(style.body_text_size, 12.0);
+        assert_eq!(style.title_text, UiTextVariant::Title);
+        assert_eq!(style.body_text, UiTextVariant::Body);
+        assert_eq!(style.status_text, UiTextVariant::Status);
         assert_eq!(style.panel_background, Color::from_rgb8(0x21, 0x20, 0x2b));
         assert_eq!(style.button_background, Color::from_rgb8(0x39, 0x35, 0x4a));
         assert_eq!(style.list_background, Color::from_rgb8(0x29, 0x28, 0x35));
+    }
+
+    #[test]
+    fn ui_size_change_scales_row_hit_and_accessibility_bounds_together() {
+        let size = Size::new(900.0, 600.0);
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+        state.rebuild_action_regions_for_test(size);
+        let before_action = state.actions[0].rect;
+        let before_accessibility = state
+            .accessibility_entries(size)
+            .into_iter()
+            .find(|entry| entry.role == Role::Button && entry.label.as_deref() == Some("Refresh"))
+            .expect("Refresh accessibility entry")
+            .bounds;
+
+        let mut active = crate::protocol::ActiveTypography {
+            revision: 1,
+            ..crate::protocol::ActiveTypography::default()
+        };
+        active.ui.size = 24.0;
+        state.set_typography(TypographyRegistry::from_active_typography(active).unwrap());
+        state.rebuild_action_regions_for_test(size);
+        let after_action = state.actions[0].rect;
+        let after_accessibility = state
+            .accessibility_entries(size)
+            .into_iter()
+            .find(|entry| entry.role == Role::Button && entry.label.as_deref() == Some("Refresh"))
+            .expect("Refresh accessibility entry after typography update")
+            .bounds;
+
+        assert!(after_action.height() > before_action.height());
+        assert_eq!(after_action, after_accessibility);
+        assert_eq!(before_action, before_accessibility);
+        assert!(
+            (after_action.height() - state.body_metrics().button_height()).abs() < 0.001,
+            "paint, hit test, and accessibility use one UI metric"
+        );
+    }
+
+    #[test]
+    fn package_component_font_role_uses_selected_profile_without_concrete_sizes() {
+        let component = PackageUiComponentTree::from_declaration(&json!({
+            "kind": "panel",
+            "id": "markdown.preview.root",
+            "title": "Preview",
+            "children": [{
+                "kind": "button",
+                "id": "markdown.preview.toggle",
+                "label": "Toggle",
+                "style": { "fontRole": "monospace", "typography": "typography.body" },
+                "action": { "commandId": "markdown.togglePreview" }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(component.children[0].font_role, FontRole::Monospace);
+        assert_eq!(
+            component.children[0].text_variant,
+            Some(UiTextVariant::Body)
+        );
+
+        let size = Size::new(900.0, 600.0);
+        let mut state = SduiNativeState::empty();
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "markdown.preview",
+                    FixedSlotId::Right,
+                    PackagePanelVisibility::Visible,
+                    component,
+                    vec!["markdown.togglePreview".to_string()],
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+        let mut active = crate::protocol::ActiveTypography {
+            revision: 1,
+            ..crate::protocol::ActiveTypography::default()
+        };
+        active.ui.size = 10.0;
+        active.monospace.size = 24.0;
+        state.set_typography(TypographyRegistry::from_active_typography(active).unwrap());
+        state.rebuild_action_regions_for_test(size);
+
+        let action = state.actions.first().expect("package button action").rect;
+        assert!(
+            (action.height()
+                - state
+                    .text_metrics(FontRole::Monospace, UiTextVariant::Body)
+                    .button_height())
+            .abs()
+                < 0.001
+        );
     }
 
     #[test]
@@ -1749,9 +2163,10 @@ mod tests {
         state.rebuild_action_regions_for_test(size);
 
         let sidebar = sdui_panel_left_slot_rect(size, &state).expect("left file-browser panel");
+        let row_height = state.body_metrics().row_height;
         let click_point = Point::new(
             sidebar.x0 + sdui_theme_style().panel_padding + 10.0 + 4.0,
-            sidebar.y0 + sdui_theme_style().panel_padding + sdui_theme_style().row_height + 4.0,
+            sidebar.y0 + sdui_theme_style().panel_padding + row_height + 4.0,
         );
 
         let before = state
@@ -1763,7 +2178,9 @@ mod tests {
         assert_eq!(item_id, "item-0");
 
         // Scroll down ~2 rows. The pixel that showed item-0 now shows item-2.
-        let row_pitch = sdui_theme_style().row_height + 10.0;
+        let row_pitch = state
+            .body_metrics()
+            .list_height(state.text_metrics(FontRole::Ui, UiTextVariant::Detail));
         assert!(state.scroll_vertical_pixels(size, row_pitch * 2.0));
         state.rebuild_action_regions_for_test(size);
 

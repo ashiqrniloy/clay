@@ -15,6 +15,9 @@ pub const EDIT_ACK_PAYLOAD_BUDGET_BYTES: usize = 128;
 pub const BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
+/// One validated three-profile typography snapshot. Family/profile limits are
+/// checked before publication; this bounds its serialized protocol envelope.
+pub const TYPOGRAPHY_PAYLOAD_BUDGET_BYTES: usize = 1024;
 
 // Runtime SDUI `publishTree` budgets. A package- or config-published tree is
 // untrusted input parsed into a `serde_json::Value` and then converted into a
@@ -33,6 +36,14 @@ pub const RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS: usize = 4096;
 // protocol messages and package/mode implementations promote them to hard CI
 // thresholds.
 pub const DECORATION_PAYLOAD_BUDGET_BYTES: usize = 8192;
+/// One viewport/source diagnostic replacement payload and its metadata limits.
+pub const DIAGNOSTIC_PAYLOAD_BUDGET_BYTES: usize = 8192;
+pub const DIAGNOSTIC_MAX_SPANS_PER_SET: usize = 128;
+pub const DIAGNOSTIC_MAX_CODE_BYTES: usize = 128;
+pub const DIAGNOSTIC_MAX_MESSAGE_BYTES: usize = 1024;
+pub const DIAGNOSTIC_MAX_SOURCE_BYTES: usize = 128;
+pub const DIAGNOSTIC_MAX_PROVENANCE_FIELD_BYTES: usize = 256;
+pub const DIAGNOSTIC_CACHE_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 pub const DECORATION_NEAR_VIEWPORT_GUARD_BYTES: u64 = 256 * 1024;
 pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
 // Generic retained syntax/decorator cache budget for large-file modes. Phase

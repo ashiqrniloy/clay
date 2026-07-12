@@ -19,6 +19,9 @@ const EXPECTED_BASE_UI_KEYS: &[&str] = &[
     "scrollbarTrack",
     "statusBg",
     "statusText",
+    "diagnosticError",
+    "diagnosticWarning",
+    "diagnosticInfo",
 ];
 
 const EXPECTED_TOKEN_TYPE_NAMES: &[&str] = &[
@@ -88,7 +91,7 @@ fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
     );
 
     let overrides = &record.contributions.text_styles;
-    // Full mapping: 10 base UI keys + 35 TokenType variants = 45 entries.
+    // Full mapping: 13 base UI keys + 35 TokenType variants = 48 entries.
     assert_eq!(
         overrides.len(),
         EXPECTED_BASE_UI_KEYS.len() + EXPECTED_TOKEN_TYPE_NAMES.len(),
@@ -196,6 +199,24 @@ fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
             )
             .color,
         "{specifier} must preserve per-TokenType color overrides instead of collapsing prose tokens"
+    );
+    assert_ne!(
+        registry
+            .diagnostic_style(clay::protocol::DiagnosticSeverity::Error)
+            .color,
+        registry
+            .diagnostic_style(clay::protocol::DiagnosticSeverity::Warning)
+            .color,
+        "{specifier} must provide distinct diagnosticError/diagnosticWarning colors"
+    );
+    assert_ne!(
+        registry
+            .diagnostic_style(clay::protocol::DiagnosticSeverity::Warning)
+            .color,
+        registry
+            .diagnostic_style(clay::protocol::DiagnosticSeverity::Info)
+            .color,
+        "{specifier} must provide distinct diagnosticWarning/diagnosticInfo colors"
     );
 }
 

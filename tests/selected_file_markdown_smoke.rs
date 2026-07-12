@@ -153,6 +153,7 @@ where
         match read_message(codec, stream).await {
             ServerMessage::FileOpenCapabilityIssued { token } => return token,
             ServerMessage::ActiveTheme(_)
+            | ServerMessage::ActiveTypography(_)
             | ServerMessage::SduiSnapshot { .. }
             | ServerMessage::RuntimeDiagnostic(_) => continue,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),

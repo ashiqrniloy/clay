@@ -17,6 +17,8 @@ pub struct ModeDeclaration {
     pub api_prefix: String,
     pub mode_id: String,
     pub display_name: String,
+    /// Semantic document typography selected when this mode activates.
+    pub document_font_role: crate::protocol::DocumentFontRole,
     pub extensions: Vec<String>,
     pub mime_types: Vec<String>,
     pub file_names: Vec<String>,
@@ -104,6 +106,7 @@ pub struct MajorModeActivation {
     pub api_prefix: String,
     pub mode_id: String,
     pub behavior_version: BehaviorVersion,
+    pub document_font_role: crate::protocol::DocumentFontRole,
     /// The classification signal that selected this mode, recorded so the Phase
     /// 18.9 discovery commands can report the classification source and the
     /// fallback rationale without recomputing classification or scanning any
@@ -300,6 +303,7 @@ pub fn core_text_mode() -> ModeDeclaration {
         api_prefix: CORE_API_PREFIX.to_string(),
         mode_id: CORE_TEXT_MODE_ID.to_string(),
         display_name: "Plain Text".to_string(),
+        document_font_role: crate::protocol::DocumentFontRole::Proportional,
         extensions: Vec::new(),
         mime_types: Vec::new(),
         file_names: Vec::new(),
@@ -322,6 +326,7 @@ pub fn core_code_mode() -> ModeDeclaration {
         api_prefix: CORE_API_PREFIX.to_string(),
         mode_id: CORE_CODE_MODE_ID.to_string(),
         display_name: "Code".to_string(),
+        document_font_role: crate::protocol::DocumentFontRole::Monospace,
         extensions: vec![
             "rs".to_string(),
             "py".to_string(),
@@ -659,14 +664,14 @@ impl ModeRegistry {
                 "major mode activation must match a mode declared by the validated package manifest",
             ));
         }
-        if !self.modes.contains_key(&classification.mode_id) {
+        let Some(registered) = self.modes.get(&classification.mode_id) else {
             return Err(
                 ModeDiagnosticContext::from_classification(&classification).diagnostic(
                     ModeValidationRule::UndeclaredMode,
                     "major mode activation requires a registered mode declaration",
                 ),
             );
-        }
+        };
 
         let behavior_version = self
             .active_major_modes
@@ -679,6 +684,7 @@ impl ModeRegistry {
             api_prefix: classification.api_prefix,
             mode_id: classification.mode_id,
             behavior_version,
+            document_font_role: registered.declaration.document_font_role,
             matched_by: classification.matched_by,
         };
         self.active_major_modes
@@ -728,6 +734,7 @@ impl ModeRegistry {
             api_prefix: classification.api_prefix.clone(),
             mode_id: classification.mode_id.clone(),
             behavior_version,
+            document_font_role: registered.declaration.document_font_role,
             matched_by: classification.matched_by,
         };
         self.active_major_modes
@@ -1029,6 +1036,7 @@ impl ModeRegistry {
             major_activation.api_prefix, major_activation.mode_id
         );
         manifest.scope = BehaviorScope::Document { document_id };
+        manifest.document_font_role = major_activation.document_font_role;
 
         // Track which command IDs and key-sequence+context pairs are owned by
         // the major mode so minor modes cannot override them.

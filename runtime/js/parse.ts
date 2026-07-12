@@ -17,6 +17,39 @@ function parseResult(json: string): unknown {
   return JSON.parse(json);
 }
 
+export type SyntaxDiagnosticKind = "error" | "missing";
+
+export type SyntaxDiagnosticCapture = {
+  byteStart: number;
+  byteEnd: number;
+  kind: SyntaxDiagnosticKind;
+};
+
+export type ParseDiagnosticSpan = {
+  byteStart: number;
+  byteEnd: number;
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+};
+
+export type ParseDiagnosticUpdate = {
+  source: string;
+  spans: ParseDiagnosticSpan[];
+};
+
+export type IncrementalParseResult = {
+  documentId?: number;
+  documentVersion?: number;
+  behaviorVersion?: number;
+  packagePrefix?: string;
+  mode?: string;
+  viewport?: { byteStart: number; byteEnd: number };
+  syntaxTreeDelta?: string;
+  spans?: unknown[];
+  diagnostics?: ParseDiagnosticUpdate;
+};
+
 export type ServerRegisterParseHandlerOptions = {
   module?: Record<string, unknown>;
   handler?: never;

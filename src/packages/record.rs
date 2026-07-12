@@ -25,6 +25,7 @@ use crate::shell::{
 };
 
 use crate::editor::theme::{parse_hex_rgba, parse_override_token};
+use crate::protocol::DocumentFontRole;
 
 // ── Contribution descriptors ─────────────────────────────────────────────────
 
@@ -100,6 +101,14 @@ pub struct DecorationContributionDescriptor {
     pub kind: String,
 }
 
+/// Inert style-map entry for one syntax capture. Packages may select a
+/// document role but never a concrete font family, size, or renderer value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxStyleMapEntry {
+    pub style_token: String,
+    pub font_role: Option<DocumentFontRole>,
+}
+
 /// Inert descriptor for a package-provided Tree-sitter syntax grammar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxGrammarContributionDescriptor {
@@ -123,8 +132,9 @@ pub struct SyntaxGrammarContributionDescriptor {
     pub locals_query_path: Option<String>,
     /// Optional injections query path.
     pub injections_query_path: Option<String>,
-    /// Tree-sitter capture name to known Clay style token.
-    pub style_map: BTreeMap<String, String>,
+    /// Tree-sitter capture name to known Clay style token and optional
+    /// document-role override.
+    pub style_map: BTreeMap<String, SyntaxStyleMapEntry>,
     /// Optional parser timeout budget in milliseconds.
     pub timeout_ms: Option<u64>,
     /// Optional parse-window byte budget override.
@@ -2793,7 +2803,7 @@ impl UiComponentValidationState<'_> {
         reject_ui_prohibited_authority(value, self.ctx)?;
         let obj = object_field(value, "component", self.ctx)?;
         let kind = required_str_field(obj, "kind", self.ctx)?;
-        validate_component_kind(kind).map_err(|error| {
+        let component_kind = validate_component_kind(kind).map_err(|error| {
             self.ctx.error(
                 PackageRecordRule::InvalidContributionDescriptor,
                 Some(&error.field),
@@ -2823,6 +2833,17 @@ impl UiComponentValidationState<'_> {
                     error.message,
                 )
             })?;
+        if style_variables
+            .iter()
+            .any(|variable| variable.name == "fontRole")
+            && !component_kind.supports_text_font_role()
+        {
+            return Err(self.ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(id),
+                "style.fontRole is only supported by text-bearing panel, label, button, list, and statusItem components",
+            ));
+        }
         self.style_variable_count += style_variables.len();
         if let Some(action) = obj.get("action").and_then(Value::as_object) {
             let command_id = required_str_field(action, "commandId", self.ctx)?;
@@ -3203,7 +3224,7 @@ fn reject_syntax_grammar_prohibited_authority(
             Err(ctx.error(
                 PackageRecordRule::InvalidContributionDescriptor,
                 None,
-                "syntax grammar metadata must not contain URLs, raw ops, native handles, client JavaScript, CSS, or raw colors",
+                "syntax grammar metadata must not contain URLs, raw ops, native handles, client JavaScript, CSS, raw colors, or concrete typography",
             ))
         }
         Value::Object(object) => {
@@ -3221,12 +3242,16 @@ fn reject_syntax_grammar_prohibited_authority(
                         | "rawOps"
                         | "css"
                         | "rawColor"
+                        | "fontFamily"
+                        | "fontFamilies"
+                        | "fontSize"
+                        | "fontStack"
                 ) {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         None,
                         format!(
-                            "syntax grammar metadata must not include executable or external authority field `{key}`"
+                            "syntax grammar metadata must not include executable, external, or concrete typography field `{key}`"
                         ),
                     ));
                 }
@@ -3306,7 +3331,7 @@ fn parse_syntax_style_map(
     value: Option<&Value>,
     contribution_id: &str,
     ctx: &ErrorContext,
-) -> Result<BTreeMap<String, String>, PackageRecordError> {
+) -> Result<BTreeMap<String, SyntaxStyleMapEntry>, PackageRecordError> {
     let Some(Value::Object(map)) = value else {
         return Err(ctx.error(
             PackageRecordRule::InvalidContributionDescriptor,
@@ -3334,21 +3359,77 @@ fn parse_syntax_style_map(
                 "syntax grammar capture names must be non-empty names without @, braces, CSS, or query payloads",
             ));
         }
-        let Some(token) = token.as_str().filter(|value| !value.trim().is_empty()) else {
-            return Err(ctx.error(
-                PackageRecordRule::InvalidContributionDescriptor,
-                Some(capture),
-                "syntax grammar styleMap values must be known Clay style token strings",
-            ));
+        let (style_token, font_role) = match token {
+            Value::String(style_token) => (style_token.as_str(), None),
+            Value::Object(entry) => {
+                if entry.contains_key("fontFamily")
+                    || entry.contains_key("fontFamilies")
+                    || entry.contains_key("fontSize")
+                    || entry.contains_key("fontStack")
+                {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(capture),
+                        "syntax grammar styleMap entries may declare only a semantic fontRole, never font families, sizes, or stacks",
+                    ));
+                }
+                let style_token = entry
+                    .get("styleToken")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(capture),
+                            "syntax grammar styleMap object entries require a known `styleToken`",
+                        )
+                    })?;
+                let font_role = match entry.get("fontRole") {
+                    None => None,
+                    Some(Value::String(role)) => match DocumentFontRole::from_name(role) {
+                        Some(
+                            role @ (DocumentFontRole::Monospace | DocumentFontRole::Proportional),
+                        ) => Some(role),
+                        _ => {
+                            return Err(ctx.error(
+                                PackageRecordRule::InvalidContributionDescriptor,
+                                Some(role),
+                                "syntax grammar styleMap fontRole must be `monospace` or `proportional`",
+                            ));
+                        }
+                    },
+                    Some(_) => {
+                        return Err(ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(capture),
+                            "syntax grammar styleMap fontRole must be a semantic role string",
+                        ));
+                    }
+                };
+                (style_token, font_role)
+            }
+            _ => {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(capture),
+                    "syntax grammar styleMap values must be known Clay style token strings or inert role objects",
+                ));
+            }
         };
-        if !is_known_syntax_style_token(token) {
+        if !is_known_syntax_style_token(style_token) {
             return Err(ctx.error(
                 PackageRecordRule::InvalidContributionDescriptor,
-                Some(token),
+                Some(style_token),
                 "syntax grammar styleMap values must be known Clay style tokens, not raw CSS or colors",
             ));
         }
-        style_map.insert(capture.clone(), token.to_string());
+        style_map.insert(
+            capture.clone(),
+            SyntaxStyleMapEntry {
+                style_token: style_token.to_string(),
+                font_role,
+            },
+        );
     }
     Ok(style_map)
 }

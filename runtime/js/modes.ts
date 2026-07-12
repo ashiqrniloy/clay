@@ -20,7 +20,24 @@ function parse<T>(json: string): T {
 const activationRegistry = ((globalThis as typeof globalThis & { __clayModeActivations?: Record<string, unknown> }).__clayModeActivations ??= Object.create(null));
 const activationKey = (apiPrefix: string, modeId: string): string => `${apiPrefix}:${modeId}`;
 
-export function serverRegisterModePattern(packageManifest: unknown, declaration: unknown): unknown {
+export type DocumentFontRole = "monospace" | "proportional";
+
+export type ModePatternDeclaration = {
+  modeId: string;
+  displayName?: string;
+  defaultFontRole?: DocumentFontRole;
+  extensions?: string[];
+  mimeTypes?: string[];
+  fileNames?: string[];
+  fileNamePatterns?: string[];
+  shebangPatterns?: string[];
+  contentProbes?: string[];
+  editorRules?: unknown;
+  commands?: unknown;
+  keymaps?: unknown;
+};
+
+export function serverRegisterModePattern(packageManifest: unknown, declaration: ModePatternDeclaration): unknown {
   const result = parse(requireOps().op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
   const manifest = packageManifest as { clay?: { apiPrefix?: string } } | null;
   const mode = declaration as { modeId?: string; editorRules?: unknown; commands?: unknown; keymaps?: unknown } | null;

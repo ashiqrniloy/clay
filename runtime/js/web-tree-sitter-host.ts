@@ -22,6 +22,55 @@ export type WebTreeSitterCapture = {
   captureName: string;
 };
 
+export type WebTreeSitterDiagnosticCapture = {
+  startByte: number;
+  endByte: number;
+  kind: "error" | "missing";
+};
+
+type WebTreeSitterNode = {
+  startIndex: number;
+  endIndex: number;
+  hasError: boolean;
+  isError: boolean;
+  isMissing: boolean;
+  childCount: number;
+  child(index: number): WebTreeSitterNode | null;
+};
+
+export function collectWebTreeSitterDiagnostics(
+  root: WebTreeSitterNode,
+  viewportStart: number,
+  viewportEnd: number,
+  limit = 128,
+): WebTreeSitterDiagnosticCapture[] {
+  if (!root.hasError) return [];
+  const captures: WebTreeSitterDiagnosticCapture[] = [];
+  const stack = [root];
+  while (stack.length && captures.length < limit) {
+    const node = stack.pop()!;
+    if (node.isError || node.isMissing) {
+      const startByte = Math.max(node.startIndex, viewportStart);
+      const endByte = Math.min(node.endIndex, viewportEnd);
+      if (
+        startByte < endByte ||
+        (node.isMissing && node.startIndex >= viewportStart && node.startIndex <= viewportEnd)
+      ) {
+        captures.push({
+          startByte,
+          endByte,
+          kind: node.isMissing ? "missing" : "error",
+        });
+      }
+    }
+    for (let index = node.childCount - 1; index >= 0; index--) {
+      const child = node.child(index);
+      if (child?.hasError || child?.isError || child?.isMissing) stack.push(child);
+    }
+  }
+  return captures;
+}
+
 let initPromise: Promise<void> | undefined;
 const languageCache = new Map<string, unknown>();
 const queryCache = new Map<string, unknown>();

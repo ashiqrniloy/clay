@@ -1534,6 +1534,7 @@ fn register_and_activate_major(
         api_prefix: record.manifest.clay.api_prefix.clone(),
         mode_id: mode_id.to_string(),
         display_name: format!("{} mode", mode_id),
+        document_font_role: clay::protocol::DocumentFontRole::Proportional,
         extensions: vec![extension.to_string()],
         mime_types: vec![],
         file_names: vec![],

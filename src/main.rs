@@ -68,6 +68,9 @@ impl AppDriver for Driver {
                     .edit_widget(editor_widget_id, |mut widget| {
                         if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
                             let changed = editor.widget.apply_connection_event(event);
+                            if editor.widget.take_layout_invalidation() {
+                                editor.ctx.request_layout();
+                            }
                             if changed {
                                 editor.ctx.request_render();
                                 editor.ctx.request_accessibility_update();

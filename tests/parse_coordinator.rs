@@ -10,9 +10,9 @@ use clay::{
     packages::record::{PackageRecord, assemble_package_record},
     perf::budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     protocol::{
-        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan,
-        IncrementalParseUpdate, ParseByteRange, ParseEditNotification, ParsePolicy, ParseUnit,
-        ParseWindowSnapshot,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
+        DiagnosticSeverity, DiagnosticSpan, IncrementalParseUpdate, ParseByteRange,
+        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot,
     },
     server::parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
 };
@@ -85,6 +85,32 @@ fn update(version: u64) -> IncrementalParseUpdate {
         invalidated_ranges: vec![ParseByteRange::new(0, 5)],
         syntax_tree_delta: Some("heading".to_string()),
         decoration_update: None,
+        diagnostic_update: None,
+    }
+}
+
+fn markdown_diagnostic_update(version: u64) -> DiagnosticSet {
+    let provenance = DecorationProvenance {
+        package_name: "@clay/markdown".to_string(),
+        package_version: "0.1.0".to_string(),
+        package_prefix: "markdown".to_string(),
+    };
+    DiagnosticSet {
+        document_id: 7,
+        document_version: version,
+        viewport_byte_start: 0,
+        viewport_byte_end: 64,
+        source: "markdown-parser".to_string(),
+        provenance: provenance.clone(),
+        spans: vec![DiagnosticSpan {
+            byte_start: 20,
+            byte_end: 21,
+            severity: DiagnosticSeverity::Error,
+            code: "syntax.error".to_string(),
+            message: "syntax error".to_string(),
+            source: "markdown-parser".to_string(),
+            provenance,
+        }],
     }
 }
 
@@ -193,6 +219,7 @@ async fn generic_parse_request_metadata_supports_token_stream_adapters() {
                         invalidated_ranges: notification.invalidated_ranges,
                         syntax_tree_delta: Some("token-stream:visible-ranges-first".to_string()),
                         decoration_update: None,
+                        diagnostic_update: None,
                     })
                 }
             },
@@ -273,10 +300,120 @@ fn markdown_parse_update_accepts_valid_decoration_payload() {
     coordinator.schedule_parse(request(4)).unwrap_err();
     let parsed = IncrementalParseUpdate {
         decoration_update: Some(markdown_decoration_update(4)),
+        diagnostic_update: None,
         ..update(4)
     };
 
     assert!(coordinator.validate_update(&parsed).is_ok());
+}
+
+#[tokio::test]
+async fn parse_update_accepts_matching_decoration_and_diagnostic_side_channels() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                Ok(IncrementalParseUpdate {
+                    decoration_update: Some(markdown_decoration_update(
+                        notification.document_version,
+                    )),
+                    diagnostic_update: Some(markdown_diagnostic_update(
+                        notification.document_version,
+                    )),
+                    ..update(notification.document_version)
+                })
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(4)).unwrap();
+    let parsed = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(parsed.decoration_update.is_some());
+    assert!(parsed.diagnostic_update.is_some());
+}
+
+#[tokio::test]
+async fn invalid_diagnostic_rejects_parse_update_without_partial_publication() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                let mut diagnostics = markdown_diagnostic_update(notification.document_version);
+                diagnostics.spans[0].byte_end = 128;
+                Ok(IncrementalParseUpdate {
+                    decoration_update: Some(markdown_decoration_update(
+                        notification.document_version,
+                    )),
+                    diagnostic_update: Some(diagnostics),
+                    ..update(notification.document_version)
+                })
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(4)).unwrap();
+    let runtime_diagnostic =
+        tokio::time::timeout(Duration::from_secs(1), coordinator.next_diagnostic())
+            .await
+            .unwrap()
+            .unwrap();
+
+    assert_eq!(runtime_diagnostic.code, "clay.parse.open_failed");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), coordinator.next_update())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn superseded_parse_publishes_neither_diagnostics_nor_decorations() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                if notification.document_version == 1 {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+                Ok(IncrementalParseUpdate {
+                    decoration_update: Some(markdown_decoration_update(
+                        notification.document_version,
+                    )),
+                    diagnostic_update: Some(markdown_diagnostic_update(
+                        notification.document_version,
+                    )),
+                    ..update(notification.document_version)
+                })
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(1)).unwrap();
+    coordinator.schedule_parse(request(2)).unwrap();
+    let parsed = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(parsed.document_version, 2);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), coordinator.next_update())
+            .await
+            .is_err()
+    );
 }
 
 #[test]
@@ -284,6 +421,7 @@ fn markdown_parse_update_rejects_decoration_version_mismatch() {
     let coordinator = ParseCoordinator::new();
     let parsed = IncrementalParseUpdate {
         decoration_update: Some(markdown_decoration_update(99)),
+        diagnostic_update: None,
         ..update(4)
     };
 

@@ -23,6 +23,45 @@ Each configuration option is exposed as a Clay JS API. That means it must have:
 - Generated registry and lookup coverage for public registry surfaces.
 - Security and authority notes.
 
+## Phase 18.16.5 typography configuration
+
+[`clay.theme.setTypography`](theme/set-typography.md) atomically configures user-owned monospace, proportional, and UI family stacks and logical-pixel sizes. No call is required for defaults.
+
+```js
+import { setTypography } from "clay:theme";
+
+setTypography({
+  monospace: { families: ["JetBrains Mono", "monospace"], size: 16 },
+  proportional: { families: ["Inter", "sans-serif"], size: 17 },
+  ui: { families: ["system-ui"], size: 13 },
+});
+```
+
+All three profiles are required and validated before replacement. Failed startup/reload evaluation preserves the previous complete state; removing the call and successfully reloading restores defaults. `init.js` may place the call in a local module loaded through `loadConfigurationModule`. There are no independent profile setters or hidden JSON/TOML keys.
+
+Configuration runs outside interaction hot paths. One changed complete value produces one bounded client installation; paint/input/layout consume cached profiles. Clay does not validate installed fonts on the server, open/fetch/download fonts, or grant filesystem, network, shell, package, extension, raw-op, or client-side JavaScript authority. Packages select semantic roles only and cannot override concrete user families or sizes.
+
+## Phase 18.17 range diagnostics configuration review
+
+Phase 18.17 reviewed range diagnostics and syntax-error highlighting and did **not** promote a new user-facing diagnostic toggle, squiggle geometry setting, per-severity preference, or `clay:configuration` API. Default outcome: syntax-error publication follows the active syntax engine; severity colors come from the active theme.
+
+User-visible configuration reuses existing Clay JS APIs:
+
+```js
+import { setTheme } from "clay:theme";
+import { setSyntaxEnginePreference } from "clay:syntax";
+
+setTheme("@clay/theme-gruvbox-material-dark");
+// optional: force parser tier that produces syntax diagnostics
+setSyntaxEnginePreference("rust", "wasm");
+```
+
+[`clay.theme.setTheme`](theme/set-theme.md) selects a first-party theme whose `textStyles` already include `diagnosticError`, `diagnosticWarning`, and `diagnosticInfo`. [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) selects the parser tier; no separate diagnostics preference exists. [`clay.diagnostics.serverPublishDiagnostics`](diagnostics/server-publish-diagnostics.md) is a package publication API gated by `render-decorations`, not an `init.js` user setting.
+
+Compiled budgets (`DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, `DIAGNOSTIC_CACHE_BUDGET_BYTES`, and related field caps) and Clay-owned squiggle amplitude/period/stroke constants are security/performance boundaries, not hidden `init.js` keys. Hidden/ad hoc keys rejected by policy include `diagnostics.enabled`, `diagnostics.enable`, `diagnostics.squiggleWidth`, `diagnostics.amplitude`, `diagnostics.severity`, `syntaxError.highlight`, `treeSitter.showErrors`, and parallel JSON/TOML diagnostic preference blobs.
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, and diagnostic/decoration rendering paths do not execute user configuration JavaScript or recompute diagnostic preferences. This review grants no parser, filesystem, network, shell, LSP, AI, package-manager, WASM, raw-op, native-widget, client-side JavaScript, CSS, or client-render authority.
+
 ## Phase 17 package and mode configuration review
 
 Phase 17 reviewed package loading, mode selection, decoration transport, parse coordination, and package-owned SDUI contributions for concrete user-visible settings.

@@ -1,4 +1,4 @@
-use crate::protocol::{BehaviorVersion, DecorationSet, DocumentId, DocumentVersion};
+use crate::protocol::{BehaviorVersion, DecorationSet, DiagnosticSet, DocumentId, DocumentVersion};
 
 /// Byte range metadata used by incremental parse notifications and results.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +136,20 @@ pub struct ParseEditNotification {
     pub memory_budget: Option<SyntaxMemoryBudget>,
 }
 
+/// Engine-neutral parser recovery capture before document-range translation.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxDiagnosticCapture {
+    pub byte_start: u64,
+    pub byte_end: u64,
+    pub kind: SyntaxDiagnosticKind,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxDiagnosticKind {
+    Error,
+    Missing,
+}
+
 /// Inert incremental parse update produced by a server-side package parser.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct IncrementalParseUpdate {
@@ -152,4 +166,6 @@ pub struct IncrementalParseUpdate {
     /// Optional parse-produced decorations after handler-side shaping. Decoration
     /// validation still runs before client publication.
     pub decoration_update: Option<DecorationSet>,
+    /// Optional source-associated diagnostics validated atomically with this update.
+    pub diagnostic_update: Option<DiagnosticSet>,
 }

@@ -135,6 +135,7 @@ fn markdown_mode_declaration() -> ModeDeclaration {
         api_prefix: "markdown".to_string(),
         mode_id: "markdown".to_string(),
         display_name: "Markdown".to_string(),
+        document_font_role: clay::protocol::DocumentFontRole::Proportional,
         extensions: vec![
             "md".to_string(),
             "markdown".to_string(),
@@ -702,6 +703,7 @@ fn probe_mode(
         api_prefix: prefix.to_string(),
         mode_id: prefix.to_string(),
         display_name: display.to_string(),
+        document_font_role: clay::protocol::DocumentFontRole::Proportional,
         extensions: Vec::new(),
         mime_types: Vec::new(),
         file_names: Vec::new(),

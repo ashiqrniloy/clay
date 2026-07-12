@@ -6,6 +6,8 @@
 
 use serde_json::{Map, Value};
 
+use crate::protocol::FontRole;
+
 use super::theme::{ThemeTokenResolver, ThemeTokenType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -39,6 +41,13 @@ impl ComponentKind {
             "statusItem" => Some(Self::StatusItem),
             _ => None,
         }
+    }
+
+    pub(crate) const fn supports_text_font_role(self) -> bool {
+        matches!(
+            self,
+            Self::Panel | Self::Label | Self::Button | Self::List | Self::StatusItem
+        )
     }
 }
 
@@ -172,6 +181,25 @@ fn validate_enum_style_variable(
     value: &Value,
 ) -> Result<ComponentStyleVariable, ComponentCatalogError> {
     match name {
+        "fontRole" => {
+            let value = value
+                .as_str()
+                .and_then(FontRole::from_name)
+                .ok_or_else(|| ComponentCatalogError {
+                    field: "style.fontRole".to_string(),
+                    message: "style.fontRole must be ui, monospace, or proportional".to_string(),
+                })?;
+            Ok(ComponentStyleVariable {
+                name: name.to_string(),
+                value: ComponentStyleValue::Enum {
+                    value: match value {
+                        FontRole::Monospace => "monospace".to_string(),
+                        FontRole::Proportional => "proportional".to_string(),
+                        FontRole::Ui => "ui".to_string(),
+                    },
+                },
+            })
+        }
         "variant" => {
             let value = value
                 .as_str()
@@ -292,9 +320,24 @@ mod tests {
         let unknown = json!({ "style": { "shadow": "surface.panel" } });
         let mismatch = json!({ "style": { "padding": "surface.panel" } });
         let raw_color = json!({ "style": { "background": "#ff00aa" } });
+        let concrete_font = json!({ "style": { "fontFamily": "JetBrains Mono" } });
+        let concrete_size = json!({ "style": { "fontSize": 16 } });
 
         assert!(validate_style_variables(unknown.as_object().unwrap(), &resolver).is_err());
         assert!(validate_style_variables(mismatch.as_object().unwrap(), &resolver).is_err());
         assert!(validate_style_variables(raw_color.as_object().unwrap(), &resolver).is_err());
+        assert!(validate_style_variables(concrete_font.as_object().unwrap(), &resolver).is_err());
+        assert!(validate_style_variables(concrete_size.as_object().unwrap(), &resolver).is_err());
+    }
+
+    #[test]
+    fn component_catalog_accepts_semantic_font_roles_only() {
+        let resolver = ThemeTokenResolver::new();
+        for role in ["ui", "monospace", "proportional"] {
+            let object = json!({ "style": { "fontRole": role } });
+            assert!(validate_style_variables(object.as_object().unwrap(), &resolver).is_ok());
+        }
+        let invalid = json!({ "style": { "fontRole": "serif" } });
+        assert!(validate_style_variables(invalid.as_object().unwrap(), &resolver).is_err());
     }
 }

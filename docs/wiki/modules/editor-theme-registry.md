@@ -3,6 +3,8 @@
 ## Source
 
 - `src/editor/theme.rs`
+- `src/editor/typography.rs`
+- `src/editor/layout.rs`
 - `src/editor/surface.rs`
 - `src/protocol/decorations.rs`
 - `src/protocol/mod.rs`
@@ -36,7 +38,8 @@ The authoritative package authoring and vocabulary references are:
 ## Responsibilities
 
 - Resolve two-axis decoration data (`TokenType` + `Modifiers`) into `StyleSpec { color, bold, italic, underline, strike }`.
-- Store base editor UI colors (`shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`).
+- Store base editor UI colors (`shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`).
+- Resolve range-diagnostic severity colors through `StyleRegistry::diagnostic_style(DiagnosticSeverity)` for native squiggle paint.
 - Preserve legacy style-token compatibility through `DecorationSpan::from_style_token` and `TokenType::classify_style_token` while rendering through the new vocabulary.
 - Apply static theme-package `textStyles` over the Clay default with last-wins ordering.
 - Keep paint hot paths free of package JavaScript, raw IPC, package resolution, filesystem access, allocation-heavy maps, and raw color literals outside theme definitions.
@@ -64,7 +67,7 @@ Existing producers that still have a free-form `styleToken` use `DecorationSpan:
 
 The registry stores syntax colors in a `[Color; 35]` table indexed by `TokenType::index()`. The Clay default table reproduces the old family mapping (`Keyword`, `String`, `Comment`, `Operator`, prose semantic, default syntax), while active themes can override every token independently. This matters for prose themes such as Gruvbox Material: `Heading1` and `Heading2` can be different colors instead of collapsing into one generic semantic color.
 
-`StyleRegistry::style_for(kind, token_type, modifiers)` is the paint-time lookup. `DecorationKind::Diagnostic`, `SearchMatch`, and `Semantic` use layer colors. `DecorationKind::Syntax` reads the per-token table. Text attributes are ORed from theme defaults and span modifiers.
+`StyleRegistry::style_for(kind, token_type, modifiers)` is the paint-time lookup. `DecorationKind::Diagnostic`, `SearchMatch`, and `Semantic` use layer colors. `DecorationKind::Syntax` reads the per-token table. Text attributes are ORed from theme defaults and span modifiers. `StyleSpec::attributes()` exposes only those four inert booleans to the role-aware layout path; `StyleRegistry` still owns no font family, size, or font-role decision.
 
 ### 3. Theme packages contribute inert `textStyles`
 
@@ -110,9 +113,15 @@ Theme packages require no special permission. They are inert manifest data plus 
 - `self.theme.base.panel_bg` for editor background;
 - `self.theme.base.text` and `placeholder` for text;
 - `self.theme.base.selection`, `caret`, `scrollbar`, `scrollbar_track` for chrome;
-- `self.theme.style_for(span.kind, span.token_type, span.modifiers).color` for visible decorations.
+- `self.theme.style_for(span.kind, span.token_type, span.modifiers).color` for visible decoration rectangles.
+
+Phase 18.16.5 also turns the same `StyleSpec` attributes into viewport-bounded `VisibleTextStyleRun` records. `EditorSurface` clips cached spans to UTF-8 boundaries, rejects invalid/out-of-document ranges locally, splits at visible boundaries, ORs bold/italic/underline/strike, chooses a font role only from syntax/semantic spans by priority, layer, then stable provenance, and merges adjacent equal records. `LayoutState` retains those normalized runs beside its cached Parley layout and pushes only Clay-resolved `FontStack`, `FontSize`, `FontWeight`, `FontStyle`, `Underline`, and `Strikethrough` properties. Diagnostics and search may still paint their rectangles and attributes but cannot select a font role. The cache key includes text/viewport revisions plus typography revision, layout-style revision, default document role, and width, so a paint cache hit does not rescan decoration spans.
+
+`TypographyRegistry::document_line_height()` owns the editor's conservative logical geometry: it takes the larger configured monospace/proportional size and Clay's single multiplier for visible-line estimation, pixel-scroll progression, and logical scrollbar progress. Parley continues to supply exact visible layout height and caret/selection rectangles; the empty placeholder caret uses the same Parley geometry rather than a fixed size.
 
 `src/masonry_editor.rs` reads `self.editor.theme().base.status_bg/status_text/shell_bg` for status and root background. Source guards in `tests/editor_performance_invariants.rs` reject new `Color::from_rgb8`/`Color::from_rgba8` literals in paint-path files.
+
+Phase 18.17 adds severity-owned base UI keys `diagnosticError` / `diagnosticWarning` / `diagnosticInfo`. `StyleRegistry::diagnostic_style(severity)` supplies squiggle colors; `LayoutState::paint_text` strokes zig-zag marks from cached Parley rectangles without hardcoded paint-path colors. Details: [Range Diagnostics](range-diagnostics.md).
 
 ## Code Examples
 
@@ -154,7 +163,7 @@ let color = style.color;
 - **Package contribution:** `clay.contributions.textStyles` parsed by `src/packages/record.rs`.
 - **Permissions:** none for theme packages; `setTheme` only resolves bundled first-party `@clay/*` themes.
 - **Validation:** known token/base key, valid hex, duplicate rejection, no-op rejection, executable/raw CSS/native authority rejection, manifest payload budget.
-- **Hot path:** resolved once at configuration/reload/bootstrap; paint does a per-visible-span registry read with no package JavaScript, package loading, filesystem, server IPC, or allocation-heavy maps.
+- **Hot path:** resolved once at configuration/reload/bootstrap; normalized visible presentation runs are retained with the Parley layout, so cache-hit paint does no package JavaScript, package loading, filesystem, server IPC, font-family parsing, or decoration-span rescan.
 - **Reuse rule:** future modes emit `TokenType` + `Modifiers`; future themes declare `textStyles`; no per-language Rust color branches, paint branches, or raw CSS hooks.
 
 ## Invariants and Constraints
@@ -170,7 +179,8 @@ let color = style.color;
 ## Tests
 
 - `src/editor/theme.rs`: default baseline, kind/token dispatch, modifier attributes, hex parsing, override routing, last-wins merge, unknown-token no-op, and theme text-attribute defaults.
-- `tests/theme_packages.rs`: Gruvbox Material Dark/Light validate as inert full 45-entry mappings, produce distinct palettes, change the registry, make keywords bold, and preserve per-prose-token color overrides.
+- `src/editor/surface.rs`: mixed Markdown-code role runs, deterministic overlap/attribute composition, and diagnostic/invalid-UTF-8 font-role rejection; `src/editor/layout.rs` covers typography/style/default-role cache invalidation.
+- `tests/theme_packages.rs`: Gruvbox Material Dark/Light validate as inert full 48-entry mappings, produce distinct palettes, change the registry, make keywords bold, and preserve per-prose-token color overrides.
 - `tests/decoration_transport.rs`: two-axis `DecorationSpan` protocol round trip and compatibility construction.
 - `tests/editor_performance_invariants.rs`: `style_registry_is_single_source_of_color_for_paint_paths` and `paint_uses_cached_inert_spans_without_package_javascript`.
 - `src/server/js_runtime.rs`: `set_theme_resolves_first_party_gruvbox_theme` validates runtime facade/op resolution.
@@ -184,6 +194,7 @@ let color = style.color;
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Decoration Transport](decoration-transport.md)
+- [Range Diagnostics](range-diagnostics.md)
 - [Syntax Grammar Registry](syntax-grammar-registry.md)
 - [Text Vocabulary and Two-Axis Decoration Contract](../../reference/primitives/syntax-vocabulary.md)
 - [Theme authoring guide](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme)

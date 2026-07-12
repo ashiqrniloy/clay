@@ -17,6 +17,7 @@ export * as packages from "./packages.ts";
 export * as modes from "./modes.ts";
 export * as commands from "./commands.ts";
 export * as decorations from "./decorations.ts";
+export * as diagnostics from "./diagnostics.ts";
 export * as parse from "./parse.ts";
 export * as completion from "./completion.ts";
 export * as theme from "./theme.ts";

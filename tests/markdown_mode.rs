@@ -39,10 +39,10 @@ use clay::perf::budgets::{
 };
 use clay::protocol::{
     BehaviorManifest, BehaviorScope, DecorationKind, DecorationProvenance, DecorationSet,
-    DecorationSpan, DocumentAccess, EditorBehaviorRules, EnterRule, IncrementalParseUpdate,
-    PairRule, PairRuleContext, ParseByteRange, ParseUnit, SduiActionIntent, SduiActionSource,
-    SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId, SduiNodeKind,
-    SduiTree, SduiTreeOperation, SduiTreeUpdate, ServerMessage, TabMode, TabRule,
+    DecorationSpan, DocumentAccess, DocumentFontRole, EditorBehaviorRules, EnterRule,
+    IncrementalParseUpdate, PairRule, PairRuleContext, ParseByteRange, ParseUnit, SduiActionIntent,
+    SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId,
+    SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, ServerMessage, TabMode, TabRule,
     TextEditCapability, codec::Codec,
 };
 use clay::server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest};
@@ -77,6 +77,7 @@ fn markdown_registry_with_mode() -> (ModeRegistry, clay::packages::record::Packa
         api_prefix: record.manifest.clay.api_prefix.clone(),
         mode_id: "markdown".to_string(),
         display_name: "Markdown".to_string(),
+        document_font_role: clay::protocol::DocumentFontRole::Proportional,
         extensions: vec![
             "md".to_string(),
             "markdown".to_string(),
@@ -92,6 +93,48 @@ fn markdown_registry_with_mode() -> (ModeRegistry, clay::packages::record::Packa
         .register_mode(&record.manifest, decl)
         .expect("markdown mode pattern must register");
     (registry, record)
+}
+
+#[test]
+fn core_and_markdown_modes_publish_semantic_document_font_defaults() {
+    let (mut registry, record) = markdown_registry_with_mode();
+    let markdown = activate_markdown_for_document(&mut registry, &record, "README.md", 1);
+    assert_eq!(
+        registry
+            .select_behavior_manifest_for_document(1, &[&record])
+            .unwrap()
+            .manifest
+            .document_font_role,
+        DocumentFontRole::Proportional
+    );
+
+    for (document_id, path, expected) in [
+        (2, "main.rs", DocumentFontRole::Monospace),
+        (3, "notes.unknown", DocumentFontRole::Proportional),
+    ] {
+        let classification = registry
+            .classify(&DocumentClassificationInput {
+                document_id,
+                path: Some(path.to_string()),
+                mime_type: None,
+                shebang: None,
+                leading_content: None,
+            })
+            .unwrap();
+        registry
+            .activate_builtin_major_mode(classification)
+            .unwrap();
+        assert_eq!(
+            registry
+                .select_behavior_manifest_for_document(document_id, &[])
+                .unwrap()
+                .manifest
+                .document_font_role,
+            expected
+        );
+    }
+
+    assert_eq!(markdown.document_font_role, DocumentFontRole::Proportional);
 }
 
 fn activate_markdown_for_document(
@@ -314,6 +357,7 @@ fn markdown_parse_update(document_version: u64) -> IncrementalParseUpdate {
         invalidated_ranges: vec![ParseByteRange::new(0, 80)],
         syntax_tree_delta: Some("decorations:viewport-spans=7".to_string()),
         decoration_update: Some(markdown_decoration_set(document_version, 160)),
+        diagnostic_update: None,
     }
 }
 
@@ -1166,6 +1210,7 @@ fn markdown_classifies_supported_extensions_and_mime() {
                 api_prefix: r2_record.manifest.clay.api_prefix.clone(),
                 mode_id: "markdown".to_string(),
                 display_name: "Markdown".to_string(),
+                document_font_role: clay::protocol::DocumentFontRole::Proportional,
                 extensions: vec!["md".to_string()],
                 mime_types: vec!["text/markdown".to_string()],
                 file_names: vec![],

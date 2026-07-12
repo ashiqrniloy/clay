@@ -65,6 +65,31 @@ Validation requirements:
 - The serialized update must be bounded by `DECORATION_PAYLOAD_BUDGET_BYTES`.
 - `document_version`, `behavior_version`, `render_intent_version`, and `package_prefix` provide stale-update rejection and provenance.
 
+## Semantic Typography Roles
+
+Typography is inert rendering data governed by [Semantic Typography Roles](typography.md):
+
+- mode `defaultFontRole` selects `monospace` or `proportional` for document text;
+- syntax/semantic decoration `fontRole` may override an eligible byte range with `monospace` or `proportional`;
+- text-bearing component `style.fontRole` selects `ui`, `monospace`, or `proportional`, defaulting to `ui`;
+- packages never provide family names, stacks, font files/URLs/bytes/downloads, absolute sizes, raw Parley properties, CSS, or renderer callbacks.
+
+The server validates semantic names, range/layer authorization, component-kind support, provenance, versions, UTF-8 boundaries, and payload bounds before client installation. The client normalizes visible decoration boundaries outside paint, resolves user-owned stacks/sizes through `TypographyRegistry`, and includes typography/style revisions plus document role in layout cache keys. Named-family fallback resolution is client-local; unavailable names retain a generic fallback without server font inspection or package notification.
+
+Document line/scroll/caret geometry derives from resolved document profiles and shaped Parley metrics. Shell/SDUI/component paint, rows, hit regions, scrolling, status geometry, and accessibility bounds share resolved UI metrics. Paint, input, layout, pointer, scroll, and text-event paths perform no package JavaScript, blocking IPC, filesystem/network access, font download, or server-side installed-font discovery.
+
+## Range Diagnostics
+
+Range diagnostics are a distinct rendering path documented in [Range Diagnostics](diagnostics.md). They do not overload `DecorationSpan` metadata:
+
+- `DiagnosticSet` publishes versioned, viewport-bounded, source-keyed `DiagnosticSpan` records with severity, code, message, and provenance;
+- Tree-sitter `ERROR`/`MISSING` extraction and package `serverPublishDiagnostics` share one validation/transport/paint contract;
+- paint draws theme-owned squiggles from `StyleRegistry::diagnostic_style` and cached Parley line rectangles;
+- Syntax, Semantic, Diagnostic, and Search layers remain additive; diagnostics cannot choose font roles or erase syntax/semantic styling;
+- payload/count/cache limits use `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, and `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
+
+`DecorationKind::Diagnostic` remains a visual decoration tint only. Status-level `RuntimeDiagnostic` stays in chrome and never becomes an inline squiggle solely because it shares severity vocabulary.
+
 ## Layout Hints and Render Intents
 
 Layout hints describe editor-adjacent presentation without granting native widget or GPU authority.

@@ -361,6 +361,7 @@ fn registry_with_package_md_mode(document_id: u64) -> ModeRegistry {
         api_prefix: manifest.clay.api_prefix.clone(),
         mode_id: "markdown".to_string(),
         display_name: "Markdown".to_string(),
+        document_font_role: clay::protocol::DocumentFontRole::Proportional,
         extensions: vec!["md".to_string()],
         mime_types: vec![],
         file_names: vec![],

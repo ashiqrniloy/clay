@@ -5,6 +5,39 @@ fn read(path: &str) -> String {
 }
 
 #[test]
+fn package_author_docs_pin_semantic_role_and_concrete_font_prohibition() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let primitive = read("docs/reference/primitives/typography.md");
+
+    for marker in [
+        "defaultFontRole",
+        "Range `fontRole` accepts `monospace` or `proportional`",
+        "Component text separately defaults to `ui`",
+        "fontFamily",
+        "fontSize",
+        "font paths/bytes/URLs/downloads",
+        "outside paint/input/layout hot paths",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "package guide must document {marker}"
+        );
+    }
+    for (path, role) in [
+        ("docs/reference/packages/markdown.md", "proportional"),
+        ("docs/reference/packages/rust.md", "monospace"),
+        ("docs/reference/packages/typescript.md", "monospace"),
+        ("docs/reference/packages/javascript.md", "monospace"),
+    ] {
+        let package = read(path);
+        assert!(package.contains(&format!("defaultFontRole: \"{role}\"")));
+        assert!(package.contains("Semantic Typography Roles"));
+    }
+    assert!(primitive.contains("no language-name branches"));
+    assert!(primitive.contains("raw `Deno.core.ops`"));
+}
+
+#[test]
 fn package_loading_doc_linked_from_indexes_and_marks_phase17_ready() {
     let docs_index = read("docs/index.md");
     let primitives_index = read("docs/reference/primitives/index.md");
@@ -1821,6 +1854,35 @@ fn phase18_parse_decoration_apis_are_documented_without_raw_op_exposure() {
 }
 
 #[test]
+fn package_author_guide_documents_bounded_diagnostic_publication() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let diagnostics_api =
+        read("docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md");
+    let primitives = read("docs/reference/primitives/diagnostics.md");
+
+    assert!(guide.contains("### Phase 18.17 range diagnostics publication"));
+    assert!(guide.contains("serverPublishDiagnostics"));
+    assert!(guide.contains("clay:diagnostics"));
+    assert!(guide.contains("DIAGNOSTIC_PAYLOAD_BUDGET_BYTES"));
+    assert!(guide.contains("diagnosticError"));
+    assert!(guide.contains("language-server process"));
+    assert!(guide.contains("../primitives/diagnostics.md"));
+    assert!(diagnostics_api.contains("clay.diagnostics.serverPublishDiagnostics"));
+    assert!(primitives.contains("serverPublishDiagnostics"));
+
+    for forbidden in [
+        "Deno.core.ops.op_clay_diagnostics",
+        "diagnostics.enabled",
+        "squiggleWidth",
+    ] {
+        assert!(
+            !guide.contains(forbidden),
+            "package author guide must not document forbidden surface `{forbidden}`"
+        );
+    }
+}
+
+#[test]
 fn package_loading_docs_describe_implemented_resolver_and_carried_forward_deferrals() {
     // Phase 18.6 task 8: after the docs transition, the authoritative docs must
     // describe the implemented resolver (not a gap) and the carried-forward
@@ -2067,6 +2129,82 @@ fn phase18_10_code_wiki_documents_final_syntax_implementation() {
         !package_wiki.contains("clay:decorations` and `clay:parse` are importable runtime modules, but their public Phase 18 functions currently delegate to the planned-unavailable op"),
         "package-loading wiki must not retain stale planned-unavailable language for runtime-backed parse/decor/syntax facades"
     );
+}
+
+#[test]
+fn range_diagnostics_add_no_hidden_configuration_surface() {
+    // Phase 18.17: range diagnostics reuse setTheme + setSyntaxEnginePreference;
+    // no new diagnostic toggle/geometry/severity preference API.
+    let configuration = read("docs/reference/clay-js-api/configuration.md");
+    let api_inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+    let generated_registry = read("docs/generated/clay-js-api-registry.json");
+    let budgets = read("src/perf/budgets.rs");
+    let diagnostics_facade = read("runtime/js/diagnostics.ts");
+
+    for phrase in [
+        "Phase 18.17 range diagnostics configuration review",
+        "did **not** promote a new user-facing diagnostic toggle",
+        "severity colors come from the active theme",
+        "syntax-error publication follows the active syntax engine",
+        "diagnosticError",
+        "diagnosticWarning",
+        "diagnosticInfo",
+        "setTheme",
+        "setSyntaxEnginePreference",
+        "serverPublishDiagnostics",
+        "package publication API",
+        "diagnostics.enabled",
+        "diagnostics.squiggleWidth",
+        "Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only",
+        "Ordinary keypress, paint, layout, scroll",
+    ] {
+        assert!(
+            configuration.contains(phrase),
+            "configuration docs must pin Phase 18.17 diagnostics config boundary: {phrase}"
+        );
+    }
+
+    assert!(
+        diagnostics_facade.contains("serverPublishDiagnostics")
+            && !diagnostics_facade.contains("enableDiagnostics")
+            && !diagnostics_facade.contains("setDiagnosticsPreference"),
+        "diagnostics facade must expose publication only, not user preference setters"
+    );
+
+    for forbidden in [
+        "clay.configuration.setDiagnostics",
+        "clay.diagnostics.setEnabled",
+        "clay.diagnostics.enable",
+        "clay.diagnostics.setSquiggleWidth",
+        "diagnostics.enabled",
+        "diagnostics.squiggleWidth",
+        "syntaxError.highlight",
+        "treeSitter.showErrors",
+    ] {
+        assert!(
+            !api_inventory.contains(forbidden),
+            "API inventory must not promote hidden diagnostic config `{forbidden}`"
+        );
+        assert!(
+            !generated_registry.contains(forbidden),
+            "generated registry must not promote hidden diagnostic config `{forbidden}`"
+        );
+    }
+
+    for budget in [
+        "DIAGNOSTIC_PAYLOAD_BUDGET_BYTES",
+        "DIAGNOSTIC_MAX_SPANS_PER_SET",
+        "DIAGNOSTIC_CACHE_BUDGET_BYTES",
+    ] {
+        assert!(
+            budgets.contains(budget),
+            "compiled diagnostic budgets must remain server constants: {budget}"
+        );
+        assert!(
+            configuration.contains(budget) || configuration.contains("DIAGNOSTIC_"),
+            "configuration review must name compiled diagnostic budgets, not init.js keys"
+        );
+    }
 }
 
 #[test]

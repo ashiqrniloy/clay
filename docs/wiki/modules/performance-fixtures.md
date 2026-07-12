@@ -47,6 +47,7 @@ Metric metadata is numeric and sanitized: document/client/version/transaction ID
 `Cargo.toml` installs Criterion as a development dependency and declares each bench target with `harness = false`. The initial groups intentionally stay non-interactive:
 
 - `editor_visible_extraction`, `editor_editing`, and `editor_scroll_viewport` use `EditorSurface` and generated fixtures for buffer, visible extraction, edit, and scroll-adjacent measurements.
+- `editor_typography_viewport_bounds` runs the same small/large fixtures with 10 px and 40 px document profiles, preserving a local regression check that configured typography changes only the bounded viewport window rather than triggering full-document work. Deterministic verification also exercises 500 mixed-role visible spans/1,000 normalized boundaries and statically excludes JavaScript, IPC, filesystem, network, shell, and font-discovery work from editor/SDUI hot paths.
 - `protocol_codec_payloads` and `server_document_acknowledgements` use the production `Codec` and in-process `DocumentState` acknowledgement logic for deterministic IPC/server baselines.
 - `runtime_configuration_baselines` and `sdui_application_baselines` cover deterministic behavior-manifest creation plus native SDUI snapshot/update and codec paths.
 - `markdown_activation_baselines`, `markdown_parse_and_decoration_baselines`, and `markdown_decorated_editor_baselines` cover first-party Markdown package activation, representative parse/decorations validation, and native decorated-editor render-adjacent work.

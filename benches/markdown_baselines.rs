@@ -35,6 +35,7 @@ fn register_markdown_mode(record: &PackageRecord) -> ModeRegistry {
                 api_prefix: record.manifest.clay.api_prefix.clone(),
                 mode_id: "markdown".to_string(),
                 display_name: "Markdown".to_string(),
+                document_font_role: clay::protocol::DocumentFontRole::Proportional,
                 extensions: vec![
                     "md".to_string(),
                     "markdown".to_string(),
@@ -175,6 +176,7 @@ fn markdown_parse_update(document_version: u64) -> IncrementalParseUpdate {
         invalidated_ranges: vec![ParseByteRange::new(0, 80)],
         syntax_tree_delta: Some("decorations:viewport-spans=5".to_string()),
         decoration_update: Some(markdown_decoration_set(document_version, 160)),
+        diagnostic_update: None,
     }
 }
 

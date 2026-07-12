@@ -14,7 +14,7 @@
     "modes": [],
     "docs": "./docs/index.md",
     "performance": {
-      "estimatedManifestBytes": 2400,
+      "estimatedManifestBytes": 2600,
       "hotPathPolicy": "inert style data parsed at load; no hot-path JS"
     },
     "contributions": {
@@ -29,6 +29,9 @@
         { "token": "scrollbarTrack", "color": "#7c6f6422" },
         { "token": "statusBg", "color": "#32302f" },
         { "token": "statusText", "color": "#d4be98" },
+        { "token": "diagnosticError", "color": "#ea6962" },
+        { "token": "diagnosticWarning", "color": "#d8a657" },
+        { "token": "diagnosticInfo", "color": "#7daea3" },
 
         { "token": "Keyword", "color": "#ea6962", "bold": true },
         { "token": "Modifier", "color": "#e78a4e" },

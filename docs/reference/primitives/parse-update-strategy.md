@@ -112,6 +112,7 @@ Publication rules:
 
 - Serialized parse result metadata and incremental tree/update data must fit within `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`.
 - Decoration spans derived from the result must fit within `DECORATION_PAYLOAD_BUDGET_BYTES` after server validation and viewport filtering.
+- Optional diagnostic side channels map to `IncrementalParseUpdate.diagnostic_update` / `DiagnosticSet` and must fit within `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES` after centralized validation; see [Range Diagnostics](diagnostics.md).
 - `syntax_tree_delta` is server/cache metadata unless a later primitive explicitly exposes syntax trees. The Rust client receives only validated rendering/folding/diagnostic declarations it knows how to apply.
 - Result delivery is viewport-prioritized: visible spans first, adjacent spans next, off-viewport data cached or discarded according to budget.
 
@@ -122,7 +123,7 @@ Before publishing any parse-produced rendering update, the server validates:
 - Package provenance: `package_prefix` matches the loaded package and active mode contribution.
 - Permissions: parse handlers require the declared parse permission (for example `parse-document`) and cannot access filesystem, network, shell, AI, WASM, remote listeners, or raw `Deno.core.ops` unless a future decision explicitly grants and validates that authority.
 - Version metadata: `document_id`, `document_version`, and `behavior_version` are current or safely compatible.
-- Payload bounds: `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and any related folding/diagnostic budget are enforced before allocation/publication.
+- Payload bounds: `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, and any related folding budget are enforced before allocation/publication.
 - Ranges: byte ranges are valid for the server-canonical document version and intersect the delivered viewport unless deliberately cached server-side.
 - Shape: decoration kinds, style tokens, priorities, folding kinds, and diagnostic severities are known inert schema values.
 - Security: executable JavaScript, client-side callbacks, raw ops, arbitrary draw commands, native widget mutation, and unbounded strings are stripped or rejected.

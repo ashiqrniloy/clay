@@ -57,6 +57,7 @@ pub(crate) async fn handle_connection<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let mut typography_updates = runtime_generation.subscribe_typography();
     let first_message = codec.read_client_message(&mut stream).await?;
     let mut file_open_capabilities = match first_message {
         ClientMessage::Hello {
@@ -72,6 +73,7 @@ where
                 &sdui,
                 &active_theme,
                 &runtime_diagnostics,
+                &runtime_generation,
                 codec,
             )
             .await?;
@@ -118,7 +120,54 @@ where
     };
 
     loop {
-        let message = match codec.read_client_message(&mut stream).await {
+        let message = match tokio::select! {
+            typography = typography_updates.recv() => match typography {
+                Ok(typography) => {
+                    codec
+                        .write_server_message(&mut stream, &ServerMessage::ActiveTypography(typography))
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let typography = runtime_generation.active_typography().await;
+                    codec
+                        .write_server_message(&mut stream, &ServerMessage::ActiveTypography(typography))
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            // ponytail: one connection drains shared parse channel. Desktop is
+            // single-client; broadcast fan-out if multi-client parse delivery
+            // becomes required.
+            update = parse_coordinator.next_update() => {
+                if let Some(update) = update {
+                    if let Some(set) = update.decoration_update {
+                        codec
+                            .write_server_message(&mut stream, &ServerMessage::DecorationSet(set))
+                            .await?;
+                    }
+                    if let Some(set) = update.diagnostic_update {
+                        codec
+                            .write_server_message(&mut stream, &ServerMessage::DiagnosticSet(set))
+                            .await?;
+                    }
+                }
+                continue;
+            }
+            diagnostic = parse_coordinator.next_diagnostic() => {
+                if let Some(diagnostic) = diagnostic {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::RuntimeDiagnostic(diagnostic),
+                        )
+                        .await?;
+                }
+                continue;
+            }
+            message = codec.read_client_message(&mut stream) => message,
+        } {
             Ok(message) => message,
             Err(CodecError::Io(error))
                 if matches!(
@@ -611,6 +660,7 @@ async fn send_welcome_snapshot_and_manifest<S>(
     sdui: &Arc<Mutex<StaticSduiState>>,
     active_theme: &Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     runtime_diagnostics: &Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_generation: &RuntimeGenerationStore,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -650,6 +700,12 @@ where
         });
     codec
         .write_server_message(stream, &ServerMessage::ActiveTheme(theme))
+        .await?;
+    codec
+        .write_server_message(
+            stream,
+            &ServerMessage::ActiveTypography(runtime_generation.active_typography().await),
+        )
         .await?;
 
     let (document_id, document_version) = match &initial_document {
@@ -1196,6 +1252,7 @@ mod tests {
                 service: runtime,
                 diagnostics: Vec::new(),
             })),
+            typography: super::super::ActiveTypographyState::default(),
         }
     }
 
@@ -1490,6 +1547,70 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
+    async fn live_typography_update_reaches_connection_once() {
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let runtime_generation = runtime_generation();
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document_state(),
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            workspace_state(),
+            sdui_state(),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation.clone(),
+            parse_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        loop {
+            if matches!(
+                codec.read_server_message(&mut client).await.unwrap(),
+                ServerMessage::FileOpenCapabilityIssued { .. }
+            ) {
+                break;
+            }
+        }
+
+        let mut typography = crate::protocol::ActiveTypography::default();
+        typography.monospace.size = 16.0;
+        runtime_generation
+            .replace_typography(typography)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::ActiveTypography(typography)
+                if typography.revision == 1 && typography.monospace.size == 16.0
+        ));
+        assert!(
+            timeout(
+                Duration::from_millis(20),
+                codec.read_server_message(&mut client),
+            )
+            .await
+            .is_err(),
+            "one replacement emits one live update"
+        );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn server_sends_minimal_behavior_manifest() {
         let (client, server) = duplex(4096);
         let codec = Codec::default();
@@ -1572,6 +1693,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         // Post-handshake file-open capability is always issued once.
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
@@ -1667,6 +1789,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => {
                 assert!(tree.nodes.iter().any(|node| matches!(
@@ -1721,6 +1844,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         assert_eq!(
             codec.read_server_message(&mut client).await.unwrap(),
@@ -1773,6 +1897,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -1847,6 +1972,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -1952,6 +2078,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -2029,6 +2156,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -2175,6 +2303,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let tree = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => tree,
             message => panic!("expected file browser SduiSnapshot, got {message:?}"),
@@ -2223,15 +2352,24 @@ await loadPackage("@clay/markdown");"#,
             }
             message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
         }
-        assert!(
-            timeout(
-                Duration::from_millis(25),
-                codec.read_server_message(&mut client)
-            )
-            .await
-            .is_err(),
-            "open follow-up should not block waiting for background decorations"
-        );
+        // Open follow-up returns after scheduling parse. Background
+        // DecorationSet/DiagnosticSet may arrive later; they must not have
+        // blocked DocumentOpened or the behavior manifest.
+        match timeout(
+            Duration::from_millis(250),
+            codec.read_server_message(&mut client),
+        )
+        .await
+        {
+            Err(_) => {}
+            Ok(Ok(
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_),
+            )) => {}
+            Ok(Ok(other)) => panic!("unexpected open follow-up message: {other:?}"),
+            Ok(Err(error)) => panic!("unexpected codec error after open: {error}"),
+        }
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -2294,6 +2432,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
@@ -2557,6 +2696,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
@@ -2670,6 +2810,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
@@ -2742,6 +2883,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
@@ -2813,6 +2955,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 

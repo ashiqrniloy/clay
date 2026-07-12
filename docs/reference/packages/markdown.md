@@ -39,6 +39,10 @@ Loading, contribution validation, selected-file activation, and Phase 19 reload 
 
 Tier 1 native highlighting uses Clay's compiled `tree-sitter-md-025 = 0.5.6` dependency and the package query at `packages/markdown/queries/highlights.scm`. Tier 2 uses the package-root-confined `./grammars/markdown.wasm` through the shared web-tree-sitter host adapter only after explicit `setSyntaxEnginePreference("markdown", "wasm")`; package load order cannot replace native Tier 1. The existing package JavaScript parser remains Tier 3 fallback for Markdown-specific decorations and preview behavior, or when `setSyntaxEnginePreference("markdown", "javascript")` is selected. All Tree-sitter routes use the shared `TokenType` + `Modifiers` vocabulary pipeline. Until a WASM binary is committed, `packages/markdown/grammars/PROVENANCE.md` records the reproducible build command and required SHA-256 recording step. Runtime never fetches, builds, shells out, or loads native libraries for this artifact.
 
+## Typography
+
+Markdown declares semantic `defaultFontRole: "proportional"`. Inline-code and fenced/indented code-block syntax spans declare `fontRole: "monospace"`; prose inherits proportional. These generic mode/decoration fields resolve through user-owned typography and contain no concrete family or size. See [Semantic Typography Roles](../primitives/typography.md).
+
 ## Security
 
 The package declares `mode-registration`, `mode-activation`, `command-registration`, `parse-document`, and `render-decorations` only. Installation records metadata without executing JavaScript. Client surfaces receive validated inert manifests, SDUI metadata, and decoration spans; no client-side JavaScript, raw Deno ops, filesystem, network, shell, AI, WASM, native-widget, package-enable, or workspace-mutation authority is granted. third-party/native grammar artifact loading remains deferred to Phase 23 and a separate trust decision.

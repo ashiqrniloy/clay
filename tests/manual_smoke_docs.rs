@@ -157,6 +157,62 @@ fn phase18_16_tiered_syntax_smoke_documents_engine_selection() {
 }
 
 #[test]
+fn phase18_16_5_typography_smoke_covers_fallback_geometry_and_authority() {
+    let launch_doc = launch_smoke_doc();
+
+    for expected in [
+        "Phase 18.16.5 typography smoke",
+        "Gruvbox Material dark and light",
+        "6 px, defaults, and 40 px",
+        "Unicode (`Hé`, `漢字`)",
+        "emoji (`🦀`)",
+        "unavailable name followed by its generic fallback",
+        "must not fetch or open font files/URLs",
+        "caret, selection, wrapping, hit testing, and scrolling",
+        "status text, Workspace file browser, runtime SDUI, package status items",
+        "accessibility bounds must scale together",
+        "Remove typography configuration and reconnect",
+        "previous complete typography remains active",
+        "typography_updates_do_not_enter_editor_hot_paths",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define typography marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn phase18_17_manual_smoke_documents_invalid_repair_lifecycle() {
+    let launch_doc = launch_smoke_doc();
+
+    for expected in [
+        "Phase 18.17 range diagnostics and syntax-error smoke",
+        "DiagnosticSet",
+        "ERROR",
+        "MISSING",
+        "serverPublishDiagnostics",
+        "RuntimeDiagnostic",
+        "cargo run -- smoke-gui --config-fixture syntax-grammars",
+        "invalid `.rs`, `.ts`, `.tsx`, `.js`, and `.md`",
+        "text paints first",
+        "themed squiggle",
+        "tree-sitter",
+        "Local typing/scroll remain responsive",
+        "invalid_to_valid_edit_clears_squiggle_after_current_parse",
+        "valid_to_invalid_edit_keeps_local_typing_non_blocking",
+        "runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline",
+        "valid_tree_fast_path_skips_error_node_traversal",
+        "range_diagnostics_do_not_enter_editor_hot_paths",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Phase 18.17 range-diagnostic marker `{expected}`"
+        );
+    }
+}
+
+#[test]
 fn phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract() {
     let launch_doc = launch_smoke_doc();
     let fixture = std::fs::read_to_string(concat!(

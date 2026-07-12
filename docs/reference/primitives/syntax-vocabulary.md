@@ -115,7 +115,7 @@ The exact baseline colors are locked by `free_form_style_token_decoration_colors
 
 Theme packages declare inert `clay.contributions.textStyles` entries. Each entry targets either:
 
-- a base UI key: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`; or
+- a base UI key: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`; or
 - a `TokenType` variant name such as `Keyword`, `String`, `Function`, `Heading1`, or `Paragraph`.
 
 Each entry may set any subset of:

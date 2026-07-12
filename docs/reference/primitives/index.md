@@ -19,6 +19,8 @@ The Phase 18.10 grammar metadata baseline remains documented in [Creating Clay P
 - [Primitive Implementation Gate](implementation-gate.md) — Phase 16.5 runtime validation gate, fixture format, load/activation scope boundary, and Phase 17/18 handoff.
 - [Prioritized Primitive Backlog](backlog.md) — sortable Phase-17-required, Phase-18-required, and deferred primitive implementation backlog plus the Phase 17 prerequisite checklist.
 - [Text Vocabulary and Two-Axis Decoration Contract](syntax-vocabulary.md) — Phase 18.15 locked LSP-based `TokenType` + `Modifiers` vocabulary, Clay prose/text-attribute extensions, open-string scope escape, compatibility mapping from free-form `style_token`, and the single-source-of-color `StyleRegistry` invariant.
+- [Semantic Typography Roles](typography.md) — Phase 18.16.5 package/mode contract for document defaults, syntax/semantic range overrides, UI/component roles, user-owned fallback stacks/sizes, invalidation, hot paths, and prohibited concrete font authority.
+- [Range Diagnostics](diagnostics.md) — Phase 18.17 `DiagnosticSpan`/`DiagnosticSet` contract for Tree-sitter `ERROR`/`MISSING` recovery, package analyzers, theme-owned squiggles, source-keyed replacement, and future LSP reuse without overloading `RuntimeDiagnostic` or `DecorationSpan`.
 
 ## Phase 17 Readiness Summary
 
