@@ -272,19 +272,20 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
 ```
 
 Manual language package smoke:
 
-1. Put the three `loadPackage` lines above in `~/.config/clay/init.js`, or use the checked-in fixture with `cargo run -- smoke-gui --config-fixture language-packages`.
+1. Put the `loadPackage` lines above in `~/.config/clay/init.js`, or use the checked-in fixture with `cargo run -- smoke-gui --config-fixture language-packages`. The fixture loads all four first-party language packages through one-line `loadPackage` calls with no per-facade plumbing.
 2. Launch Clay with `cargo run`, `cargo run -- smoke-gui`, or the fixture command above.
-3. Open small `.rs`, `.ts`, and `.js` files similar to `tests/fixtures/configuration/language-packages/workspace/main.rs`, `main.ts`, and `main.js`.
+3. Open small `.rs`, `.ts`, and `.js` files similar to `tests/fixtures/configuration/language-packages/workspace/main.rs`, `main.ts`, and `main.js`. A `.md` file activates the Markdown mode with Tier 1 native highlighting and the package-JS preview SDUI panel.
 4. Confirm each file is classified into the package-declared major mode (`rust`, `typescript`, or `javascript`) and remains editable with package behavior (indent size, delimiter pairs, comment continuation, electric outdent) applied.
 5. Confirm the language status item appears in the editor chrome (e.g., `rust.status.mode`, `typescript.status.mode`, `javascript.status.mode`).
 6. Trigger autocomplete with `.` or `::` and confirm a bounded, metadata-only completion list is offered from the package provider (`rust.keywords`, `typescript.keywords`, `javascript.keywords`).
 7. Remove the language package load lines and relaunch. The same files should still open editable, but classification falls back to `core.code` with no language-specific behavior, status item, or completions.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract` verifies the fixture and docs; `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions` loads the fixture deterministically and confirms all three syntax grammars, completion providers, and status-item UI components are registered; `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, `language_package_classification_is_deterministic_across_load_orders`, and `language_package_rejects_unauthorized_completion_provider` cover mode classification, command/completion/UI registration, fallback behavior, load-order determinism, and permission enforcement.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract` verifies the fixture and docs; `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions` loads the fixture deterministically and confirms all four first-party language packages register their syntax grammars, completion providers, status-item UI components, and (for Markdown) its JS parse handler; `src/server/js_runtime.rs::first_party_language_packages_are_not_silent_defaults` confirms an empty `init.js` registers no package contributions (only the compiled-in native grammars remain); `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, `language_package_classification_is_deterministic_across_load_orders`, and `language_package_rejects_unauthorized_completion_provider` cover mode classification, command/completion/UI registration, fallback behavior, load-order determinism, and permission enforcement.
 
 ### End-to-end file browser workflow smoke
 

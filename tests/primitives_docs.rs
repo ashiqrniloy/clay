@@ -1284,6 +1284,13 @@ fn phase18_17_range_diagnostics_primitive_review() -> String {
     .expect("read Phase 18.17 range diagnostics primitive review")
 }
 
+fn phase18_18_language_package_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.18-language-package-primitive-review.md",
+    ))
+    .expect("read Phase 18.18 first-party language package full implementation primitive review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -2587,6 +2594,96 @@ fn phase18_17_range_diagnostics_primitive_review_is_linked_and_complete() {
         assert!(
             review.contains(required),
             "Phase 18.17 primitive review must preserve boundary {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_18_language_package_primitive_review_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_18_language_package_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.18-language-package-primitive-review.md"),
+        "wiki index must link the Phase 18.18 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.18-language-package-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.18 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Tiered syntax engine and first-party native grammars",
+        "Capture-to-vocabulary mapping (current style-token state)",
+        "Two-axis decoration, style registry, and native rendering",
+        "Behavior manifests and text transforms",
+        "Command declaration and execution",
+        "Completion trigger and result providers",
+        "Parse coordinator, incremental updates, and diagnostics",
+        "Markdown decoration versus preview SDUI",
+        "Package UI, configuration, and loading",
+        "`src/server/syntax.rs::FIRST_PARTY_NATIVE_GRAMMARS`",
+        "`src/packages/record.rs::SyntaxStyleMapEntry`",
+        "`src/protocol/decorations.rs::DecorationSpan`",
+        "`src/editor/theme.rs::StyleRegistry`",
+        "`runtime/js/behavior.ts::buildCodeEditingManifest`",
+        "`runtime/js/completion.ts::serverRegisterCompletionProvider`",
+        "`runtime/js/packages.ts::loadPackage`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.18 primitive review must inventory {required}"
+        );
+    }
+
+    for required in [
+        "What Existing Primitives Already Achieve",
+        "Generic Phase 18.18 Gaps",
+        "Promote first-party grammar styleMaps to vocabulary `TokenType` + `Modifiers`",
+        "Expand `queries/highlights.scm` captures to match vocabulary coverage",
+        "Markdown decoration onto the vocabulary contract; preview stays package-JS",
+        "Priority-0 base keyword completion providers per language",
+        "Full mode behavior tuning on generic primitives",
+        "lossy `style_token` compatibility fallback",
+        "snippet kind is **not yet present**",
+        "Phase 18.19",
+        "a Markdown `**x**` span emits `modifiers=Bold`",
+        "decoration and preview must be independently activatable",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.18 primitive review must lock generic gap/rule {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "No package JavaScript, Tree-sitter traversal, query compilation, IPC, server validation",
+        "`INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`",
+        "`DECORATION_PAYLOAD_BUDGET_BYTES`",
+        "`SYNTAX_CACHE_BUDGET_BYTES`",
+        "`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`",
+        "`MODE_ACTIVATION_P95_BUDGET_MS`",
+        "Security and Authority Boundary",
+        "language-server subprocess",
+        "Rejected Implementation Shapes",
+        "Do not add `RustSyntaxHandler`",
+        "Do not encode vocabulary into `style_token`",
+        "Do not add color data to grammar styleMaps",
+        "Do not add a per-language Rust keyword completion table",
+        "Do not route Markdown preview through the Tree-sitter engine",
+        "Do not auto-load first-party language packages",
+        "Do not implement LSP process spawning",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.18 primitive review must preserve boundary {required}"
         );
     }
 }

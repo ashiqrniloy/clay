@@ -195,6 +195,49 @@ fn tier1_native_first_party_is_default_for_known_extensions() {
     }
 }
 
+#[test]
+fn first_party_native_registry_falls_back_to_no_grammar_for_unknown_extensions() {
+    // All five first-party native grammars are registered, yet a document whose
+    // path matches no declared extension must keep `core.code`/`core.text` as
+    // the active major mode with no syntax grammar selected. This locks that
+    // first-party registration never greedy-matches or breaks fallback.
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+    assert_eq!(
+        SyntaxGrammarRegistry::first_party_native_descriptors().len(),
+        5,
+        "five first-party native grammars must be registered"
+    );
+
+    for (path, fallback_mode) in [
+        ("notes.txt", "core.text"),
+        ("config.json", "core.code"),
+        ("data.xyz", "core.code"),
+        ("README", "core.code"),
+    ] {
+        let activation = if fallback_mode == "core.text" {
+            core_text_activation(5, 7)
+        } else {
+            core_code_activation(5, 7)
+        };
+        let selection =
+            registry.select_for_document(&classification_input(5, Some(path)), &activation, 1);
+
+        assert_eq!(
+            selection.active_major_mode, fallback_mode,
+            "{path}: unknown extension must keep the active major mode"
+        );
+        assert_eq!(selection.behavior_version, 7);
+        assert!(
+            selection.active_syntax_grammar.is_none(),
+            "{path}: no first-party grammar may match an unknown extension"
+        );
+        assert!(
+            selection.why.contains("document remains editable"),
+            "{path}: selection rationale must explain the no-grammar fallback"
+        );
+    }
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn user_forced_tier_is_honored_and_recorded_in_provenance() {

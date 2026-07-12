@@ -3111,6 +3111,77 @@ mod tests {
             grammar_ids.iter().any(|id| id == "javascript"),
             "fixture must register javascript syntax grammar"
         );
+
+        // Phase 18.18: the Markdown package also loads through a one-line
+        // `loadPackage("@clay/markdown")` and registers its JS parse handler
+        // (decoration/preview path) alongside the three code-language packages.
+        assert!(
+            grammar_ids.iter().any(|id| id == "markdown"),
+            "fixture must register markdown syntax grammar"
+        );
+        assert_eq!(
+            result.js_parse_handlers.len(),
+            1,
+            "fixture must register the Markdown parse handler"
+        );
+        assert_eq!(
+            result.js_parse_handlers[0].package.manifest.name, "@clay/markdown",
+            "Markdown parse handler must come from @clay/markdown"
+        );
+    }
+
+    #[tokio::test]
+    async fn first_party_language_packages_are_not_silent_defaults() {
+        // No `loadPackage` call in init.js: no first-party package may register
+        // its mode, commands, completion providers, parse handlers, or UI. The
+        // compiled-in Tier 1 native grammars remain (engine capability, not
+        // package activation); only an explicit `loadPackage("@clay/*")` opts a
+        // package's contributions in.
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let root = config_fixture("no-silent-defaults");
+        fs::write(
+            root.join("init.js"),
+            "// empty init.js: no language packages loaded\n",
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap();
+
+        assert!(
+            result.completion_providers.is_empty(),
+            "no completion provider may register without an explicit loadPackage"
+        );
+        assert!(
+            result.js_parse_handlers.is_empty(),
+            "no parse handler may register without an explicit loadPackage"
+        );
+        assert!(
+            result.ui_contributions.components.is_empty(),
+            "no package UI contribution may register without an explicit loadPackage"
+        );
+        assert!(
+            result.ui_contributions.panels.is_empty(),
+            "no package panel may register without an explicit loadPackage"
+        );
+        // The five compiled-in first-party native grammars are engine
+        // capability (registered by `with_first_party_native`), not silent
+        // package defaults: they only highlight when an explicit `loadPackage`
+        // has registered a matching major mode that selects them.
+        assert_eq!(
+            result.syntax_grammars.len(),
+            5,
+            "only the compiled-in native grammars exist with no package loaded"
+        );
+        for grammar in &result.syntax_grammars {
+            assert_eq!(
+                grammar.engine_tier,
+                crate::server::syntax::SyntaxEngineTier::Native,
+                "unloaded-package grammars must be native engine capability only"
+            );
+        }
     }
 
     #[tokio::test]
