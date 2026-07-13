@@ -213,7 +213,7 @@ fn phase18_17_manual_smoke_documents_invalid_repair_lifecycle() {
 }
 
 #[test]
-fn phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract() {
+fn phase18_18_manual_smoke_documents_first_party_language_matrix() {
     let launch_doc = launch_smoke_doc();
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -222,41 +222,84 @@ fn phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract() {
     .expect("read language-packages smoke fixture");
 
     for expected in [
-        "Phase 18.14 language package expansion smoke",
+        "Phase 18.18 first-party language package smoke",
         "cargo run -- smoke-gui --config-fixture language-packages",
-        "loadPackage(\"@clay/rust\")",
-        "loadPackage(\"@clay/typescript\")",
-        "loadPackage(\"@clay/javascript\")",
-        "tests/fixtures/configuration/language-packages/workspace/main.rs",
-        "main.ts",
-        "main.js",
-        "classified into the package-declared major mode",
-        "rust.status.mode",
-        "typescript.status.mode",
-        "javascript.status.mode",
-        "bounded, metadata-only completion list",
-        "Remove the language package load lines and relaunch",
-        "Automated coverage (no manual execution needed)",
+        "tests/fixtures/syntax/rust.rs",
+        "tests/fixtures/syntax/typescript.tsx",
+        "tests/fixtures/syntax/javascript.jsx",
+        "tests/fixtures/syntax/javascript.mjs",
+        "tests/fixtures/syntax/javascript.cjs",
+        "tests/fixtures/syntax/markdown-invalid.md",
+        "Gruvbox-themed native vocabulary highlighting",
+        "keyword completion",
+        "indent, pairs, and comment behavior",
+        "themed syntax-error squiggle",
+        "Typing/scroll remain responsive",
+        "graceful fallback to `core.code` (Rust/TypeScript/JavaScript) or `core.text` (Markdown)",
+        "no secrets, real paths, or executable authority",
+        "first_party_syntax_fixtures_exist_per_language",
         "language_packages_config_fixture_loads_and_registers_all_contributions",
-        "rust_package_expansion_registers_mode_command_completion_and_status",
-        "typescript_package_expansion_registers_mode_command_completion_and_status",
-        "javascript_package_expansion_registers_mode_command_completion_and_status",
     ] {
         assert!(
             launch_doc.contains(expected),
-            "launch smoke docs must define Phase 18.14 language package smoke marker `{expected}`"
+            "launch smoke docs must define Phase 18.18 language package smoke marker `{expected}`"
         );
     }
 
-    assert!(
-        fixture.contains("loadPackage(\"@clay/rust\")")
-            && fixture.contains("loadPackage(\"@clay/typescript\")")
-            && fixture.contains("loadPackage(\"@clay/javascript\")")
-            && !fixture.contains("serverRegisterSyntaxGrammar")
-            && !fixture.contains("serverRegisterModePattern")
-            && !fixture.contains("Deno.core.ops"),
-        "language-packages smoke fixture must use only end-user loadPackage calls"
-    );
+    for specifier in [
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "@clay/markdown",
+    ] {
+        assert!(
+            fixture.contains(&format!("loadPackage(\"{specifier}\")")),
+            "language package smoke fixture must explicitly load {specifier}"
+        );
+    }
+    for forbidden in [
+        "serverRegisterSyntaxGrammar",
+        "serverRegisterModePattern",
+        "Deno.core.ops",
+    ] {
+        assert!(
+            !fixture.contains(forbidden),
+            "language package smoke fixture must not use hidden/raw authority `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn first_party_syntax_fixtures_exist_per_language() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "tests/fixtures/syntax/rust.rs",
+        "tests/fixtures/syntax/rust-invalid.rs",
+        "tests/fixtures/syntax/typescript.ts",
+        "tests/fixtures/syntax/typescript.tsx",
+        "tests/fixtures/syntax/typescript-invalid.ts",
+        "tests/fixtures/syntax/javascript.js",
+        "tests/fixtures/syntax/javascript.jsx",
+        "tests/fixtures/syntax/javascript.mjs",
+        "tests/fixtures/syntax/javascript.cjs",
+        "tests/fixtures/syntax/javascript-invalid.js",
+        "tests/fixtures/syntax/markdown.md",
+        "tests/fixtures/syntax/markdown-invalid.md",
+    ] {
+        let path = manifest_dir.join(relative);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !text.trim().is_empty(),
+            "{} must not be empty",
+            path.display()
+        );
+        assert!(
+            !text.contains("/home/") && !text.to_ascii_lowercase().contains("secret"),
+            "{} must remain synthetic and path/secret-free",
+            path.display()
+        );
+    }
 }
 
 #[test]
@@ -443,10 +486,10 @@ fn phase19_code_wiki_documents_open_dialog_path() {
         "edit-ack wiki must document selected-file request and opened-document snapshot flow"
     );
     assert!(
-        markdown
-            .contains("Phase 19 extends the same package-owned path to native selected-file opens")
-            && markdown.contains("initial parse window capped at 64 KiB")
-            && markdown.contains("Ordinary edits after open continue through existing delta IPC"),
+        markdown.contains("Selected-file open now follows one generic path")
+            && markdown.contains("`schedule_open_parse` returns immediately after enqueue")
+            && markdown
+                .contains("Tier 1 grammar contribution caps selected native windows at `4 KiB`"),
         "Markdown package wiki must document selected-file activation and hot-path boundaries"
     );
 }

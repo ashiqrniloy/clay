@@ -187,6 +187,53 @@ Configuration evaluation and preference lookup happen only during startup, packa
 
 This API grants no filesystem, network, shell, package-manager, native-library, extension loading, AI mutation, workspace, package enable/disable, arbitrary third-party grammar, raw-op, WASM artifact, native-widget, client-runtime, client-side JavaScript, raw CSS/color, or parser callback authority. It only records user-initiated engine preference for already-validated first-party syntax packages; packages cannot silently promote themselves over native tier.
 
+## Phase 18.18 first-party language package configuration review
+
+Phase 18.18 promoted four first-party language packages from grammar-only metadata to full-mode contracts: Tier 1 native grammar with vocabulary styleMaps, expanded editor behavior (indent/electric/pairs/comment/autocomplete triggers), priority-0 base completion providers carrying bounded static keyword items, importable inert status items, and decoupled Markdown native-decoration-vs-package-JS-SDUI-preview. This review did **not** promote a new user-facing `clay:configuration` API.
+
+Every user-visible Phase 18.18 behavior flows through existing phase-appropriate Clay JS APIs. No per-language configuration toggle, user-preference key, or hidden `init.js` key was introduced for Rust, TypeScript, JavaScript, or Markdown behavior.
+
+User-visible Phase 18.18 configuration surfaces:
+
+| Behavior | API / surface | Notes |
+|---|---|---|
+| Package loading | [`clay.packages.loadPackage`](packages/load-package.md) | One call per language; no auto-load, no hidden `autoLoadLanguagePackages` key |
+| Active theme (color/style resolution) | [`clay.theme.setTheme`](theme/set-theme.md) | Theme `tokenType` + `modifiers` rules resolve all vocabulary token colors; no per-language color overrides |
+| Engine tier override | [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) | Optional explicit tier choice; native is the default for all four first-party languages |
+| Typography (font families/sizes) | [`clay.theme.setTypography`](theme/set-typography.md) | User-owned families and sizes; packages declare semantic roles only |
+| Editor behavior (indent/pairs/electric/comment/autocomplete triggers) | [`clay.behavior.buildCodeEditingManifest`](behavior/build-code-editing-manifest.md) | Package-owned manifest declared at load time through `serverRegisterModePattern`; no per-language behavior toggle |
+| Completion keyword/snippet items | [`clay.completion.serverRegisterCompletionProvider`](completion/server-register-completion-provider.md) | Package-owned validated static items; no user-facing keyword-list toggle or per-language item filter |
+| Markdown preview/status panel visibility | [`clay.configuration.setPackageOption`](configuration/set-package-option.md) / [`clay.ui.serverSetLayoutOverride`](ui/server-set-layout-override.md) | Existing `markdown.layout.defaultVisibility` option and `markdown.preview` `visibility` override; no new panel-display API |
+| Package enable/disable | `PackageService` (CLI, not `init.js`) | Privileged operation, not a user-configuration key |
+
+Default end-user configuration:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
+```
+
+No additional configuration call is required. Package load entries register editor behavior, completion providers, commands, and status items through existing generic facades; theme resolution, engine selection, and typography remain independently settable through their respective APIs.
+
+Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
+
+- `language.enable`, `language.disable`, `enableRust`, `enableTypeScript`, `enableJavaScript`, `enableMarkdown`
+- `language.indentWidth`, `language.tabSize`, `rust.indentSize`, `typescript.indentSize`, `javascript.indentSize`, `markdown.indentSize`
+- `language.lineComment`, `language.pairs`, `language.electricOutdent`, `language.autocompleteTriggers`
+- `completion.keywords`, `completion.snippets`, `completion.items`, `completion.enable`, `completion.disable`
+- `markdown.preview`, `markdown.preview.enabled`, `markdown.decoration.engine`, `markdown.highlight`
+- `syntax.styleMap`, `syntax.captureStyles`, `syntax.vocabulary`, `syntax.tokenType`, `language.tokens`
+- `language.behavior`, `language.mode`, `language.command`, `language.statusItem`
+- Per-language auto-load keys, implicit language-enable flags, theme-token override blobs, or ad hoc parser-policy blobs
+
+All editor behavior, completion keyword lists, syntax mappings, and mode patterns are package-owned inert metadata validated at package load time. Theme colors and font families remain owned by the user through `setTheme` and `setTypography`. Engine tier is selected through `setSyntaxEnginePreference`. Package enable/disable authority remains outside `init.js`.
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work. Ordinary keypress, Masonry paint/layout, pointer, scroll, text-event handling, edit acknowledgement, parse scheduling, parse-result publication, decoration rendering, and completion result construction do not execute user configuration JavaScript or recompute language-specific behavior settings. This review grants no parser, filesystem, network, shell, LSP, AI, package-manager, WASM, raw-op, native-widget, client-side JavaScript, CSS, package enable/disable, grammar-artifact, third-party grammar, or client-render authority.
+
 ## Phase 19 persistent-runtime hot reload configuration review
 
 Phase 19 reviewed persistent runtime hot reload and did **not** promote a new user-facing reload setting, command, key binding, or `clay:configuration` API. Hot reload is an internal/developer-only server lifecycle primitive in this phase, triggered headlessly through `IpcServer::trigger_developer_hot_reload` for tests and developer workflow. That Rust helper and its `RuntimeReloadOutcome`/`ReloadedDocumentRefresh` types are `#[doc(hidden)]` test/developer surfaces around the shared reload primitive; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`.

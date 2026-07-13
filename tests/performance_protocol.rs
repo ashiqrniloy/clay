@@ -25,7 +25,10 @@ use clay::{
         ParseWindowSnapshot, ServerMessage, SyntaxMemoryBudget,
         codec::{Codec, CodecError},
     },
-    server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
+    server::{
+        parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
+        syntax::{SyntaxGrammarRegistry, TreeSitterSyntaxHandler},
+    },
 };
 use serde_json::json;
 
@@ -45,6 +48,14 @@ fn edit_event(byte_offset: u64, text: &str) -> EditorEditEvent {
 
 fn payload_len(frame: &[u8]) -> usize {
     frame.len().saturating_sub(FRAME_PREFIX_BYTES)
+}
+
+fn first_party_package_record(package: &str) -> PackageRecord {
+    let path = format!("packages/{package}/package.json");
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));
+    let value = serde_json::from_str(&text).unwrap_or_else(|error| panic!("parse {path}: {error}"));
+    assemble_package_record(&value).unwrap_or_else(|error| panic!("assemble {path}: {error:?}"))
 }
 
 fn package_with_parse_permission() -> PackageRecord {
@@ -555,6 +566,185 @@ async fn valid_to_invalid_edit_keeps_local_typing_non_blocking() {
         started.elapsed() < Duration::from_millis(25),
         "local typing must not wait for slow diagnostic-producing parse"
     );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn first_party_decoration_payloads_stay_within_budget_per_language() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    for (label, package, contribution_id, language, query, text) in [
+        (
+            "rust",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            include_str!("fixtures/syntax/rust.rs"),
+        ),
+        (
+            "typescript",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            include_str!("fixtures/syntax/typescript.ts"),
+        ),
+        (
+            "tsx",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            include_str!("fixtures/syntax/typescript.tsx"),
+        ),
+        (
+            "javascript",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            include_str!("fixtures/syntax/javascript.js"),
+        ),
+        (
+            "markdown",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            include_str!("fixtures/syntax/markdown.md"),
+        ),
+    ] {
+        let contribution = registry
+            .get(contribution_id)
+            .unwrap_or_else(|| panic!("registered {contribution_id}"))
+            .clone();
+        assert_eq!(contribution.max_window_bytes, Some(4096));
+        assert_eq!(contribution.timeout_ms, Some(5000));
+        let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
+            .unwrap_or_else(|error| panic!("compile {label} query: {error}"));
+        let update = handler
+            .parse_sync(parse_notification_for_fixture(package, 1, text))
+            .unwrap_or_else(|error| panic!("parse {label}: {error}"));
+        let decoration_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(
+            update
+                .decoration_update
+                .as_ref()
+                .unwrap_or_else(|| panic!("{label} emits decorations")),
+        )
+        .unwrap_or_else(|error| panic!("serialize {label} decorations: {error}"))
+        .len();
+        let update_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&update)
+            .unwrap_or_else(|error| panic!("serialize {label} update: {error}"))
+            .len();
+
+        eprintln!(
+            "{label}: decoration={decoration_bytes}B/{DECORATION_PAYLOAD_BUDGET_BYTES}B update={update_bytes}B/{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES}B"
+        );
+        assert!(decoration_bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
+        assert!(update_bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
+        assert!(text.len() <= SYNTAX_CACHE_BUDGET_BYTES);
+    }
+}
+
+fn parse_notification_for_fixture(
+    package: &str,
+    version: u64,
+    text: &str,
+) -> ParseEditNotification {
+    ParseEditNotification {
+        document_id: 77,
+        document_version: version,
+        behavior_version: 1,
+        package_prefix: package.to_string(),
+        mode_id: package.to_string(),
+        viewport: ParseByteRange::new(0, text.len() as u64),
+        invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+        parse_windows: vec![ParseWindowSnapshot {
+            document_id: 77,
+            document_version: version,
+            package_prefix: package.to_string(),
+            mode_id: package.to_string(),
+            byte_start: 0,
+            byte_end: text.len() as u64,
+            base_line: 0,
+            text: text.to_string(),
+        }],
+        memory_budget: Some(SyntaxMemoryBudget::new(
+            SYNTAX_CACHE_BUDGET_BYTES as u64,
+            text.len() as u64,
+        )),
+    }
+}
+
+#[tokio::test]
+async fn first_party_open_parse_does_not_block_initial_render_per_language() {
+    for (package, text) in [
+        ("rust", include_str!("fixtures/syntax/rust.rs")),
+        ("typescript", include_str!("fixtures/syntax/typescript.ts")),
+        ("javascript", include_str!("fixtures/syntax/javascript.js")),
+        ("markdown", include_str!("fixtures/syntax/markdown.md")),
+    ] {
+        let coordinator = ParseCoordinator::new();
+        let record = first_party_package_record(package);
+        coordinator
+            .register_handler(
+                &record,
+                package,
+                |notification: ParseEditNotification| async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    Ok(IncrementalParseUpdate {
+                        document_id: notification.document_id,
+                        document_version: notification.document_version,
+                        behavior_version: notification.behavior_version,
+                        package_prefix: notification.package_prefix,
+                        mode_id: notification.mode_id,
+                        parse_unit: ParseUnit::Region,
+                        viewport: notification.viewport,
+                        invalidated_ranges: notification.invalidated_ranges,
+                        syntax_tree_delta: None,
+                        decoration_update: None,
+                        diagnostic_update: None,
+                    })
+                },
+            )
+            .unwrap_or_else(|error| panic!("register {package} handler: {error:?}"));
+
+        let mut surface = EditorSurface::default();
+        surface.load_snapshot(
+            77,
+            1,
+            text.to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let started = Instant::now();
+        coordinator
+            .schedule_parse_with_windows(
+                ParseScheduleRequest {
+                    document_id: 77,
+                    document_version: 1,
+                    behavior_version: 1,
+                    package_prefix: package.to_string(),
+                    mode_id: package.to_string(),
+                    viewport: ParseByteRange::new(0, text.len() as u64),
+                    invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+                },
+                parse_notification_for_fixture(package, 1, text).parse_windows,
+                Some(ParsePolicy::new(
+                    4096,
+                    4096,
+                    SYNTAX_CACHE_BUDGET_BYTES as u64,
+                    5000,
+                )),
+            )
+            .unwrap_or_else(|error| panic!("schedule {package} parse: {error:?}"));
+
+        assert_eq!(surface.visible_text(), text);
+        assert!(
+            started.elapsed() < Duration::from_millis(25),
+            "{package} initial render must not wait for background parse"
+        );
+    }
 }
 
 #[test]

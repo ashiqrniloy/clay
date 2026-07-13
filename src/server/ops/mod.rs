@@ -591,6 +591,15 @@ impl ClayOpState {
             .collect()
     }
 
+    pub(crate) fn syntax_engine_preferences(
+        &self,
+    ) -> std::collections::BTreeMap<String, crate::server::syntax::SyntaxEngineTier> {
+        self.syntax_grammars
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .engine_preferences()
+    }
+
     /// Record the active theme resolved by the `setTheme` Clay JS op.
     pub(super) fn set_active_theme(&self, theme: crate::protocol::ActiveTheme) {
         *self

@@ -21,11 +21,11 @@
 
 ## Overview
 
-Phase 18.16 turns the Phase 18.10 `SyntaxGrammarContribution` metadata into a tiered syntax engine. The server stores validated grammar descriptors separately from active major modes, selects native first-party Tree-sitter by default, supports explicit web-tree-sitter WASM selection, and retains package-JavaScript parsing as Tier 3 fallback. All engines feed one bounded capture-to-`TokenType`/`Modifiers` decoration path, so a document remains editable through `core.code`, `core.text`, or its package mode when highlighting is absent or deferred.
+Phase 18.16 turns `SyntaxGrammarContribution` metadata into a tiered syntax engine; Phase 18.18 promotes first-party package/native descriptors to direct `TokenType` + `Modifiers` styleMaps and honest `grammar.kind = "native"` metadata. The server stores validated grammar descriptors separately from active major modes, selects native first-party Tree-sitter by default, supports explicit web-tree-sitter WASM selection, and retains package-JavaScript parsing as Tier 3 fallback. All engines feed one bounded capture-to-`TokenType`/`Modifiers` decoration path, so a document remains editable through `core.code`, `core.text`, or its package mode when highlighting is absent or deferred.
 
 ## Primitive Coverage
 
-- **`SyntaxGrammarContribution` / `SyntaxGrammarRegistry`** — owned by `src/server/syntax.rs`; package metadata and registry state carry provenance, `SyntaxEngineTier`, grammar/query paths, style maps, and bounded parse budgets.
+- **`SyntaxGrammarContribution` / `SyntaxGrammarRegistry`** — owned by `src/server/syntax.rs`; package metadata and registry state carry provenance, `SyntaxEngineTier`, native source or WASM/query paths, vocabulary style maps, and bounded parse budgets.
 - **Clay JS boundary** — `clay:syntax.serverRegisterSyntaxGrammar` registers inert grammar metadata; `clay:syntax.setSyntaxEnginePreference` records an explicit user tier preference. Public usage is documented in [`server-register-syntax-grammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) and [`set-syntax-engine-preference`](../../reference/clay-js-api/syntax/set-syntax-engine-preference.md).
 - **Parse/decorations primitives** — `ParseCoordinator` owns background scheduling, cancellation, stale-result rejection, and sanitized diagnostics; `DecorationSet`/`DecorationSpan` owns bounded inert output and `StyleRegistry` resolves colors during native paint. Syntax packages require `parse-document` and `render-decorations`.
 - **Reuse rule** — future language packages add descriptor/package data and queries; they reuse the registry, host adapter, mapper, coordinator, and decoration transport rather than adding language-specific Rust/client branches.
@@ -37,10 +37,9 @@ Phase 18.16 turns the Phase 18.10 `SyntaxGrammarContribution` metadata into a ti
 - package-owned optional `id` (default: `<apiPrefix>.<languageId>`)
 - lowercase generic `languageId`
 - `filePatterns.extensions` and/or `filePatterns.fileNames`
-- `grammar.kind = "tree-sitter-wasm"`
-- package-root-confined `grammar.path` ending in `.wasm`
+- `grammar.kind = "native"` with a required compiled source ID and no artifact path, or `grammar.kind = "tree-sitter-wasm"` with a confined `.wasm` path
 - package-root-confined `.scm` query paths for `highlights`, optional `locals`, and optional `injections`
-- capture-to-style-token `styleMap` using known Clay style tokens only
+- capture-to-vocabulary `styleMap` objects using closed `TokenType` + `Modifiers`; known legacy style-token strings remain accepted and normalized for compatibility
 - optional `budgets.timeoutMs` and `budgets.maxWindowBytes`
 - bounded contribution metadata under `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`
 - required `parse-document` and `render-decorations` permissions
@@ -83,9 +82,9 @@ Phase 18.16 ships expanded first-party language packages plus a compiled-in nati
 - `packages/javascript/` -> `@clay/javascript`, `apiPrefix = javascript`, `languageId = javascript`, extensions `.js`, `.jsx`, `.mjs`, `.cjs`
 - `packages/markdown/` -> `@clay/markdown`, full Markdown mode package with a native `.md`/`.markdown`/`.mdown` descriptor and existing markdown-it Tier 3 parser fallback
 
-Rust, TypeScript, and JavaScript packages declare package-root-confined `tree-sitter-wasm` metadata, `./queries/highlights.scm`, known style maps, permissions, and full mode contributions. Markdown keeps its full mode/package-JavaScript parser contract while its Tree-sitter descriptor and query are owned by the native first-party registry. All syntax output still requires `parse-document` and `render-decorations`; package loading does not grant filesystem, network, shell, AI, native-library, raw-op, client-JavaScript, package-manager, or package-control authority.
+Rust, TypeScript, JavaScript, and Markdown packages declare `native` source metadata, `./queries/highlights.scm`, direct vocabulary styleMaps, permissions, and their mode contributions. Markdown keeps its package-JavaScript preview/Tier 3 fallback contract while Tier 1 decorations use the native descriptor/query path. All syntax output still requires `parse-document` and `render-decorations`; package loading does not grant filesystem, network, shell, AI, native-library, raw-op, client-JavaScript, package-manager, or package-control authority.
 
-The `dist/load.js` entries import `clay:syntax` and register only inert grammar metadata. `loadPackage("@clay/<language>")` validates/enables package data through the existing resolver, executes the load entry on the controlled runtime, and registers package contributions without exposing raw ops or executable callbacks to user config. Matching first-party WASM metadata is normally shadowed by the native descriptor; an explicit `setSyntaxEnginePreference("<language>", "wasm")` selects Tier 2, while `javascript` retains package parser fallback. User config remains one-line `loadPackage` setup unless it explicitly requests a tier; hidden JSON/TOML syntax keys are not supported.
+The `dist/load.js` entries import `clay:syntax` and register only inert grammar metadata. `loadPackage("@clay/<language>")` validates/enables package data through the existing resolver, executes the load entry on the controlled runtime, and registers package contributions without exposing raw ops or executable callbacks to user config. Matching first-party native package metadata is shadowed by the already-seeded compiled descriptor. Explicit `setSyntaxEnginePreference("<language>", "wasm")` selects Tier 2 only when a package actually supplies valid WASM metadata; `javascript` preference retains package parser fallback. User config remains one-line `loadPackage` setup unless it explicitly requests a tier; hidden JSON/TOML syntax keys are not supported.
 
 End-user opt-in fixture:
 
@@ -108,7 +107,9 @@ Tier 1 native descriptors are static data, not control-flow branches. Each descr
 - `@clay/javascript`: `.js`, `.jsx`, `.mjs`, `.cjs` via `tree-sitter-javascript`.
 - `@clay/markdown`: `.md`, `.markdown`, `.mdown` via `tree-sitter-md-025`.
 
-`ClayOpState::new_for_document` uses `SyntaxGrammarRegistry::with_first_party_native()` so runtime op state starts with Tier 1 native entries. `SyntaxGrammarRegistry::native_language()` exposes the compiled language for later generic handler construction; parser instances remain cached inside `TreeSitterSyntaxHandler` per contribution.
+`ClayOpState::new_for_document` uses `SyntaxGrammarRegistry::with_first_party_native()` so runtime op state starts with Tier 1 native entries. Each static descriptor also embeds its package highlight query with `include_str!`, avoiding runtime filesystem authority. `ClayRuntimeEvaluation` carries the grammar list and engine-preference snapshot across the worker boundary. On document open, `select_grammar_for_path` applies exact-file/extension matching plus user tier preference; `ClayJsRuntimeService::register_native_syntax_handler` builds the selected `TreeSitterSyntaxHandler` once per generation/package/mode and replaces a same-generation package/mode JS fallback before `schedule_open_parse` enqueues work. Later opens reuse that installed handler and its parser/tree caches.
+
+Current `ParseCoordinator` handler keys are package + mode, so runtime native installation deliberately skips modes that expose multiple compiled grammars under one mode key rather than letting the last-opened grammar win. Markdown, Rust, and JavaScript each have one native handler key and use this path; TypeScript/TSX needs a generic document-selected grammar identity in the coordinator key before both can be installed concurrently. Direct registry/query coverage for both TypeScript grammars remains intact.
 
 ## Tier 2 Web-tree-sitter Artifact Contract
 
@@ -126,7 +127,9 @@ Selection diagnostics include the chosen tier in `SyntaxGrammarSelection::why` a
 
 ## First-Party Query and Artifact Provenance
 
-Phase 18.16 ships real first-party highlight queries for Rust, TypeScript, TSX, JavaScript, and Markdown under `packages/*/queries/highlights.scm`. These queries emit only captures present in the package/native `styleMap`, so the shared mapper produces Phase 18.15 vocabulary tokens and modifiers instead of legacy free-form-only families. Smoke fixtures live in `tests/fixtures/syntax/{rust.rs,typescript.ts,typescript.tsx,javascript.js,markdown.md}` and are parsed through `TreeSitterSyntaxHandler` in `tests/syntax_grammar.rs::first_party_language_fixtures_produce_themed_vocabulary_decorations`.
+Phase 18.18 expands first-party highlight queries under `packages/*/queries/highlights.scm` for keywords, strings, comments, functions/declarations, types, numbers, punctuation, and Markdown prose. Direct package/native styleMap entries produce Phase 18.15 `TokenType` + `Modifiers` with no scope/color data. Query captures absent from the styleMap are skipped as unstyled; they never receive a default color.
+
+`tree-sitter-md-025::LANGUAGE` is the block grammar; inline syntax has a separate `INLINE_LANGUAGE`. To avoid a Markdown-only Rust parser path, the current block query classifies standalone `**strong**`, `_emphasis_`, `` `code` ``, and `[link](url)` inline ranges with query predicates. Mixed prose containing partial inline runs remains `Paragraph`; add generic block+inline grammar composition when partial-run styling is required. Smoke fixtures live in `tests/fixtures/syntax/{rust.rs,typescript.ts,typescript.tsx,javascript.js,markdown.md}` and are parsed through `TreeSitterSyntaxHandler` in `tests/syntax_grammar.rs::first_party_language_fixtures_produce_themed_vocabulary_decorations`.
 
 Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE.md` records the exact upstream crate/release used by Tier 1, a reproducible `tree-sitter build --wasm` command, and the required SHA-256 recording step for the eventual `*.wasm` file. `first_party_artifact_provenance_is_recorded` keeps that contract from regressing. Clay runtime still performs no network fetch, package-manager install, shell build, or native-library load for grammar artifacts.
 
@@ -136,7 +139,7 @@ Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE
 
 1. compiles the highlight `Query` once at handler construction
 2. creates and configures one `tree_sitter::Parser` per handler, reused across all parses for that grammar instead of recreating it per document open (avoids repeated wasm language instantiation in debug builds)
-3. fails closed if a query capture is not present in the package `styleMap`
+3. leaves query captures absent from the package `styleMap` unstyled while still rejecting invalid query syntax
 4. runs from `ParseCoordinator` as a `ParseHandler`
 5. selects the viewport-intersecting `ParseWindowSnapshot`
 6. enforces the contribution `maxWindowBytes` before parsing
@@ -151,7 +154,7 @@ Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE
 15. inserts the validated set into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
 16. returns one `IncrementalParseUpdate` containing both current syntax decorations and the current `tree-sitter` diagnostic source set
 
-Capture extraction is engine-neutral after parse: Tree-sitter and future web-tree-sitter adapters produce `SyntaxCapture { byte_start, byte_end, capture_name }` records. `map_capture_to_vocabulary` is the one shared capture-to-vocabulary mapper; it looks up the descriptor `style_map`, converts the style token to the Phase 18.15 closed `TokenType` + `Modifiers` axes, preserves the original token as `scope`, and fails closed for unmapped captures. Native and WASM tiers therefore feed the same `DecorationSpan` construction path.
+Capture extraction is engine-neutral after parse: Tree-sitter and future web-tree-sitter adapters produce `SyntaxCapture { byte_start, byte_end, capture_name }` records. `map_capture_to_vocabulary` is the one shared capture-to-vocabulary mapper. Direct entries copy closed `token_type` + `modifiers` and emit scope-less spans; legacy entries are normalized through `TokenType::classify_style_token` and preserve the validated original token as `scope`. Extraction skips absent mappings, while direct calls remain fallible. Native and WASM tiers feed the same `DecorationSpan` construction path.
 
 ### Generic Tree-sitter Recovery Diagnostics
 
@@ -161,7 +164,7 @@ Tree-sitter `MISSING` nodes have zero-width ranges. `visible_scalar_range` ancho
 
 Tier 2 mirrors the local capture contract through `collectWebTreeSitterDiagnostics` in `runtime/js/web-tree-sitter-host.ts`; Tier 3 uses the already documented inert parse diagnostic records. Neither adapter adds callbacks or language-name branches.
 
-The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. Handler failures and invalid results publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives the normal decoration/diagnostic transport message path; no package code runs in the Rust client.
+The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. A classified grammar-backed mode with no Tier 3 JS handler treats `ParseCoordinatorError::HandlerNotRegistered` as the normal native/WASM path rather than publishing `clay.parse.open_activation_failed`; registered-handler failures and invalid results still publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives the normal decoration/diagnostic transport message path; no package code runs in the Rust client.
 
 ## Hot Path and Security Boundary
 
@@ -192,12 +195,13 @@ Coverage:
 - web-tree-sitter artifact contract accepts package-confined `grammars/*.wasm` + `queries/*.scm` and rejects native/unconfined inputs
 - internal web-tree-sitter host adapter is bundled/local-only and caches runtime/language/query initialization
 - native parser instance identity is stable per grammar handler
+- Markdown open replaces its registered Tier 3 fallback with the path-selected native handler and publishes builtin-provenance vocabulary spans
 - static no-branch guard for language-specific highlighter/control-flow shapes
 - valid grammar contribution provenance, asset paths, style map, and budgets
 - required `parse-document` + `render-decorations` permissions
 - rejection of third-party syntax grammar packages, external/traversing paths
 - rejection of executable/native/client/CSS authority fields
-- rejection of unknown style tokens/raw CSS
+- rejection of unknown token types/modifiers, unknown legacy style tokens, and raw CSS/colors
 - registry provenance and extension lookup
 - active syntax grammar selection separate from active major mode and behavior version
 - no-grammar fallback that preserves editability through the active major mode
@@ -207,13 +211,13 @@ Coverage:
 - deterministic manual-smoke surrogate `manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow`: loads all three grammar packages, selects `.rs`/`.ts`/`.js` syntax grammars while preserving `core.code`, parses before/after a small edit, and verifies unloaded no-highlight fallback editability
 - explicit `syntax-grammars-init.js` one-line load fixture and `tests/fixtures/configuration/syntax-grammars/init.js` smoke-gui fixture
 - deterministic duplicate language and duplicate pattern conflicts
-- engine-neutral `SyntaxCapture` to `TokenType`/`Modifiers` vocabulary mapping with fail-closed unmapped captures
+- engine-neutral `SyntaxCapture` to `TokenType`/`Modifiers` vocabulary mapping with unmapped captures left unstyled
 - Tree-sitter highlight query capture extraction into bounded decoration spans
-- valid capture mapping to `keyword.control`, `string.quoted`, `comment.line`, and `punctuation.definition`
+- direct first-party capture mapping for code/prose `TokenType` families and declaration/bold/italic modifiers, plus legacy style-token compatibility
 - cached-tree reuse for later document versions with whole-window `InputEdit` correctness
 - generic `ERROR` and `MISSING` extraction, valid-tree empty-set clearing, UTF-8-safe missing anchors, viewport/deduplication/count bounds, first-party invalid grammar coverage, and no language-specific branches
 - Tier 2 host-side generic error/missing capture contract
-- invalid query/unmapped capture fail-closed behavior with actionable diagnostics
+- invalid query fail-closed behavior and unmapped-capture no-color-leak behavior
 - parse-window budget enforcement before parsing
 - per-viewport capture overflow rejection before decoration publication
 - parse coordinator publication through existing `IncrementalParseUpdate`/`DecorationSet` path

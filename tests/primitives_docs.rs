@@ -2652,6 +2652,9 @@ fn phase18_18_language_package_primitive_review_is_linked_and_complete() {
         "Full mode behavior tuning on generic primitives",
         "lossy `style_token` compatibility fallback",
         "snippet kind is **not yet present**",
+        "package-owned `items: string[]` data",
+        "`CompletionProviderMeta.items: Vec<CompletionItem>`",
+        "richer providers sort ahead of base priority 0",
         "Phase 18.19",
         "a Markdown `**x**` span emits `modifiers=Bold`",
         "decoration and preview must be independently activatable",
@@ -2686,6 +2689,40 @@ fn phase18_18_language_package_primitive_review_is_linked_and_complete() {
             "Phase 18.18 primitive review must preserve boundary {required}"
         );
     }
+}
+
+#[test]
+fn phase18_18_markdown_native_decoration_split_is_documented() {
+    let markdown = fs::read_to_string(repository_path(
+        "docs/wiki/modules/first-party-markdown-package.md",
+    ))
+    .expect("read Markdown package wiki");
+    let languages = fs::read_to_string(repository_path(
+        "docs/wiki/modules/first-party-language-packages.md",
+    ))
+    .expect("read language package wiki");
+    let syntax = fs::read_to_string(repository_path(
+        "docs/wiki/modules/syntax-grammar-registry.md",
+    ))
+    .expect("read syntax registry wiki");
+
+    for required in [
+        "compiled `tree-sitter-md-025` descriptor the default decoration engine",
+        "`./dist/parser.js` remains registered as Tier 3 fallback data",
+        "unchanged package-owned SDUI preview/status adapter",
+        "`markdown_decoration_renders_through_tier1_native_engine`",
+        "`markdown_preview_sdui_panel_remains_package_js_and_unchanged`",
+        "`markdown_decoration_and_preview_are_independently_activatable`",
+    ] {
+        assert!(
+            markdown.contains(required),
+            "Markdown wiki must contain {required}"
+        );
+    }
+    assert!(languages.contains("register_native_syntax_handler"));
+    assert!(languages.contains("preview remains independently opt-in package-JS SDUI"));
+    assert!(syntax.contains("same-generation package/mode JS fallback"));
+    assert!(syntax.contains("multiple compiled grammars under one mode key"));
 }
 
 #[test]

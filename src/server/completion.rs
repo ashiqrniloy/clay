@@ -300,6 +300,10 @@ pub struct CompletionProviderMeta {
     pub priority: i32,
     pub trigger_metadata: CompletionTriggerMetadata,
     pub word_boundary: WordBoundaryRule,
+    /// Bounded inert static text-replacement items declared by the package.
+    /// Each item carries package provenance and contains no callbacks, snippet
+    /// transforms, commands, or external authority.
+    pub items: Vec<CompletionItem>,
     /// Per-provider timeout in milliseconds. Providers that exceed it return a
     /// `Timeout` status result instead of blocking the lane.
     pub timeout_ms: u64,
@@ -336,6 +340,7 @@ impl CompletionProviderMeta {
             priority,
             trigger_metadata,
             word_boundary,
+            items: Vec::new(),
             timeout_ms,
             max_items,
             generation,

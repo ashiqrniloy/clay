@@ -47,7 +47,7 @@ custom_properties:
   - name: grammar
     type: object
     default: required-inside-syntaxGrammar
-    description: tree-sitter-wasm grammar artifact path confined to the package root.
+    description: Native Tier 1 source ID with no path, or a Tier 2 tree-sitter-wasm artifact path confined to the package root.
   - name: queries
     type: object
     default: required-inside-syntaxGrammar
@@ -55,12 +55,12 @@ custom_properties:
   - name: styleMap
     type: object
     default: required-inside-syntaxGrammar
-    description: Tree-sitter capture names mapped to known Clay style tokens.
+    description: Tree-sitter capture names mapped to closed TokenType + Modifiers vocabulary objects; known legacy Clay style tokens remain compatible.
   - name: budgets
     type: object
     default: optional
     description: timeoutMs and maxWindowBytes metadata bounded by shared syntax budgets.
-security: Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, package-root-confined tree-sitter-wasm and .scm paths, known style-token maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party grammar artifact loading in Phase 18.10.
+security: Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, compiled-in native source IDs or package-root-confined tree-sitter-wasm paths, confined .scm paths, closed vocabulary/validated legacy style maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, arbitrary native/WASM loading, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party native grammar loading.
 agent_guidance: Use `clay.syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, or `loadPackage("@clay/javascript")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.
 lookup_tags: [js-api, syntax, tree-sitter, grammar, highlighting]
 app_visible: true
@@ -73,7 +73,7 @@ async: false
 
 ## Summary
 
-Registers package-provided syntax grammar metadata with Clay's server-side syntax registry. The API is for first-party grammar-only packages such as `@clay/rust`, `@clay/typescript`, and `@clay/javascript`; ordinary users load those packages with `loadPackage(...)` from `~/.config/clay/init.js` rather than calling this registration API directly.
+Registers package-provided syntax grammar metadata with Clay's server-side syntax registry. The API is for first-party language packages such as `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown`; ordinary users load those packages with `loadPackage(...)` from `~/.config/clay/init.js` rather than calling this registration API directly.
 
 ## Description
 
@@ -106,17 +106,17 @@ serverRegisterSyntaxGrammar({
   syntaxGrammar: {
     languageId: "rust",
     filePatterns: { extensions: ["rs"] },
-    grammar: {
-      kind: "tree-sitter-wasm",
-      path: "./grammars/rust.wasm",
-      source: "tree-sitter-rust"
-    },
+    grammar: { kind: "native", source: "tree-sitter-rust" },
     queries: { highlights: "./queries/highlights.scm" },
     styleMap: {
-      keyword: "keyword.control",
-      string: "string.quoted",
-      comment: "comment.line",
-      punctuation: "punctuation.definition"
+      keyword: { type: "Keyword" },
+      string: { type: "String" },
+      comment: { type: "Comment" },
+      punctuation: { type: "Operator" },
+      "function.declaration": {
+        type: "Function",
+        modifiers: ["Declaration"]
+      }
     },
     budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
   }
@@ -139,9 +139,9 @@ export default function loadRustGrammar() {
     syntaxGrammar: {
       languageId: "rust",
       filePatterns: { extensions: ["rs"] },
-      grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
+      grammar: { kind: "native", source: "tree-sitter-rust" },
       queries: { highlights: "./queries/highlights.scm" },
-      styleMap: { keyword: "keyword.control" }
+      styleMap: { keyword: { type: "Keyword" } }
     }
   });
 }
@@ -154,9 +154,9 @@ export default function loadRustGrammar() {
 - `syntaxGrammar` / `contribution`: A syntax grammar contribution descriptor. Top-level `languageId`, `filePatterns`, `grammar`, `queries`, `styleMap`, and `budgets` are also accepted and normalized into a descriptor.
 - `languageId`: Lowercase identifier such as `rust`, `typescript`, or `javascript`.
 - `filePatterns`: Bare extensions and/or exact file names used for deterministic selection.
-- `grammar`: Must be `{ kind: "tree-sitter-wasm", path: "./.../*.wasm" }`; paths are package-root-confined.
+- `grammar`: Tier 1 uses `{ kind: "native", source: "tree-sitter-rust" }` with no `path`; Tier 2 uses `{ kind: "tree-sitter-wasm", path: "./.../*.wasm" }` with package-root confinement.
 - `queries`: Must include `highlights: "./.../*.scm"`; optional locals/injections query paths use the same confinement.
-- `styleMap`: Capture names without `@` mapped only to known Clay style tokens such as `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, or `text`.
+- `styleMap`: Capture names without `@` map to vocabulary objects such as `{ type: "Function", modifiers: ["Declaration"] }`; `type` must be a closed `TokenType` variant and modifiers must be closed `Modifiers` names. Known legacy style-token strings remain accepted for compatibility.
 - `budgets`: Optional `timeoutMs` and `maxWindowBytes`; actual parse/highlight and decoration transport remain bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`.
 
 ## Key bindings
@@ -169,9 +169,9 @@ No default key binding is assigned.
 - `permissions`: package permissions; must include `parse-document` and `render-decorations`.
 - `languageId`: syntax provider selection identity.
 - `filePatterns`: extension/file-name selection contract.
-- `grammar`: package-root-confined `tree-sitter-wasm` artifact metadata.
+- `grammar`: compiled-in native source metadata or package-root-confined Tier 2 `tree-sitter-wasm` artifact metadata.
 - `queries`: package-root-confined highlight query metadata.
-- `styleMap`: capture-to-known-token validation map.
+- `styleMap`: capture-to-`TokenType`/`Modifiers` vocabulary map with validated legacy compatibility.
 - `budgets`: load-time syntax parse budget metadata.
 
 ## Return and async behavior
@@ -180,13 +180,13 @@ Returns registration metadata synchronously: package name/version/prefix, regist
 
 ## Errors
 
-Fails with Clay error codes when package metadata is malformed, permissions are missing, the package is not first-party, grammar/query paths are not confined package assets, the grammar kind is not `tree-sitter-wasm`, style tokens are unknown/raw CSS/colors, duplicate language/file-pattern registrations conflict, or executable/raw-authority fields are present.
+Fails with Clay error codes when package metadata is malformed, permissions are missing, the package is not first-party, native source/query or WASM asset paths are invalid, grammar kind is neither `native` nor `tree-sitter-wasm`, token types/modifiers or legacy style tokens are unknown, raw CSS/colors appear, duplicate language/file-pattern registrations conflict, or executable/raw-authority fields are present.
 
 ## Permissions and security
 
 Requires: `parse-document` and `render-decorations`.
 
-Clay performs server-side validation of first-party package provenance, declared permissions, package-root-confined assets, known style-token maps, and duplicate registry conflicts. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority; it also rejects raw ops, native UI handles, client-runtime hooks, executable callbacks, and arbitrary native/WASM artifact loading. Phase 18.10 grammar loading is first-party-only and rejects arbitrary third-party/native grammar artifact loading.
+Clay performs server-side validation of first-party package provenance, declared permissions, native source or package-root-confined WASM/query metadata, closed vocabulary maps (plus validated legacy compatibility), and duplicate registry conflicts. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority; it also rejects raw ops, native UI handles, client-runtime hooks, executable callbacks, and arbitrary native/WASM artifact loading. Phase 18.10 grammar loading is first-party-only and rejects arbitrary third-party/native grammar artifact loading.
 
 ## Agent guidance
 

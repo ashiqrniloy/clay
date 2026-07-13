@@ -367,7 +367,7 @@ deno_op = "op_clay_modes_register_pattern"
 deno_op_path = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
 documentation_path = "docs/reference/clay-js-api/behavior/build-code-editing-manifest.md"
 key_bindings = []
-custom_properties = ["indentSize:number=required", "lineComment:string=optional", "blockCommentStart:string=optional", "blockCommentEnd:string=optional", "pairs:object[]=default-delimiters", "electricOutdentCharacters:string[]=optional", "autocompleteTriggers:string[]=optional"]
+custom_properties = ["indentSize:number=required", "lineComment:string=optional", "blockCommentStart:string=optional", "blockCommentEnd:string=optional", "enter:object=preserve-leading-whitespace", "pairs:object[]=default-delimiters", "electricOutdentCharacters:string[]=optional", "autocompleteTriggers:string[]=optional"]
 permissions = []
 security_notes = "Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
 current_rust_owner = "runtime/js/behavior.ts"
@@ -1200,7 +1200,7 @@ deno_op = "op_clay_completion_register_completion_provider"
 deno_op_path = "src/server/ops/completion.rs::op_clay_completion_register_completion_provider"
 documentation_path = "docs/reference/clay-js-api/completion/server-register-completion-provider.md"
 key_bindings = []
-custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=completion-provider", "completionProvider:object=required-without-packageManifest", "providerId:string=package-prefixed", "triggerCharacters:string[]=inert", "wordBoundaryChars:string[]=inert", "priority:number=0", "timeoutMs:number=500", "maxItems:number=64"]
+custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=completion-provider", "completionProvider:object=required-without-packageManifest", "providerId:string=package-prefixed", "triggerCharacters:string[]=inert", "wordBoundaryChars:string[]=inert", "items:string[]=bounded-static-text", "priority:number=0", "timeoutMs:number=500", "maxItems:number=64"]
 permissions = ["completion-provider"]
 security_notes = "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
 current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::CompletionProviderMeta"

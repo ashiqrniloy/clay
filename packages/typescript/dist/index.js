@@ -9,7 +9,15 @@ export { typescriptGrammarContract, loadTypescriptPackage } from "./load.js";
 export const typescriptEditorRules = buildCodeEditingManifest({
   indentSize: 2,
   lineComment: "//",
-  electricOutdentCharacters: ["}"],
+  pairs: [
+    { open: "(", close: ")" },
+    { open: "[", close: "]" },
+    { open: "{", close: "}" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+    { open: "`", close: "`" }
+  ],
+  electricOutdentCharacters: ["}", ")", "]"],
   autocompleteTriggers: ["."]
 });
 
@@ -26,9 +34,15 @@ export const typescriptCommands = [
 export const typescriptCompletionProvider = {
   providerId: "typescript.keywords",
   packagePrefix: "typescript",
-  priority: 20,
+  priority: 0,
   triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
   wordBoundaryChars: [".", ";", ","],
+  items: [
+    "as", "async", "await", "break", "case", "catch", "class", "const",
+    "continue", "default", "do", "else", "enum", "export", "extends", "false",
+    "finally", "for", "from", "function", "if", "implements", "import", "in",
+    "instanceof", "interface", "let", "new", "return", "true", "type", "while"
+  ],
   budgets: { timeoutMs: 300, maxItems: 32 }
 };
 
@@ -80,11 +94,12 @@ export function typescriptPackageManifest() {
         ],
         completionProviders: [
           {
-            id: "typescript.keywords",
-            priority: 20,
-            triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
-            wordBoundaryChars: [".", ";", ","],
-            budgets: { timeoutMs: 300, maxItems: 32 }
+            id: typescriptCompletionProvider.providerId,
+            priority: typescriptCompletionProvider.priority,
+            triggerCharacters: typescriptCompletionProvider.triggerCharacters,
+            wordBoundaryChars: typescriptCompletionProvider.wordBoundaryChars,
+            items: typescriptCompletionProvider.items,
+            budgets: typescriptCompletionProvider.budgets
           }
         ],
         ui: {

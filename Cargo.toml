@@ -61,3 +61,7 @@ harness = false
 [[bench]]
 name = "markdown_baselines"
 harness = false
+
+[[bench]]
+name = "first_party_language_baselines"
+harness = false

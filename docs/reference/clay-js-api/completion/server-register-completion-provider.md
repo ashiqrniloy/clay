@@ -9,9 +9,9 @@ deno_op: op_clay_completion_register_completion_provider
 deno_op_path: src/server/ops/completion.rs::op_clay_completion_register_completion_provider
 name: serverRegisterCompletionProvider
 user_facing_name: Register Completion Provider
-summary: Register package-provided completion provider metadata for Clay's server-side completion framework.
+summary: Register package-provided completion metadata and bounded static text items for Clay's server-side completion framework.
 owner: server
-phase: Phase 18.11
+phase: Phase 18.18
 visibility: public
 permissions: ['completion-provider']
 key_bindings: []
@@ -48,6 +48,10 @@ custom_properties:
     type: string[]
     default: core-buffer-word-boundaries
     description: Inert word-boundary characters used by providers to split tokens.
+  - name: items
+    type: string[]
+    default: []
+    description: Bounded inert static items; each string is both completion label and inserted text.
   - name: priority
     type: number
     default: 0
@@ -60,9 +64,9 @@ custom_properties:
     type: number
     default: 64
     description: Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS.
-security: Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.
+security: Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert metadata and static text items only; JS provider execution tokens are intentionally not exposed. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.
 agent_guidance: Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage("@vendor/provider")` from user configuration; do not pass callbacks, raw Deno ops, modules, snippets, commands, or UI widget code.
-lookup_tags: [js-api, completion, provider, package, phase18.11]
+lookup_tags: [js-api, completion, provider, package, phase18.18]
 app_visible: true
 help_visible: true
 stability: runtime-backed
@@ -73,11 +77,11 @@ async: false
 
 ## Summary
 
-Registers inert completion provider metadata for a package. In Phase 18.11 this API records provider IDs, priority, trigger characters, word-boundary metadata, timeout, item caps, and package provenance. It does **not** expose JavaScript provider execution yet; built-in `core.bufferWords` remains the executable provider until the handler bridge is added.
+Registers inert completion provider metadata for a package. Phase 18.18 adds bounded static text items to the Phase 18.11 provider ID, priority, trigger, word-boundary, timeout, item-cap, and provenance contract. It does **not** expose JavaScript provider execution yet; built-in `core.bufferWords` remains the executable provider until the handler bridge is added.
 
 ## Description
 
-`serverRegisterCompletionProvider` is the public `clay:completion` registration API for package load entries. It requires the `completion-provider` permission, validates the package-shaped contribution through Clay's package record assembler, and records only inert provider metadata in the server runtime state. It is intentionally metadata-only in this phase: package JavaScript functions are rejected instead of being stored as executable completion handlers.
+`serverRegisterCompletionProvider` is the public `clay:completion` registration API for package load entries. It requires the `completion-provider` permission, validates the package-shaped contribution through Clay's package record assembler, and records only inert provider metadata in the server runtime state. It remains callback-free: package JavaScript functions are rejected instead of being stored as executable completion handlers. Bounded `items` strings are normalized to provenance-bearing `CompletionItem` text replacements; Clay retains the successful runtime evaluation's Rust snapshot and prefix-filters the active package's static items on completion requests without running package JavaScript.
 
 ## When to use
 
@@ -96,6 +100,7 @@ serverRegisterCompletionProvider({
   providerId: "words.buffer",
   triggerCharacters: ["."],
   wordBoundaryChars: [".", ",", ";"],
+  items: ["const", "function", "return"],
   priority: 0,
   timeoutMs: 50,
   maxItems: 50
@@ -116,7 +121,7 @@ The resolver validates and loads the package load entry; the load entry then cal
 
 ## Options
 
-Pass either `packageManifest` or package context fields plus one inert provider descriptor. `completionProvider` and `contribution` accept the same descriptor shape; top-level `providerId`, trigger, boundary, priority, timeout, and item cap fields are normalized into that descriptor.
+Pass either `packageManifest` or package context fields plus one inert provider descriptor. `completionProvider` and `contribution` accept the same descriptor shape; top-level `providerId`, trigger, boundary, static-item, priority, timeout, and item-cap fields are normalized into that descriptor.
 
 ## Key bindings
 
@@ -135,6 +140,7 @@ This API has no default key bindings. Manual completion triggering is handled se
 - `triggerCharacters`: inert trigger metadata.
 - `triggers`: optional wrapper for trigger characters.
 - `wordBoundaryChars`: inert word-boundary metadata.
+- `items`: bounded unique static strings; each becomes both `CompletionItem.label` and `insert_text` with package provenance.
 - `priority`: deterministic provider priority.
 - `timeoutMs`: provider timeout budget.
 - `maxItems`: provider result item cap.
@@ -145,12 +151,12 @@ Returns a synchronous registration summary with `packageName`, `packageVersion`,
 
 ## Errors
 
-- `clay.completion.invalid_provider`: options are malformed, missing `completion-provider`, use a non-package-owned provider ID, exceed budgets, or include prohibited authority fields.
+- `clay.completion.invalid_provider`: options are malformed, missing `completion-provider`, use a non-package-owned provider ID, duplicate or exceed static item bounds, exceed budgets, or include prohibited authority fields.
 - `clay.completion.registration_failed`: duplicate provider metadata was already registered in the current runtime evaluation state.
 
 ## Permissions and security
 
-The facade and op reject executable fields including `handler`, `callback`, `complete`, `function`, and `module`, plus `clientJavaScript`, `nativeHandle`, and `rawOps`. Requires: `completion-provider`. server-side validation checks package permission declarations, provider ID ownership, duplicate IDs, trigger metadata, and timeout/item budgets. Completion provider metadata grants only that registration capability. It does not grant filesystem, network, shell, AI mutation authority, WASM, workspace index, extension loading authority, client-side JavaScript authority, raw-op, native widget, package manager, snippet, or command execution authority.
+The facade and op reject executable fields including `handler`, `callback`, `complete`, `function`, and `module`, plus `clientJavaScript`, `nativeHandle`, and `rawOps`. Requires: `completion-provider`. server-side validation checks package permission declarations, provider ID ownership, duplicate IDs/items, trigger metadata, static item field/count bounds, and timeout/item budgets. Completion provider metadata grants only that registration capability. It does not grant filesystem, network, shell, AI mutation authority, WASM, workspace index, extension loading authority, client-side JavaScript authority, raw-op, native widget, package manager, snippet, or command execution authority.
 
 Local typing, paint, layout, scroll, pointer, and text-event handlers never run package provider JavaScript.
 
@@ -167,4 +173,4 @@ Prefer `loadPackage("@vendor/provider")` from user configuration. Package load e
 
 ## Lookup metadata
 
-Lookup tags: `js-api`, `completion`, `provider`, `package`, `phase18.11`.
+Lookup tags: `js-api`, `completion`, `provider`, `package`, `phase18.18`.

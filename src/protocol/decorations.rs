@@ -125,6 +125,35 @@ impl Modifiers {
     pub const fn bits(self) -> u16 {
         self.0
     }
+
+    /// Parse a `Modifiers` bitfield from Rust variant names (e.g.
+    /// `["Declaration", "Bold"]`). Returns `None` if any name is unknown so
+    /// styleMap/theme validation rejects it up front. Empty input yields
+    /// `Modifiers::NONE`.
+    pub(crate) fn from_names(names: &[&str]) -> Option<Modifiers> {
+        let mut mods = Modifiers::NONE;
+        for name in names {
+            let bit = match *name {
+                "Declaration" => Modifiers::DECLARATION,
+                "Definition" => Modifiers::DEFINITION,
+                "Readonly" => Modifiers::READONLY,
+                "Static" => Modifiers::STATIC,
+                "Deprecated" => Modifiers::DEPRECATED,
+                "Abstract" => Modifiers::ABSTRACT,
+                "Async" => Modifiers::ASYNC,
+                "Modification" => Modifiers::MODIFICATION,
+                "Documentation" => Modifiers::DOCUMENTATION,
+                "DefaultLibrary" => Modifiers::DEFAULT_LIBRARY,
+                "Bold" => Modifiers::BOLD,
+                "Italic" => Modifiers::ITALIC,
+                "Underline" => Modifiers::UNDERLINE,
+                "Strikethrough" => Modifiers::STRIKETHROUGH,
+                _ => return None,
+            };
+            mods.insert(bit);
+        }
+        Some(mods)
+    }
 }
 
 impl std::ops::BitOr for Modifiers {

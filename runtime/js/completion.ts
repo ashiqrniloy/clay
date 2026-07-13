@@ -31,6 +31,7 @@ export type ServerRegisterCompletionProviderOptions = {
   triggerCharacters?: string[];
   triggers?: { characters?: string[]; wordBoundary?: boolean };
   wordBoundaryChars?: string[];
+  items?: string[];
   priority?: number;
   timeoutMs?: number;
   maxItems?: number;

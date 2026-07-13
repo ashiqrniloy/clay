@@ -381,8 +381,11 @@ fn markdown_package_has_no_mdast_dependency() {
         Some("./dist/parser.js")
     );
     assert_eq!(
-        package["clay"]["contributions"]["decorations"][0]["adapter"].as_str(),
-        Some("./dist/parser.js")
+        package["clay"]["contributions"]["decorations"]
+            .as_array()
+            .map(Vec::len),
+        Some(0),
+        "default Markdown decoration ownership moved to syntaxGrammars/Tier 1"
     );
 }
 
@@ -794,6 +797,54 @@ fn markdown_package_declares_sdui_preview_status_adapter() {
         !sdui.contains("Deno.core.ops"),
         "package SDUI adapter must use Clay facades, not raw Deno ops"
     );
+}
+
+#[test]
+fn markdown_preview_sdui_panel_remains_package_js_and_unchanged() {
+    let package = markdown_package_json();
+    assert_eq!(
+        package["clay"]["contributions"]["sdui"][0]["adapter"].as_str(),
+        Some("./dist/sdui.js")
+    );
+    let source = std::fs::read_to_string("packages/markdown/dist/sdui.js")
+        .expect("package-JS preview adapter");
+    for marker in [
+        "buildMarkdownPreviewStatusTree",
+        "publishMarkdownPreviewStatus",
+        "markdown.togglePreview",
+        "defineEditorView",
+    ] {
+        assert!(
+            source.contains(marker),
+            "preview adapter must retain `{marker}`"
+        );
+    }
+    assert!(!source.contains("tree-sitter") && !source.contains("Deno.core.ops"));
+}
+
+#[test]
+fn markdown_decoration_and_preview_are_independently_activatable() {
+    let record = markdown_package_record();
+    assert_eq!(record.contributions.syntax_grammars.len(), 1);
+    assert_eq!(
+        record.contributions.syntax_grammars[0].grammar_kind,
+        "native"
+    );
+    assert!(
+        record.contributions.decorations.is_empty(),
+        "parser.js must not remain the default decoration contribution"
+    );
+    assert_eq!(record.contributions.sdui.len(), 1);
+    assert_eq!(
+        markdown_package_json()["clay"]["contributions"]["sdui"][0]["adapter"].as_str(),
+        Some("./dist/sdui.js")
+    );
+
+    let load =
+        std::fs::read_to_string("packages/markdown/dist/load.js").expect("Markdown load entry");
+    assert!(load.contains("role: \"tier3-javascript-fallback\""));
+    assert!(load.contains("engine: \"tier1-native\""));
+    assert!(load.contains("export function registerMarkdownPreview"));
 }
 
 #[test]

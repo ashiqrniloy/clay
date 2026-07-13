@@ -15,8 +15,9 @@ use serde_json::Value;
 use crate::packages::manifest::{ClayPackageManifest, PackageDiagnostic, validate_manifest_value};
 use crate::packages::permissions::PackagePermission;
 use crate::perf::budgets::{
-    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEMS,
-    SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS,
+    COMPLETION_RESULT_MAX_ITEMS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
+    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
 };
 use crate::shell::{
     components::validate_component_kind,
@@ -25,7 +26,7 @@ use crate::shell::{
 };
 
 use crate::editor::theme::{parse_hex_rgba, parse_override_token};
-use crate::protocol::DocumentFontRole;
+use crate::protocol::{DocumentFontRole, Modifiers, TokenType};
 
 // ── Contribution descriptors ─────────────────────────────────────────────────
 
@@ -101,11 +102,19 @@ pub struct DecorationContributionDescriptor {
     pub kind: String,
 }
 
-/// Inert style-map entry for one syntax capture. Packages may select a
-/// document role but never a concrete font family, size, or renderer value.
+/// Inert vocabulary style-map entry for one syntax capture. Maps a
+/// Tree-sitter capture name directly to the Phase 18.15 two-axis vocabulary
+/// (`TokenType` + `Modifiers`), plus an optional semantic document font role.
+/// Packages never select a concrete font family, size, color, or renderer
+/// value here — only the closed vocabulary the paint path resolves through the
+/// active theme.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxStyleMapEntry {
-    pub style_token: String,
+    pub token_type: TokenType,
+    pub modifiers: Modifiers,
+    /// Preserved only for legacy style-token inputs. Native/vocabulary entries
+    /// leave this empty and render from the closed two-axis fields above.
+    pub scope: Option<String>,
     pub font_role: Option<DocumentFontRole>,
 }
 
@@ -145,11 +154,11 @@ pub struct SyntaxGrammarContributionDescriptor {
 
 /// Inert descriptor for a package-provided completion provider.
 ///
-/// Phase 18.11 completion provider contributions are metadata only: provider
-/// ID, priority, trigger characters, word-boundary rule, timeout, and item
-/// budgets. No callbacks, snippets, command side effects, or executable code
-/// are represented here. The package's `completion-provider` permission is the
-/// authority gate; the descriptor carries no extra authority.
+/// Completion provider contributions are inert metadata: provider ID, priority,
+/// trigger characters, word-boundary rule, bounded static text items, timeout,
+/// and item budgets. No callbacks, snippet transforms, command side effects, or
+/// executable code are represented here. The package's `completion-provider`
+/// permission is the authority gate; the descriptor carries no extra authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionProviderContributionDescriptor {
     /// Package-prefixed provider ID (e.g. `<apiPrefix>.words`). Must not claim
@@ -162,6 +171,9 @@ pub struct CompletionProviderContributionDescriptor {
     pub trigger_characters: Vec<String>,
     /// Inert word-boundary characters used by the provider to split tokens.
     pub word_boundary_chars: Vec<String>,
+    /// Bounded static text-replacement items. Each value is both the menu label
+    /// and inserted text; snippet transforms remain a later capability.
+    pub items: Vec<String>,
     /// Per-provider timeout in milliseconds. Must be within `1..=5000`.
     pub timeout_ms: u64,
     /// Per-provider cap on result item count. Must be within `1..=COMPLETION_RESULT_MAX_ITEMS`.
@@ -1568,20 +1580,41 @@ fn parse_syntax_grammar_contributions(
                 )
             })?;
         let grammar_kind = required_str_field(grammar, "kind", ctx)?;
-        if grammar_kind != "tree-sitter-wasm" {
+        let (grammar_path, grammar_source) = if grammar_kind == "native" {
+            // Tier 1: the grammar is compiled into the server binary; packages
+            // declare only the native crate identifier. No wasm asset path is
+            // accepted, and the first-party registry is the sole source of
+            // truth for which native crates exist.
+            if grammar.get("path").is_some() {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "native (Tier 1) syntax grammars are compiled into the server; a `path` is not accepted",
+                ));
+            }
+            let source = required_str_field(grammar, "source", ctx)?;
+            (String::new(), source.to_string())
+        } else if grammar_kind == "tree-sitter-wasm" {
+            let grammar_path = required_str_field(grammar, "path", ctx)?;
+            validate_package_asset_path(grammar_path, "grammar.path", Some(".wasm"), ctx)?;
+            let source = grammar
+                .get("source")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToOwned::to_owned);
+            (grammar_path.to_string(), source.unwrap_or_default())
+        } else {
             return Err(ctx.error(
                 PackageRecordRule::InvalidContributionDescriptor,
                 Some(grammar_kind),
-                "Phase 18.10 syntax grammars only support kind `tree-sitter-wasm`; native libraries are not accepted",
+                "Phase 18.18 syntax grammars support kind `native` (Tier 1 compiled-in) or `tree-sitter-wasm` (Tier 2 host-side); other kinds are not accepted",
             ));
-        }
-        let grammar_path = required_str_field(grammar, "path", ctx)?;
-        validate_package_asset_path(grammar_path, "grammar.path", Some(".wasm"), ctx)?;
-        let grammar_source = grammar
-            .get("source")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .map(ToOwned::to_owned);
+        };
+        let grammar_source = if grammar_source.is_empty() {
+            None
+        } else {
+            Some(grammar_source)
+        };
 
         let queries = obj
             .get("queries")
@@ -1672,6 +1705,39 @@ fn parse_completion_provider_contributions(
             optional_string_vec(obj.get("triggerCharacters"), "triggerCharacters", ctx)?;
         let word_boundary_chars =
             optional_string_vec(obj.get("wordBoundaryChars"), "wordBoundaryChars", ctx)?;
+        let items = optional_string_vec(obj.get("items"), "items", ctx)?;
+        if items.len() > COMPLETION_RESULT_MAX_ITEMS {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "completion provider items must contain at most {COMPLETION_RESULT_MAX_ITEMS} entries"
+                ),
+            ));
+        }
+        if let Some(item) = items
+            .iter()
+            .find(|item| item.chars().count() > COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS)
+        {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "completion provider item `{item}` exceeds {COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS} characters"
+                ),
+            ));
+        }
+        let mut unique_items = HashSet::new();
+        if let Some(item) = items
+            .iter()
+            .find(|item| !unique_items.insert(item.as_str()))
+        {
+            return Err(ctx.error(
+                PackageRecordRule::DuplicateContributionId,
+                Some(&id),
+                format!("completion provider item `{item}` is duplicated"),
+            ));
+        }
         let timeout_ms = optional_u64_budget(
             obj.get("budgets").and_then(Value::as_object),
             "timeoutMs",
@@ -1702,11 +1768,22 @@ fn parse_completion_provider_contributions(
                 ),
             ));
         }
+        if items.len() > max_items {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "completion provider item count ({}) exceeds its maxItems budget ({max_items})",
+                    items.len()
+                ),
+            ));
+        }
         descriptors.push(CompletionProviderContributionDescriptor {
             id,
             priority,
             trigger_characters,
             word_boundary_chars,
+            items,
             timeout_ms,
             max_items,
             estimated_payload_bytes,
@@ -3336,7 +3413,7 @@ fn parse_syntax_style_map(
         return Err(ctx.error(
             PackageRecordRule::InvalidContributionDescriptor,
             Some(contribution_id),
-            "syntax grammar styleMap must be an object mapping captures to known Clay style tokens",
+            "syntax grammar styleMap must map captures to vocabulary objects or known legacy Clay style tokens",
         ));
     };
     if map.is_empty() {
@@ -3346,8 +3423,9 @@ fn parse_syntax_style_map(
             "syntax grammar styleMap must not be empty",
         ));
     }
+
     let mut style_map = BTreeMap::new();
-    for (capture, token) in map {
+    for (capture, value) in map {
         if capture.trim().is_empty()
             || capture.starts_with('@')
             || capture.contains('{')
@@ -3359,31 +3437,32 @@ fn parse_syntax_style_map(
                 "syntax grammar capture names must be non-empty names without @, braces, CSS, or query payloads",
             ));
         }
-        let (style_token, font_role) = match token {
-            Value::String(style_token) => (style_token.as_str(), None),
+
+        let (token_type, modifiers, scope, font_role) = match value {
+            Value::String(style_token) => {
+                if !is_known_syntax_style_token(style_token) {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(style_token),
+                        "syntax grammar styleMap legacy values must be known Clay style tokens, not raw CSS or colors",
+                    ));
+                }
+                let (token_type, modifiers) = TokenType::classify_style_token(style_token);
+                (token_type, modifiers, Some(style_token.clone()), None)
+            }
             Value::Object(entry) => {
                 if entry.contains_key("fontFamily")
                     || entry.contains_key("fontFamilies")
                     || entry.contains_key("fontSize")
                     || entry.contains_key("fontStack")
+                    || entry.contains_key("color")
                 {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(capture),
-                        "syntax grammar styleMap entries may declare only a semantic fontRole, never font families, sizes, or stacks",
+                        "syntax grammar styleMap entries may select vocabulary and a semantic fontRole, never font families, sizes, stacks, or colors",
                     ));
                 }
-                let style_token = entry
-                    .get("styleToken")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .ok_or_else(|| {
-                        ctx.error(
-                            PackageRecordRule::InvalidContributionDescriptor,
-                            Some(capture),
-                            "syntax grammar styleMap object entries require a known `styleToken`",
-                        )
-                    })?;
                 let font_role = match entry.get("fontRole") {
                     None => None,
                     Some(Value::String(role)) => match DocumentFontRole::from_name(role) {
@@ -3406,27 +3485,89 @@ fn parse_syntax_style_map(
                         ));
                     }
                 };
-                (style_token, font_role)
+
+                if let Some(style_token) = entry.get("styleToken").and_then(Value::as_str) {
+                    if entry.contains_key("type") || entry.contains_key("modifiers") {
+                        return Err(ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(capture),
+                            "syntax grammar styleMap entries must use either legacy `styleToken` or vocabulary `type` + `modifiers`, never both",
+                        ));
+                    }
+                    if !is_known_syntax_style_token(style_token) {
+                        return Err(ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(style_token),
+                            "syntax grammar styleMap legacy values must be known Clay style tokens, not raw CSS or colors",
+                        ));
+                    }
+                    let (token_type, modifiers) = TokenType::classify_style_token(style_token);
+                    (
+                        token_type,
+                        modifiers,
+                        Some(style_token.to_string()),
+                        font_role,
+                    )
+                } else {
+                    let type_name = entry
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| {
+                            ctx.error(
+                                PackageRecordRule::InvalidContributionDescriptor,
+                                Some(capture),
+                                "syntax grammar styleMap entry requires a known `type` naming a TokenType variant (e.g. `Keyword`, `String`, `Heading1`)",
+                            )
+                        })?;
+                    let token_type = TokenType::from_name(type_name).ok_or_else(|| {
+                        ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(type_name),
+                            "syntax grammar styleMap `type` must name a known TokenType variant, not raw CSS, a color, or a free-form string",
+                        )
+                    })?;
+                    let modifiers = match entry.get("modifiers") {
+                        None => Modifiers::NONE,
+                        Some(Value::Array(names)) => {
+                            let parsed: Vec<&str> = names
+                                .iter()
+                                .map(|value| value.as_str().unwrap_or(""))
+                                .collect();
+                            Modifiers::from_names(&parsed).ok_or_else(|| {
+                                ctx.error(
+                                    PackageRecordRule::InvalidContributionDescriptor,
+                                    Some(capture),
+                                    "syntax grammar styleMap `modifiers` must be an array of known Modifiers variant names (e.g. `Declaration`, `Bold`)",
+                                )
+                            })?
+                        }
+                        Some(_) => {
+                            return Err(ctx.error(
+                                PackageRecordRule::InvalidContributionDescriptor,
+                                Some(capture),
+                                "syntax grammar styleMap `modifiers` must be an array of known Modifiers variant names",
+                            ));
+                        }
+                    };
+                    (token_type, modifiers, None, font_role)
+                }
             }
             _ => {
                 return Err(ctx.error(
                     PackageRecordRule::InvalidContributionDescriptor,
                     Some(capture),
-                    "syntax grammar styleMap values must be known Clay style token strings or inert role objects",
+                    "syntax grammar styleMap values must be vocabulary objects or known legacy Clay style-token strings",
                 ));
             }
         };
-        if !is_known_syntax_style_token(style_token) {
-            return Err(ctx.error(
-                PackageRecordRule::InvalidContributionDescriptor,
-                Some(style_token),
-                "syntax grammar styleMap values must be known Clay style tokens, not raw CSS or colors",
-            ));
-        }
+
         style_map.insert(
             capture.clone(),
             SyntaxStyleMapEntry {
-                style_token: style_token.to_string(),
+                token_type,
+                modifiers,
+                scope,
                 font_role,
             },
         );

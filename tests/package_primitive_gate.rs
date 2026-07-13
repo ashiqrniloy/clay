@@ -70,6 +70,7 @@ fn completion_provider_fixture() -> Value {
                     "priority": 10,
                     "triggerCharacters": ["."],
                     "wordBoundaryChars": [".", ","],
+                    "items": ["alpha", "await"],
                     "budgets": { "timeoutMs": 50, "maxItems": 32 }
                 }]
             }
@@ -213,6 +214,10 @@ fn completion_provider_contributions_require_permission_and_inert_metadata() {
         valid.contributions.completion_providers[0].id,
         "words.buffer"
     );
+    assert_eq!(
+        valid.contributions.completion_providers[0].items,
+        vec!["alpha", "await"]
+    );
 
     let mut missing_permission = completion_provider_fixture();
     missing_permission["clay"]["permissions"] = json!([]);
@@ -259,6 +264,27 @@ fn completion_provider_contributions_reject_conflicts_and_oversize_metadata() {
     let mut bad_prefix = completion_provider_fixture();
     bad_prefix["clay"]["contributions"]["completionProviders"][0]["id"] = json!("other.buffer");
     let error = assemble_package_record(&bad_prefix).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    let mut duplicate_item = completion_provider_fixture();
+    duplicate_item["clay"]["contributions"]["completionProviders"][0]["items"] =
+        json!(["await", "await"]);
+    let error = assemble_package_record(&duplicate_item).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::DuplicateContributionId);
+
+    let mut too_many_items = completion_provider_fixture();
+    too_many_items["clay"]["contributions"]["completionProviders"][0]["items"] = json!(
+        (0..33)
+            .map(|index| format!("item{index}"))
+            .collect::<Vec<_>>()
+    );
+    let error = assemble_package_record(&too_many_items).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    let mut oversized_item = completion_provider_fixture();
+    oversized_item["clay"]["contributions"]["completionProviders"][0]["items"] =
+        json!(["x".repeat(129)]);
+    let error = assemble_package_record(&oversized_item).unwrap_err();
     assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
 
     let mut oversize = completion_provider_fixture();

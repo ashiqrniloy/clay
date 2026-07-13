@@ -22,6 +22,12 @@ export interface CodeEditingManifestOptions {
   lineComment?: string;
   blockCommentStart?: string;
   blockCommentEnd?: string;
+  enter?: {
+    kind: "preserveLeadingWhitespace" | "insertNewlineOnly" | "continueLineMarkers" | "preserveFenceBodyIndent";
+    markers?: string[];
+    exitOnEmptyItem?: boolean;
+    fenceMarkers?: string[];
+  };
   pairs?: Array<{ open: string; close: string }>;
   electricOutdentCharacters?: string[];
   autocompleteTriggers?: string[];
@@ -70,21 +76,25 @@ export function buildCodeEditingManifest(options: CodeEditingManifestOptions): R
   }
 
   const electricCharacters: Array<{ trigger: string; effect: string }> = [];
+  const seenElectric = new Set<string>();
   for (const character of options.electricOutdentCharacters ?? []) {
-    if (character === "}") {
+    if ([...character].length === 1 && !seenElectric.has(character)) {
+      seenElectric.add(character);
       electricCharacters.push({ trigger: character, effect: "outdent-one-level" });
     }
   }
 
   const autocompleteTriggers: Array<{ trigger: string }> = [];
+  const seenAutocomplete = new Set<string>();
   for (const trigger of options.autocompleteTriggers ?? []) {
-    if (trigger.length > 0) {
+    if ([...trigger].length === 1 && !seenAutocomplete.has(trigger) && seenAutocomplete.size < 32) {
+      seenAutocomplete.add(trigger);
       autocompleteTriggers.push({ trigger });
     }
   }
 
   return {
-    enter: { kind: "preserveLeadingWhitespace" },
+    enter: options.enter ?? { kind: "preserveLeadingWhitespace" },
     pairs,
     comments,
     tabSpaces: options.indentSize,

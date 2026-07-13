@@ -260,6 +260,25 @@ impl ParseCoordinator {
         meta: ParseHandlerMeta,
         handler: impl ParseHandler,
     ) -> Result<ParseHandlerMeta, ParseCoordinatorError> {
+        self.register_handler_meta(generation_id, meta, handler, false)
+    }
+
+    pub(crate) fn replace_handler_meta_for_generation(
+        &self,
+        generation_id: u64,
+        meta: ParseHandlerMeta,
+        handler: impl ParseHandler,
+    ) -> Result<ParseHandlerMeta, ParseCoordinatorError> {
+        self.register_handler_meta(generation_id, meta, handler, true)
+    }
+
+    fn register_handler_meta(
+        &self,
+        generation_id: u64,
+        meta: ParseHandlerMeta,
+        handler: impl ParseHandler,
+        replace_same_generation: bool,
+    ) -> Result<ParseHandlerMeta, ParseCoordinatorError> {
         let key = HandlerKey {
             package_prefix: meta.package_prefix.clone(),
             mode_id: meta.mode_id.clone(),
@@ -270,10 +289,14 @@ impl ParseCoordinator {
             .get(&key)
             .is_some_and(|registered| registered.generation_id == generation_id)
         {
-            return Err(ParseCoordinatorError::HandlerAlreadyRegistered {
-                package_prefix: key.package_prefix,
-                mode_id: key.mode_id,
-            });
+            if replace_same_generation {
+                inner.handlers.remove(&key);
+            } else {
+                return Err(ParseCoordinatorError::HandlerAlreadyRegistered {
+                    package_prefix: key.package_prefix,
+                    mode_id: key.mode_id,
+                });
+            }
         }
         let stale_task_keys: Vec<_> = inner
             .active_tasks

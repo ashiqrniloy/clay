@@ -6,7 +6,10 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     packages::record::{PackageRecord, assemble_package_record},
-    protocol::completion::{CompletionProvenance, CompletionProviderGeneration},
+    protocol::{
+        CompletionItem,
+        completion::{CompletionProvenance, CompletionProviderGeneration},
+    },
     server::completion::{CompletionProviderMeta, CompletionTriggerMetadata, WordBoundaryRule},
 };
 
@@ -99,6 +102,7 @@ fn package_value_from_options(options: &Map<String, Value>) -> Result<Value, JsE
                     .get("wordBoundaryChars")
                     .cloned()
                     .unwrap_or(Value::Null),
+                "items": options.get("items").cloned().unwrap_or(Value::Null),
                 "budgets": {
                     "timeoutMs": options.get("timeoutMs").cloned().unwrap_or(Value::Null),
                     "maxItems": options.get("maxItems").cloned().unwrap_or(Value::Null),
@@ -140,25 +144,33 @@ fn completion_provider_metas(package: &PackageRecord) -> Vec<CompletionProviderM
         .contributions
         .completion_providers
         .iter()
-        .map(|descriptor| CompletionProviderMeta {
-            id: descriptor.id.clone(),
-            provenance: CompletionProvenance {
+        .map(|descriptor| {
+            let provenance = CompletionProvenance {
                 package_name: package.manifest.name.clone(),
                 package_version: package.manifest.version.clone(),
                 package_prefix: package.manifest.clay.api_prefix.clone(),
-            },
-            priority: descriptor.priority,
-            trigger_metadata: CompletionTriggerMetadata {
-                trigger_characters: descriptor.trigger_characters.clone(),
-            },
-            word_boundary: if descriptor.word_boundary_chars.is_empty() {
-                WordBoundaryRule::default_buffer_word()
-            } else {
-                WordBoundaryRule::new(descriptor.word_boundary_chars.clone())
-            },
-            timeout_ms: descriptor.timeout_ms,
-            max_items: descriptor.max_items,
-            generation: CompletionProviderGeneration::default(),
+            };
+            CompletionProviderMeta {
+                id: descriptor.id.clone(),
+                provenance: provenance.clone(),
+                priority: descriptor.priority,
+                trigger_metadata: CompletionTriggerMetadata {
+                    trigger_characters: descriptor.trigger_characters.clone(),
+                },
+                word_boundary: if descriptor.word_boundary_chars.is_empty() {
+                    WordBoundaryRule::default_buffer_word()
+                } else {
+                    WordBoundaryRule::new(descriptor.word_boundary_chars.clone())
+                },
+                items: descriptor
+                    .items
+                    .iter()
+                    .map(|item| CompletionItem::new(item, item, provenance.clone()))
+                    .collect(),
+                timeout_ms: descriptor.timeout_ms,
+                max_items: descriptor.max_items,
+                generation: CompletionProviderGeneration::default(),
+            }
         })
         .collect()
 }
@@ -182,6 +194,7 @@ pub(super) fn op_clay_completion_providers_for_trigger(
             "priority": meta.priority,
             "triggerCharacters": meta.trigger_metadata.trigger_characters,
             "wordBoundaryChars": meta.word_boundary.boundary_chars,
+            "items": meta.items.iter().map(|item| &item.label).collect::<Vec<_>>(),
             "timeoutMs": meta.timeout_ms,
             "maxItems": meta.max_items,
         })).collect::<Vec<_>>(),

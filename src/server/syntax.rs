@@ -74,7 +74,10 @@ impl SyntaxGrammarContribution {
         descriptor: &SyntaxGrammarContributionDescriptor,
     ) -> Self {
         Self {
-            engine_tier: SyntaxEngineTier::Wasm,
+            engine_tier: match descriptor.grammar_kind.as_str() {
+                "native" => SyntaxEngineTier::Native,
+                _ => SyntaxEngineTier::Wasm,
+            },
             package_name: package.manifest.name.clone(),
             package_version: package.manifest.version.clone(),
             package_prefix: package.manifest.clay.api_prefix.clone(),
@@ -198,9 +201,11 @@ pub struct NativeGrammarDescriptor {
     file_names: &'static [&'static str],
     grammar_source: &'static str,
     highlights_query_path: &'static str,
+    highlights_query: &'static str,
     style_map: &'static [(
         &'static str,
-        &'static str,
+        crate::protocol::TokenType,
+        crate::protocol::Modifiers,
         Option<crate::protocol::DocumentFontRole>,
     )],
     language: fn() -> Language,
@@ -234,6 +239,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         file_names: &[],
         grammar_source: "tree-sitter-rust",
         highlights_query_path: "packages/rust/queries/highlights.scm",
+        highlights_query: include_str!("../../packages/rust/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_rust::LANGUAGE.into(),
     },
@@ -247,6 +253,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         file_names: &[],
         grammar_source: "tree-sitter-typescript",
         highlights_query_path: "packages/typescript/queries/highlights.scm",
+        highlights_query: include_str!("../../packages/typescript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
     },
@@ -260,6 +267,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         file_names: &[],
         grammar_source: "tree-sitter-typescript",
         highlights_query_path: "packages/typescript/queries/highlights.scm",
+        highlights_query: include_str!("../../packages/typescript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
     },
@@ -273,6 +281,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         file_names: &[],
         grammar_source: "tree-sitter-javascript",
         highlights_query_path: "packages/javascript/queries/highlights.scm",
+        highlights_query: include_str!("../../packages/javascript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_javascript::LANGUAGE.into(),
     },
@@ -286,27 +295,65 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         file_names: &[],
         grammar_source: "tree-sitter-md-025",
         highlights_query_path: "packages/markdown/queries/highlights.scm",
+        highlights_query: include_str!("../../packages/markdown/queries/highlights.scm"),
         style_map: MARKDOWN_NATIVE_STYLE_MAP,
         language: || tree_sitter_md_025::LANGUAGE.into(),
     },
 ];
 
-const DEFAULT_NATIVE_STYLE_MAP: &[(&str, &str, Option<crate::protocol::DocumentFontRole>)] = &[
-    ("keyword", "keyword.control", None),
-    ("string", "string.quoted", None),
-    ("comment", "comment.line", None),
-    ("punctuation", "punctuation.definition", None),
-    ("text", "text", None),
+const DEFAULT_NATIVE_STYLE_MAP: &[(
+    &str,
+    TokenType,
+    Modifiers,
+    Option<crate::protocol::DocumentFontRole>,
+)] = &[
+    ("keyword", TokenType::Keyword, Modifiers::NONE, None),
+    ("string", TokenType::String, Modifiers::NONE, None),
+    ("comment", TokenType::Comment, Modifiers::NONE, None),
+    ("punctuation", TokenType::Operator, Modifiers::NONE, None),
+    ("text", TokenType::Paragraph, Modifiers::NONE, None),
+    ("function", TokenType::Function, Modifiers::NONE, None),
+    (
+        "function.declaration",
+        TokenType::Function,
+        Modifiers::DECLARATION,
+        None,
+    ),
+    ("type", TokenType::Type, Modifiers::NONE, None),
+    ("number", TokenType::Number, Modifiers::NONE, None),
 ];
 
-const MARKDOWN_NATIVE_STYLE_MAP: &[(&str, &str, Option<crate::protocol::DocumentFontRole>)] = &[
-    ("punctuation", "punctuation.definition", None),
-    ("text", "text", None),
+const MARKDOWN_NATIVE_STYLE_MAP: &[(
+    &str,
+    TokenType,
+    Modifiers,
+    Option<crate::protocol::DocumentFontRole>,
+)] = &[
+    ("punctuation", TokenType::Operator, Modifiers::NONE, None),
+    ("text", TokenType::Paragraph, Modifiers::NONE, None),
     (
         "code",
-        "markup.code-block",
+        TokenType::CodeBlock,
+        Modifiers::NONE,
         Some(crate::protocol::DocumentFontRole::Monospace),
     ),
+    (
+        "code-span",
+        TokenType::CodeSpan,
+        Modifiers::NONE,
+        Some(crate::protocol::DocumentFontRole::Monospace),
+    ),
+    ("heading-1", TokenType::Heading1, Modifiers::NONE, None),
+    ("heading-2", TokenType::Heading2, Modifiers::NONE, None),
+    ("heading-3", TokenType::Heading3, Modifiers::NONE, None),
+    ("heading-4", TokenType::Heading4, Modifiers::NONE, None),
+    ("heading-5", TokenType::Heading5, Modifiers::NONE, None),
+    ("heading-6", TokenType::Heading6, Modifiers::NONE, None),
+    ("strong", TokenType::Paragraph, Modifiers::BOLD, None),
+    ("emphasis", TokenType::Paragraph, Modifiers::ITALIC, None),
+    ("list-marker", TokenType::ListItem, Modifiers::NONE, None),
+    ("link", TokenType::Link, Modifiers::NONE, None),
+    ("quote", TokenType::Quote, Modifiers::NONE, None),
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -407,8 +454,8 @@ impl SyntaxGrammarRegistry {
             if preference == Some(SyntaxEngineTier::JavaScriptFallback) {
                 continue;
             }
-            let tier2_override =
-                explicit_tier2_override || preference == Some(SyntaxEngineTier::Wasm);
+            let tier2_override = contribution.engine_tier == SyntaxEngineTier::Wasm
+                && (explicit_tier2_override || preference == Some(SyntaxEngineTier::Wasm));
             if self.is_shadowed_by_native_first_party(&contribution) && !tier2_override {
                 continue;
             }
@@ -421,8 +468,10 @@ impl SyntaxGrammarRegistry {
 
         let count = staged.len();
         for contribution in staged {
-            if explicit_tier2_override
-                || self.preference_for_contribution(&contribution) == Some(SyntaxEngineTier::Wasm)
+            if contribution.engine_tier == SyntaxEngineTier::Wasm
+                && (explicit_tier2_override
+                    || self.preference_for_contribution(&contribution)
+                        == Some(SyntaxEngineTier::Wasm))
             {
                 self.remove_overridden_native_first_party(&contribution);
             }
@@ -433,6 +482,10 @@ impl SyntaxGrammarRegistry {
 
     pub fn list(&self) -> impl Iterator<Item = &SyntaxGrammarContribution> {
         self.grammars_by_id.values()
+    }
+
+    pub(crate) fn engine_preferences(&self) -> BTreeMap<String, SyntaxEngineTier> {
+        self.engine_preferences.clone()
     }
 
     pub fn get(&self, id: &str) -> Option<&SyntaxGrammarContribution> {
@@ -534,14 +587,12 @@ impl SyntaxGrammarRegistry {
     }
 
     fn is_shadowed_by_native_first_party(&self, contribution: &SyntaxGrammarContribution) -> bool {
-        contribution.engine_tier == SyntaxEngineTier::Wasm
-            && self
-                .native_descriptors_by_id
-                .values()
-                .filter(|descriptor| descriptor.package_prefix == contribution.package_prefix)
-                .flat_map(|descriptor| descriptor.extensions.iter().copied())
-                .collect::<std::collections::BTreeSet<_>>()
-                .is_superset(&contribution.extensions.iter().map(String::as_str).collect())
+        self.native_descriptors_by_id
+            .values()
+            .filter(|descriptor| descriptor.package_prefix == contribution.package_prefix)
+            .flat_map(|descriptor| descriptor.extensions.iter().copied())
+            .collect::<std::collections::BTreeSet<_>>()
+            .is_superset(&contribution.extensions.iter().map(String::as_str).collect())
             && contribution.file_names.iter().all(|file_name| {
                 self.find_for_file_name(file_name).is_some_and(|grammar| {
                     grammar.engine_tier == SyntaxEngineTier::Native
@@ -712,6 +763,55 @@ pub struct SyntaxGrammarSelection {
     pub why: String,
 }
 
+pub(crate) fn select_grammar_for_path<'a>(
+    grammars: &'a [SyntaxGrammarContribution],
+    engine_preferences: &BTreeMap<String, SyntaxEngineTier>,
+    path: &str,
+) -> Option<&'a SyntaxGrammarContribution> {
+    let file_name = file_name(path);
+    let extension = extension(path);
+    grammars
+        .iter()
+        .find(|grammar| {
+            file_name
+                .is_some_and(|name| grammar.file_names.iter().any(|candidate| candidate == name))
+        })
+        .or_else(|| {
+            grammars.iter().find(|grammar| {
+                extension.is_some_and(|extension| {
+                    grammar
+                        .extensions
+                        .iter()
+                        .any(|candidate| candidate == extension)
+                })
+            })
+        })
+        .filter(|grammar| {
+            engine_preferences
+                .get(&grammar.language_id)
+                .or_else(|| engine_preferences.get(&grammar.package_prefix))
+                .or_else(|| engine_preferences.get(&grammar.package_name))
+                .is_none_or(|tier| *tier == grammar.engine_tier)
+        })
+}
+
+pub(crate) fn native_handler(
+    contribution: &SyntaxGrammarContribution,
+) -> Result<Option<TreeSitterSyntaxHandler>, TreeSitterSyntaxError> {
+    let Some(descriptor) = FIRST_PARTY_NATIVE_GRAMMARS
+        .iter()
+        .find(|descriptor| descriptor.id == contribution.id)
+    else {
+        return Ok(None);
+    };
+    TreeSitterSyntaxHandler::new(
+        contribution.clone(),
+        (descriptor.language)(),
+        descriptor.highlights_query,
+    )
+    .map(Some)
+}
+
 fn contribution_from_native_descriptor(
     descriptor: &NativeGrammarDescriptor,
 ) -> SyntaxGrammarContribution {
@@ -732,8 +832,8 @@ fn contribution_from_native_descriptor(
             .iter()
             .map(|file_name| (*file_name).to_string())
             .collect(),
-        grammar_kind: "tree-sitter-native".to_string(),
-        grammar_path: "builtin".to_string(),
+        grammar_kind: "native".to_string(),
+        grammar_path: String::new(),
         grammar_source: Some(descriptor.grammar_source.to_string()),
         highlights_query_path: descriptor.highlights_query_path.to_string(),
         locals_query_path: None,
@@ -741,11 +841,13 @@ fn contribution_from_native_descriptor(
         style_map: descriptor
             .style_map
             .iter()
-            .map(|(capture, token, font_role)| {
+            .map(|(capture, token_type, modifiers, font_role)| {
                 (
                     (*capture).to_string(),
                     crate::packages::record::SyntaxStyleMapEntry {
-                        style_token: (*token).to_string(),
+                        token_type: *token_type,
+                        modifiers: *modifiers,
+                        scope: None,
                         font_role: *font_role,
                     },
                 )
@@ -843,9 +945,9 @@ pub struct SyntaxCapture {
 pub struct SyntaxVocabularySpan {
     pub byte_start: u64,
     pub byte_end: u64,
-    pub style_token: String,
     pub token_type: TokenType,
     pub modifiers: Modifiers,
+    pub scope: Option<String>,
     pub font_role: Option<crate::protocol::DocumentFontRole>,
 }
 
@@ -871,7 +973,7 @@ impl fmt::Display for TreeSitterSyntaxError {
             }
             Self::QueryCaptureNotMapped { capture } => write!(
                 formatter,
-                "syntax highlight capture @{capture} is not mapped to a known Clay style token"
+                "syntax highlight capture @{capture} has no vocabulary styleMap entry"
             ),
             Self::WindowTooLarge { bytes, budget } => write!(
                 formatter,
@@ -933,13 +1035,6 @@ impl TreeSitterSyntaxHandler {
                 message: error.to_string(),
             }
         })?;
-        for capture in query.capture_names() {
-            if !contribution.style_map.contains_key(*capture) {
-                return Err(TreeSitterSyntaxError::QueryCaptureNotMapped {
-                    capture: (*capture).to_string(),
-                });
-            }
-        }
         let mut parser = Parser::new();
         parser.set_language(&language).map_err(|error| {
             TreeSitterSyntaxError::QueryCompileFailed {
@@ -1140,9 +1235,7 @@ impl TreeSitterSyntaxHandler {
             let capture = query_match.captures[*capture_index];
             let capture_name = capture_names[capture.index as usize];
             if !self.contribution.style_map.contains_key(capture_name) {
-                return Err(TreeSitterSyntaxError::QueryCaptureNotMapped {
-                    capture: capture_name.to_string(),
-                });
+                continue;
             }
             let absolute_start = window
                 .byte_start
@@ -1291,20 +1384,19 @@ pub fn map_capture_to_vocabulary(
     contribution: &SyntaxGrammarContribution,
     capture: &SyntaxCapture,
 ) -> Result<SyntaxVocabularySpan, TreeSitterSyntaxError> {
-    let style_token = contribution
+    let entry = contribution
         .style_map
         .get(&capture.capture_name)
         .ok_or_else(|| TreeSitterSyntaxError::QueryCaptureNotMapped {
             capture: capture.capture_name.clone(),
         })?;
-    let (token_type, modifiers) = TokenType::classify_style_token(&style_token.style_token);
     Ok(SyntaxVocabularySpan {
         byte_start: capture.byte_start,
         byte_end: capture.byte_end,
-        style_token: style_token.style_token.clone(),
-        token_type,
-        modifiers,
-        font_role: style_token.font_role,
+        token_type: entry.token_type,
+        modifiers: entry.modifiers,
+        scope: entry.scope.clone(),
+        font_role: entry.font_role,
     })
 }
 
@@ -1323,7 +1415,9 @@ fn captures_to_decoration_set(
             kind: DecorationKind::Syntax,
             token_type: vocabulary.token_type,
             modifiers: vocabulary.modifiers,
-            scope: Some(vocabulary.style_token),
+            // First-party vocabulary maps leave scope empty. Legacy grammar
+            // contributions preserve their validated style token here.
+            scope: vocabulary.scope,
             font_role: vocabulary.font_role,
             priority: 70,
             provenance: provenance.clone(),

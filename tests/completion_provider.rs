@@ -113,6 +113,7 @@ fn package_provider_meta(
         priority,
         trigger_metadata: CompletionTriggerMetadata::default(),
         word_boundary: WordBoundaryRule::default(),
+        items: Vec::new(),
         timeout_ms: 500,
         max_items: 64,
         generation,
@@ -158,6 +159,83 @@ fn result_with_items(
         items,
         status: CompletionStatus::Ok,
         ..empty_result_for(request)
+    }
+}
+
+#[test]
+fn each_language_registers_a_base_keyword_completion_provider() {
+    for (package, provider_id, expected_item, expected_triggers) in [
+        ("rust", "rust.keywords", "fn", &[".", ":"][..]),
+        ("typescript", "typescript.keywords", "interface", &["."][..]),
+        ("javascript", "javascript.keywords", "function", &["."][..]),
+        ("markdown", "markdown.keywords", "# ", &["#", "[", "`"][..]),
+    ] {
+        let path = format!(
+            "{}/packages/{package}/package.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let record = assemble_package_record(&value).unwrap();
+        let provider = &record.contributions.completion_providers[0];
+
+        assert_eq!(provider.id, provider_id);
+        assert_eq!(provider.priority, 0);
+        assert_eq!(provider.trigger_characters, expected_triggers);
+        assert!(provider.items.iter().any(|item| item == expected_item));
+        assert!(!provider.items.is_empty());
+        assert!(provider.items.len() <= provider.max_items);
+        assert_eq!(provider.timeout_ms, 300);
+        assert_eq!(provider.max_items, 32);
+    }
+}
+
+#[test]
+fn base_keyword_provider_merges_with_future_providers_at_documented_priority() {
+    let coordinator = CompletionCoordinator::new();
+    let package = completion_package("@org/words", "words");
+    let mut base = package_provider_meta("words.keywords", "words", 0, 1);
+    base.items = vec![CompletionItem::new(
+        "while",
+        "while",
+        base.provenance.clone(),
+    )];
+
+    coordinator
+        .register_package(&package, base, immediate_provider())
+        .unwrap();
+    coordinator
+        .register_builtin(builtin_meta("future", 20, 1), immediate_provider())
+        .unwrap();
+
+    assert_eq!(
+        coordinator
+            .providers()
+            .iter()
+            .map(|provider| (provider.id.as_str(), provider.priority))
+            .collect::<Vec<_>>(),
+        vec![("core.future", 20), ("words.keywords", 0)]
+    );
+}
+
+#[test]
+fn completion_registration_has_no_per_language_rust_branch() {
+    let sources = [
+        include_str!("../src/server/completion.rs"),
+        include_str!("../src/server/ops/completion.rs"),
+    ];
+    for source in sources {
+        for language_id in [
+            "rust.keywords",
+            "typescript.keywords",
+            "javascript.keywords",
+            "markdown.keywords",
+        ] {
+            assert!(
+                !source.contains(language_id),
+                "completion registration must not branch on {language_id}"
+            );
+        }
     }
 }
 

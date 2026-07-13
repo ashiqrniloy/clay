@@ -1479,9 +1479,9 @@ Mode/classification defaults are compile-time (no configuration-evaluation cost 
 - Built-in modes ship their own default behavior manifests without an owning package; `select_behavior_manifest_for_document` detects the `core.` prefix and bypasses package-record lookup.
 - There is intentionally no runtime configuration knob for the fallback mode or electric toggles (YAGNI; the package system is the override escape hatch). Do not add undocumented `setPackageOption` keys for these.
 
-## Phase 18.10 authoring contract: grammar-only syntax packages
+## Phase 18.18 authoring contract: native grammars and vocabulary styleMaps
 
-Phase 18.10 adds `SyntaxGrammarContribution` metadata for grammar-only language packages. A grammar-only package highlights documents whose active major mode may still be `core.code` or `core.text`; it does **not** register a full major mode, commands, completions, UI, key behavior, or language-specific Rust branches.
+Phase 18.10 introduced `SyntaxGrammarContribution`; Phase 18.18 promotes first-party packages to native grammar metadata and direct `TokenType` + `Modifiers` styleMaps. A grammar-only package highlights documents whose active major mode may still be `core.code` or `core.text`; it does **not** register a full major mode, commands, completions, UI, key behavior, or language-specific Rust branches.
 
 Declare grammar assets under `clay.contributions.syntaxGrammars`:
 
@@ -1495,13 +1495,17 @@ Declare grammar assets under `clay.contributions.syntaxGrammars`:
       "syntaxGrammars": [{
         "languageId": "rust",
         "filePatterns": { "extensions": ["rs"] },
-        "grammar": { "kind": "tree-sitter-wasm", "path": "./grammars/rust.wasm" },
+        "grammar": { "kind": "native", "source": "tree-sitter-rust" },
         "queries": { "highlights": "./queries/highlights.scm" },
         "styleMap": {
-          "keyword": "keyword.control",
-          "string": "string.quoted",
-          "comment": "comment.line",
-          "punctuation": "punctuation.definition"
+          "keyword": { "type": "Keyword" },
+          "string": { "type": "String" },
+          "comment": { "type": "Comment" },
+          "punctuation": { "type": "Operator" },
+          "function.declaration": {
+            "type": "Function",
+            "modifiers": ["Declaration"]
+          }
         },
         "budgets": { "timeoutMs": 5000, "maxWindowBytes": 4096 }
       }]
@@ -1510,7 +1514,7 @@ Declare grammar assets under `clay.contributions.syntaxGrammars`:
 }
 ```
 
-Validation is load-time only and reuses the package metadata budget. Phase 18.10 accepts grammar contributions from first-party `@clay/*` packages only; arbitrary third-party/native grammar artifact loading is out of scope. Grammar/query paths must be package-root-confined relative `./` asset paths; grammar artifacts must be `tree-sitter-wasm`, query files must be `.scm`, style-map values must be known Clay style tokens, and packages must declare both `parse-document` and `render-decorations`. Clay rejects non-`@clay/*` grammar packages, absolute paths, parent traversal, URLs/downloads, native libraries, package-manager/shell fields, raw ops, client JavaScript, CSS/raw colors, duplicate language IDs, and duplicate file-pattern claims. Parse/highlight work runs as `Background`, cancellable, viewport-prioritized server work bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; it never runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. First-party grammar packages are loaded explicitly from `~/.config/clay/init.js`; they are not auto-loaded.
+Validation is load-time only and reuses the package metadata budget. Grammar contributions remain first-party-only here; arbitrary third-party native artifact loading is out of scope. Tier 1 native entries require a compiled source ID and reject an artifact path; Tier 2 WASM entries require a package-root-confined `.wasm` path. Query files must be confined `.scm` assets. Vocabulary styleMaps accept closed `TokenType` variant names and closed `Modifiers` names; known legacy style tokens remain compatible. Packages must declare both `parse-document` and `render-decorations`. Clay rejects non-`@clay/*` grammar packages, absolute paths, parent traversal, URLs/downloads, native libraries, package-manager/shell fields, raw ops, client JavaScript, CSS/raw colors, duplicate language IDs, and duplicate file-pattern claims. Parse/highlight work runs as `Background`, cancellable, viewport-prioritized server work bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; it never runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. First-party grammar packages are loaded explicitly from `~/.config/clay/init.js`; they are not auto-loaded.
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -1518,6 +1522,7 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
 ```
 
 Do not add hidden JSON/TOML/ad hoc syntax configuration keys for preferred grammar selection, grammar paths, style maps, capture styles, or auto-load behavior. If a later phase exposes any of those as user preferences, they must be promoted as documented Clay JS APIs with custom properties and registry coverage.
@@ -1531,13 +1536,13 @@ Shipped first-party grammar packages are documented at:
 
 ## Phase 18.16 authoring contract: tiered syntax engine
 
-Phase 18.16 extends the Phase 18.10 `SyntaxGrammarContribution` contract without changing the package manifest shape. Package metadata still declares Tier 2 assets and the capture `styleMap`; Clay's host registry chooses the engine at package-load/open/reclassification time:
+Phase 18.16 introduced engine selection; Phase 18.18 lets package metadata honestly declare Tier 1 `native` sources or Tier 2 `tree-sitter-wasm` assets. Clay's host registry chooses the engine at package-load/open/reclassification time:
 
 1. **Tier 1 — native first-party.** Clay seeds compiled-in `tree-sitter-*` grammar data for Rust, TypeScript/TSX, JavaScript, and Markdown. Dispatch is by descriptor data (`languageId`, extensions/file names, query path, and style map), not language-specific Rust branches. First-party package load remains required for package-owned mode behavior; native syntax registration does not silently auto-load a package.
 2. **Tier 2 — web-tree-sitter WASM.** A package-root-confined `./grammars/*.wasm` plus `./queries/*.scm` contribution uses the shared host adapter. It replaces Tier 1 only after explicit user selection, for example `setSyntaxEnginePreference("rust", "wasm")`; package load order alone cannot promote it.
 3. **Tier 3 — package JavaScript fallback.** Existing `clay.parse.serverRegisterParseHandler` handlers remain available for grammar-less packages, Markdown-specific parser behavior, or an explicit `javascript` preference. This route uses the existing server-issued handler token and does not run package JavaScript in the client.
 
-All tiers feed one grammar/capture-to-vocabulary path. A query capture maps through `styleMap` to Phase 18.15 `TokenType` + `Modifiers`, retains package scope/provenance, and publishes only bounded inert `DecorationSet` spans. Unknown captures fail closed. The active syntax grammar remains separate from the active major mode, so a document can stay editable as `core.code` or `core.text` while highlighting is selected.
+All tiers feed one grammar/capture-to-vocabulary path. A query capture maps through `styleMap` to Phase 18.15 `TokenType` + `Modifiers` and publishes only bounded inert `DecorationSet` spans with provenance. Direct vocabulary entries are scope-less; validated legacy style tokens preserve their compatibility scope. Unmapped captures are ignored (unstyled) rather than assigned a fallback color. The active syntax grammar remains separate from the active major mode, so a document can stay editable as `core.code` or `core.text` while highlighting is selected.
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -1552,13 +1557,13 @@ setSyntaxEnginePreference("rust", "wasm"); // or "javascript"
 
 Open is enqueue-only: text and the initial mode manifest return before background parse completion. Later parse failures or invalid results publish sanitized `RuntimeDiagnostic` values such as `clay.parse.open_failed`; they must never block typing or leak paths/source text. Parse windows, decoration payloads, and retained syntax cache remain bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`.
 
-Tier 2 binaries may be committed when available. Until then, each first-party `grammars/PROVENANCE.md` records the upstream crate/release, reproducible `tree-sitter build --wasm` command, and SHA-256 recording step. Runtime does not fetch, build, shell out, install packages, load native libraries, or execute client-side JavaScript. First-party artifact loading and package-root confinement remain required; third-party grammar/native trust is deferred to Phase 23 and a separate security decision.
+Tier 2 binaries may be supplied by a package that explicitly declares WASM metadata. First-party packages currently ship native metadata only; each `grammars/PROVENANCE.md` still records the upstream crate/release and reproducible `tree-sitter build --wasm`/hash procedure for future audited artifacts. Runtime does not fetch, build, shell out, install packages, load native libraries, or execute client-side JavaScript. First-party artifact loading and package-root confinement remain required; third-party grammar/native trust is deferred to Phase 23 and a separate security decision.
 
 Use the documented `clay:syntax` API for engine preference. Do not add hidden JSON/TOML keys for grammar paths, query paths, style maps, auto-loading, or tier selection. See [`setSyntaxEnginePreference`](../clay-js-api/syntax/set-syntax-engine-preference.md) and the [Syntax Grammar Registry](../../wiki/modules/syntax-grammar-registry.md) implementation guide.
 
 ## Phase 18.11 authoring contract: completion providers
 
-Phase 18.11 adds the `CompletionTriggerAndResult` primitive and a server-side completion provider framework. Completion providers are **metadata-only** in Phase 18.11: a package declares provider metadata and trigger/word-boundary parameters, and Clay owns trigger classification, result computation scheduling, and the completion picker UI. Package authors do **not** ship an executable completion handler, raw callback, raw op, native handle, client JavaScript, snippet with executable transforms, command side effect on accept, CSS, or any completion-specific popup widget.
+Phase 18.11 adds the `CompletionTriggerAndResult` primitive and server-side completion framework; Phase 18.18 extends its metadata-only package contract with bounded static text items. A package declares provider metadata, trigger/word-boundary parameters, and optional inert `items`, and Clay owns trigger classification, result computation scheduling, and the completion picker UI. Package authors do **not** ship an executable completion handler, raw callback, raw op, native handle, client JavaScript, snippet with executable transforms, command side effect on accept, CSS, or any completion-specific popup widget.
 
 Completion reuses the Phase 18.8 `TransientMenuSession` bottom overlay and `SduiNativeState` active-menu rendering with `KeyBindingContext::CompletionMenu`; do not add a completion-specific Masonry widget tree, custom popup, or fixed bottom panel for completions. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code.
 
@@ -1573,9 +1578,10 @@ Declare completion provider contributions under `clay.contributions.completionPr
     "contributions": {
       "completionProviders": [{
         "id": "words.buffer",
-        "priority": 10,
+        "priority": 0,
         "triggerCharacters": ["."],
         "wordBoundaryChars": [".", ","],
+        "items": ["const", "function", "return"],
         "budgets": { "timeoutMs": 500, "maxItems": 64 }
       }]
     }
@@ -1595,6 +1601,7 @@ export default function load() {
     providerId: "words.buffer",
     triggerCharacters: ["."],
     wordBoundaryChars: [".", ","],
+    items: ["const", "function", "return"],
     timeoutMs: 500,
     maxItems: 64
   });
@@ -1609,13 +1616,13 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@vendor/words");
 ```
 
-Validation is load/registration-time only and reuses the package metadata budget. Provider IDs must be package-owned (`<apiPrefix>.<name>`), must not claim the reserved `clay.*` namespace, and must be unique within a package. Trigger characters are inert single-character strings; word-boundary characters are inert strings. `timeoutMs` must be within `1..=5000` and `maxItems` within `1..=COMPLETION_RESULT_MAX_ITEMS`. Clay rejects raw callbacks (`handler`, `callback`, `complete`, `function`, `module`), raw ops, native handles, client-side JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate provider IDs, and oversize metadata.
+Validation is load/registration-time only and reuses the package metadata budget. Provider IDs must be package-owned (`<apiPrefix>.<name>`), must not claim the reserved `clay.*` namespace, and must be unique within a package. Trigger characters are inert single-character strings; word-boundary characters are inert strings. Static `items` must be unique non-empty strings, fit `CompletionItem` label/insert-text limits, and contain no more entries than `maxItems` or `COMPLETION_RESULT_MAX_ITEMS`. `timeoutMs` must be within `1..=5000` and `maxItems` within `1..=COMPLETION_RESULT_MAX_ITEMS`. Clay rejects raw callbacks (`handler`, `callback`, `complete`, `function`, `module`), raw ops, native handles, client-side JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate provider IDs, and oversize metadata.
 
 Result items are inert text-replacement data only: `label`, `insertText`, `detail`, `commitCharacters`, and provenance. They carry no callbacks, command side effects, file paths, shell/network/AI directives, raw op names, or client JavaScript. Providers may read only Clay-provided open-document content/windows; completion grants no filesystem/network/shell/AI/raw-op/native-UI/client-runtime authority without later documented APIs and an approved decision log. Per-field and result payload budgets (`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`, `COMPLETION_RESULT_MAX_ITEMS`, and per-field char caps) are enforced before client publication.
 
 Trigger classification is local manifest lookup: typing a trigger character edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Manual `completion.trigger` requests completions without mutating text. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Provider work is UI-reactive/cancellable and never runs on keypress-to-local-paint, paint, layout, scroll, pointer, or text-event hot paths.
 
-Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Package providers registered through `clay.completion.serverRegisterCompletionProvider` are metadata-only: the registered provider metadata is retained, but no executable JS provider token is exposed this phase. A future constrained handler bridge may add executable package providers; until then the built-in buffer-word provider remains the only executable provider. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
+Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 18.18 package providers registered through `clay.completion.serverRegisterCompletionProvider` remain callback-free: registered static strings normalize to provenance-bearing `CompletionItem` text replacements, and the connection path filters the active package's Rust snapshot by replacement prefix without running package JavaScript. A future constrained handler bridge may add computed package providers; current package execution is limited to bounded static text. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
 
 See [`clay.completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/modules/phase18.11-completion-provider-primitive-review.md`](../../wiki/modules/phase18.11-completion-provider-primitive-review.md) for the implementation review.
 
@@ -1687,7 +1694,7 @@ Optional customization is exposed through documented Clay/package JS APIs, not b
 Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same metadata is the Tier 2 package contribution in Phase 18.16; Tier 1 native selection and Tier 3 JavaScript fallback are host/runtime decisions. Add the following full-language surfaces through generic primitives:
 
 - **Major mode**: declare `clay.modes` and register a mode pattern with `clay.modes.serverRegisterModePattern`. The pattern uses generic file-extension, MIME-type, and bounded shebang/leading-content probes; do not add language-specific Rust classification branches.
-- **Behavior manifest**: declare editor rules (indentation, tab, enter, delimiter pairs, comment continuation, electric characters) through the behavior manifest API. Use `clay.behavior.buildCodeEditingManifest({ indentSize, lineComment, electricOutdentCharacters, autocompleteTriggers })` to produce a validated C-family manifest; do not add a Rust-specific behavior manifest branch in core.
+- **Behavior manifest**: declare editor rules (indentation, tab, generic Enter rule, delimiter pairs, comment continuation, electric characters) through the behavior manifest API. Use `clay.behavior.buildCodeEditingManifest({ indentSize, enter, lineComment, pairs, electricOutdentCharacters, autocompleteTriggers })` to produce validated inert rules for code or prose modes; do not add language-specific behavior branches in core.
 - **Commands**: register package-prefixed commands with `clay.commands.serverRegisterCommand`. Commands must route through the server-owned `CommandExecution` path, declare permissions, and avoid shell/network/filesystem authority unless explicitly approved.
 - **Completion providers**: register keyword/snippet providers with `clay.completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `clay.completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
 - **Parse handlers**: register a mode-scoped parse handler with `clay.parse.serverRegisterParseHandler` to derive decorations, folding ranges, diagnostics, or outline data. The handler runs as `Background`, cancellable, viewport-prioritized server work and never in paint/typing hot paths.
@@ -1756,6 +1763,55 @@ Shipped first-party language package docs:
 - [`@clay/rust`](rust.md)
 - [`@clay/typescript`](typescript.md)
 - [`@clay/javascript`](javascript.md)
+
+## Phase 18.18 authoring contract: complete first-party language packages
+
+Phase 18.18 combines the already-documented generic primitives into the complete first-party language-package shape. `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` are explicit opt-in packages, not core defaults:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
+```
+
+One `loadPackage` call validates the package, loads its `loadEntry` once per runtime generation, and registers only its declared inert contributions. Do not copy a manifest, call raw ops, or register each primitive from `init.js`. Optional customization belongs to an already-documented Clay API; no per-language option is introduced here.
+
+### Full package contribution shape
+
+Each first-party package owns data and load-time registration, while Clay owns selection, validation, rendering, command execution, completion UI, shell layout, and client input:
+
+| Package | Native grammar + vocabulary styleMap | Major-mode behavior | Commands/completion/status |
+| --- | --- | --- | --- |
+| `@clay/rust` | `tree-sitter-rust`; code `TokenType` captures | 4-space, `//`, bracket/quote pairs, `}` electric outdent, `.`/`:` triggers | `rust.toggleLineComment`, priority-0 `rust.keywords`, `rust.status.mode` |
+| `@clay/typescript` | `tree-sitter-typescript` and TSX descriptors; code captures | 2-space, `//`, bracket/quote/backtick pairs, `}`/`)`/`]` electric outdent | `typescript.toggleLineComment`, priority-0 `typescript.keywords`, `typescript.status.mode` |
+| `@clay/javascript` | `tree-sitter-javascript`; code captures | 2-space, `//`, bracket/quote/backtick pairs, `}`/`)`/`]` electric outdent | `javascript.toggleLineComment`, priority-0 `javascript.keywords`, `javascript.status.mode` |
+| `@clay/markdown` | `tree-sitter-md-025`; prose `TokenType` + `Modifiers` captures | 2-space list continuation, prose pairs, `#`/`[`/backtick triggers | server-first Markdown commands, priority-0 `markdown.keywords`, `markdown.status.mode` |
+
+A language `loadEntry` calls the same generic facades: `serverRegisterSyntaxGrammar`, `serverRegisterModePattern` with `buildCodeEditingManifest`, `serverRegisterCommand`, `serverRegisterCompletionProvider`, and `serverRegisterComponentContribution`. Completion `items` are bounded, static text replacements at priority 0; they are not snippets or callback providers. Phase 18.19 owns snippet transforms, exclusive claims, and native-provider suppression.
+
+Vocabulary styleMap entries map grammar captures directly to closed `TokenType`/`Modifiers` values; see [Clay Text Vocabulary and Two-Axis Decoration Contract](../primitives/syntax-vocabulary.md#package-stylemap-authoring). Grammar selection remains independent from major-mode selection. Tier 1 native is the normal first-party engine, Tier 2 requires an explicitly selected package-confined WASM artifact, and Tier 3 is an explicit JavaScript fallback. Arbitrary third-party grammar/native loading and LSP process authority remain deferred pending their own security decisions.
+
+### Markdown decoration and preview are separate
+
+Markdown uses the same package contract but has two intentionally independent outputs:
+
+```text
+native tree-sitter-md-025 + queries/highlights.scm
+  -> bounded vocabulary DecorationSet
+packages/markdown/dist/sdui.js
+  -> optional validated preview/status SduiSnapshot
+```
+
+The default decoration path is Tier 1 native. `parser.js` is registered only as the Tier 3 JavaScript fallback and is selected only when native syntax is unavailable or the user explicitly selects `setSyntaxEnginePreference("markdown", "javascript")`. The package manifest has no default parser-backed `decorations` contribution. The preview remains package-JS SDUI, is optional, and does not create a fixed panel, Masonry widget, raw CSS, client-side JavaScript, or a native layout mutation. It may publish a bounded status/preview snapshot only through the documented SDUI contract.
+
+### UI/layout, performance, and authority rules
+
+Status items and optional SDUI preview are inert `clay:ui`/`clay:sdui` contributions. Fixed panels consume a declared slot; transient overlays do not. Clay owns slot composition, action routing, focus, user-over-package precedence, typed style tokens, and Masonry rendering. A package cannot win a slot by load order and cannot use a status item or SDUI preview to bypass fixed-versus-transient rules.
+
+All package JavaScript runs at load, explicit command, explicit SDUI update, or bounded server parse/completion work—not in client keypress, paint, layout, scroll, pointer, or text-event hot paths. Behavior manifests, parse windows, decoration payloads, SDUI snapshots, completion items, and syntax cache retention remain subject to their typed budgets. Contributions preserve package provenance and require declared permissions; `loadPackage` grants no capabilities. Packages receive no filesystem, network, shell, AI, raw-op, native-widget, client-runtime, arbitrary WASM, third-party grammar, or LSP authority from this contract.
 
 ## Minimal Package Checklist
 

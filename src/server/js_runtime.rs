@@ -227,19 +227,23 @@ export function buildCodeEditingManifest(options) {
     comments.push({ linePrefix: options.lineComment, continuePrefix: `${options.lineComment} ` });
   }
   const electricCharacters = [];
+  const seenElectric = new Set();
   for (const character of options.electricOutdentCharacters ?? []) {
-    if (character === "}") {
+    if ([...character].length === 1 && !seenElectric.has(character)) {
+      seenElectric.add(character);
       electricCharacters.push({ trigger: character, effect: "outdent-one-level" });
     }
   }
   const autocompleteTriggers = [];
+  const seenAutocomplete = new Set();
   for (const trigger of options.autocompleteTriggers ?? []) {
-    if (trigger.length > 0) {
+    if ([...trigger].length === 1 && !seenAutocomplete.has(trigger) && seenAutocomplete.size < 32) {
+      seenAutocomplete.add(trigger);
       autocompleteTriggers.push({ trigger });
     }
   }
   return {
-    enter: { kind: "preserveLeadingWhitespace" },
+    enter: options.enter ?? { kind: "preserveLeadingWhitespace" },
     pairs,
     comments,
     tabSpaces: options.indentSize,
@@ -505,6 +509,9 @@ pub(crate) struct ClayJsRuntimeService {
     timeout: Duration,
     heap_limit_bytes: usize,
     poisoned: Arc<std::sync::atomic::AtomicBool>,
+    completion_providers:
+        Arc<std::sync::Mutex<Vec<crate::server::completion::CompletionProviderMeta>>>,
+    native_syntax_handlers: Arc<std::sync::Mutex<std::collections::HashSet<(u64, String, String)>>>,
     worker: Arc<std::sync::Mutex<Arc<RuntimeWorker>>>,
 }
 
@@ -525,6 +532,10 @@ impl ClayJsRuntimeService {
             timeout,
             heap_limit_bytes,
             poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
+            native_syntax_handlers: Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
             worker: Arc::new(std::sync::Mutex::new(start_runtime_worker(
                 timeout,
                 heap_limit_bytes,
@@ -634,10 +645,24 @@ impl ClayJsRuntimeService {
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
             self.poisoned.store(true, Ordering::Relaxed);
-        } else if result.is_ok() {
+        } else if let Ok(evaluation) = &result {
             self.evaluations.fetch_add(1, Ordering::Relaxed);
+            *self
+                .completion_providers
+                .lock()
+                .expect("completion provider snapshot lock poisoned") =
+                evaluation.completion_providers.clone();
         }
         result
+    }
+
+    pub(crate) fn completion_providers(
+        &self,
+    ) -> Vec<crate::server::completion::CompletionProviderMeta> {
+        self.completion_providers
+            .lock()
+            .expect("completion provider snapshot lock poisoned")
+            .clone()
     }
 
     pub(crate) async fn load_default_configuration(
@@ -694,6 +719,102 @@ impl ClayJsRuntimeService {
             }
         }
         Ok(registered)
+    }
+
+    pub(crate) fn register_native_syntax_handler(
+        &self,
+        coordinator: &crate::server::parse_coordinator::ParseCoordinator,
+        generation_id: u64,
+        evaluation: &ClayRuntimeEvaluation,
+        path: &str,
+        package_prefix: &str,
+        mode_id: &str,
+    ) -> Result<
+        Option<(
+            crate::server::parse_coordinator::ParseHandlerMeta,
+            crate::protocol::ParsePolicy,
+        )>,
+        crate::server::parse_coordinator::ParseCoordinatorError,
+    > {
+        let Some(contribution) = crate::server::syntax::select_grammar_for_path(
+            &evaluation.syntax_grammars,
+            &evaluation.syntax_engine_preferences,
+            path,
+        ) else {
+            return Ok(None);
+        };
+        if contribution.engine_tier != crate::server::syntax::SyntaxEngineTier::Native {
+            return Ok(None);
+        }
+        // ponytail: ParseCoordinator keys handlers by package/mode. Skip modes
+        // with multiple native grammars until its key carries document-selected
+        // grammar identity; replacing here would make last-opened grammar win.
+        if evaluation
+            .syntax_grammars
+            .iter()
+            .filter(|grammar| {
+                grammar.engine_tier == crate::server::syntax::SyntaxEngineTier::Native
+                    && grammar.package_prefix == contribution.package_prefix
+            })
+            .count()
+            != 1
+        {
+            return Ok(None);
+        }
+        let policy = crate::protocol::ParsePolicy::new(
+            contribution
+                .max_window_bytes
+                .unwrap_or(crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES)
+                as u64,
+            4 * 1024,
+            30 * 1024 * 1024,
+            contribution.timeout_ms.unwrap_or(5_000),
+        );
+        let key = (
+            generation_id,
+            package_prefix.to_string(),
+            mode_id.to_string(),
+        );
+        let mut native_syntax_handlers = self
+            .native_syntax_handlers
+            .lock()
+            .expect("native syntax handler set lock poisoned");
+        if native_syntax_handlers.contains(&key) {
+            return Ok(Some((
+                crate::server::parse_coordinator::ParseHandlerMeta {
+                    package_prefix: package_prefix.to_string(),
+                    mode_id: mode_id.to_string(),
+                },
+                policy,
+            )));
+        }
+        let handler = crate::server::syntax::native_handler(contribution).map_err(|error| {
+            crate::server::parse_coordinator::ParseCoordinatorError::HandlerFailed(
+                error.to_string(),
+            )
+        })?;
+        let Some(handler) = handler else {
+            return Ok(None);
+        };
+        match coordinator.replace_handler_meta_for_generation(
+            generation_id,
+            crate::server::parse_coordinator::ParseHandlerMeta {
+                package_prefix: package_prefix.to_string(),
+                mode_id: mode_id.to_string(),
+            },
+            handler,
+        ) {
+            Ok(meta) => {
+                native_syntax_handlers.insert(key);
+                Ok(Some((meta, policy)))
+            }
+            Err(
+                crate::server::parse_coordinator::ParseCoordinatorError::HandlerAlreadyRegistered {
+                    ..
+                },
+            ) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     async fn invoke_parse_handler(
@@ -791,6 +912,8 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) behavior_manifest: Option<crate::protocol::BehaviorManifest>,
     pub(crate) ui_contributions: crate::server::ui::PackageUiRegistrySnapshot,
     pub(crate) syntax_grammars: Vec<crate::server::syntax::SyntaxGrammarContribution>,
+    pub(crate) syntax_engine_preferences:
+        std::collections::BTreeMap<String, crate::server::syntax::SyntaxEngineTier>,
     pub(crate) completion_providers: Vec<crate::server::completion::CompletionProviderMeta>,
     /// Resolved active theme snapshot from `setTheme` (`clay:theme` facade). `None`
     /// when `init.js` did not select a theme (Clay default applies). Applied to
@@ -1207,6 +1330,7 @@ async fn evaluate_loaded_module(
                 .then_some(behavior_manifest),
             ui_contributions: op_state.ui_contributions(),
             syntax_grammars: op_state.syntax_grammars(),
+            syntax_engine_preferences: op_state.syntax_engine_preferences(),
             completion_providers: op_state.completion_providers(),
             active_theme: op_state.active_theme(),
             active_typography: op_state.active_typography(),
@@ -1845,10 +1969,13 @@ mod tests {
         ClayRuntimeEvaluation, PackageLoadEntryAllowlist, RuntimeEntry, create_js_runtime,
         evaluate_loaded_module, prepare_runtime_entry,
     };
-    use crate::perf::budgets::{JS_RUNTIME_EVALUATION_TIMEOUT_MS, JS_RUNTIME_HEAP_LIMIT_BYTES};
+    use crate::perf::budgets::{
+        BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, JS_RUNTIME_EVALUATION_TIMEOUT_MS,
+        JS_RUNTIME_HEAP_LIMIT_BYTES,
+    };
     use crate::protocol::{
-        BehaviorVersion, DiagnosticSeverity, ParseByteRange, ParseEditNotification, ParsePolicy,
-        ParseWindowSnapshot,
+        BehaviorVersion, DiagnosticSeverity, EnterRule, ParseByteRange, ParseEditNotification,
+        ParsePolicy, ParseWindowSnapshot,
     };
     use crate::server::configuration::ConfigurationRuntime;
     use crate::server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest};
@@ -2164,6 +2291,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn javascript_engine_preference_keeps_markdown_tier3_fallback_selected() {
+        let root = config_fixture("markdown-javascript-fallback");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            import { setSyntaxEnginePreference } from "clay:syntax";
+            setSyntaxEnginePreference("markdown", "javascript");
+            await loadPackage("@clay/markdown");
+            "#,
+        )
+        .unwrap();
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .load_configuration_from_root(root)
+            .await
+            .expect("Markdown JavaScript preference loads");
+        assert_eq!(
+            evaluation.syntax_engine_preferences.get("markdown"),
+            Some(&crate::server::syntax::SyntaxEngineTier::JavaScriptFallback)
+        );
+        assert_eq!(evaluation.js_parse_handlers.len(), 1);
+        assert!(
+            service
+                .register_native_syntax_handler(
+                    &ParseCoordinator::new(),
+                    1,
+                    &evaluation,
+                    "note.md",
+                    "markdown",
+                    "markdown",
+                )
+                .expect("engine selection")
+                .is_none(),
+            "explicit JavaScript preference must suppress native handler installation"
+        );
+    }
+
+    #[tokio::test]
     async fn syntax_facade_rejects_raw_authority_and_third_party_grammars() {
         let service = ClayJsRuntimeService::default();
         for source in [
@@ -2291,16 +2457,18 @@ mod tests {
         let service = ClayJsRuntimeService::default();
         let evaluation = service
             .evaluate_controlled_module(
-                r#"
+                r##"
                 import { loadPackage } from "clay:packages";
                 import { serverListCompletionProvidersForTrigger } from "clay:completion";
 
                 await loadPackage("@clay/rust");
                 await loadPackage("@clay/typescript");
                 await loadPackage("@clay/javascript");
+                await loadPackage("@clay/markdown");
 
                 const dotProviders = serverListCompletionProvidersForTrigger({ trigger: "." });
-                const rustScopeProviders = serverListCompletionProvidersForTrigger({ trigger: "::" });
+                const rustScopeProviders = serverListCompletionProvidersForTrigger({ trigger: ":" });
+                const markdownProviders = serverListCompletionProvidersForTrigger({ trigger: "#" });
                 const noProviders = serverListCompletionProvidersForTrigger({ trigger: "?" });
 
                 Deno.core.ops.op_clay_runtime_record(JSON.stringify({
@@ -2309,8 +2477,12 @@ mod tests {
                   noCount: noProviders.providers.length,
                   rustTriggerCharacters: dotProviders.providers.find((p) => p.id === "rust.keywords")?.triggerCharacters ?? [],
                   typescriptTriggerCharacters: dotProviders.providers.find((p) => p.id === "typescript.keywords")?.triggerCharacters ?? [],
+                  rustPriority: dotProviders.providers.find((p) => p.id === "rust.keywords")?.priority,
+                  rustItems: dotProviders.providers.find((p) => p.id === "rust.keywords")?.items ?? [],
+                  markdownIds: markdownProviders.providers.map((p) => p.id),
+                  markdownItems: markdownProviders.providers.find((p) => p.id === "markdown.keywords")?.items ?? [],
                 }));
-                "#,
+                "##,
             )
             .await
             .unwrap();
@@ -2333,11 +2505,28 @@ mod tests {
         assert_eq!(parsed["noCount"], 0);
         assert_eq!(
             parsed["rustTriggerCharacters"],
-            serde_json::json!([".", "::"])
+            serde_json::json!([".", ":"])
         );
         assert_eq!(
             parsed["typescriptTriggerCharacters"],
             serde_json::json!(["."])
+        );
+        assert_eq!(parsed["rustPriority"], 0);
+        assert!(
+            parsed["rustItems"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("fn"))
+        );
+        assert_eq!(
+            parsed["markdownIds"],
+            serde_json::json!(["markdown.keywords"])
+        );
+        assert!(
+            parsed["markdownItems"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("# "))
         );
     }
 
@@ -3048,28 +3237,35 @@ mod tests {
             .join("configuration")
             .join("language-packages");
 
-        let result = ClayJsRuntimeService::default()
-            .load_configuration_from_root(root)
-            .await
-            .unwrap();
+        let service = ClayJsRuntimeService::default();
+        let result = service.load_configuration_from_root(root).await.unwrap();
+        assert_eq!(
+            service.completion_providers(),
+            result.completion_providers,
+            "runtime service must retain an inert Rust snapshot for completion requests"
+        );
 
-        let provider_ids: Vec<_> = result
-            .completion_providers
-            .iter()
-            .map(|provider| provider.id.clone())
-            .collect();
-        assert!(
-            provider_ids.iter().any(|id| id == "rust.keywords"),
-            "fixture must register rust.keywords completion provider"
-        );
-        assert!(
-            provider_ids.iter().any(|id| id == "typescript.keywords"),
-            "fixture must register typescript.keywords completion provider"
-        );
-        assert!(
-            provider_ids.iter().any(|id| id == "javascript.keywords"),
-            "fixture must register javascript.keywords completion provider"
-        );
+        for (provider_id, expected_item) in [
+            ("rust.keywords", "fn"),
+            ("typescript.keywords", "interface"),
+            ("javascript.keywords", "function"),
+            ("markdown.keywords", "# "),
+        ] {
+            let provider = result
+                .completion_providers
+                .iter()
+                .find(|provider| provider.id == provider_id)
+                .unwrap_or_else(|| panic!("fixture must register {provider_id}"));
+            assert_eq!(provider.priority, 0);
+            assert!(
+                provider
+                    .items
+                    .iter()
+                    .any(|item| item.label == expected_item),
+                "{provider_id} must carry `{expected_item}` as inert text replacement data"
+            );
+            assert!(provider.items.len() <= provider.max_items);
+        }
 
         let component_ids: Vec<_> = result
             .ui_contributions
@@ -3092,6 +3288,10 @@ mod tests {
                 .iter()
                 .any(|id| id == "javascript.status.mode"),
             "fixture must register javascript.status.mode status item"
+        );
+        assert!(
+            component_ids.iter().any(|id| id == "markdown.status.mode"),
+            "fixture must register markdown.status.mode status item"
         );
 
         let grammar_ids: Vec<_> = result
@@ -4005,6 +4205,232 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn each_language_mode_registers_indent_electric_pairs_comment_triggers() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let cases = [
+            (
+                "@clay/rust",
+                "src/main.rs",
+                4,
+                5,
+                1,
+                vec!["}"],
+                vec![".", ":"],
+                false,
+                1700,
+            ),
+            (
+                "@clay/typescript",
+                "src/main.ts",
+                2,
+                6,
+                1,
+                vec!["}", ")", "]"],
+                vec!["."],
+                false,
+                1900,
+            ),
+            (
+                "@clay/javascript",
+                "src/main.js",
+                2,
+                6,
+                1,
+                vec!["}", ")", "]"],
+                vec!["."],
+                false,
+                1900,
+            ),
+            (
+                "@clay/markdown",
+                "README.md",
+                2,
+                5,
+                0,
+                vec![],
+                vec!["#", "[", "`"],
+                true,
+                1900,
+            ),
+        ];
+
+        for (
+            specifier,
+            path,
+            indent,
+            pair_count,
+            comment_count,
+            electric,
+            triggers,
+            markdown,
+            estimated_bytes,
+        ) in cases
+        {
+            let source = format!(
+                r#"
+                import {{ loadPackage }} from "clay:packages";
+                import {{ serverActivateClassifiedMode, serverClassifyDocument }} from "clay:modes";
+                await loadPackage("{specifier}");
+                const classification = serverClassifyDocument({{ documentId: 88, path: "{path}" }});
+                serverActivateClassifiedMode(classification, {{ path: "{path}" }});
+                "#,
+            );
+            let result = ClayJsRuntimeService::default()
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_or_else(|error| panic!("{specifier} should activate: {error}"));
+            let manifest = result
+                .behavior_manifest
+                .unwrap_or_else(|| panic!("{specifier} should publish a behavior manifest"));
+            let rules = &manifest.editor_rules;
+
+            assert_eq!(rules.tab.spaces_per_tab, indent, "{specifier} indent");
+            assert_eq!(rules.pairs.len(), pair_count, "{specifier} pairs");
+            assert_eq!(rules.comments.len(), comment_count, "{specifier} comments");
+            assert_eq!(
+                rules
+                    .electric_characters
+                    .iter()
+                    .map(|rule| rule.trigger.as_str())
+                    .collect::<Vec<_>>(),
+                electric,
+                "{specifier} electric characters"
+            );
+            assert_eq!(
+                rules
+                    .autocomplete_triggers
+                    .iter()
+                    .map(|rule| rule.trigger.as_str())
+                    .collect::<Vec<_>>(),
+                triggers,
+                "{specifier} autocomplete triggers"
+            );
+            if markdown {
+                assert!(matches!(
+                    &rules.enter,
+                    EnterRule::ContinueLineMarkers {
+                        markers,
+                        exit_on_empty_item: true,
+                    } if markers == &["-", "*", "+", "ordered-dot"]
+                ));
+            } else {
+                assert!(matches!(rules.enter, EnterRule::PreserveLeadingWhitespace));
+                assert_eq!(rules.comments[0].line_prefix, "//");
+            }
+            let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&manifest)
+                .expect("behavior manifest serializes")
+                .len();
+            assert!(
+                payload <= estimated_bytes,
+                "{specifier} payload {payload} exceeds package estimate {estimated_bytes}"
+            );
+            assert!(payload <= BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES);
+        }
+    }
+
+    #[tokio::test]
+    async fn language_commands_are_package_prefixed_and_server_first_with_provenance() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverListCommands } from "clay:commands";
+                await loadPackage("@clay/rust");
+                await loadPackage("@clay/typescript");
+                await loadPackage("@clay/javascript");
+                await loadPackage("@clay/markdown");
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify(serverListCommands()));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let commands: serde_json::Value = serde_json::from_str(&result.op_records[0]).unwrap();
+        for (command_id, package_name, api_prefix, declaration_source, load_source) in [
+            (
+                "rust.toggleLineComment",
+                "@clay/rust",
+                "rust",
+                include_str!("../../packages/rust/dist/index.js"),
+                include_str!("../../packages/rust/dist/load.js"),
+            ),
+            (
+                "typescript.toggleLineComment",
+                "@clay/typescript",
+                "typescript",
+                include_str!("../../packages/typescript/dist/index.js"),
+                include_str!("../../packages/typescript/dist/load.js"),
+            ),
+            (
+                "javascript.toggleLineComment",
+                "@clay/javascript",
+                "javascript",
+                include_str!("../../packages/javascript/dist/index.js"),
+                include_str!("../../packages/javascript/dist/load.js"),
+            ),
+            (
+                "markdown.toggleComment",
+                "@clay/markdown",
+                "markdown",
+                include_str!("../../packages/markdown/dist/index.js"),
+                include_str!("../../packages/markdown/dist/load.js"),
+            ),
+        ] {
+            let command = commands
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|command| command["commandId"] == command_id)
+                .unwrap_or_else(|| panic!("missing {command_id}"));
+            assert_eq!(command["packageName"], package_name);
+            assert_eq!(command["packageVersion"], "0.1.0");
+            assert_eq!(command["apiPrefix"], api_prefix);
+            assert!(declaration_source.contains(command_id));
+            assert!(
+                declaration_source.contains("routingPolicy: \"server-first\"")
+                    || declaration_source.contains("routingPolicy: \"ServerFirst\"")
+            );
+            assert!(declaration_source.contains("permissions: []"));
+            assert!(load_source.contains("routingPolicy:"));
+            assert!(load_source.contains("permissions:"));
+        }
+
+        for (component_id, package_name, api_prefix) in [
+            ("rust.status.mode", "@clay/rust", "rust"),
+            ("typescript.status.mode", "@clay/typescript", "typescript"),
+            ("javascript.status.mode", "@clay/javascript", "javascript"),
+            ("markdown.status.mode", "@clay/markdown", "markdown"),
+        ] {
+            let component = result
+                .ui_contributions
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+                .unwrap_or_else(|| panic!("missing {component_id}"));
+            assert_eq!(component.root_kind, "statusItem");
+            assert_eq!(component.provenance.package_name, package_name);
+            assert_eq!(component.provenance.package_version, "0.1.0");
+            assert_eq!(component.provenance.api_prefix, api_prefix);
+        }
+    }
+
+    #[test]
+    fn language_mode_registration_has_no_per_language_rust_branch() {
+        let sources = [
+            include_str!("ops/modes.rs"),
+            include_str!("../packages/modes.rs"),
+            include_str!("../packages/commands.rs"),
+        ];
+        for source in sources {
+            for mode in ["rust", "typescript", "javascript", "markdown"] {
+                assert!(!source.contains(&format!("mode_id == \"{mode}\"")));
+                assert!(!source.contains(&format!("mode_id == {mode:?}")));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn build_code_editing_manifest_produces_valid_editor_rules() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let result = ClayJsRuntimeService::default()
@@ -4024,9 +4450,10 @@ mod tests {
                 const rules = buildCodeEditingManifest({
                   indentSize: 4,
                   lineComment: "//",
+                  enter: { kind: "continueLineMarkers", markers: ["-"], exitOnEmptyItem: true },
                   pairs: [{ open: "(", close: ")" }],
-                  electricOutdentCharacters: ["}"],
-                  autocompleteTriggers: [".", "::"]
+                  electricOutdentCharacters: ["}", ")", "]", "xx", "}"],
+                  autocompleteTriggers: [".", "::", ":", ":"]
                 });
 
                 Deno.core.ops.op_clay_runtime_record(JSON.stringify({
@@ -4053,11 +4480,11 @@ mod tests {
         assert_eq!(parsed["apiPrefix"], "javascript");
         assert_eq!(parsed["packageName"], "@clay/javascript");
         assert_eq!(parsed["packageVersion"], "0.1.0");
-        assert_eq!(parsed["rulesEnterKind"], "preserveLeadingWhitespace");
+        assert_eq!(parsed["rulesEnterKind"], "continueLineMarkers");
         assert_eq!(parsed["rulesTabSpaces"], 4);
         assert_eq!(parsed["rulesPairCount"], 1);
         assert_eq!(parsed["rulesCommentCount"], 1);
-        assert_eq!(parsed["rulesElectricCount"], 1);
+        assert_eq!(parsed["rulesElectricCount"], 3);
         assert_eq!(parsed["rulesAutocompleteCount"], 2);
     }
 

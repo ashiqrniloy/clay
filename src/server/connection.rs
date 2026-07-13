@@ -14,10 +14,10 @@ use tokio::{
 use crate::{
     packages::commands::CommandRegistry,
     protocol::{
-        ClientId, ClientMessage, CompletionProvenance, CompletionResultSet, CompletionStatus,
-        DocumentId, DocumentMetadata, PROTOCOL_VERSION, ParseByteRange, ParsePolicy,
-        ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
-        SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
+        ClientId, ClientMessage, CompletionProvenance, CompletionRequest, CompletionResultSet,
+        CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata, PROTOCOL_VERSION,
+        ParseByteRange, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
+        SduiActionArgument, SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
     },
 };
@@ -26,9 +26,10 @@ use super::{
     RuntimeGenerationStore,
     behavior::ActiveBehaviorManifest,
     command_execution::{CommandExecutionRequest, CommandExecutionTarget, CommandExecutor},
+    completion::CompletionProviderMeta,
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
-    parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
+    parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
     sdui::{StaticSduiState, sdui_action_response},
     workspace::{
         WorkspaceError, WorkspaceState, open_existing_file_unlocked, open_selected_file_unlocked,
@@ -488,12 +489,9 @@ where
                 }
             }
             ClientMessage::CompletionRequest { request } => {
-                // Phase 18.11 task 3 wires the protocol shapes only; the
-                // server-side provider registry and cancellable UI-reactive
-                // coordinator are task 4. Until then, acknowledge the request
-                // with an empty, versioned result set so the protocol path is
-                // type-correct and the codec round-trips without implementing
-                // provider execution. No document mutation, no provider code.
+                // Static package items are already validated and provenance-
+                // tagged at configuration load. Resolve them from the Rust
+                // snapshot only; no package JavaScript runs on this request.
                 if let Err(rejection) = request.validate() {
                     codec
                         .write_server_message(
@@ -506,7 +504,20 @@ where
                         .await?;
                     continue;
                 }
-                let empty = CompletionResultSet {
+                let manifest_id = behavior.lock().await.manifest().manifest_id.clone();
+                let document_text = document.lock().await.text();
+                let providers = runtime_generation
+                    .current()
+                    .await
+                    .service
+                    .completion_providers();
+                let result = static_package_completion_result(
+                    &request,
+                    &manifest_id,
+                    &document_text,
+                    &providers,
+                )
+                .unwrap_or_else(|| CompletionResultSet {
                     request_id: request.request_id,
                     client_id: request.client_id,
                     document_id: request.document_id,
@@ -517,12 +528,9 @@ where
                     status: CompletionStatus::Empty,
                     items: Vec::new(),
                     provenance: CompletionProvenance::builtin_core(),
-                };
+                });
                 codec
-                    .write_server_message(
-                        &mut stream,
-                        &ServerMessage::CompletionResult { result: empty },
-                    )
+                    .write_server_message(&mut stream, &ServerMessage::CompletionResult { result })
                     .await?;
             }
             ClientMessage::Hello { .. } => {
@@ -978,6 +986,60 @@ async fn reload_document_response(
     }
 }
 
+fn static_package_completion_result(
+    request: &CompletionRequest,
+    manifest_id: &str,
+    document_text: &str,
+    providers: &[CompletionProviderMeta],
+) -> Option<CompletionResultSet> {
+    let package_prefix = manifest_id.split('.').next()?;
+    let provider = providers
+        .iter()
+        .filter(|provider| {
+            provider.provenance.package_prefix == package_prefix
+                && match &request.trigger {
+                    CompletionTrigger::Manual => true,
+                    CompletionTrigger::Character(character) => provider
+                        .trigger_metadata
+                        .trigger_characters
+                        .iter()
+                        .any(|trigger| trigger == character),
+                }
+        })
+        .max_by(|left, right| {
+            left.priority
+                .cmp(&right.priority)
+                .then_with(|| right.id.cmp(&left.id))
+        })?;
+    let start = usize::try_from(request.replacement_range.byte_start).ok()?;
+    let end = usize::try_from(request.replacement_range.byte_end).ok()?;
+    let prefix = document_text.get(start..end)?;
+    let items: Vec<_> = provider
+        .items
+        .iter()
+        .filter(|item| item.insert_text.starts_with(prefix))
+        .take(provider.max_items)
+        .cloned()
+        .collect();
+
+    Some(CompletionResultSet {
+        request_id: request.request_id,
+        client_id: request.client_id,
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        provider_generation: request.provider_generation,
+        replacement_range: request.replacement_range,
+        status: if items.is_empty() {
+            CompletionStatus::Empty
+        } else {
+            CompletionStatus::Ok
+        },
+        items,
+        provenance: provider.provenance.clone(),
+    })
+}
+
 async fn document_status_response(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
@@ -1060,6 +1122,7 @@ pub(crate) async fn open_document_followup_messages(
 struct OpenModeActivation {
     package_prefix: String,
     mode_id: String,
+    native_parse_policy: Option<ParsePolicy>,
 }
 
 async fn classify_open_document(
@@ -1126,14 +1189,30 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
         leading_json,
     );
     let evaluation = js_runtime.evaluate_controlled_module(source).await.ok()?;
-    let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
     super::apply_runtime_outputs_without_sdui(&evaluation, behavior).await;
     let record = evaluation.op_records.last()?;
     let value: serde_json::Value = serde_json::from_str(record).ok()?;
-    Some(OpenModeActivation {
+    let mut activation = OpenModeActivation {
         package_prefix: value.get("apiPrefix")?.as_str()?.to_string(),
         mode_id: value.get("modeId")?.as_str()?.to_string(),
-    })
+        native_parse_policy: None,
+    };
+    activation.native_parse_policy = js_runtime
+        .register_native_syntax_handler(
+            parse_coordinator,
+            generation_id,
+            &evaluation,
+            &metadata.path,
+            &activation.package_prefix,
+            &activation.mode_id,
+        )
+        .ok()
+        .flatten()
+        .map(|(_, policy)| policy);
+    // Tier 1 registers first. A same-generation JS handler remains available
+    // only when no selected native handler owns this package/mode key.
+    let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
+    Some(activation)
 }
 
 async fn schedule_open_parse(
@@ -1143,7 +1222,14 @@ async fn schedule_open_parse(
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     activation: &OpenModeActivation,
 ) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
-    let (window_text, window_byte_end) = bounded_utf8_prefix(text, 64 * 1024);
+    let policy = activation.native_parse_policy.unwrap_or(ParsePolicy::new(
+        64 * 1024,
+        4 * 1024,
+        30 * 1024 * 1024,
+        5_000,
+    ));
+    let (window_text, window_byte_end) =
+        bounded_utf8_prefix(text, policy.max_window_bytes as usize);
     let behavior_version = behavior.lock().await.version();
     let request = ParseScheduleRequest {
         document_id: metadata.document_id,
@@ -1164,25 +1250,13 @@ async fn schedule_open_parse(
         base_line: 0,
         text: window_text.to_string(),
     }];
-    parse_coordinator
-        .schedule_parse_with_windows(
-            request,
-            windows,
-            Some(ParsePolicy::new(
-                64 * 1024,
-                4 * 1024,
-                30 * 1024 * 1024,
-                5_000,
-            )),
-        )
-        .map_err(|error| {
-            RuntimeDiagnostic::error(
-                "clay.parse.open_activation_failed",
-                format!("Open-time parse scheduling failed: {error:?}"),
-            )
-        })?;
-
-    Ok(None)
+    match parse_coordinator.schedule_parse_with_windows(request, windows, Some(policy)) {
+        Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
+        Err(error) => Err(RuntimeDiagnostic::error(
+            "clay.parse.open_activation_failed",
+            format!("Open-time parse scheduling failed: {error:?}"),
+        )),
+    }
 }
 
 fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
@@ -1206,7 +1280,10 @@ mod tests {
         time::{Duration, timeout},
     };
 
-    use super::{execute_command_intent, handle_connection, sdui_command_request};
+    use super::{
+        execute_command_intent, handle_connection, sdui_command_request,
+        static_package_completion_result,
+    };
     use crate::server::command_execution::{CommandExecutionRequest, CommandExecutionTarget};
 
     fn workspace_state() -> Arc<Mutex<WorkspaceState>> {
@@ -1239,6 +1316,56 @@ mod tests {
 
     fn js_runtime() -> ClayJsRuntimeService {
         ClayJsRuntimeService::default()
+    }
+
+    #[test]
+    fn static_package_completion_filters_active_provider_items_by_prefix() {
+        let provenance = crate::protocol::CompletionProvenance {
+            package_name: "@clay/javascript".to_string(),
+            package_version: "0.1.0".to_string(),
+            package_prefix: "javascript".to_string(),
+        };
+        let provider = crate::server::completion::CompletionProviderMeta {
+            id: "javascript.keywords".to_string(),
+            provenance: provenance.clone(),
+            priority: 0,
+            trigger_metadata: crate::server::completion::CompletionTriggerMetadata {
+                trigger_characters: vec![".".to_string()],
+            },
+            word_boundary: crate::server::completion::WordBoundaryRule::default(),
+            items: ["function", "for", "return"]
+                .into_iter()
+                .map(|item| crate::protocol::CompletionItem::new(item, item, provenance.clone()))
+                .collect(),
+            timeout_ms: 300,
+            max_items: 32,
+            generation: 0,
+        };
+        let request = crate::protocol::CompletionRequest {
+            request_id: 1,
+            client_id: 2,
+            document_id: 3,
+            document_version: 4,
+            behavior_version: 5,
+            cursor_byte_offset: 2,
+            replacement_range: crate::protocol::CompletionReplacementRange::new(0, 2),
+            trigger: crate::protocol::CompletionTrigger::Character(".".to_string()),
+            provider_generation: 0,
+        };
+
+        let result =
+            static_package_completion_result(&request, "javascript.javascript", "fu", &[provider])
+                .unwrap();
+
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["function"]
+        );
+        assert_eq!(result.provenance, provenance);
     }
 
     fn runtime_generation() -> super::RuntimeGenerationStore {
@@ -2187,10 +2314,27 @@ await loadPackage("@clay/markdown");"#,
                 text: "fn main() {}\n".to_string(),
             }
         );
-        assert_eq!(
-            codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))
-        );
+        let behavior_version = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => {
+                assert_eq!(manifest.manifest_id, "rust.rust");
+                assert_eq!(
+                    manifest.scope,
+                    crate::protocol::BehaviorScope::Document { document_id: 1 }
+                );
+                assert_eq!(manifest.editor_rules.tab.spaces_per_tab, 4);
+                assert_eq!(
+                    manifest
+                        .editor_rules
+                        .autocomplete_triggers
+                        .iter()
+                        .map(|trigger| trigger.trigger.as_str())
+                        .collect::<Vec<_>>(),
+                    vec![".", ":"]
+                );
+                manifest.behavior_version
+            }
+            other => panic!("expected Rust behavior manifest after open, got {other:?}"),
+        };
 
         codec
             .write_client_message(
@@ -2200,7 +2344,7 @@ await loadPackage("@clay/markdown");"#,
                     client_id: 99,
                     lease_id: Some(1),
                     base_version: 1,
-                    behavior_version: 1,
+                    behavior_version,
                     transaction_id: 444,
                     operation: EditOperation::Insert {
                         byte_offset: 13,
@@ -2211,14 +2355,19 @@ await loadPackage("@clay/markdown");"#,
             .await
             .unwrap();
 
-        assert_eq!(
-            codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::EditAck {
-                document_id: 1,
-                confirmed_version: 2,
-                transaction_id: 444,
+        loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::EditAck {
+                    document_id: 1,
+                    confirmed_version: 2,
+                    transaction_id: 444,
+                } => break,
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                other => panic!("expected edit acknowledgement, got {other:?}"),
             }
-        );
+        }
 
         codec
             .write_client_message(
@@ -2569,6 +2718,12 @@ await loadPackage("@clay/markdown");"#,
                 .iter()
                 .any(|span| span.token_type == TokenType::Heading1)
         );
+        assert!(
+            set.spans
+                .iter()
+                .all(|span| span.provenance.package_version == "builtin"),
+            "open Markdown decorations must come from compiled Tier 1 grammar, not parser.js"
+        );
         let _ = fs::remove_file(config_root.join("init.js"));
         let _ = fs::remove_dir(config_root);
     }
@@ -2638,14 +2793,15 @@ await loadPackage("@clay/markdown");"#,
             .unwrap();
         let set = update.decoration_update.expect("background decorations");
 
+        let native_window = crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES as u64;
         assert_eq!(set.document_id, 2);
         assert_eq!(set.viewport_byte_start, 0);
-        assert_eq!(set.viewport_byte_end, 64 * 1024);
-        assert!(set.spans.iter().all(|span| span.byte_end <= 64 * 1024));
+        assert_eq!(set.viewport_byte_end, native_window);
+        assert!(set.spans.iter().all(|span| span.byte_end <= native_window));
         assert!(
             set.spans
                 .iter()
-                .any(|span| span.token_type == TokenType::Heading1 && span.byte_start == 0)
+                .any(|span| span.token_type == TokenType::Heading1)
         );
         assert!(!set.spans.iter().any(|span| span.byte_start > 64 * 1024));
     }
@@ -2750,15 +2906,20 @@ await loadPackage("@clay/markdown");"#,
             )
             .await
             .unwrap();
-        assert!(matches!(
-            codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::FileOperationFailed {
-                code: FileErrorCode::OutsideRoot,
-                workspace_root_id: Some(id),
-                document_id: None,
-                ..
-            } if id == selected_root_id
-        ));
+        loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::OutsideRoot,
+                    workspace_root_id: Some(id),
+                    document_id: None,
+                    ..
+                } if id == selected_root_id => break,
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                other => panic!("expected outside-root failure, got {other:?}"),
+            }
+        }
 
         drop(client);
         server_task.await.unwrap().unwrap();

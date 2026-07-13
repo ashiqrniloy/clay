@@ -262,30 +262,36 @@ Manual matrix:
 
 Automated coverage (no manual execution needed): `invalid_to_valid_edit_clears_squiggle_after_current_parse`, `valid_to_invalid_edit_keeps_local_typing_non_blocking`, `runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline`, `valid_tree_fast_path_skips_error_node_traversal`, `range_diagnostics_do_not_enter_editor_hot_paths`, plus prior Phase 18.17 suite coverage in `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, and `tests/performance_protocol.rs`.
 
-### Phase 18.14 language package expansion smoke
+### Phase 18.18 first-party language package smoke
 
-Phase 18.14 upgrades the first-party grammar packages into full language packages. They remain explicit opt-in:
+First-party language packages are explicit opt-in. Run the checked-in end-user-shaped fixture:
 
-```js
-import { loadPackage } from "clay:packages";
-
-await loadPackage("@clay/rust");
-await loadPackage("@clay/typescript");
-await loadPackage("@clay/javascript");
-await loadPackage("@clay/markdown");
+```bash
+cargo run -- smoke-gui --config-fixture language-packages
 ```
 
-Manual language package smoke:
+It calls only `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, `loadPackage("@clay/javascript")`, and `loadPackage("@clay/markdown")`; no raw ops or per-facade setup. Open these deterministic fixtures in order, then repeat one small edit and scroll while decoration/diagnostic work is pending:
 
-1. Put the `loadPackage` lines above in `~/.config/clay/init.js`, or use the checked-in fixture with `cargo run -- smoke-gui --config-fixture language-packages`. The fixture loads all four first-party language packages through one-line `loadPackage` calls with no per-facade plumbing.
-2. Launch Clay with `cargo run`, `cargo run -- smoke-gui`, or the fixture command above.
-3. Open small `.rs`, `.ts`, and `.js` files similar to `tests/fixtures/configuration/language-packages/workspace/main.rs`, `main.ts`, and `main.js`. A `.md` file activates the Markdown mode with Tier 1 native highlighting and the package-JS preview SDUI panel.
-4. Confirm each file is classified into the package-declared major mode (`rust`, `typescript`, or `javascript`) and remains editable with package behavior (indent size, delimiter pairs, comment continuation, electric outdent) applied.
-5. Confirm the language status item appears in the editor chrome (e.g., `rust.status.mode`, `typescript.status.mode`, `javascript.status.mode`).
-6. Trigger autocomplete with `.` or `::` and confirm a bounded, metadata-only completion list is offered from the package provider (`rust.keywords`, `typescript.keywords`, `javascript.keywords`).
-7. Remove the language package load lines and relaunch. The same files should still open editable, but classification falls back to `core.code` with no language-specific behavior, status item, or completions.
+| Language | Valid fixture(s) | Invalid fixture | Expected mode and behavior |
+| --- | --- | --- | --- |
+| Rust | `tests/fixtures/syntax/rust.rs` | `tests/fixtures/syntax/rust-invalid.rs` | `rust`; 4-space indent, pairs, `//` comment toggle, `.`/`:` keyword completion |
+| TypeScript | `tests/fixtures/syntax/typescript.ts`, `tests/fixtures/syntax/typescript.tsx` | `tests/fixtures/syntax/typescript-invalid.ts` | `typescript`; 2-space indent, pairs, `//` comment toggle, `.` keyword completion |
+| JavaScript | `tests/fixtures/syntax/javascript.js`, `tests/fixtures/syntax/javascript.jsx`, `tests/fixtures/syntax/javascript.mjs`, `tests/fixtures/syntax/javascript.cjs` | `tests/fixtures/syntax/javascript-invalid.js` | `javascript`; 2-space indent, pairs, `//` comment toggle, `.` keyword completion |
+| Markdown | `tests/fixtures/syntax/markdown.md` | `tests/fixtures/syntax/markdown-invalid.md` | `markdown`; list continuation/prose pairs, Markdown construct completion, optional package-JS preview/status separate from native decorations |
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_14_language_package_expansion_smoke_has_runnable_fixture_contract` verifies the fixture and docs; `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions` loads the fixture deterministically and confirms all four first-party language packages register their syntax grammars, completion providers, status-item UI components, and (for Markdown) its JS parse handler; `src/server/js_runtime.rs::first_party_language_packages_are_not_silent_defaults` confirms an empty `init.js` registers no package contributions (only the compiled-in native grammars remain); `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, `language_package_classification_is_deterministic_across_load_orders`, and `language_package_rejects_unauthorized_completion_provider` cover mode classification, command/completion/UI registration, fallback behavior, load-order determinism, and permission enforcement.
+Manual matrix:
+
+1. Launch the command above. Verify all eight valid fixture extensions classify into their package-declared major modes and remain editable.
+2. Confirm Gruvbox-themed native vocabulary highlighting appears after text paints: code keywords/strings/comments/functions/types for Rust, TypeScript, and JavaScript; headings, list markers, code, links, quotes, strong, and emphasis for Markdown. Markdown decoration is Tier 1 native; its optional preview/status remains independent package-JS SDUI and does not open a default panel.
+3. Trigger keyword completion with the listed one-character trigger. Confirm bounded priority-0 static text items from `rust.keywords`, `typescript.keywords`, `javascript.keywords`, or `markdown.keywords`; snippets are not expected in Phase 18.18.
+4. Exercise indent, pairs, and comment behavior in each code fixture. Confirm Rust uses four spaces; TypeScript/JavaScript use two; Markdown continues list markers. Command/status metadata is package-prefixed (`rust.status.mode`, `typescript.status.mode`, `javascript.status.mode`, `markdown.status.mode`).
+5. Open each invalid fixture. Confirm text paints first and a themed syntax-error squiggle arrives asynchronously. Repair the error, then confirm the current parse clears its squiggle without blocking local typing or scroll.
+6. Type and scroll during background parse. Typing/scroll remain responsive; package JavaScript, parser work, IPC, or full-document serialization must not enter input/paint/scroll hot paths.
+7. Remove one package `loadPackage` line, relaunch, and open its fixture. Confirm graceful fallback to `core.code` (Rust/TypeScript/JavaScript) or `core.text` (Markdown), with no package status/completion/highlighting error. Restore the line before testing the next package.
+
+Fixtures contain only short synthetic source text—no secrets, real paths, or executable authority.
+
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover vocabulary decorations, range diagnostics, and no-hot-path behavior.
 
 ### End-to-end file browser workflow smoke
 

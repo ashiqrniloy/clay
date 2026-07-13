@@ -1,5 +1,5 @@
-// @clay/javascript load entry. Phase 18.14 full language package:
-// keeps the Phase 18.10 grammar contribution, adds a JavaScript major mode
+// @clay/javascript load entry. Phase 18.18 language package:
+// registers native grammar/vocabulary metadata plus a JavaScript major mode
 // with editor behavior rules, one server-first command, a keyword completion
 // provider, and an optional status-item UI contribution.
 
@@ -19,13 +19,18 @@ export function javascriptGrammarContract() {
     syntaxGrammar: {
       languageId: "javascript",
       filePatterns: { extensions: ["js", "jsx", "mjs", "cjs"] },
-      grammar: { kind: "tree-sitter-wasm", path: "./grammars/javascript.wasm", source: "tree-sitter-javascript" },
+      grammar: { kind: "native", source: "tree-sitter-javascript" },
       queries: { highlights: "./queries/highlights.scm" },
       styleMap: {
-        keyword: "keyword.control",
-        string: "string.quoted",
-        comment: "comment.line",
-        punctuation: "punctuation.definition"
+        keyword: { type: "Keyword" },
+        string: { type: "String" },
+        comment: { type: "Comment" },
+        punctuation: { type: "Operator" },
+        text: { type: "Paragraph" },
+        function: { type: "Function" },
+        "function.declaration": { type: "Function", modifiers: ["Declaration"] },
+        type: { type: "Type" },
+        number: { type: "Number" }
       },
       budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
     }
@@ -35,9 +40,24 @@ export function javascriptGrammarContract() {
 const javascriptEditorRules = buildCodeEditingManifest({
   indentSize: 2,
   lineComment: "//",
-  electricOutdentCharacters: ["}"],
+  pairs: [
+    { open: "(", close: ")" },
+    { open: "[", close: "]" },
+    { open: "{", close: "}" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+    { open: "`", close: "`" }
+  ],
+  electricOutdentCharacters: ["}", ")", "]"],
   autocompleteTriggers: ["."]
 });
+
+const javascriptKeywords = Object.freeze([
+  "async", "await", "break", "case", "catch", "class", "const", "continue",
+  "debugger", "default", "delete", "do", "else", "export", "extends", "false",
+  "finally", "for", "from", "function", "if", "import", "in", "instanceof",
+  "let", "new", "return", "switch", "throw", "true", "try", "typeof"
+]);
 
 const javascriptPackageManifest = () => ({
   name: "@clay/javascript",
@@ -80,9 +100,10 @@ const javascriptPackageManifest = () => ({
       completionProviders: [
         {
           id: "javascript.keywords",
-          priority: 20,
+          priority: 0,
           triggerCharacters: completionTriggerCharactersFromEditorRules(javascriptEditorRules),
           wordBoundaryChars: [".", ";", ","],
+          items: javascriptKeywords,
           budgets: { timeoutMs: 300, maxItems: 32 }
         }
       ],
@@ -117,9 +138,10 @@ export default async function loadJavaScriptPackage() {
   await serverRegisterCompletionProvider({
     packageManifest: javascriptPackageManifest(),
     providerId: "javascript.keywords",
-    priority: 20,
+    priority: 0,
     triggerCharacters: completionTriggerCharactersFromEditorRules(javascriptEditorRules),
     wordBoundaryChars: [".", ";", ","],
+    items: javascriptKeywords,
     budgets: { timeoutMs: 300, maxItems: 32 }
   });
   await serverRegisterComponentContribution(javascriptPackageManifest(), {

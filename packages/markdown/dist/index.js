@@ -1,9 +1,37 @@
+import { buildCodeEditingManifest } from "clay:behavior";
+import { completionTriggerCharactersFromEditorRules } from "clay:completion";
+
 export const packageName = "@clay/markdown";
 export const apiPrefix = "markdown";
 export const modeId = "markdown";
 
 export const supportedExtensions = ["md", "markdown", "mdown"];
 export const supportedMimeTypes = ["text/markdown"];
+
+export const markdownSyntaxGrammar = Object.freeze({
+  languageId: "markdown",
+  filePatterns: { extensions: supportedExtensions },
+  grammar: { kind: "native", source: "tree-sitter-md-025" },
+  queries: { highlights: "./queries/highlights.scm" },
+  styleMap: {
+    punctuation: { type: "Operator" },
+    text: { type: "Paragraph" },
+    code: { type: "CodeBlock", fontRole: "monospace" },
+    "code-span": { type: "CodeSpan", fontRole: "monospace" },
+    "heading-1": { type: "Heading1" },
+    "heading-2": { type: "Heading2" },
+    "heading-3": { type: "Heading3" },
+    "heading-4": { type: "Heading4" },
+    "heading-5": { type: "Heading5" },
+    "heading-6": { type: "Heading6" },
+    strong: { type: "Paragraph", modifiers: ["Bold"] },
+    emphasis: { type: "Paragraph", modifiers: ["Italic"] },
+    "list-marker": { type: "ListItem" },
+    link: { type: "Link" },
+    quote: { type: "Quote" }
+  },
+  budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
+});
 
 export const markdownLargeFilePolicy = Object.freeze({
   smallFileMaxBytes: 1 * 1024 * 1024,
@@ -59,7 +87,44 @@ export function markdownPolicyForDocument(options = {}) {
   });
 }
 
+export const markdownEditorRules = Object.freeze(
+  buildCodeEditingManifest({
+    indentSize: 2,
+    enter: {
+      kind: "continueLineMarkers",
+      markers: ["-", "*", "+", "ordered-dot"],
+      exitOnEmptyItem: true
+    },
+    pairs: [
+      { open: "(", close: ")" },
+      { open: "[", close: "]" },
+      { open: "**", close: "**" },
+      { open: "__", close: "__" },
+      { open: "`", close: "`" }
+    ],
+    autocompleteTriggers: ["#", "[", "`"]
+  })
+);
+
+export const markdownCompletionProvider = Object.freeze({
+  id: "markdown.keywords",
+  priority: 0,
+  triggerCharacters: completionTriggerCharactersFromEditorRules(markdownEditorRules),
+  wordBoundaryChars: ["#", "[", "]", "(", ")", "`", "*", "_"],
+  items: [
+    "# ", "## ", "### ", "#### ", "##### ", "###### ", "- ", "* ",
+    "1. ", "> ", "```", "~~~", "---", "**", "__", "`"
+  ],
+  budgets: { timeoutMs: 300, maxItems: 32 }
+});
+
 export const commands = Object.freeze([
+  {
+    id: "markdown.toggleComment",
+    userFacingName: "Toggle Markdown Comment",
+    routingPolicy: "ServerFirst",
+    permissions: []
+  },
   {
     id: "markdown.togglePreview",
     userFacingName: "Toggle Markdown Preview",
@@ -79,6 +144,13 @@ export const commands = Object.freeze([
     permissions: []
   }
 ]);
+
+export const markdownStatusItem = Object.freeze({
+  kind: "statusItem",
+  id: "markdown.status.mode",
+  style: { variant: "muted" },
+  children: [{ kind: "label", id: "markdown.status.mode.label" }]
+});
 
 export const behaviorTransforms = Object.freeze([
   {
@@ -122,23 +194,30 @@ export function markdownPackageManifest() {
         "mode-registration",
         "mode-activation",
         "command-registration",
+        "completion-provider",
         "parse-document",
         "render-decorations"
       ],
       modes: [modeId],
       docs: "./docs/index.md",
       apiDependencies: [
+        "clay.syntax.serverRegisterSyntaxGrammar",
         "clay.modes.serverRegisterModePattern",
         "clay.modes.serverActivateMajorMode",
+        "clay.behavior.buildCodeEditingManifest",
         "clay.commands.serverRegisterCommand",
+        "clay.completion.serverRegisterCompletionProvider",
+        "clay.completion.completionTriggerCharactersFromEditorRules",
         "clay.parse.serverRegisterParseHandler",
-        "clay.decorations.serverPublishDecorations"
+        "clay.decorations.serverPublishDecorations",
+        "clay.ui.serverRegisterComponentContribution"
       ],
       performance: {
         estimatedManifestBytes: 1900,
         hotPathPolicy: "no hot-path JS on keypress/paint"
       },
       contributions: {
+        syntaxGrammars: [markdownSyntaxGrammar],
         modePatterns: [
           {
             mode: modeId,
@@ -152,6 +231,7 @@ export function markdownPackageManifest() {
           displayName: command.userFacingName,
           routingPolicy: "server-first"
         })),
+        completionProviders: [markdownCompletionProvider],
         keyRouting: [
           { commandId: "markdown.togglePreview", key: "Ctrl+Shift+M", routingPolicy: "server-first" },
           { commandId: "markdown.insertHeading", key: "Ctrl+Alt+1", routingPolicy: "server-first" },
@@ -161,6 +241,9 @@ export function markdownPackageManifest() {
           transformId: transform.transformId,
           kind: transform.transformId === "markdown.inline-pair-handling" ? "pair-rule" : "enter-rule"
         })),
+        ui: {
+          components: [markdownStatusItem]
+        },
         sdui: [
           {
             regionId: "markdown.previewStatus",
@@ -170,13 +253,7 @@ export function markdownPackageManifest() {
             estimatedUpdateBytes: 512
           }
         ],
-        decorations: [
-          {
-            primitiveId: "markdown.syntaxDecorations",
-            kind: "markdown.syntax",
-            adapter: "./dist/parser.js"
-          }
-        ]
+        decorations: []
       }
     }
   };

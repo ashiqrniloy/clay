@@ -1005,7 +1005,7 @@ fn grammar_package_reference_docs_cover_authoring_primitive_security_and_perform
                 "core.code",
                 "parse-document",
                 "render-decorations",
-                "punctuation.definition",
+                "Vocabulary styleMap",
                 "third-party/native grammar artifact loading",
                 "keypress, paint, layout, scroll, pointer, or text-event hot paths",
             ] {
@@ -1372,7 +1372,7 @@ fn phase18_14_language_package_default_init_js_loading_is_documented() {
 }
 
 #[test]
-fn phase18_14_behavior_manifest_helper_is_documented() {
+fn phase18_18_behavior_manifest_helper_is_documented() {
     let package_guide = read("docs/reference/packages/creating-packages.md");
 
     for phrase in [
@@ -1380,15 +1380,83 @@ fn phase18_14_behavior_manifest_helper_is_documented() {
         "clay.completion.completionTriggerCharactersFromEditorRules",
         "indentSize",
         "lineComment",
+        "enter",
+        "pairs",
         "electricOutdentCharacters",
         "autocompleteTriggers",
-        "C-family manifest",
+        "validated inert rules",
         "behavior manifest API",
         "Derive `triggerCharacters` from the major-mode behavior manifest",
     ] {
         assert!(
             package_guide.contains(phrase),
             "creating-packages.md must document the generic behavior-manifest helper with `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn package_author_guide_documents_first_party_language_contract() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let vocabulary = read("docs/reference/primitives/syntax-vocabulary.md");
+
+    for phrase in [
+        "Phase 18.18 authoring contract: complete first-party language packages",
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "@clay/markdown",
+        "serverRegisterSyntaxGrammar",
+        "buildCodeEditingManifest",
+        "serverRegisterCompletionProvider",
+        "serverRegisterComponentContribution",
+        "priority 0",
+        "Phase 18.19 owns snippet transforms",
+        "loadEntry` once per runtime generation",
+        "loadPackage` grants no capabilities",
+        "first-party engine",
+        "Arbitrary third-party grammar/native loading and LSP process authority remain deferred",
+        "keypress, paint, layout, scroll, pointer, or text-event hot paths",
+    ] {
+        assert!(
+            guide.contains(phrase),
+            "package guide must document first-party language contract `{phrase}`"
+        );
+    }
+    for phrase in [
+        "Package styleMap authoring",
+        "clay.contributions.syntaxGrammars[].styleMap",
+        "closed `TokenType` variant",
+        "raw CSS",
+        "Creating Clay Packages: complete first-party language packages",
+    ] {
+        assert!(
+            vocabulary.contains(phrase),
+            "vocabulary reference must document styleMap authoring `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn package_author_guide_documents_markdown_decoration_preview_split() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+
+    for phrase in [
+        "Markdown decoration and preview are separate",
+        "tree-sitter-md-025",
+        "queries/highlights.scm",
+        "Tier 3 JavaScript fallback",
+        "setSyntaxEnginePreference(\"markdown\", \"javascript\")",
+        "no default parser-backed `decorations` contribution",
+        "preview remains package-JS SDUI",
+        "Fixed panels consume a declared slot; transient overlays do not",
+        "Masonry widget",
+        "user-over-package precedence",
+        "SduiSnapshot",
+    ] {
+        assert!(
+            guide.contains(phrase),
+            "package guide must document Markdown decoration/preview split `{phrase}`"
         );
     }
 }
@@ -1643,7 +1711,7 @@ fn package_author_guide_documents_native_wasm_js_fallback_routes() {
             "TokenType",
             "Modifiers",
             "clay.parse.open_failed",
-            "package-root-confined",
+            "confined WASM",
             "third-party/native grammar artifact loading",
             "keypress, paint, layout, scroll, pointer, or text-event hot paths",
         ] {
@@ -2239,6 +2307,202 @@ fn load_package_introduces_no_hidden_configuration_key() {
 }
 
 #[test]
+fn first_party_language_packages_add_no_hidden_configuration_surface() {
+    let config_review = read("docs/reference/clay-js-api/configuration.md");
+
+    // Verify the Phase 18.18 configuration review section exists
+    assert!(
+        config_review.contains("Phase 18.18 first-party language package configuration review"),
+        "configuration.md must contain Phase 18.18 config review section"
+    );
+    assert!(
+        config_review.contains("did **not** promote a new user-facing `clay:configuration` API"),
+        "Phase 18.18 config review must state no new config API was promoted"
+    );
+
+    // Verify the section documents existing APIs, not hidden keys
+    for phrase in [
+        "clay.packages.loadPackage",
+        "clay.theme.setTheme",
+        "clay.syntax.setSyntaxEnginePreference",
+        "clay.behavior.buildCodeEditingManifest",
+        "clay.completion.serverRegisterCompletionProvider",
+        "clay.configuration.setPackageOption",
+    ] {
+        assert!(
+            config_review.contains(phrase),
+            "Phase 18.18 config review must document existing API {phrase}"
+        );
+    }
+
+    // Verify rejected hidden keys are listed
+    for key in [
+        "enableRust",
+        "language.indentWidth",
+        "language.pairs",
+        "completion.keywords",
+        "markdown.preview",
+        "syntax.styleMap",
+        "language.behavior",
+    ] {
+        assert!(
+            config_review.contains(key),
+            "Phase 18.18 config review must reject hidden key {key}"
+        );
+    }
+
+    // Package source files must not contain hidden per-language config keys
+    for (pkg, file) in [
+        ("rust", "packages/rust/dist/load.js"),
+        ("typescript", "packages/typescript/dist/load.js"),
+        ("javascript", "packages/javascript/dist/load.js"),
+        ("markdown", "packages/markdown/dist/load.js"),
+    ] {
+        let src = read(file);
+        for key in ["setPackageOption", "setModePreference", "packageOptions"] {
+            assert!(
+                !src.contains(key),
+                "{pkg} load.js must not introduce config surface {key}"
+            );
+        }
+    }
+
+    // Per-package docs/index.md must reference only existing APIs for config
+    for (pkg, doc) in [
+        ("rust", read("packages/rust/docs/index.md")),
+        ("typescript", read("packages/typescript/docs/index.md")),
+        ("javascript", read("packages/javascript/docs/index.md")),
+        ("markdown", read("packages/markdown/docs/index.md")),
+    ] {
+        assert!(
+            doc.contains("loadPackage") || doc.contains("clay:packages"),
+            "{pkg}/docs/index.md must document loadPackage as the config surface"
+        );
+        assert!(
+            doc.contains("config") || doc.contains("Configuration"),
+            "{pkg}/docs/index.md must reference configuration"
+        );
+    }
+}
+
+#[test]
+fn first_party_language_packages_ride_existing_clay_js_facades() {
+    // Verify that Phase 18.18 first-party language packages use only existing
+    // Clay JS facades — no new raw Deno.core.ops or package-specific API surface.
+    let existing_facade_imports = [
+        "clay:syntax",
+        "clay:modes",
+        "clay:behavior",
+        "clay:commands",
+        "clay:completion",
+        "clay:ui",
+        "clay:packages",
+    ];
+
+    for (pkg, file) in [
+        ("rust", "packages/rust/dist/load.js"),
+        ("typescript", "packages/typescript/dist/load.js"),
+        ("javascript", "packages/javascript/dist/load.js"),
+        ("markdown", "packages/markdown/dist/load.js"),
+    ] {
+        let src = read(file);
+        // Each package load.js must use at least one existing facade import
+        let found = existing_facade_imports.iter().any(|f| src.contains(f));
+        assert!(
+            found,
+            "{pkg} load.js must import at least one existing clay: facade"
+        );
+        // No raw Deno.core.ops calls
+        assert!(
+            !src.contains("Deno.core.ops"),
+            "{pkg} load.js must not call raw Deno.core.ops"
+        );
+        assert!(
+            !src.contains("Deno.core.opAsync"),
+            "{pkg} load.js must not call raw Deno.core.opAsync"
+        );
+    }
+
+    // Per-package docs index.md must name the facades used
+    for (pkg, doc) in [
+        ("rust", read("packages/rust/docs/index.md")),
+        ("typescript", read("packages/typescript/docs/index.md")),
+        ("javascript", read("packages/javascript/docs/index.md")),
+        ("markdown", read("packages/markdown/docs/index.md")),
+    ] {
+        assert!(
+            doc.contains("loadPackage") || doc.contains("clay:packages"),
+            "{pkg}/docs/index.md must reference loadPackage"
+        );
+        assert!(
+            doc.contains("clay:"),
+            "{pkg}/docs/index.md must reference at least one clay: facade"
+        );
+    }
+}
+
+#[test]
+fn first_party_language_package_docs_and_registry_are_fresh() {
+    // The generated Clay JS API registry must match current Markdown docs.
+    // The per-package Markdown reference docs and per-package docs/index.md
+    // pages must be linked from the master index.
+    let registry_text = read("docs/generated/clay-js-api-registry.json");
+    let master_index = read("docs/index.md");
+
+    // Registry must contain entries for all public APIs used by first-party packages
+    for api_id in [
+        "clay.syntax.serverRegisterSyntaxGrammar",
+        "clay.modes.serverRegisterModePattern",
+        "clay.behavior.buildCodeEditingManifest",
+        "clay.commands.serverRegisterCommand",
+        "clay.completion.serverRegisterCompletionProvider",
+        "clay.ui.serverRegisterComponentContribution",
+        "clay.packages.loadPackage",
+    ] {
+        assert!(
+            registry_text.contains(api_id),
+            "generated registry must contain {api_id}"
+        );
+    }
+
+    // Master index must link all four per-package reference docs
+    for (pkg, ref_doc) in [
+        ("rust", "reference/packages/rust.md"),
+        ("typescript", "reference/packages/typescript.md"),
+        ("javascript", "reference/packages/javascript.md"),
+        ("markdown", "reference/packages/markdown.md"),
+    ] {
+        assert!(
+            master_index.contains(ref_doc),
+            "docs/index.md must link {ref_doc}"
+        );
+        let ref_content = read(&format!("docs/{ref_doc}"));
+        assert!(
+            !ref_content.is_empty(),
+            "{ref_doc} must exist and be non-empty"
+        );
+        assert!(
+            ref_content.contains(pkg),
+            "{ref_doc} must reference package name {pkg}"
+        );
+    }
+
+    // API inventory must list the public APIs
+    let inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+    for api_id in [
+        "clay.syntax.serverRegisterSyntaxGrammar",
+        "clay.completion.serverRegisterCompletionProvider",
+        "clay.behavior.buildCodeEditingManifest",
+        "clay.packages.loadPackage",
+    ] {
+        assert!(
+            inventory.contains(api_id),
+            "api-inventory.toml must contain {api_id}"
+        );
+    }
+}
+
+#[test]
 fn package_ui_layout_authoring_contract_is_unified_across_package_sources() {
     // Plan 035 task 9: the package UI/layout authoring contract must apply
     // identically to @clay/* packages and user-installed packages, with native
@@ -2402,5 +2666,72 @@ fn phase18_11_completion_provider_authoring_contract_documented_in_package_guide
     assert!(
         api_reference.contains("clay.completion.serverRegisterCompletionProvider"),
         "completion provider API reference must be linked from the authoring contract"
+    );
+}
+
+#[test]
+fn first_party_language_package_docs_are_indexed_and_complete() {
+    let rust_doc = read("packages/rust/docs/index.md");
+    let typescript_doc = read("packages/typescript/docs/index.md");
+    let javascript_doc = read("packages/javascript/docs/index.md");
+    let markdown_doc = read("packages/markdown/docs/index.md");
+    let docs_index = read("docs/index.md");
+
+    // Verify all four per-package docs/index.md files exist and contain
+    // the required Phase 18.18 full-mode contract elements
+    for (name, doc) in [
+        ("rust", rust_doc),
+        ("typescript", typescript_doc),
+        ("javascript", javascript_doc),
+        ("markdown", markdown_doc),
+    ] {
+        assert!(
+            doc.contains("Tier 1 native"),
+            "{name}/docs/index.md must document Tier 1 native grammar"
+        );
+        assert!(
+            doc.contains("vocabulary styleMap") || doc.contains("styleMap"),
+            "{name}/docs/index.md must document vocabulary styleMap"
+        );
+        assert!(
+            doc.contains("Behavior manifest") || doc.contains("behavior manifest"),
+            "{name}/docs/index.md must document behavior manifest"
+        );
+        assert!(
+            doc.contains("Completion provider") || doc.contains("completion provider"),
+            "{name}/docs/index.md must document completion provider"
+        );
+        assert!(
+            doc.contains("per-language Rust branches") || doc.contains("per-language Rust"),
+            "{name}/docs/index.md must state no per-language Rust branches"
+        );
+    }
+
+    // Verify docs/index.md links per-package pages with correct full-mode descriptions
+    assert!(
+        docs_index.contains("[@clay/rust Package](reference/packages/rust.md)")
+            && docs_index.contains("first-party Rust full-mode package"),
+        "docs/index.md must link rust package with full-mode description"
+    );
+    assert!(
+        docs_index.contains("[@clay/typescript Package](reference/packages/typescript.md)")
+            && docs_index.contains("first-party TypeScript full-mode package"),
+        "docs/index.md must link typescript package with full-mode description"
+    );
+    assert!(
+        docs_index.contains("[@clay/javascript Package](reference/packages/javascript.md)")
+            && docs_index.contains("first-party JavaScript full-mode package"),
+        "docs/index.md must link javascript package with full-mode description"
+    );
+    assert!(
+        docs_index.contains("[@clay/markdown Package](reference/packages/markdown.md)")
+            && docs_index.contains("first-party Markdown full-mode package"),
+        "docs/index.md must link markdown package with full-mode description"
+    );
+
+    // Verify docs/index.md does NOT contain stale "grammar-only" descriptions
+    assert!(
+        !docs_index.contains("grammar-only"),
+        "docs/index.md must not contain stale 'grammar-only' descriptions for first-party packages"
     );
 }

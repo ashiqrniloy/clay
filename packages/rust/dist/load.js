@@ -1,5 +1,5 @@
-// @clay/rust load entry. Phase 18.14 expansion: keeps the Phase 18.10
-// grammar contribution unchanged and adds a `rust` major mode, behavior
+// @clay/rust load entry. Phase 18.18 registers native grammar/vocabulary
+// metadata plus a `rust` major mode, behavior
 // manifest, package-prefixed command, keyword completion provider, and an
 // optional status-item UI contribution through generic Clay primitives.
 // No language-specific Rust branches, native widgets, or hot-path JS.
@@ -37,8 +37,8 @@ export function rustGrammarContract() {
 export async function loadRustPackage() {
   const manifest = rustPackageManifest();
 
-  // Register the Tree-sitter grammar contribution first; this is the same
-  // Phase 18.10 path and remains independent of active major mode.
+  // Register inert native grammar/vocabulary metadata first; syntax selection
+  // remains independent of active major mode.
   await serverRegisterSyntaxGrammar(rustGrammarContract());
 
   // Register the Rust major-mode pattern. Documents opened with matching
@@ -64,7 +64,7 @@ export async function loadRustPackage() {
     });
   }
 
-  // Register a lightweight keyword/snippet completion provider.
+  // Register bounded static keyword text replacements. Snippet transforms land in Phase 18.19.
   await serverRegisterCompletionProvider({
     packageManifest: manifest,
     packageName,

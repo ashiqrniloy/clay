@@ -111,6 +111,25 @@ The exact baseline colors are locked by `free_form_style_token_decoration_colors
 | `diagnostic.*` / `search.match` | `Variable` | layer color from `kind` |
 | unknown valid fallback | `Variable` | none |
 
+## Package styleMap authoring
+
+First-party grammar packages declare capture mappings in `clay.contributions.syntaxGrammars[].styleMap` as vocabulary objects, not renderer colors or CSS:
+
+```json
+{
+  "function.declaration": {
+    "type": "Function",
+    "modifiers": ["Declaration"]
+  },
+  "heading-1": { "type": "Heading1" },
+  "strong": { "type": "Paragraph", "modifiers": ["Bold"] }
+}
+```
+
+`type` must be one closed `TokenType` variant and every `modifiers` value must be a closed `Modifiers` name. `fontRole`, when needed for code spans/blocks, remains semantic (`monospace` or `proportional`). The grammar-to-vocabulary conversion is load/parse-time validation; the native renderer reads resulting inert spans through `StyleRegistry`. Do not put colors, raw CSS, callbacks, executable code, or open-ended grammar scopes in a first-party styleMap. Legacy `styleToken` inputs remain a third-party compatibility path only.
+
+See [Creating Clay Packages: complete first-party language packages](../packages/creating-packages.md#phase-1818-authoring-contract-complete-first-party-language-packages) for grammar, behavior, completion, UI, and Markdown preview composition.
+
 ## Theme binding
 
 Theme packages declare inert `clay.contributions.textStyles` entries. Each entry targets either:

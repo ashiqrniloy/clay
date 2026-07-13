@@ -33,6 +33,7 @@ The public configuration surface is [`clay.theme.setTheme`](../../reference/clay
 The authoritative package authoring and vocabulary references are:
 
 - [Text Vocabulary and Two-Axis Decoration Contract](../../reference/primitives/syntax-vocabulary.md)
+- [Package styleMap authoring (vocabulary captures)](../../reference/primitives/syntax-vocabulary.md#package-stylemap-authoring)
 - [Phase 18.15 theme authoring: `textStyles` and `setTheme`](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme)
 
 ## Responsibilities
@@ -197,5 +198,6 @@ let color = style.color;
 - [Range Diagnostics](range-diagnostics.md)
 - [Syntax Grammar Registry](syntax-grammar-registry.md)
 - [Text Vocabulary and Two-Axis Decoration Contract](../../reference/primitives/syntax-vocabulary.md)
+- [Package styleMap authoring (vocabulary captures)](../../reference/primitives/syntax-vocabulary.md#package-stylemap-authoring)
 - [Theme authoring guide](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme)
 - [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)

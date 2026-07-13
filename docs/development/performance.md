@@ -43,6 +43,7 @@ Current benchmark targets:
 - `benches/protocol_server_baselines.rs`: `protocol_codec_payloads`, `client_edit_queue_pressure`, `server_document_acknowledgements`, and `server_stale_edit_rejections` groups for `rkyv` frame encoding/decoding, client queue pressure, initial-document payloads, and in-process server acknowledgement/rejection paths.
 - `benches/runtime_sdui_baselines.rs`: `runtime_configuration_baselines` and `sdui_application_baselines` groups for deterministic behavior-manifest construction plus native SDUI snapshot/update and SDUI codec paths.
 - `benches/markdown_baselines.rs`: `markdown_activation_baselines`, `markdown_parse_and_decoration_baselines`, and `markdown_decorated_editor_baselines` groups for first-party Markdown package classification/activation, parse-update/decorations validation, and native decorated-editor render-adjacent work.
+- `benches/first_party_language_baselines.rs`: `first_party_open_parse`, `first_party_incremental_edit`, and `first_party_decorated_scroll` groups for the actual Rust, TypeScript, TSX, JavaScript, and Markdown native descriptors, package queries, representative fixtures, incremental tree reuse, and inert decorated-editor scroll work.
 - `tools/bench/markdown-parser.mjs`: advisory Node.js harness for actual Markdown parser cost. It synthesizes 64 KiB, 256 KiB, 1 MiB, 5 MiB, and 16 MiB corpora by repeating the largest committed repository Markdown files, then times the active `markdown-it` parser, full-document package adapter advisory path, and `windowed-adapter` viewport path without creating dummy source documents. JSON output separates parser, adapter, transport, render-adjacent, status/fallback, and memory categories for Phase 18.5 editor-parity verification. Historical mdast timings remain below only as replacement rationale.
 
 Run all benchmarks locally:
@@ -177,6 +178,38 @@ Performance workflows must remain local and constrained:
 - Bench/profiling commands must not grant shell authority.
 - Bench/profiling commands must not execute arbitrary JavaScript in the client.
 - Fixture generation and benchmark helpers must stay within approved output/data boundaries and preserve server-authoritative file/workspace permissions.
+
+## Phase 18.18 first-party language package verification
+
+Phase 18.18 adds deterministic payload/open-order guards and an optimized Criterion target for all five first-party native descriptor/fixture combinations (`.rs`, `.ts`, `.tsx`, `.js`, `.md`). These fixtures are inert repository text; benchmark code loads no config, package JavaScript, network, shell, workspace, or user path.
+
+Hard guards:
+
+- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It also locks the 4096-byte native parse window, 5000 ms timeout, and 30 MiB syntax-cache ceiling.
+- `first_party_open_parse_does_not_block_initial_render_per_language` installs a deliberately delayed handler for each package, enqueues parse work, and proves the editor snapshot is visible before background parse completion.
+- Existing `editor_performance_invariants` guards keep parser/package JavaScript/IPC/file IO out of paint, input, layout, and scroll paths.
+
+Measured on the local Linux verification host (2026-07-13, optimized Criterion profile, 10 samples, 1 s warm-up, 2 s measurement):
+
+| Fixture | Decoration/update payload | Open parse median | Incremental one-character edit median | Decorated scroll median |
+| --- | ---: | ---: | ---: | ---: |
+| Rust | 928 / 1168 B | 70.692 µs | 176.05 µs | 1.141 µs |
+| TypeScript | 1480 / 1768 B | 82.379 µs | 122.17 µs | 1.416 µs |
+| TSX | 1304 / 1576 B | 71.946 µs | 127.00 µs | 1.216 µs |
+| JavaScript | 1304 / 1584 B | 71.403 µs | 133.52 µs | 1.244 µs |
+| Markdown | 664 / 920 B | 91.540 µs | 209.38 µs | 1.008 µs |
+
+Payload ceilings are 8192 B per decoration set and 4096 B per combined incremental update. All measured scroll work is far below the advisory 16 ms render-adjacent budget; all open/incremental parses are below 0.25 ms median on these small representative fixtures. Direct monitoring of the optimized benchmark process (excluding Cargo/compiler parent RSS) observed 16.9 MiB maximum RSS, below `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` (256 MiB); retained syntax accounting remains independently capped at `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB).
+
+Baseline workflow used:
+
+```text
+cargo bench --bench first_party_language_baselines -- --save-baseline phase18.18-entry --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench first_party_language_baselines -- --baseline phase18.18-entry --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench first_party_language_baselines -- first_party_incremental_edit/tsx --baseline phase18.18-entry --sample-size 20 --warm-up-time 2 --measurement-time 4
+```
+
+Immediate comparison found no sustained actionable regression. The first short TSX comparison reported +6.57%; the repeated 20-sample run narrowed to +1.48% and Criterion classified it within the noise threshold. Absolute results and baseline deltas remain advisory and machine-local until Phase 21; deterministic payload, enqueue-order, cache, and no-hot-path checks remain the hard CI gates. Baseline files stay under ignored `target/criterion/`, not source control.
 
 ## Markdown mode verification
 

@@ -1,6 +1,6 @@
 # @clay/typescript Package
 
-`@clay/typescript` is Clay's first-party TypeScript language package. Phase 18.14 expanded it from a grammar-only syntax highlighter into a full language package: it contributes a `typescript` major mode, behavior manifest, package-prefixed command, keyword completion provider, and an optional status-item UI contribution while keeping the Tree-sitter grammar contribution from Phase 18.10 unchanged.
+`@clay/typescript` is Clay's first-party TypeScript language package. Phase 18.14 expanded it from a grammar-only syntax highlighter into a full language package: it contributes a `typescript` major mode, behavior manifest, package-prefixed command, keyword completion provider, and an optional status-item UI contribution with Phase 18.18 native grammar metadata and a direct vocabulary styleMap.
 
 ## End-User Setup
 
@@ -25,9 +25,9 @@ Optional customization is exposed through documented Clay/package JS APIs. For e
 - File patterns: `.ts`, `.tsx`, `.mts`, `.cts`
 - Docs path: `./docs/index.md`
 - Entries: `./dist/index.js`, `./dist/load.js`
-- Grammar contribution: `tree-sitter-wasm` at `./grammars/typescript.wasm`
+- Grammar contribution: `native`, source `tree-sitter-typescript` (no package `.wasm` asset)
 - Highlight query: `./queries/highlights.scm`
-- Style map: `keyword` -> `keyword.control`, `string` -> `string.quoted`, `comment` -> `comment.line`, `punctuation` -> `punctuation.definition`
+- Vocabulary styleMap: TypeScript/TSX captures map directly to closed `TokenType` + `Modifiers`, including `Function + Declaration` and `Type`
 - Budgets: `timeoutMs = 5000`, `maxWindowBytes = 4096`; published decorations remain bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` and cached syntax chunks by `SYNTAX_CACHE_BUDGET_BYTES`
 - API dependencies:
   - `clay.syntax.serverRegisterSyntaxGrammar`
@@ -41,20 +41,20 @@ Optional customization is exposed through documented Clay/package JS APIs. For e
 The package now declares:
 
 - **Major mode `typescript`**: registered with generic file-extension probes (`*.ts`, `*.tsx`, `*.mts`, `*.cts`). No TypeScript-specific classification branch lives in Clay core.
-- **Behavior manifest**: indentation (2 spaces), delimiter pairs, line-comment continuation (`//`), and an electric `}` outdent rule. These are expressed through generic `EditorBehaviorRules` primitives.
+- **Behavior manifest**: indentation (2 spaces), bracket/quote/template-literal pairs, line-comment continuation (`//`), and electric `}`/`)`/`]` outdent rules. These are expressed through generic `EditorBehaviorRules` primitives.
 - **Command `typescript.toggleLineComment`**: a server-first command registered for validated execution through the Clay `CommandExecution` path.
-- **Completion provider `typescript.keywords`**: metadata-only provider with `.` trigger and bounded item/timeout budgets.
+- **Completion provider `typescript.keywords`**: priority-0 metadata-only provider with 32 inert TypeScript keyword text replacements, `.` trigger, language-appropriate boundaries, and 300 ms/32-item budgets. Snippet transforms remain deferred to Phase 18.19.
 - **Status item `typescript.status.mode`**: an inert `statusItem` component contribution validated by Clay before client publication.
 
 Active syntax grammar remains selectable independently of active major mode, so a `.ts` file can use the TypeScript grammar while its major mode is still `core.code`, and loading the package does not silently change the mode of already-open documents.
 
 ## Configuration
 
-Phase 18.14 keeps TypeScript editing defaults (2-space indentation, `//` line comments, delimiter pairs, electric `}` outdent, `.` autocomplete trigger) as package-defined values. No new user-tunable configuration keys are introduced in this phase. Future phases may expose documented, package-prefixed options through `clay.configuration.setPackageOption` (for example, `typescript.indentSize`) after they are declared in `clay.contributions.packageOptions`.
+Phase 18.18 keeps TypeScript editing defaults (2-space indentation, `//` line comments, bracket/quote/template-literal pairs, electric `}`/`)`/`]` outdent, and `.` autocomplete trigger) as package-defined values. No new user-tunable configuration keys are introduced in this phase. Future phases may expose documented, package-prefixed options through `clay.configuration.setPackageOption` (for example, `typescript.indentSize`) after they are declared in `clay.contributions.packageOptions`.
 
 ## Phase 18.16 syntax engine artifacts
 
-Tier 1 native highlighting uses Clay's compiled `tree-sitter-typescript = 0.23.2` dependency for TypeScript and TSX plus the package query at `packages/typescript/queries/highlights.scm`. Tier 2 uses the package-root-confined `./grammars/typescript.wasm` through the shared web-tree-sitter host adapter only after explicit `setSyntaxEnginePreference("typescript", "wasm")`; package load order cannot replace native Tier 1. Tier 3 remains the server-side package-JS parse-handler route when `setSyntaxEnginePreference("typescript", "javascript")` is selected or no grammar is available. All routes map captures through the shared `TokenType` + `Modifiers` vocabulary pipeline. Until a WASM binary is committed, `packages/typescript/grammars/PROVENANCE.md` records the reproducible build command and required SHA-256 recording step. Runtime never fetches, builds, shells out, or loads native libraries for this artifact.
+Tier 1 native highlighting uses Clay's compiled `tree-sitter-typescript = 0.23.2` dependency for TypeScript and TSX plus the package query at `packages/typescript/queries/highlights.scm`. Tier 2 remains available to an explicitly selected package that supplies valid confined WASM metadata; `@clay/typescript` itself ships native metadata only, and package load order cannot replace native Tier 1. Tier 3 remains the server-side package-JS parse-handler route when `setSyntaxEnginePreference("typescript", "javascript")` is selected or no grammar is available. All routes map captures through the shared `TokenType` + `Modifiers` vocabulary pipeline. Until a WASM binary is committed, `packages/typescript/grammars/PROVENANCE.md` records the reproducible build command and required SHA-256 recording step. Runtime never fetches, builds, shells out, or loads native libraries for this artifact.
 
 ## Typography
 

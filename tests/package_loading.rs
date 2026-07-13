@@ -31,7 +31,7 @@ use clay::packages::modes::{
 };
 use clay::packages::record::{PackageRecordRule, assemble_package_record};
 use clay::packages::service::{PackageService, PackageServiceError};
-use clay::protocol::BehaviorScope;
+use clay::protocol::{BehaviorScope, Modifiers, TokenType};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -317,7 +317,14 @@ fn markdown_package_contract_validates_with_required_metadata() {
     assert_eq!(record.manifest.clay.api_prefix, "markdown");
     assert_eq!(record.manifest.clay.modes, vec!["markdown"]);
     assert_eq!(record.docs.docs_path, "./docs/index.md");
-    assert_eq!(record.contributions.commands.len(), 3);
+    assert_eq!(record.contributions.commands.len(), 4);
+    assert!(
+        record
+            .contributions
+            .commands
+            .iter()
+            .any(|command| command.id == "markdown.toggleComment")
+    );
     assert_eq!(record.contributions.key_routing.len(), 3);
     // Verify key binding descriptors carry command IDs and key tokens.
     let kr = &record.contributions.key_routing;
@@ -329,7 +336,32 @@ fn markdown_package_contract_validates_with_required_metadata() {
         && k.key_binding.as_deref() == Some("Ctrl+Shift+8")));
     assert_eq!(record.contributions.text_transforms.len(), 3);
     assert_eq!(record.contributions.sdui.len(), 1);
-    assert_eq!(record.contributions.decorations.len(), 1);
+    assert!(record.contributions.decorations.is_empty());
+    assert_eq!(record.contributions.ui_components.len(), 1);
+    assert_eq!(
+        record.contributions.ui_components[0].id,
+        "markdown.status.mode"
+    );
+    assert_eq!(record.contributions.syntax_grammars.len(), 1);
+    let grammar = &record.contributions.syntax_grammars[0];
+    assert_eq!(grammar.grammar_kind, "native");
+    assert_eq!(
+        grammar.grammar_source.as_deref(),
+        Some("tree-sitter-md-025")
+    );
+    assert_eq!(
+        grammar.style_map["heading-1"].token_type,
+        TokenType::Heading1
+    );
+    assert!(
+        grammar.style_map["strong"]
+            .modifiers
+            .contains(Modifiers::BOLD)
+    );
+    assert_eq!(
+        grammar.style_map["code-span"].font_role,
+        Some(clay::protocol::DocumentFontRole::Monospace)
+    );
 
     let clay = package["clay"].as_object().unwrap();
     let mode_patterns = clay["contributions"]["modePatterns"].as_array().unwrap();
@@ -370,7 +402,10 @@ fn markdown_package_rejects_missing_required_permissions() {
             err.rule,
             PackageRecordRule::UndeclaredPermissionForContribution
         );
-        if api_id != "clay.commands.serverRegisterCommand" {
+        if !matches!(
+            missing_permission,
+            "command-registration" | "parse-document" | "render-decorations"
+        ) {
             assert_eq!(err.contribution_id.as_deref(), Some(api_id));
         }
         assert!(

@@ -9,9 +9,9 @@ deno_op: op_clay_modes_register_pattern
 deno_op_path: src/server/ops/modes.rs::op_clay_modes_register_pattern
 name: buildCodeEditingManifest
 user_facing_name: Build Code Editing Manifest
-summary: Build a generic C-family code-editing behavior manifest (editorRules) from language-specific parameters for use with major mode registration.
+summary: Build a generic code-editing behavior manifest (editorRules) from language-specific parameters for use with major mode registration.
 owner: server
-phase: Phase 18.14
+phase: Phase 18.18
 visibility: public
 permissions: []
 key_bindings: []
@@ -32,6 +32,10 @@ custom_properties:
     type: string
     default: optional
     description: End token for block comments (reserved for future phases).
+  - name: enter
+    type: object
+    default: preserveLeadingWhitespace
+    description: Generic EnterRule declaration; supports preserveLeadingWhitespace, insertNewlineOnly, continueLineMarkers, or preserveFenceBodyIndent.
   - name: pairs
     type: Array<{ open: string; close: string }>
     default: [{ "(" / ")" }, { "[" / "]" }, { "{" / "}" }, { '"' / '"' }, { "'" / "'" }]
@@ -39,14 +43,14 @@ custom_properties:
   - name: electricOutdentCharacters
     type: string[]
     default: []
-    description: Characters that trigger electric indentation; "}" currently produces outdent-one-level.
+    description: Unique single characters that trigger the generic outdent-one-level effect.
   - name: autocompleteTriggers
     type: string[]
     default: []
-    description: Trigger characters that may start autocomplete, e.g. [".", "::"].
+    description: Up to 32 unique single-character autocomplete triggers, e.g. [".", ":"].
 security: Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use this helper when registering a C-family major mode instead of hand-rolling editorRules that may drift from the server validator.
-lookup_tags: [js-api, behavior, manifest, editor-rules, phase18.14]
+agent_guidance: Use this helper when registering a language major mode instead of hand-rolling editorRules that may drift from the server validator.
+lookup_tags: [js-api, behavior, manifest, editor-rules, phase18.18]
 app_visible: true
 help_visible: true
 stability: runtime-backed
@@ -57,11 +61,11 @@ async: false
 
 ## Summary
 
-Build a generic C-family code-editing behavior manifest from language-specific parameters.
+Build a generic code-editing behavior manifest from language-specific parameters.
 
 ## Description
 
-`buildCodeEditingManifest` produces an `editorRules` object matching the shape validated by `clay:modes` registration and activation. It covers indentation size, delimiter pairs, line-comment continuation, electric outdent characters, and autocomplete trigger characters.
+`buildCodeEditingManifest` produces an `editorRules` object matching the shape validated by `clay:modes` registration and activation. It covers generic Enter behavior, indentation size, delimiter pairs, line-comment continuation, electric outdent characters, and autocomplete trigger characters.
 
 The helper is intentionally declarative: it emits only inert metadata and never produces executable callbacks, client-side JavaScript, native handles, or raw authority fields.
 
@@ -89,6 +93,7 @@ serverRegisterModePattern(manifest, {
   editorRules: buildCodeEditingManifest({
     indentSize: 4,
     lineComment: "//",
+    enter: { kind: "preserveLeadingWhitespace" },
     electricOutdentCharacters: ["}"],
     autocompleteTriggers: ["."]
   })
@@ -119,9 +124,10 @@ const rules = buildCodeEditingManifest({
 - `lineComment` (`string`, optional): line-comment token.
 - `blockCommentStart` (`string`, optional): reserved.
 - `blockCommentEnd` (`string`, optional): reserved.
+- `enter` (`object`, optional): a generic `EnterRule` declaration (`preserveLeadingWhitespace`, `insertNewlineOnly`, `continueLineMarkers`, or `preserveFenceBodyIndent`).
 - `pairs` (`Array<{ open: string; close: string }>`, optional): delimiter pairs.
-- `electricOutdentCharacters` (`string[]`, optional): electric characters.
-- `autocompleteTriggers` (`string[]`, optional): autocomplete trigger characters.
+- `electricOutdentCharacters` (`string[]`, optional): unique single-character electric triggers.
+- `autocompleteTriggers` (`string[]`, optional): up to 32 unique single-character autocomplete triggers.
 
 ## Key bindings
 
@@ -135,7 +141,7 @@ See options above.
 
 Returns a synchronous `editorRules` object with:
 
-- `enter`: `{ kind: "preserveLeadingWhitespace" }`
+- `enter`: the supplied generic rule, or `{ kind: "preserveLeadingWhitespace" }`
 - `pairs`: filtered non-empty pairs
 - `comments`: line-comment continuation rules
 - `tabSpaces`: indentation size
@@ -152,7 +158,7 @@ No permission required. Pure helper returning inert declarative rules. Does not 
 
 ## Agent guidance
 
-Prefer `clay.behavior.buildCodeEditingManifest` when authoring a C-family language package. Do not hand-roll `editorRules` objects that duplicate this shape; if a language needs rules outside the helper's scope, extend the helper rather than bypassing it.
+Prefer `clay.behavior.buildCodeEditingManifest` when authoring a language package. Do not hand-roll `editorRules` objects that duplicate this shape; if a language needs rules outside the helper's scope, extend the helper rather than bypassing it.
 
 ## Backing implementation
 
@@ -162,4 +168,4 @@ Prefer `clay.behavior.buildCodeEditingManifest` when authoring a C-family langua
 
 ## Lookup metadata
 
-Lookup tags: `js-api`, `behavior`, `manifest`, `editor-rules`, `phase18.14`.
+Lookup tags: `js-api`, `behavior`, `manifest`, `editor-rules`, `phase18.18`.

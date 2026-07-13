@@ -45,10 +45,10 @@ fn grammar_package(prefix: &str, language_id: &str, extension: &str) -> Value {
                         "injections": "./queries/injections.scm"
                     },
                     "styleMap": {
-                        "keyword": "keyword.control",
-                        "string": "string.quoted",
-                        "comment": "comment.line",
-                        "punctuation": "punctuation.definition"
+                        "keyword": { "type": "Keyword" },
+                        "string": { "type": "String" },
+                        "comment": { "type": "Comment" },
+                        "punctuation": { "type": "Operator" }
                     },
                     "budgets": { "timeoutMs": 5000, "maxWindowBytes": 4096 }
                 }]
@@ -182,7 +182,7 @@ fn tier1_native_first_party_is_default_for_known_extensions() {
         assert_eq!(grammar.language_id, language_id);
         assert_eq!(grammar.package_prefix, package_prefix);
         assert_eq!(contribution.engine_tier, SyntaxEngineTier::Native);
-        assert_eq!(contribution.grammar_kind, "tree-sitter-native");
+        assert_eq!(contribution.grammar_kind, "native");
         if language_id == "markdown" {
             assert_eq!(
                 contribution.style_map["code"].font_role,
@@ -240,27 +240,22 @@ fn first_party_native_registry_falls_back_to_no_grammar_for_unknown_extensions()
 
 #[cfg(any(unix, windows))]
 #[test]
-fn user_forced_tier_is_honored_and_recorded_in_provenance() {
+fn forced_wasm_without_wasm_artifact_does_not_masquerade_native_metadata() {
     let (_, record) = first_party_grammar_package_record("rust");
     let mut registry = SyntaxGrammarRegistry::with_first_party_native();
     registry
         .set_engine_preference("rust", SyntaxEngineTier::Wasm)
         .expect("valid preference");
 
-    assert_eq!(registry.register_package(&record), Ok(1));
+    assert_eq!(registry.register_package(&record), Ok(0));
 
     let selection = registry.select_for_document(
         &classification_input(17, Some("src/main.rs")),
         &core_code_activation(17, 2),
         3,
     );
-    let grammar = selection
-        .active_syntax_grammar
-        .as_ref()
-        .expect("forced wasm grammar selected");
-    assert_eq!(grammar.engine_tier, SyntaxEngineTier::Wasm);
-    assert_eq!(grammar.package_prefix, "rust");
-    assert!(selection.why.contains("wasm tier"));
+    assert!(selection.active_syntax_grammar.is_none());
+    assert!(selection.why.contains("document remains editable"));
 }
 
 #[cfg(any(unix, windows))]
@@ -371,7 +366,8 @@ fn tier2_rejects_grammar_path_outside_package_root() {
 #[cfg(any(unix, windows))]
 #[test]
 fn tier2_wasm_override_suppresses_tier1_when_user_selected() {
-    let (_, record) = first_party_grammar_package_record("rust");
+    let record = assemble_package_record(&grammar_package("rust", "rust", "rs"))
+        .expect("valid synthetic Tier 2 wasm package");
     let mut registry = SyntaxGrammarRegistry::with_first_party_native();
 
     assert_eq!(
@@ -560,7 +556,7 @@ fn syntax_grammar_contribution_validates_with_provenance_and_budgets() {
     assert_eq!(grammar.grammar_kind, "tree-sitter-wasm");
     assert_eq!(grammar.grammar_path, "./grammars/rust.wasm");
     assert_eq!(grammar.highlights_query_path, "./queries/highlights.scm");
-    assert_eq!(grammar.style_map["keyword"].style_token, "keyword.control");
+    assert_eq!(grammar.style_map["keyword"].token_type, TokenType::Keyword);
     assert_eq!(grammar.timeout_ms, Some(5000));
     assert_eq!(grammar.max_window_bytes, Some(4096));
     assert!(grammar.estimated_payload_bytes > 0);
@@ -570,7 +566,7 @@ fn syntax_grammar_contribution_validates_with_provenance_and_budgets() {
 fn syntax_style_map_accepts_document_font_roles_and_rejects_concrete_typography() {
     let mut package = grammar_package("markdown", "markdown", "md");
     package["clay"]["contributions"]["syntaxGrammars"][0]["styleMap"]["code"] = json!({
-        "styleToken": "markup.inline-code",
+        "type": "CodeSpan",
         "fontRole": "monospace"
     });
 
@@ -581,7 +577,7 @@ fn syntax_style_map_accepts_document_font_roles_and_rejects_concrete_typography(
     );
 
     package["clay"]["contributions"]["syntaxGrammars"][0]["styleMap"]["code"] = json!({
-        "styleToken": "markup.inline-code",
+        "type": "CodeSpan",
         "fontFamily": "JetBrains Mono"
     });
     assert_eq!(
@@ -673,7 +669,7 @@ fn syntax_grammar_rejects_native_or_executable_authority_fields() {
 }
 
 #[test]
-fn syntax_grammar_rejects_unknown_style_tokens_and_raw_css() {
+fn syntax_grammar_rejects_legacy_style_tokens_and_raw_css() {
     let mut package = grammar_package("rust", "rust", "rs");
     package["clay"]["contributions"]["syntaxGrammars"][0]["styleMap"]["keyword"] =
         json!("color: red");
@@ -1071,13 +1067,266 @@ fn first_party_language_fixtures_produce_themed_vocabulary_decorations() {
                 "{fixture} should emit {expected:?} vocabulary decoration"
             );
         }
-        assert!(set.spans.iter().all(|span| span.scope.is_some()));
+        // Phase 18.18: first-party grammar captures are pure two-axis
+        // vocabulary (closed token_type + modifiers); the optional `scope`
+        // escape stays reserved for third-party package-JS decorations.
+        assert!(set.spans.iter().all(|span| span.scope.is_none()));
         assert!(
             set.spans
                 .iter()
                 .all(|span| span.provenance.package_prefix == package_dir)
         );
     }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn rust_grammar_emits_vocabulary_tokens_through_stylemap() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry
+        .get("rust.rust")
+        .expect("native Rust grammar")
+        .clone();
+    let query = std::fs::read_to_string(format!(
+        "{}/packages/rust/queries/highlights.scm",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("read Rust highlights query");
+    let handler = TreeSitterSyntaxHandler::new(contribution, rust_language(), &query)
+        .expect("Rust query compiles");
+    let set = handler
+        .parse_sync(parse_notification(
+            1,
+            "fn main() { let s = \"x\"; // comment\n}",
+        ))
+        .expect("Rust parses")
+        .decoration_update
+        .expect("Rust decorations");
+
+    for token_type in [
+        TokenType::Keyword,
+        TokenType::String,
+        TokenType::Comment,
+        TokenType::Function,
+    ] {
+        assert!(
+            set.spans.iter().any(|span| span.token_type == token_type),
+            "Rust should emit {token_type:?} through styleMap"
+        );
+    }
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Function
+            && span.modifiers.contains(Modifiers::DECLARATION)
+            && span.scope.is_none()
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn typescript_grammar_covers_typescript_and_tsx_language_ids() {
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let query = std::fs::read_to_string(format!(
+        "{manifest_dir}/packages/typescript/queries/highlights.scm"
+    ))
+    .expect("read TypeScript highlights query");
+
+    for (path, contribution_id, language_id, language, fixture) in [
+        (
+            "src/app.ts",
+            "typescript.typescript",
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            "tests/fixtures/syntax/typescript.ts",
+        ),
+        (
+            "src/app.tsx",
+            "typescript.tsx",
+            "tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            "tests/fixtures/syntax/typescript.tsx",
+        ),
+    ] {
+        let selection = registry.select_for_document(
+            &classification_input(71, Some(path)),
+            &core_code_activation(71, 1),
+            1,
+        );
+        let grammar = selection
+            .active_syntax_grammar
+            .unwrap_or_else(|| panic!("{path} should select Tier 1 syntax"));
+        let contribution = registry
+            .get(contribution_id)
+            .expect("registered TS grammar")
+            .clone();
+
+        assert_eq!(grammar.contribution_id, contribution_id);
+        assert_eq!(grammar.language_id, language_id);
+        assert_eq!(contribution.engine_tier, SyntaxEngineTier::Native);
+        assert_eq!(
+            contribution.grammar_source.as_deref(),
+            Some("tree-sitter-typescript")
+        );
+
+        let source = std::fs::read_to_string(format!("{manifest_dir}/{fixture}"))
+            .expect("read TypeScript fixture");
+        let set = TreeSitterSyntaxHandler::new(contribution, language, &query)
+            .expect("TypeScript query compiles")
+            .parse_sync(parse_notification_for("typescript", 1, &source))
+            .expect("TypeScript fixture parses")
+            .decoration_update
+            .expect("TypeScript decorations");
+        assert!(set.spans.iter().any(|span| {
+            span.token_type == TokenType::Function
+                && span.modifiers.contains(Modifiers::DECLARATION)
+        }));
+        assert!(
+            set.spans
+                .iter()
+                .any(|span| span.token_type == TokenType::Type)
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn javascript_grammar_covers_js_jsx_mjs_cjs_extensions() {
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    for extension in ["js", "jsx", "mjs", "cjs"] {
+        let path = format!("src/app.{extension}");
+        let selection = registry.select_for_document(
+            &classification_input(72, Some(&path)),
+            &core_code_activation(72, 1),
+            1,
+        );
+        let grammar = selection
+            .active_syntax_grammar
+            .unwrap_or_else(|| panic!("{path} should select Tier 1 syntax"));
+
+        assert_eq!(grammar.contribution_id, "javascript.javascript");
+        assert_eq!(grammar.language_id, "javascript");
+    }
+
+    let contribution = registry
+        .get("javascript.javascript")
+        .expect("native JavaScript grammar")
+        .clone();
+    assert_eq!(contribution.engine_tier, SyntaxEngineTier::Native);
+    assert_eq!(
+        contribution.grammar_source.as_deref(),
+        Some("tree-sitter-javascript")
+    );
+
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let query = std::fs::read_to_string(format!(
+        "{manifest_dir}/packages/javascript/queries/highlights.scm"
+    ))
+    .expect("read JavaScript highlights query");
+    let source = std::fs::read_to_string(format!(
+        "{manifest_dir}/tests/fixtures/syntax/javascript.js"
+    ))
+    .expect("read JavaScript fixture");
+    let set = TreeSitterSyntaxHandler::new(
+        contribution,
+        tree_sitter_javascript::LANGUAGE.into(),
+        &query,
+    )
+    .expect("JavaScript query compiles")
+    .parse_sync(parse_notification_for("javascript", 1, &source))
+    .expect("JavaScript fixture parses")
+    .decoration_update
+    .expect("JavaScript decorations");
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Function && span.modifiers.contains(Modifiers::DECLARATION)
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn markdown_grammar_emits_prose_vocabulary_tokens_with_modifiers() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry
+        .get("markdown.markdown")
+        .expect("native Markdown grammar")
+        .clone();
+    let query = std::fs::read_to_string(format!(
+        "{}/packages/markdown/queries/highlights.scm",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("read Markdown highlights query");
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, tree_sitter_md_025::LANGUAGE.into(), &query)
+            .expect("Markdown query compiles");
+    let source = "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n\n**bold**\n\n_emphasis_\n\n`code`\n\n[x](https://example.com)\n\n- item\n\n> quote\n\n```rust\nfn main() {}\n```\n";
+    let set = handler
+        .parse_sync(parse_notification_for("markdown", 1, source))
+        .expect("Markdown parses")
+        .decoration_update
+        .expect("Markdown decorations");
+
+    for token_type in [
+        TokenType::Heading1,
+        TokenType::Heading2,
+        TokenType::Heading3,
+        TokenType::Heading4,
+        TokenType::Heading5,
+        TokenType::Heading6,
+        TokenType::CodeSpan,
+        TokenType::CodeBlock,
+        TokenType::ListItem,
+        TokenType::Link,
+        TokenType::Quote,
+    ] {
+        assert!(
+            set.spans.iter().any(|span| span.token_type == token_type),
+            "Markdown should emit {token_type:?} through styleMap"
+        );
+    }
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Paragraph && span.modifiers.contains(Modifiers::BOLD)
+    }));
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Paragraph && span.modifiers.contains(Modifiers::ITALIC)
+    }));
+    assert!(set.spans.iter().all(|span| span.scope.is_none()));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn markdown_decoration_renders_through_tier1_native_engine() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry
+        .get("markdown.markdown")
+        .expect("compiled Markdown descriptor")
+        .clone();
+    assert_eq!(contribution.engine_tier, SyntaxEngineTier::Native);
+    assert_eq!(
+        contribution.grammar_source.as_deref(),
+        Some("tree-sitter-md-025")
+    );
+
+    let query = include_str!("../packages/markdown/queries/highlights.scm");
+    let set =
+        TreeSitterSyntaxHandler::new(contribution, tree_sitter_md_025::LANGUAGE.into(), query)
+            .expect("compiled Markdown query")
+            .parse_sync(parse_notification_for(
+                "markdown",
+                1,
+                "# heading\n\n> quote\n",
+            ))
+            .expect("native Markdown parse")
+            .decoration_update
+            .expect("native Markdown decoration set");
+
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Heading1 && span.provenance.package_version == "builtin"
+    }));
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Quote)
+    );
 }
 
 #[test]
@@ -1443,30 +1692,49 @@ fn tree_sitter_handler_reuses_cached_tree_for_later_document_versions() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn tree_sitter_handler_fails_closed_for_invalid_query_or_unmapped_capture() {
+fn tree_sitter_handler_fails_closed_for_invalid_query() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
 
-    let invalid = TreeSitterSyntaxHandler::new(
-        contribution.clone(),
-        rust_language(),
-        "(not_a_node) @keyword",
-    )
-    .unwrap_err();
+    let invalid =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), "(not_a_node) @keyword")
+            .unwrap_err();
     assert!(matches!(
         invalid,
         TreeSitterSyntaxError::QueryCompileFailed { .. }
     ));
     assert!(invalid.to_string().contains("query failed to compile"));
+}
 
-    let unmapped = TreeSitterSyntaxHandler::new(contribution, rust_language(), "\"fn\" @function")
-        .unwrap_err();
-    assert!(matches!(
-        unmapped,
-        TreeSitterSyntaxError::QueryCaptureNotMapped { ref capture } if capture == "function"
-    ));
-    assert!(unmapped.to_string().contains("@function"));
-    assert!(unmapped.to_string().contains("known Clay style token"));
+#[cfg(any(unix, windows))]
+#[test]
+fn unmatched_grammar_captures_stay_unstyled_without_color_leak() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler = TreeSitterSyntaxHandler::new(
+        contribution,
+        rust_language(),
+        r#""fn" @keyword
+           (identifier) @unmapped"#,
+    )
+    .expect("unmapped query captures are inert");
+
+    let set = handler
+        .parse_sync(parse_notification(1, "fn main() {}"))
+        .expect("parse succeeds")
+        .decoration_update
+        .expect("decoration update");
+
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Keyword)
+    );
+    assert!(set.spans.iter().all(|span| {
+        span.scope.is_none()
+            && span.token_type == TokenType::Keyword
+            && span.modifiers == Modifiers::NONE
+    }));
 }
 
 #[cfg(any(unix, windows))]
@@ -1638,14 +1906,17 @@ fn first_party_language_packages_load_with_required_assets() {
         let grammar = &contributions.syntax_grammars[0];
         assert_eq!(grammar.language_id, language_id);
         assert!(grammar.extensions.contains(&extension.to_string()));
-        assert_eq!(grammar.grammar_kind, "tree-sitter-wasm");
-        assert!(grammar.style_map.values().all(|token| matches!(
-            token.style_token.as_str(),
-            "keyword.control"
-                | "string.quoted"
-                | "comment.line"
-                | "punctuation.definition"
-                | "text"
+        assert_eq!(grammar.grammar_kind, "native");
+        assert!(grammar.style_map.values().all(|entry| matches!(
+            entry.token_type,
+            TokenType::Keyword
+                | TokenType::String
+                | TokenType::Comment
+                | TokenType::Operator
+                | TokenType::Paragraph
+                | TokenType::Function
+                | TokenType::Type
+                | TokenType::Number
         )));
 
         assert_eq!(contributions.commands.len(), 1);

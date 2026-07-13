@@ -1,15 +1,19 @@
 import { serverRegisterCommand } from "clay:commands";
+import { serverRegisterCompletionProvider } from "clay:completion";
 import { serverActivateMajorMode, serverRegisterModePattern } from "clay:modes";
 import { serverLoadPackage } from "clay:packages";
 import { serverRegisterParseHandler } from "clay:parse";
-import { serverRegisterPanelContribution } from "clay:ui";
+import { serverRegisterComponentContribution, serverRegisterPanelContribution } from "clay:ui";
 
 import {
   apiPrefix,
   behaviorTransforms,
   commands,
+  markdownCompletionProvider,
+  markdownEditorRules,
   markdownLargeFilePolicy,
   markdownPackageManifest,
+  markdownStatusItem,
   modeId,
   packageName,
   supportedExtensions,
@@ -27,6 +31,7 @@ export function markdownPackageContract() {
     behaviorTransforms,
     parse: {
       id: "markdown.parseDecorations",
+      role: "tier3-javascript-fallback",
       adapter: "./dist/parser.js",
       parseUnit: "line-group",
       viewportPriority: true,
@@ -41,19 +46,13 @@ export function markdownPackageContract() {
     },
     decorations: {
       primitiveId: "markdown.syntaxDecorations",
-      adapter: "./dist/parser.js",
-      styleTokens: [
-        "markup.heading.1",
-        "markup.heading.2",
-        "markup.heading.3",
-        "markup.heading.4",
-        "markup.heading.5",
-        "markup.heading.6",
-        "markup.strong",
-        "markup.emphasis",
-        "markup.inline-code",
-        "markup.code-block",
-        "markup.list-marker"
+      engine: "tier1-native",
+      grammar: "tree-sitter-md-025",
+      fallbackAdapter: "./dist/parser.js",
+      vocabularyTokens: [
+        "Heading1", "Heading2", "Heading3", "Heading4", "Heading5", "Heading6",
+        "Paragraph+Bold", "Paragraph+Italic", "CodeSpan", "CodeBlock",
+        "ListItem", "Link", "Quote"
       ]
     },
     sdui: {
@@ -65,37 +64,13 @@ export function markdownPackageContract() {
   };
 }
 
-// All Markdown-specific editing knowledge lives here in the package.
-// The editor side exposes generic primitives (EnterRule kinds, PairRule,
-// CommentContinuationRule); the package decides which rule instances to use.
-const MARKDOWN_EDITOR_RULES = Object.freeze({
-  // Unordered and ordered list markers trigger ContinueLineMarkers.
-  // Any mode with list-like continuation declares its own marker strings here.
-  enter: {
-    kind: "continueLineMarkers",
-    markers: ["-", "*", "+", "ordered-dot"],
-    exitOnEmptyItem: true
-  },
-  // Generic pair rules: the editor auto-closes these delimiter pairs.
-  // Markdown adds ** and __ (bold), ` (inline code) on top of the base pairs.
-  pairs: [
-    { open: "(", close: ")" },
-    { open: "[", close: "]" },
-    { open: "**", close: "**" },
-    { open: "__", close: "__" },
-    { open: "`",  close: "`"  }
-  ],
-  // Markdown has no line-comment continuation.
-  comments: [],
-  tabSpaces: 4
-});
-
-// Package-declared commands with routing policy.
-// The editor registers these as ServerFirst intents with no built-in authority.
+// Package-declared activation metadata stays local to avoid evaluating imported
+// index bindings during the package's intentional index <-> load re-export cycle.
 const MARKDOWN_COMMANDS = Object.freeze([
-  { id: "markdown.togglePreview",  displayName: "Toggle Markdown Preview",  routingPolicy: "server-first" },
-  { id: "markdown.insertHeading",  displayName: "Insert Markdown Heading",  routingPolicy: "server-first" },
-  { id: "markdown.toggleList",     displayName: "Toggle Markdown List",     routingPolicy: "server-first" }
+  { id: "markdown.toggleComment", displayName: "Toggle Markdown Comment", routingPolicy: "server-first" },
+  { id: "markdown.togglePreview", displayName: "Toggle Markdown Preview", routingPolicy: "server-first" },
+  { id: "markdown.insertHeading", displayName: "Insert Markdown Heading", routingPolicy: "server-first" },
+  { id: "markdown.toggleList", displayName: "Toggle Markdown List", routingPolicy: "server-first" }
 ]);
 
 // Package-declared key bindings as generic key descriptor objects.
@@ -123,7 +98,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
     defaultFontRole: "proportional",
     extensions: supportedExtensions,
     mimeTypes: supportedMimeTypes,
-    editorRules: MARKDOWN_EDITOR_RULES,
+    editorRules: markdownEditorRules,
     commands: MARKDOWN_COMMANDS,
     keymaps: MARKDOWN_KEYMAPS
   });
@@ -136,7 +111,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
     documentId,
     path: documentPath,
     mimeType,
-    editorRules: MARKDOWN_EDITOR_RULES,
+    editorRules: markdownEditorRules,
     commands: MARKDOWN_COMMANDS,
     keymaps: MARKDOWN_KEYMAPS
   });
@@ -151,7 +126,23 @@ export async function loadMarkdownPackage(clay, options = {}) {
     });
   }
 
-  // Register the background parse handler (server-side only, no hot-path JS).
+  await clay.completion?.serverRegisterCompletionProvider?.({
+    packageManifest,
+    completionProvider: markdownCompletionProvider,
+    providerId: markdownCompletionProvider.id,
+    priority: markdownCompletionProvider.priority,
+    triggerCharacters: markdownCompletionProvider.triggerCharacters,
+    wordBoundaryChars: markdownCompletionProvider.wordBoundaryChars,
+    items: markdownCompletionProvider.items,
+    budgets: markdownCompletionProvider.budgets
+  });
+
+  // Register inert status metadata; native client code owns rendering.
+  await clay.ui?.serverRegisterComponentContribution?.(packageManifest, markdownStatusItem);
+
+  // Keep parser.js registered as Tier 3 fallback metadata. On open, Clay's
+  // generic syntax selector installs the matching Tier 1 native handler first;
+  // this same package/mode fallback is used only when no native handler wins.
   let parserModule;
   try {
     parserModule = await import("./parser.js");
@@ -183,7 +174,9 @@ export async function markdownLoadMode(options = {}) {
     packages: { serverLoadPackage },
     modes: { serverActivateMajorMode, serverRegisterModePattern },
     commands: { serverRegisterCommand },
-    parse: { serverRegisterParseHandler }
+    completion: { serverRegisterCompletionProvider },
+    parse: { serverRegisterParseHandler },
+    ui: { serverRegisterComponentContribution }
   };
   return loadMarkdownPackage(clay, options);
 }

@@ -41,9 +41,9 @@
       "deno_op_path": "src/server/ops/modes.rs::op_clay_modes_register_pattern",
       "name": "buildCodeEditingManifest",
       "user_facing_name": "Build Code Editing Manifest",
-      "summary": "Build a generic C-family code-editing behavior manifest (editorRules) from language-specific parameters for use with major mode registration.",
+      "summary": "Build a generic code-editing behavior manifest (editorRules) from language-specific parameters for use with major mode registration.",
       "owner": "server",
-      "phase": "Phase 18.14",
+      "phase": "Phase 18.18",
       "visibility": "public",
       "permissions": [],
       "key_bindings": [],
@@ -73,6 +73,12 @@
           "description": "End token for block comments (reserved for future phases)."
         },
         {
+          "name": "enter",
+          "type": "object",
+          "default": "preserveLeadingWhitespace",
+          "description": "Generic EnterRule declaration; supports preserveLeadingWhitespace, insertNewlineOnly, continueLineMarkers, or preserveFenceBodyIndent."
+        },
+        {
           "name": "pairs",
           "type": "Array<{ open: string; close: string }>",
           "default": "[{ \"(\" / \")\" }, { \"[\" / \"]\" }, { \"{\" / \"}\" }, { '\"' / '\"' }, { \"'\" / \"'\" }]",
@@ -82,18 +88,18 @@
           "name": "electricOutdentCharacters",
           "type": "string[]",
           "default": "[]",
-          "description": "Characters that trigger electric indentation; \"}\" currently produces outdent-one-level."
+          "description": "Unique single characters that trigger the generic outdent-one-level effect."
         },
         {
           "name": "autocompleteTriggers",
           "type": "string[]",
           "default": "[]",
-          "description": "Trigger characters that may start autocomplete, e.g. [\".\", \"::\"]."
+          "description": "Up to 32 unique single-character autocomplete triggers, e.g. [\".\", \":\"]."
         }
       ],
       "security": "Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use this helper when registering a C-family major mode instead of hand-rolling editorRules that may drift from the server validator.",
-      "lookup_tags": ["js-api", "behavior", "manifest", "editor-rules", "phase18.14"],
+      "agent_guidance": "Use this helper when registering a language major mode instead of hand-rolling editorRules that may drift from the server validator.",
+      "lookup_tags": ["js-api", "behavior", "manifest", "editor-rules", "phase18.18"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",
@@ -439,9 +445,9 @@
       "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_register_completion_provider",
       "name": "serverRegisterCompletionProvider",
       "user_facing_name": "Register Completion Provider",
-      "summary": "Register package-provided completion provider metadata for Clay's server-side completion framework.",
+      "summary": "Register package-provided completion metadata and bounded static text items for Clay's server-side completion framework.",
       "owner": "server",
-      "phase": "Phase 18.11",
+      "phase": "Phase 18.18",
       "visibility": "public",
       "permissions": ["completion-provider"],
       "key_bindings": [],
@@ -495,6 +501,12 @@
           "description": "Inert word-boundary characters used by providers to split tokens."
         },
         {
+          "name": "items",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Bounded inert static items; each string is both completion label and inserted text."
+        },
+        {
           "name": "priority",
           "type": "number",
           "default": "0",
@@ -513,9 +525,9 @@
           "description": "Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS."
         }
       ],
-      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
+      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert metadata and static text items only; JS provider execution tokens are intentionally not exposed. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
       "agent_guidance": "Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, snippets, commands, or UI widget code.",
-      "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.11"],
+      "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.18"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",
@@ -2323,7 +2335,7 @@
           "name": "grammar",
           "type": "object",
           "default": "required-inside-syntaxGrammar",
-          "description": "tree-sitter-wasm grammar artifact path confined to the package root."
+          "description": "Native Tier 1 source ID with no path, or a Tier 2 tree-sitter-wasm artifact path confined to the package root."
         },
         {
           "name": "queries",
@@ -2335,7 +2347,7 @@
           "name": "styleMap",
           "type": "object",
           "default": "required-inside-syntaxGrammar",
-          "description": "Tree-sitter capture names mapped to known Clay style tokens."
+          "description": "Tree-sitter capture names mapped to closed TokenType + Modifiers vocabulary objects; known legacy Clay style tokens remain compatible."
         },
         {
           "name": "budgets",
@@ -2344,7 +2356,7 @@
           "description": "timeoutMs and maxWindowBytes metadata bounded by shared syntax budgets."
         }
       ],
-      "security": "Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, package-root-confined tree-sitter-wasm and .scm paths, known style-token maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party grammar artifact loading in Phase 18.10.",
+      "security": "Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, compiled-in native source IDs or package-root-confined tree-sitter-wasm paths, confined .scm paths, closed vocabulary/validated legacy style maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, arbitrary native/WASM loading, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party native grammar loading.",
       "agent_guidance": "Use `clay.syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage(\"@clay/rust\")`, `loadPackage(\"@clay/typescript\")`, or `loadPackage(\"@clay/javascript\")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.",
       "lookup_tags": ["js-api", "syntax", "tree-sitter", "grammar", "highlighting"],
       "app_visible": true,

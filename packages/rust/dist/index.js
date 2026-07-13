@@ -12,17 +12,18 @@ export const supportedFileNames = ["Cargo.toml"];
 export const rustSyntaxGrammar = Object.freeze({
   languageId: "rust",
   filePatterns: { extensions: ["rs"] },
-  grammar: {
-    kind: "tree-sitter-wasm",
-    path: "./grammars/rust.wasm",
-    source: "tree-sitter-rust"
-  },
+  grammar: { kind: "native", source: "tree-sitter-rust" },
   queries: { highlights: "./queries/highlights.scm" },
   styleMap: {
-    keyword: "keyword.control",
-    string: "string.quoted",
-    comment: "comment.line",
-    punctuation: "punctuation.definition"
+    keyword: { type: "Keyword" },
+    string: { type: "String" },
+    comment: { type: "Comment" },
+    punctuation: { type: "Operator" },
+    text: { type: "Paragraph" },
+    function: { type: "Function" },
+    "function.declaration": { type: "Function", modifiers: ["Declaration"] },
+    type: { type: "Type" },
+    number: { type: "Number" }
   },
   budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
 });
@@ -37,7 +38,7 @@ export const rustEditorRules = Object.freeze(
     indentSize: 4,
     lineComment: "//",
     electricOutdentCharacters: ["}"],
-    autocompleteTriggers: [".", "::"]
+    autocompleteTriggers: [".", ":"]
   })
 );
 
@@ -52,9 +53,15 @@ export const rustCommands = Object.freeze([
 
 export const rustCompletionProvider = Object.freeze({
   id: "rust.keywords",
-  priority: 20,
+  priority: 0,
   triggerCharacters: completionTriggerCharactersFromEditorRules(rustEditorRules),
   wordBoundaryChars: [".", "::", ";", ","],
+  items: [
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn",
+    "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
+    "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+    "self", "static", "struct", "trait", "true", "where"
+  ],
   budgets: { timeoutMs: 300, maxItems: 32 }
 });
 
