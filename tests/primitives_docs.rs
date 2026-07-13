@@ -690,6 +690,7 @@ fn decoration_viewport_scroll_flow_is_documented() {
     for required in [
         "DecorationViewportRequest",
         "deduplicated",
+        "reserving one outbound queue slot",
         "UTF-8-safe",
         "Individual spans are intersected",
         "nonzero native parse windows",
@@ -701,6 +702,8 @@ fn decoration_viewport_scroll_flow_is_documented() {
     }
     assert!(coordinator.contains("schedule_parse_window"));
     assert!(protocol.contains("never carries document text"));
+    assert!(protocol.contains("Wire protocol version 2"));
+    assert!(protocol.contains("requires incrementing `PROTOCOL_VERSION`"));
 }
 
 #[test]

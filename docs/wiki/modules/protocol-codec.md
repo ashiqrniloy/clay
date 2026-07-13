@@ -10,7 +10,7 @@
 
 ## Overview
 
-The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`.
+The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 accompanies `DecorationViewportRequest`; older version-1 servers are rejected before changed `ClientMessage` enum discriminants can be decoded.
 
 ## Responsibilities
 
@@ -62,6 +62,7 @@ let message = codec.decode_client_message(&frame)?;
 ## Invariants and Constraints
 
 - `Codec` is the only protocol serialization boundary; client/server code should not call `rkyv` directly for wire messages.
+- Adding, removing, or reordering a wire enum variant requires incrementing `PROTOCOL_VERSION`; handshake rejection prevents stale server processes from decoding changed discriminants.
 - `DEFAULT_MAX_FRAME_SIZE` is 1 MiB to prevent accidental unbounded allocation from malformed IPC frames.
 - The 4-byte frame prefix is not part of the archived payload, so decode realigns payload bytes before validation.
 - Behavior manifests are inert declarations of built-in behavior and do not execute JavaScript, WASM, extensions, commands, or filesystem/network operations.

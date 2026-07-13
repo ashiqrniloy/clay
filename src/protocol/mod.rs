@@ -12,7 +12,10 @@ pub use parse::*;
 pub use sdui::*;
 
 /// Current wire protocol version for the local Clay IPC boundary.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// Version 2 adds `DecorationViewportRequest` to `ClientMessage`; version 1
+/// peers must not decode the changed enum discriminants.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;

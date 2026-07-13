@@ -1514,9 +1514,9 @@ await loadPackage("@clay/markdown");"#,
     use crate::{
         protocol::{
             BehaviorManifest, BehaviorScope, ClientMessage, DocumentAccess, DocumentMetadata,
-            EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic,
-            SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue, SduiNodeId,
-            SduiNodeKind, ServerMessage, TokenType, codec::Codec,
+            EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION, ProtocolErrorCode,
+            RuntimeDiagnostic, SduiActionArgument, SduiActionIntent, SduiActionSource,
+            SduiActionValue, SduiNodeId, SduiNodeKind, ServerMessage, TokenType, codec::Codec,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState,
@@ -1763,6 +1763,46 @@ await loadPackage("@clay/markdown");"#,
         );
 
         drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn version_one_client_is_rejected_after_viewport_message_schema_change() {
+        let (client, server) = duplex(4096);
+        let codec = Codec::default();
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document_state(),
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            workspace_state(),
+            sdui_state(),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: 1,
+                    client_name: "stale-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::Error {
+                code: ProtocolErrorCode::UnsupportedProtocolVersion,
+                message: "unsupported protocol version".to_string(),
+            }
+        );
         server_task.await.unwrap().unwrap();
     }
 

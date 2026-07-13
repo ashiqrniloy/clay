@@ -275,14 +275,17 @@ impl ClientEditQueue {
         byte_start: u64,
         byte_end: u64,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender
-            .try_send(ClientMessage::DecorationViewportRequest {
-                client_id: self.client_id,
-                document_id,
-                document_version,
-                byte_start,
-                byte_end,
-            })
+        let message = ClientMessage::DecorationViewportRequest {
+            client_id: self.client_id,
+            document_id,
+            document_version,
+            byte_start,
+            byte_end,
+        };
+        if self.sender.capacity() <= 1 {
+            return Err(mpsc::error::TrySendError::Full(message));
+        }
+        self.sender.try_send(message)
     }
 
     pub fn enqueue_sdui_action(
@@ -1219,7 +1222,7 @@ mod tests {
 
     #[tokio::test]
     async fn decoration_viewport_request_emits_bounded_range_metadata() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let (queue, mut receiver) = ClientEditQueue::bounded(2);
         let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
 
         queue
@@ -1236,6 +1239,41 @@ mod tests {
                 byte_end: 2_048,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn viewport_requests_reserve_queue_capacity_for_workspace_actions() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(2);
+        let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
+
+        queue
+            .enqueue_decoration_viewport_request(7, 3, 1_024, 2_048)
+            .unwrap();
+        assert!(matches!(
+            queue.enqueue_decoration_viewport_request(7, 3, 2_048, 3_072),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+        ));
+        queue
+            .enqueue_sdui_action(
+                1,
+                SduiActionIntent {
+                    command_id: "clay.workspace.openDirectory".to_string(),
+                    source: SduiActionSource::Button {
+                        node_id: SduiNodeId(5),
+                    },
+                    arguments: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::DecorationViewportRequest { .. }
+        ));
+        assert!(matches!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::SduiAction { .. }
+        ));
     }
 
     #[tokio::test]
