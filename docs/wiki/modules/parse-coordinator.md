@@ -65,7 +65,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 
 ## Open-Time Flow
 
-`open_document_followup_messages` classifies and activates the document, schedules a bounded 64 KiB parse window, and returns the behavior manifest immediately. `schedule_open_parse` is enqueue-only, so initial text and mode state render before background syntax/parse work completes. Later decorations arrive on `next_update()` and failures on `next_diagnostic()`; open-time scheduling errors use a separate sanitized `clay.parse.open_activation_failed` diagnostic.
+`open_document_followup_messages` classifies and activates the document, schedules the grammar policy's bounded opening window (4 KiB for first-party native grammars), and returns the behavior manifest immediately. `schedule_open_parse` is enqueue-only, so initial text and mode state render before background syntax/parse work completes. When scrolling changes the visible byte range, the client sends a deduplicated metadata-only `DecorationViewportRequest`; `schedule_parse_window` validates the current document/version and schedules the already-registered document-selected native handler over a UTF-8-safe nonzero window. Later decorations arrive on `next_update()` and failures on `next_diagnostic()`; scheduling errors use sanitized runtime diagnostics.
 
 ## Invariants and Constraints
 
@@ -111,6 +111,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`
 - `src/server/js_runtime.rs::runtime_boundary_does_not_expose_platform_authorities`
 - `src/server/connection.rs::open_document_renders_before_background_parse_completes`
+- `src/server/connection.rs::nonzero_viewports_produce_typescript_and_markdown_decorations`
 - `src/server/connection.rs::selected_markdown_file_publishes_manifest_and_decorations`
 - `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow`
 - `tests/syntax_grammar.rs::tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`

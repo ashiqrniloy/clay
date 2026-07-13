@@ -263,6 +263,9 @@ impl EditorDecorationState {
                 )
             })
             .flat_map(|chunk| chunk.spans.iter())
+            .filter(move |span| {
+                ranges_intersect(span.byte_start, span.byte_end, visible_start, visible_end)
+            })
     }
 
     fn next_access(&mut self) -> u64 {
@@ -382,6 +385,9 @@ impl EditorDiagnosticState {
                 )
             })
             .flat_map(|chunk| chunk.spans.iter())
+            .filter(move |span| {
+                ranges_intersect(span.byte_start, span.byte_end, visible_start, visible_end)
+            })
     }
 
     fn next_access(&mut self) -> u64 {
@@ -1054,6 +1060,12 @@ impl EditorSurface {
 
     pub fn visible_text(&self) -> String {
         self.visible_snapshot().text
+    }
+
+    pub(crate) fn visible_byte_range(&self) -> std::ops::Range<u64> {
+        let snapshot = self.visible_snapshot();
+        let start = snapshot.start_byte_offset as u64;
+        start..start.saturating_add(snapshot.text.len() as u64)
     }
 
     pub fn with_perf_recorder(mut self, perf: PerfRecorder) -> Self {
@@ -2130,6 +2142,40 @@ mod tests {
         assert_eq!(runs.len(), 1_000);
         assert_eq!(runs.first().unwrap().range, 0..1);
         assert_eq!(runs.last().unwrap().range, 999..1_000);
+    }
+
+    #[test]
+    fn scrolling_past_earlier_spans_does_not_underflow_visible_ranges() {
+        let text = (0..200)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>();
+        let later_start = text.find("line 150").unwrap() as u64;
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(1, 1, text.clone(), DocumentAccess::Editable { lease_id: 1 });
+        assert!(editor.apply_decoration_set(DecorationSet {
+            document_id: 1,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: text.len() as u64,
+            spans: vec![
+                span(0, 4, DecorationKind::Syntax, None, 10, Modifiers::NONE,),
+                span(
+                    later_start,
+                    later_start + 8,
+                    DecorationKind::Syntax,
+                    None,
+                    10,
+                    Modifiers::NONE,
+                ),
+            ],
+        }));
+
+        assert!(editor.scroll_lines(120));
+        let snapshot = editor.visible_snapshot();
+        let runs = normalized_runs(&editor);
+
+        assert!(snapshot.start_byte_offset > 4);
+        assert!(runs.iter().all(|run| run.range.end <= snapshot.text.len()));
     }
 
     #[test]

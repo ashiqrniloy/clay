@@ -275,6 +275,56 @@ where
                 };
                 codec.write_server_message(&mut stream, &response).await?;
             }
+            ClientMessage::DecorationViewportRequest {
+                client_id: request_client_id,
+                document_id,
+                document_version,
+                byte_start,
+                byte_end,
+            } => {
+                if request_client_id != client_id || byte_start > byte_end {
+                    continue;
+                }
+                let (metadata, target_document) = {
+                    let workspace = workspace.lock().await;
+                    let Ok(metadata) = workspace.document_metadata(document_id, client_id).await
+                    else {
+                        continue;
+                    };
+                    let Some(target_document) = workspace.document_handle(document_id) else {
+                        continue;
+                    };
+                    (metadata, target_document)
+                };
+                if metadata.version != document_version {
+                    continue;
+                }
+                let text = target_document.lock().await.text();
+                let runtime = runtime_generation.current().await;
+                let Some((meta, policy)) = runtime
+                    .service
+                    .registered_native_syntax_handler(runtime.id, &metadata.path)
+                else {
+                    continue;
+                };
+                if let Err(diagnostic) = schedule_parse_window(
+                    &parse_coordinator,
+                    &metadata,
+                    &text,
+                    behavior.lock().await.version(),
+                    &meta.package_prefix,
+                    &meta.mode_id,
+                    policy,
+                    ParseByteRange::new(byte_start, byte_end),
+                ) {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::RuntimeDiagnostic(diagnostic),
+                        )
+                        .await?;
+                }
+            }
             ClientMessage::OpenDocument {
                 client_id,
                 workspace_root_id,
@@ -1233,33 +1283,71 @@ async fn schedule_open_parse(
         30 * 1024 * 1024,
         5_000,
     ));
-    let (window_text, window_byte_end) =
-        bounded_utf8_prefix(text, policy.max_window_bytes as usize);
-    let behavior_version = behavior.lock().await.version();
+    schedule_parse_window(
+        parse_coordinator,
+        metadata,
+        text,
+        behavior.lock().await.version(),
+        &activation.package_prefix,
+        &activation.parse_handler_mode_id,
+        policy,
+        ParseByteRange::new(0, text.len() as u64),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn schedule_parse_window(
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    text: &str,
+    behavior_version: u64,
+    package_prefix: &str,
+    mode_id: &str,
+    policy: ParsePolicy,
+    requested: ParseByteRange,
+) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
+    let mut byte_start = requested.start.min(text.len() as u64) as usize;
+    while !text.is_char_boundary(byte_start) {
+        byte_start = byte_start.saturating_sub(1);
+    }
+    let requested_end = requested.end.max(byte_start as u64).min(text.len() as u64);
+    let mut byte_end =
+        requested_end.min((byte_start as u64).saturating_add(policy.max_window_bytes)) as usize;
+    while !text.is_char_boundary(byte_end) {
+        byte_end = byte_end.saturating_sub(1);
+    }
+    if byte_start >= byte_end {
+        return Ok(None);
+    }
+
+    let viewport = ParseByteRange::new(byte_start as u64, byte_end as u64);
     let request = ParseScheduleRequest {
         document_id: metadata.document_id,
         document_version: metadata.version,
         behavior_version,
-        package_prefix: activation.package_prefix.clone(),
-        mode_id: activation.parse_handler_mode_id.clone(),
-        viewport: ParseByteRange::new(0, window_byte_end),
-        invalidated_ranges: vec![ParseByteRange::new(0, window_byte_end)],
+        package_prefix: package_prefix.to_string(),
+        mode_id: mode_id.to_string(),
+        viewport,
+        invalidated_ranges: vec![viewport],
     };
     let windows = vec![ParseWindowSnapshot {
         document_id: metadata.document_id,
         document_version: metadata.version,
-        package_prefix: activation.package_prefix.clone(),
-        mode_id: activation.parse_handler_mode_id.clone(),
-        byte_start: 0,
-        byte_end: window_byte_end,
-        base_line: 0,
-        text: window_text.to_string(),
+        package_prefix: package_prefix.to_string(),
+        mode_id: mode_id.to_string(),
+        byte_start: viewport.start,
+        byte_end: viewport.end,
+        base_line: text[..byte_start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count() as u64,
+        text: text[byte_start..byte_end].to_string(),
     }];
     match parse_coordinator.schedule_parse_with_windows(request, windows, Some(policy)) {
         Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
         Err(error) => Err(RuntimeDiagnostic::error(
-            "clay.parse.open_activation_failed",
-            format!("Open-time parse scheduling failed: {error:?}"),
+            "clay.parse.viewport_activation_failed",
+            format!("Viewport parse scheduling failed: {error:?}"),
         )),
     }
 }
@@ -2729,6 +2817,124 @@ await loadPackage("@clay/markdown");"#,
                 .all(|span| span.provenance.package_version == "builtin"),
             "open Markdown decorations must come from compiled Tier 1 grammar, not parser.js"
         );
+        let _ = fs::remove_file(config_root.join("init.js"));
+        let _ = fs::remove_dir(config_root);
+    }
+
+    #[tokio::test]
+    async fn nonzero_viewports_produce_typescript_and_markdown_decorations() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let config_root = temp_workspace("viewport-native-decoration");
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/typescript");
+            await loadPackage("@clay/markdown");
+            "#,
+        )
+        .unwrap();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        let evaluation = runtime
+            .load_configuration_from_root(config_root.clone())
+            .await
+            .expect("language configuration evaluates");
+
+        for (document_id, path, package_prefix, start_marker, text) in [
+            (
+                20,
+                "main.ts",
+                "typescript",
+                "const value150",
+                (0..300)
+                    .map(|line| format!("const value{line}: number = {line};\n"))
+                    .collect::<String>(),
+            ),
+            (
+                21,
+                "notes.md",
+                "markdown",
+                "## Heading 150",
+                (0..300)
+                    .map(|line| format!("## Heading {line}\n\nParagraph {line}.\n\n"))
+                    .collect::<String>(),
+            ),
+        ] {
+            let metadata = DocumentMetadata {
+                document_id,
+                version: 1,
+                access: DocumentAccess::Editable { lease_id: 1 },
+                lease_id: Some(1),
+                dirty: false,
+                workspace_root_id: 1,
+                path: path.to_string(),
+            };
+            let (meta, policy) = runtime
+                .register_native_syntax_handler(
+                    &coordinator,
+                    1,
+                    &evaluation,
+                    path,
+                    package_prefix,
+                    package_prefix,
+                )
+                .expect("native handler registration succeeds")
+                .expect("native handler selected");
+            assert_eq!(
+                runtime.registered_native_syntax_handler(1, path),
+                Some((meta.clone(), policy))
+            );
+            super::schedule_parse_window(
+                &coordinator,
+                &metadata,
+                &text,
+                1,
+                &meta.package_prefix,
+                &meta.mode_id,
+                policy,
+                super::ParseByteRange::new(0, text.len() as u64),
+            )
+            .expect("opening viewport schedules");
+            tokio::select! {
+                update = coordinator.next_update() => update.expect("opening native update"),
+                diagnostic = coordinator.next_diagnostic() => {
+                    panic!("opening viewport parse failed: {:?}", diagnostic)
+                }
+            };
+
+            let start = text.find(start_marker).expect("middle line marker") as u64;
+            super::schedule_parse_window(
+                &coordinator,
+                &metadata,
+                &text,
+                1,
+                &meta.package_prefix,
+                &meta.mode_id,
+                policy,
+                super::ParseByteRange::new(start, text.len() as u64),
+            )
+            .expect("nonzero viewport schedules");
+            let update = tokio::select! {
+                update = coordinator.next_update() => update.expect("nonzero native update"),
+                diagnostic = coordinator.next_diagnostic() => {
+                    panic!("nonzero viewport parse failed: {:?}", diagnostic)
+                }
+            };
+            let set = update
+                .decoration_update
+                .expect("nonzero viewport decorations");
+
+            assert!(set.viewport_byte_start >= start, "{path}");
+            assert!(!set.spans.is_empty(), "{path}");
+            assert!(
+                set.spans
+                    .iter()
+                    .all(|span| span.byte_start >= set.viewport_byte_start),
+                "{path}"
+            );
+        }
+
         let _ = fs::remove_file(config_root.join("init.js"));
         let _ = fs::remove_dir(config_root);
     }

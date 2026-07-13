@@ -174,7 +174,7 @@ The handler does not load arbitrary paths, fetch network resources, run package 
 
 The runtime [`clay:syntax.serverRegisterSyntaxGrammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) facade/op registers the same inert grammar contract declared in `package.json` during the package load entry. User config still uses only one-line `loadPackage` calls; it does not perform manual primitive registration or raw op calls.
 
-Native query output is capped at 80 spans per decoration chunk. Capture overflow truncates to bounded inert output instead of failing the entire parse, keeping the serialized set within `DECORATION_PAYLOAD_BUDGET_BYTES` and preserving highlighting for scroll-sized inputs.
+Native query output is capped at 32 spans per decoration chunk. Capture overflow truncates to bounded inert output instead of failing the entire parse, keeping both the decoration set and its containing `IncrementalParseUpdate` within their transport budgets. Viewport-change requests replenish bounded chunks as the user scrolls.
 
 ## Tests
 

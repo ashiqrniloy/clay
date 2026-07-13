@@ -187,6 +187,7 @@ pub struct EditorWidget {
     next_transaction_id: u64,
     next_completion_request_id: u64,
     active_completion_request_id: Option<CompletionRequestId>,
+    last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
     status: EditorStatus,
     sdui: SduiNativeState,
     layout_invalidated: bool,
@@ -207,6 +208,7 @@ impl Default for EditorWidget {
             next_transaction_id: 1,
             next_completion_request_id: 1,
             active_completion_request_id: None,
+            last_decoration_viewport: None,
             status,
             sdui: SduiNativeState::empty(),
             layout_invalidated: false,
@@ -241,6 +243,7 @@ impl EditorWidget {
             next_transaction_id: 1,
             next_completion_request_id: 1,
             active_completion_request_id: None,
+            last_decoration_viewport: None,
             status,
             sdui,
             layout_invalidated: false,
@@ -608,6 +611,7 @@ impl EditorWidget {
             let _ = edit_queue.enqueue_edit_event(event, transaction_id);
         }
         if outcome.changed {
+            self.enqueue_decoration_viewport_request();
             ctx.request_render();
             ctx.request_accessibility_update();
             ctx.set_handled();
@@ -622,6 +626,34 @@ impl EditorWidget {
         self.next_completion_request_id = self.next_completion_request_id.saturating_add(1).max(1);
         self.active_completion_request_id = Some(request_id);
         let _ = edit_queue.enqueue_completion_request(event, request_id);
+    }
+
+    fn enqueue_decoration_viewport_request(&mut self) {
+        let Some(edit_queue) = &self.edit_queue else {
+            return;
+        };
+        let document = self.editor.document_state();
+        let range = self.editor.visible_byte_range();
+        let viewport = (
+            document.document_id,
+            document.document_version,
+            range.start,
+            range.end,
+        );
+        if self.last_decoration_viewport == Some(viewport) {
+            return;
+        }
+        if edit_queue
+            .enqueue_decoration_viewport_request(
+                document.document_id,
+                document.document_version,
+                range.start,
+                range.end,
+            )
+            .is_ok()
+        {
+            self.last_decoration_viewport = Some(viewport);
+        }
     }
 
     fn accessibility_label(&self) -> String {
@@ -788,6 +820,9 @@ impl Widget for EditorWidget {
                             self.editor.scroll_lines((-*y).round() as isize)
                         }
                     };
+                    if changed {
+                        self.enqueue_decoration_viewport_request();
+                    }
                     (changed, changed)
                 }
             }
@@ -1527,6 +1562,44 @@ mod tests {
             widget.status_text(),
             "Clay — Connected — Editable — doc 43 — v1"
         );
+    }
+
+    #[tokio::test]
+    async fn scrolling_enqueues_new_decoration_viewport_once() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(4);
+        let queue = queue.with_authority(11, &DocumentAccess::ReadOnly);
+        let mut widget = EditorWidget::default().with_edit_queue(queue);
+        let text = (0..200)
+            .map(|line| format!("const value{line} = {line};\n"))
+            .collect::<String>();
+        widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+            metadata: DocumentMetadata {
+                document_id: 42,
+                version: 5,
+                access: DocumentAccess::ReadOnly,
+                lease_id: None,
+                dirty: false,
+                workspace_root_id: 77,
+                path: "main.ts".to_string(),
+            },
+            text,
+        });
+
+        assert!(widget.editor.scroll_lines(80));
+        widget.enqueue_decoration_viewport_request();
+        widget.enqueue_decoration_viewport_request();
+
+        assert!(matches!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::DecorationViewportRequest {
+                client_id: 11,
+                document_id: 42,
+                document_version: 5,
+                byte_start,
+                byte_end,
+            } if byte_start > 0 && byte_end > byte_start
+        ));
+        assert!(receiver.try_recv().is_err());
     }
 
     #[tokio::test]

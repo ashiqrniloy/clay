@@ -19,7 +19,7 @@ The protocol module defines the shared client/server IPC message contract. It us
 - Represent Phase 9/19 file/workspace commands and results: workspace-root open, selected-file open, save, reload, status, list, document metadata, and typed file-operation failures.
 - Represent Phase 12 SDUI bootstrap/update/action messages: `SduiSnapshot`, `SduiUpdate`, and `SduiAction`.
 - Represent Phase 13 runtime diagnostics with severity, stable code, and sanitized message fields.
-- Represent Phase 18 handoff decoration updates as bounded `DecorationSet` messages.
+- Represent Phase 18 handoff decoration updates as bounded `DecorationSet` messages and metadata-only `DecorationViewportRequest` messages for scroll-driven window scheduling.
 - Represent Phase 18.16.5 `ActiveTypography` separately from `ActiveTheme`: three bounded fallback-stack/size profiles, a revision, document defaults, and closed semantic roles.
 - Define Phase 18 handoff parse shapes (`ParseEditNotification` and `IncrementalParseUpdate`) as serializable server-side data without adding parse results to hot edit-ack IPC.
 - Encode and decode messages as `rkyv` payloads with a big-endian 4-byte length prefix.
@@ -38,7 +38,7 @@ Phase 12 adds SDUI protocol variants without a second serialization path. `Serve
 
 Phase 13 adds `RuntimeDiagnostic` and `ServerMessage::RuntimeDiagnostic` for server-side JavaScript/configuration errors. Diagnostics carry `DiagnosticSeverity`, stable Clay error code, and sanitized actionable message; they do not carry raw source snippets, absolute paths, environment dumps, tokens, or authority handles.
 
-Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
+Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. `ClientMessage::DecorationViewportRequest` carries only client/document/version IDs and visible byte bounds; it never carries document text. The server validates those fields, reads canonical text from the already-open document, and schedules a bounded native parse window. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
 
 `BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, document font role, key bindings, command declarations, routing policies, and editor rules; it is data, not script code. `core.text` defaults proportional and `core.code` defaults monospace.
 
@@ -74,7 +74,7 @@ let message = codec.decode_client_message(&frame)?;
 
 ## Tests
 
-- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, region-lock rejection metadata, file/workspace commands including `OpenSelectedFile`, workspace result messages, typed file-operation failures, SDUI snapshot/update/action messages, and runtime diagnostic messages.
+- `src/protocol/codec.rs`: round-trip tests for hello, initial documents with Unicode, behavior manifest schema/publication updates, behavior-version rejection metadata, lease/version edit deltas, stale-edit rejection, resync snapshots, region-lock rejection metadata, file/workspace commands including `OpenSelectedFile`, decoration viewport requests, workspace result messages, typed file-operation failures, SDUI snapshot/update/action messages, and runtime diagnostic messages.
 - `tests/decoration_transport.rs::decoration_transport_round_trips_through_protocol_codec`: verifies `ServerMessage::DecorationSet` uses the shared codec boundary.
 - `tests/typography_protocol.rs`: codec round trip for all profiles/revision plus invalid profile and role-layer rejection coverage.
 - `src/client/mod.rs` and `src/server/connection.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.

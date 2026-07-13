@@ -613,6 +613,13 @@ pub enum ClientMessage {
         client_id: ClientId,
         known_version: DocumentVersion,
     },
+    DecorationViewportRequest {
+        client_id: ClientId,
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        byte_start: u64,
+        byte_end: u64,
+    },
     OpenDocument {
         client_id: ClientId,
         workspace_root_id: WorkspaceRootId,

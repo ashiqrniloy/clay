@@ -1623,9 +1623,17 @@ fn scroll_sized_native_sources_produce_bounded_decorations() {
         let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
             .unwrap_or_else(|error| panic!("{label} highlight query: {error}"));
 
-        let set = handler
+        let update = handler
             .parse_sync(parse_notification_for(prefix, 1, &source))
-            .unwrap_or_else(|error| panic!("scroll-sized {label} parses: {error}"))
+            .unwrap_or_else(|error| panic!("scroll-sized {label} parses: {error}"));
+        assert!(
+            rkyv::to_bytes::<rkyv::rancor::Error>(&update)
+                .expect("serialize bounded parse update")
+                .len()
+                <= clay::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+            "{label}"
+        );
+        let set = update
             .decoration_update
             .unwrap_or_else(|| panic!("scroll-sized {label} decorations"));
 
@@ -1841,7 +1849,7 @@ fn tree_sitter_handler_truncates_capture_output_to_transport_safe_limit() {
         .decoration_update
         .expect("bounded decoration update");
 
-    assert_eq!(set.spans.len(), 80);
+    assert_eq!(set.spans.len(), 32);
     assert!(
         rkyv::to_bytes::<rkyv::rancor::Error>(&set)
             .expect("serialize bounded decorations")

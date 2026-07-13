@@ -268,6 +268,23 @@ impl ClientEditQueue {
         Ok(())
     }
 
+    pub(crate) fn enqueue_decoration_viewport_request(
+        &self,
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        byte_start: u64,
+        byte_end: u64,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender
+            .try_send(ClientMessage::DecorationViewportRequest {
+                client_id: self.client_id,
+                document_id,
+                document_version,
+                byte_start,
+                byte_end,
+            })
+    }
+
     pub fn enqueue_sdui_action(
         &self,
         ui_version: u64,
@@ -1198,6 +1215,27 @@ mod tests {
         assert!(queue.enqueue_edit_event(event.clone(), 1).is_ok());
         assert!(queue.enqueue_edit_event(event, 2).is_err());
         assert_eq!(queue.sync_snapshot().pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn decoration_viewport_request_emits_bounded_range_metadata() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
+
+        queue
+            .enqueue_decoration_viewport_request(7, 3, 1_024, 2_048)
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::DecorationViewportRequest {
+                client_id: 42,
+                document_id: 7,
+                document_version: 3,
+                byte_start: 1_024,
+                byte_end: 2_048,
+            }
+        );
     }
 
     #[tokio::test]

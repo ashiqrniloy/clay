@@ -7,7 +7,7 @@ use std::{
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
-const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 80;
+const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 32;
 
 use crate::{
     packages::{
@@ -560,7 +560,7 @@ impl SyntaxGrammarRegistry {
             .copied()
     }
 
-    fn find_candidate_for_path(
+    pub(crate) fn find_candidate_for_path(
         &self,
         path: &str,
     ) -> Option<(SyntaxGrammarPatternKind, &SyntaxGrammarContribution)> {

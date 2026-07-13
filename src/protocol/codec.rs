@@ -554,6 +554,13 @@ mod tests {
             capability: "folder-token".to_string(),
             selected_path: "C:/Users/test/project".to_string(),
         };
+        let viewport = ClientMessage::DecorationViewportRequest {
+            client_id: 9,
+            document_id: 7,
+            document_version: 3,
+            byte_start: 4_096,
+            byte_end: 8_192,
+        };
         let save = ClientMessage::SaveDocument {
             client_id: 9,
             document_id: 7,
@@ -566,7 +573,7 @@ mod tests {
             force: true,
         };
 
-        for message in [open, selected, selected_folder, save, reload] {
+        for message in [open, selected, selected_folder, viewport, save, reload] {
             let frame = codec.encode_client_message(&message).unwrap();
             let decoded = codec.decode_client_message(&frame).unwrap();
             assert_eq!(decoded, message);

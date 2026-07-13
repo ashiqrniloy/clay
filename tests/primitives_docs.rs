@@ -670,6 +670,40 @@ fn editor_theme_registry_wiki_documents_phase18_15_implementation() {
 }
 
 #[test]
+fn decoration_viewport_scroll_flow_is_documented() {
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let transport =
+        fs::read_to_string(repository_path("docs/wiki/modules/decoration-transport.md"))
+            .expect("read decoration transport wiki");
+    let coordinator = fs::read_to_string(repository_path("docs/wiki/modules/parse-coordinator.md"))
+        .expect("read parse coordinator wiki");
+    let protocol = fs::read_to_string(repository_path("docs/wiki/modules/protocol-codec.md"))
+        .expect("read protocol codec wiki");
+
+    for page in [
+        "modules/decoration-transport.md",
+        "modules/parse-coordinator.md",
+        "modules/protocol-codec.md",
+    ] {
+        assert!(index.contains(page), "wiki index must link {page}");
+    }
+    for required in [
+        "DecorationViewportRequest",
+        "deduplicated",
+        "UTF-8-safe",
+        "Individual spans are intersected",
+        "nonzero native parse windows",
+    ] {
+        assert!(
+            transport.contains(required),
+            "transport wiki must document {required}"
+        );
+    }
+    assert!(coordinator.contains("schedule_parse_window"));
+    assert!(protocol.contains("never carries document text"));
+}
+
+#[test]
 fn markdown_mode_prerequisites_reference_registry_entries() {
     let registry = primitives_registry();
     let requirements = markdown_mode_requirements();

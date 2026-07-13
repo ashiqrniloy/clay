@@ -802,6 +802,46 @@ impl ClayJsRuntimeService {
         }
     }
 
+    pub(crate) fn registered_native_syntax_handler(
+        &self,
+        generation_id: u64,
+        path: &str,
+    ) -> Option<(
+        crate::server::parse_coordinator::ParseHandlerMeta,
+        crate::protocol::ParsePolicy,
+    )> {
+        let registry = crate::server::syntax::SyntaxGrammarRegistry::with_first_party_native();
+        let contribution = registry.find_candidate_for_path(path)?.1;
+        let key = (
+            generation_id,
+            contribution.package_prefix.clone(),
+            contribution.id.clone(),
+        );
+        if !self
+            .native_syntax_handlers
+            .lock()
+            .expect("native syntax handler set lock poisoned")
+            .contains(&key)
+        {
+            return None;
+        }
+        Some((
+            crate::server::parse_coordinator::ParseHandlerMeta {
+                package_prefix: contribution.package_prefix.clone(),
+                mode_id: contribution.id.clone(),
+            },
+            crate::protocol::ParsePolicy::new(
+                contribution
+                    .max_window_bytes
+                    .unwrap_or(crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES)
+                    as u64,
+                4 * 1024,
+                30 * 1024 * 1024,
+                contribution.timeout_ms.unwrap_or(5_000),
+            ),
+        ))
+    }
+
     async fn invoke_parse_handler(
         &self,
         registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
