@@ -133,8 +133,8 @@ fn paint_uses_cached_inert_spans_without_package_javascript() {
     let layout_source = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
     let paint_sources = format!("{surface_source}\n{layout_source}");
 
-    assert!(surface_source.contains("visible_decoration_ranges"));
-    assert!(layout_source.contains("decoration_visible_byte_ranges"));
+    assert!(surface_source.contains("normalize_visible_text_style_runs"));
+    assert!(layout_source.contains("StyleProperty::Brush"));
     for forbidden in [
         "markdownIt",
         "parseMarkdown",

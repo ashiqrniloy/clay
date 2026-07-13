@@ -78,7 +78,7 @@ When no loaded grammar matches, `active_syntax_grammar` is `None` and the docume
 Phase 18.16 ships expanded first-party language packages plus a compiled-in native descriptor for each supported language:
 
 - `packages/rust/` -> `@clay/rust`, `apiPrefix = rust`, `languageId = rust`, extension `.rs`
-- `packages/typescript/` -> `@clay/typescript`, `apiPrefix = typescript`, `languageId = typescript`, extensions `.ts`, `.tsx`
+- `packages/typescript/` -> `@clay/typescript`, `apiPrefix = typescript`, native TypeScript grammar for `.ts`, `.mts`, `.cts`, and native TSX grammar for `.tsx`
 - `packages/javascript/` -> `@clay/javascript`, `apiPrefix = javascript`, `languageId = javascript`, extensions `.js`, `.jsx`, `.mjs`, `.cjs`
 - `packages/markdown/` -> `@clay/markdown`, full Markdown mode package with a native `.md`/`.markdown`/`.mdown` descriptor and existing markdown-it Tier 3 parser fallback
 
@@ -107,9 +107,9 @@ Tier 1 native descriptors are static data, not control-flow branches. Each descr
 - `@clay/javascript`: `.js`, `.jsx`, `.mjs`, `.cjs` via `tree-sitter-javascript`.
 - `@clay/markdown`: `.md`, `.markdown`, `.mdown` via `tree-sitter-md-025`.
 
-`ClayOpState::new_for_document` uses `SyntaxGrammarRegistry::with_first_party_native()` so runtime op state starts with Tier 1 native entries. Each static descriptor also embeds its package highlight query with `include_str!`, avoiding runtime filesystem authority. `ClayRuntimeEvaluation` carries the grammar list and engine-preference snapshot across the worker boundary. On document open, `select_grammar_for_path` applies exact-file/extension matching plus user tier preference; `ClayJsRuntimeService::register_native_syntax_handler` builds the selected `TreeSitterSyntaxHandler` once per generation/package/mode and replaces a same-generation package/mode JS fallback before `schedule_open_parse` enqueues work. Later opens reuse that installed handler and its parser/tree caches.
+`ClayOpState::new_for_document` uses `SyntaxGrammarRegistry::with_first_party_native()` so runtime op state starts with Tier 1 native entries. Each static descriptor also embeds its package highlight query with `include_str!`, avoiding runtime filesystem authority. `ClayRuntimeEvaluation` carries the grammar list and engine-preference snapshot across the worker boundary. On document open, `select_grammar_for_path` applies exact-file/extension matching plus user tier preference; `ClayJsRuntimeService::register_native_syntax_handler` builds the selected `TreeSitterSyntaxHandler` once per generation/package/grammar ID before `schedule_open_parse` enqueues work. The package/mode JS fallback remains separately keyed and is selected only when no native handler is chosen. Later opens reuse the selected native handler and its parser/tree caches.
 
-Current `ParseCoordinator` handler keys are package + mode, so runtime native installation deliberately skips modes that expose multiple compiled grammars under one mode key rather than letting the last-opened grammar win. Markdown, Rust, and JavaScript each have one native handler key and use this path; TypeScript/TSX needs a generic document-selected grammar identity in the coordinator key before both can be installed concurrently. Direct registry/query coverage for both TypeScript grammars remains intact.
+Runtime native installation uses the document-selected grammar contribution ID as the coordinator handler mode key while preserving package provenance. This lets `typescript.typescript` and `typescript.tsx` coexist in one runtime generation without last-opened-grammar replacement; open scheduling records the selected handler ID separately from the active package mode (`typescript`). Rust, JavaScript, and Markdown use the same generic path with their single selected grammar IDs.
 
 ## Tier 2 Web-tree-sitter Artifact Contract
 
@@ -173,6 +173,8 @@ Package metadata validation and registry insertion happen at package load/reload
 The handler does not load arbitrary paths, fetch network resources, run package managers/shells, call raw ops, or execute client-side JavaScript. Grammar artifacts must already be resolver-validated first-party package assets before a `tree_sitter::Language` reaches the handler.
 
 The runtime [`clay:syntax.serverRegisterSyntaxGrammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) facade/op registers the same inert grammar contract declared in `package.json` during the package load entry. User config still uses only one-line `loadPackage` calls; it does not perform manual primitive registration or raw op calls.
+
+Native query output is capped at 80 spans per decoration chunk. Capture overflow truncates to bounded inert output instead of failing the entire parse, keeping the serialized set within `DECORATION_PAYLOAD_BUDGET_BYTES` and preserving highlighting for scroll-sized inputs.
 
 ## Tests
 

@@ -1123,7 +1123,7 @@ fn rust_grammar_emits_vocabulary_tokens_through_stylemap() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn typescript_grammar_covers_typescript_and_tsx_language_ids() {
+fn typescript_grammar_covers_ts_tsx_mts_and_cts_extensions() {
     let mut registry = SyntaxGrammarRegistry::with_first_party_native();
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let query = std::fs::read_to_string(format!(
@@ -1145,6 +1145,20 @@ fn typescript_grammar_covers_typescript_and_tsx_language_ids() {
             "tsx",
             tree_sitter_typescript::LANGUAGE_TSX.into(),
             "tests/fixtures/syntax/typescript.tsx",
+        ),
+        (
+            "src/app.mts",
+            "typescript.typescript",
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            "tests/fixtures/syntax/typescript.ts",
+        ),
+        (
+            "src/app.cts",
+            "typescript.typescript",
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            "tests/fixtures/syntax/typescript.ts",
         ),
     ] {
         let selection = registry.select_for_document(
@@ -1558,6 +1572,77 @@ fn syntax_diagnostics_are_viewport_bounded_deduplicated_and_capped() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn scroll_sized_native_sources_produce_bounded_decorations() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    for (label, prefix, contribution_id, language, query, source) in [
+        (
+            "Rust",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn value() -> usize { 42 }\n".repeat(80),
+        ),
+        (
+            "TypeScript",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "const value: number = 42;\n".repeat(80),
+        ),
+        (
+            "TSX",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "const view = <div>{42}</div>;\n".repeat(80),
+        ),
+        (
+            "JavaScript",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "const value = 42;\n".repeat(80),
+        ),
+        (
+            "Markdown",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            "## Heading\n\nParagraph with `code`.\n\n".repeat(40),
+        ),
+    ] {
+        let contribution = registry
+            .get(contribution_id)
+            .unwrap_or_else(|| panic!("native {label} grammar"))
+            .clone();
+        let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
+            .unwrap_or_else(|error| panic!("{label} highlight query: {error}"));
+
+        let set = handler
+            .parse_sync(parse_notification_for(prefix, 1, &source))
+            .unwrap_or_else(|error| panic!("scroll-sized {label} parses: {error}"))
+            .decoration_update
+            .unwrap_or_else(|| panic!("scroll-sized {label} decorations"));
+
+        assert!(!set.spans.is_empty(), "{label}");
+        assert_eq!(set.viewport_byte_end, source.len() as u64, "{label}");
+        assert!(
+            rkyv::to_bytes::<rkyv::rancor::Error>(&set)
+                .expect("serialize bounded decorations")
+                .len()
+                <= clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES,
+            "{label}"
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn first_party_invalid_fixtures_emit_diagnostics_without_language_branches() {
     let registry = SyntaxGrammarRegistry::with_first_party_native();
     for (contribution_id, language, source) in [
@@ -1739,7 +1824,7 @@ fn unmatched_grammar_captures_stay_unstyled_without_color_leak() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn tree_sitter_handler_rejects_capture_output_over_viewport_limit() {
+fn tree_sitter_handler_truncates_capture_output_to_transport_safe_limit() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
     let handler =
@@ -1750,15 +1835,19 @@ fn tree_sitter_handler_rejects_capture_output_over_viewport_limit() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let error = handler
+    let set = handler
         .parse_sync(parse_notification(1, &text))
-        .unwrap_err();
+        .expect("capture overflow degrades to bounded decorations")
+        .decoration_update
+        .expect("bounded decoration update");
 
-    assert!(matches!(
-        error,
-        TreeSitterSyntaxError::CaptureLimitExceeded { limit: 128 }
-    ));
-    assert!(error.to_string().contains("more than 128 captures"));
+    assert_eq!(set.spans.len(), 80);
+    assert!(
+        rkyv::to_bytes::<rkyv::rancor::Error>(&set)
+            .expect("serialize bounded decorations")
+            .len()
+            <= clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES
+    );
 }
 
 #[cfg(any(unix, windows))]

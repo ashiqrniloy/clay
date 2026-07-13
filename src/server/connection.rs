@@ -1122,6 +1122,7 @@ pub(crate) async fn open_document_followup_messages(
 struct OpenModeActivation {
     package_prefix: String,
     mode_id: String,
+    parse_handler_mode_id: String,
     native_parse_policy: Option<ParsePolicy>,
 }
 
@@ -1195,9 +1196,10 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
     let mut activation = OpenModeActivation {
         package_prefix: value.get("apiPrefix")?.as_str()?.to_string(),
         mode_id: value.get("modeId")?.as_str()?.to_string(),
+        parse_handler_mode_id: value.get("modeId")?.as_str()?.to_string(),
         native_parse_policy: None,
     };
-    activation.native_parse_policy = js_runtime
+    if let Some((meta, policy)) = js_runtime
         .register_native_syntax_handler(
             parse_coordinator,
             generation_id,
@@ -1208,7 +1210,10 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
         )
         .ok()
         .flatten()
-        .map(|(_, policy)| policy);
+    {
+        activation.parse_handler_mode_id = meta.mode_id;
+        activation.native_parse_policy = Some(policy);
+    }
     // Tier 1 registers first. A same-generation JS handler remains available
     // only when no selected native handler owns this package/mode key.
     let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
@@ -1236,7 +1241,7 @@ async fn schedule_open_parse(
         document_version: metadata.version,
         behavior_version,
         package_prefix: activation.package_prefix.clone(),
-        mode_id: activation.mode_id.clone(),
+        mode_id: activation.parse_handler_mode_id.clone(),
         viewport: ParseByteRange::new(0, window_byte_end),
         invalidated_ranges: vec![ParseByteRange::new(0, window_byte_end)],
     };
@@ -1244,7 +1249,7 @@ async fn schedule_open_parse(
         document_id: metadata.document_id,
         document_version: metadata.version,
         package_prefix: activation.package_prefix.clone(),
-        mode_id: activation.mode_id.clone(),
+        mode_id: activation.parse_handler_mode_id.clone(),
         byte_start: 0,
         byte_end: window_byte_end,
         base_line: 0,

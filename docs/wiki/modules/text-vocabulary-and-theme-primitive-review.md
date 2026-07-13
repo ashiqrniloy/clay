@@ -77,7 +77,7 @@ A text-style contribution kind (token → `StyleSpec` override) validated throug
 
 ## Hot-Path Classification
 
-`StyleRegistry` lookup is a cheap per-span read during paint — array-indexed or a small map, no allocation, no per-glyph lookup. `visible_decoration_ranges` remains the only paint-time decoration consumer; the cost change is one `decoration_color` call replaced by one `style_for` call per visible span. Active-theme resolution happens at package load/reload, never on the typing/rendering path; the resolved registry is immutable for the duration of a paint. Span production (`decorations_for_window`) keeps its `MAX_SYNTAX_HIGHLIGHT_SPANS` cap and viewport clamp.
+`StyleRegistry` lookup is a cheap per-visible-span read during layout normalization — array-indexed or a small map, no per-glyph lookup. `normalize_visible_text_style_runs` resolves syntax/semantic foreground colors and `LayoutState` caches ranged Parley brushes with the shaped layout. Active-theme resolution happens at package load/reload, never in package JavaScript during typing/rendering. Span production (`decorations_for_window`) keeps its viewport clamp and transport-safe `MAX_SYNTAX_HIGHLIGHT_SPANS` cap; overflow truncates rather than dropping the entire set.
 
 ## Security and Authority Boundary
 

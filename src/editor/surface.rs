@@ -467,12 +467,13 @@ fn normalize_visible_text_style_runs(
         {
             continue;
         }
+        let style = theme.style_for(span.kind, span.token_type, span.modifiers);
         spans.push(VisibleDecorationStyle {
             range: start..end,
             span,
-            attributes: theme
-                .style_for(span.kind, span.token_type, span.modifiers)
-                .attributes(),
+            attributes: style.attributes(),
+            color: matches!(span.kind, DecorationKind::Syntax | DecorationKind::Semantic)
+                .then_some(style.color),
         });
     }
 
@@ -495,6 +496,7 @@ fn normalize_visible_text_style_runs(
             .filter(|style| style.range.start <= range.start && style.range.end >= range.end);
         let mut attributes = TextAttributes::default();
         let mut font_span = None;
+        let mut color_style: Option<&VisibleDecorationStyle<'_>> = None;
         for style in active {
             attributes.bold |= style.attributes.bold;
             attributes.italic |= style.attributes.italic;
@@ -505,14 +507,21 @@ fn normalize_visible_text_style_runs(
             {
                 font_span = Some(style.span);
             }
+            if style.color.is_some()
+                && color_style.is_none_or(|current| font_role_precedes(style.span, current.span))
+            {
+                color_style = Some(style);
+            }
         }
         let font_role = font_span
             .and_then(span_font_role)
             .unwrap_or(default_font_role);
+        let color = color_style.and_then(|style| style.color);
         if let Some(previous) = runs.last_mut()
             && previous.range.end == range.start
             && previous.font_role == font_role
             && previous.attributes == attributes
+            && previous.color == color
         {
             previous.range.end = range.end;
         } else {
@@ -520,6 +529,7 @@ fn normalize_visible_text_style_runs(
                 range,
                 font_role,
                 attributes,
+                color,
             });
         }
     }
@@ -530,6 +540,7 @@ struct VisibleDecorationStyle<'a> {
     range: Range<usize>,
     span: &'a DecorationSpan,
     attributes: TextAttributes,
+    color: Option<Color>,
 }
 
 fn span_font_role(span: &DecorationSpan) -> Option<FontRole> {
@@ -1312,7 +1323,6 @@ impl EditorSurface {
 
         let caret_visible_offset = self.visible_caret_offset(&snapshot);
         let selection_visible_range = self.visible_selection_range(&snapshot);
-        let decoration_visible_ranges = self.visible_decoration_ranges(&snapshot);
         let diagnostic_visible_ranges = self.visible_diagnostic_ranges(&snapshot);
         let document_font_role = self.document_font_role();
         let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width)
@@ -1339,7 +1349,6 @@ impl EditorSurface {
             caret_visible_offset,
             selection_visible_range,
             self.theme.base.selection,
-            &decoration_visible_ranges,
             &diagnostic_visible_ranges,
             origin,
             pin_caret_visible,

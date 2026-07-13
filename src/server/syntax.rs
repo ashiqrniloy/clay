@@ -7,7 +7,7 @@ use std::{
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
-const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 128;
+const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 80;
 
 use crate::{
     packages::{
@@ -249,7 +249,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         package_prefix: "typescript",
         id: "typescript.typescript",
         language_id: "typescript",
-        extensions: &["ts"],
+        extensions: &["ts", "mts", "cts"],
         file_names: &[],
         grammar_source: "tree-sitter-typescript",
         highlights_query_path: "packages/typescript/queries/highlights.scm",
@@ -959,7 +959,6 @@ pub enum TreeSitterSyntaxError {
     ParseTimedOut,
     DecorationInvalid(String),
     PayloadBudgetExceeded { bytes: usize, budget: usize },
-    CaptureLimitExceeded { limit: usize },
 }
 
 impl fmt::Display for TreeSitterSyntaxError {
@@ -986,10 +985,6 @@ impl fmt::Display for TreeSitterSyntaxError {
             Self::PayloadBudgetExceeded { bytes, budget } => write!(
                 formatter,
                 "syntax decoration payload is {bytes} bytes, above the {budget} byte budget"
-            ),
-            Self::CaptureLimitExceeded { limit } => write!(
-                formatter,
-                "syntax highlight query produced more than {limit} captures for one viewport"
             ),
         }
     }
@@ -1228,9 +1223,7 @@ impl TreeSitterSyntaxHandler {
                 break;
             };
             if syntax_captures.len() >= MAX_SYNTAX_HIGHLIGHT_SPANS {
-                return Err(TreeSitterSyntaxError::CaptureLimitExceeded {
-                    limit: MAX_SYNTAX_HIGHLIGHT_SPANS,
-                });
+                break;
             }
             let capture = query_match.captures[*capture_index];
             let capture_name = capture_names[capture.index as usize];

@@ -5,7 +5,7 @@ use masonry::kurbo::{Affine, BezPath, Rect, Stroke};
 use masonry::parley::Layout;
 use masonry::parley::layout::{Affinity, Cursor, Selection};
 use masonry::parley::style::{FontStyle, FontWeight, LineHeight, StyleProperty};
-use masonry::peniko::{Color, Fill};
+use masonry::peniko::{Brush, Color, Fill};
 use masonry::{TextAlign, TextAlignOptions};
 
 use crate::perf::metrics::global_recorder;
@@ -16,11 +16,12 @@ use super::surface::TEXT_INSET;
 use super::theme::TextAttributes;
 use super::typography::{DOCUMENT_LINE_HEIGHT_MULTIPLIER, TypographyRegistry};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct VisibleTextStyleRun {
     pub range: Range<usize>,
     pub font_role: FontRole,
     pub attributes: TextAttributes,
+    pub color: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,6 +93,7 @@ struct CachedLayout {
     layout: Layout<BrushIndex>,
     text_len: usize,
     style_runs: Vec<VisibleTextStyleRun>,
+    brushes: Vec<Brush>,
 }
 
 impl fmt::Debug for LayoutState {
@@ -126,7 +128,6 @@ impl LayoutState {
         caret_visible_byte_offset: Option<usize>,
         selection_visible_byte_range: Option<Range<usize>>,
         selection_color: Color,
-        decoration_visible_byte_ranges: &[(Range<usize>, Color)],
         diagnostic_visible_byte_ranges: &[(Range<usize>, Color)],
         origin: (f64, f64),
         pin_caret_visible: bool,
@@ -149,6 +150,7 @@ impl LayoutState {
                 key,
                 typography,
                 document_font_role,
+                color,
                 normalize_style_runs(),
             );
         } else {
@@ -181,25 +183,6 @@ impl LayoutState {
             origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
-        for (range, decoration_color) in decoration_visible_byte_ranges {
-            for rect in
-                Self::selection_rects_in_layout(&cached.layout, cached.text_len, range.clone())
-            {
-                let rect = Rect::new(
-                    origin.0 + rect.x0 + TEXT_INSET,
-                    origin.1 + rect.y0 + TEXT_INSET - *scroll_y,
-                    origin.0 + rect.x1 + TEXT_INSET,
-                    origin.1 + rect.y1 + TEXT_INSET - *scroll_y,
-                );
-                scene.fill(
-                    Fill::NonZero,
-                    Affine::IDENTITY,
-                    *decoration_color,
-                    None,
-                    &rect,
-                );
-            }
-        }
         if let Some(range) = selection_visible_byte_range {
             for rect in Self::selection_rects_in_layout(&cached.layout, cached.text_len, range) {
                 let rect = Rect::new(
@@ -221,7 +204,7 @@ impl LayoutState {
             scene,
             Affine::translate((origin.0 + TEXT_INSET, origin.1 + TEXT_INSET - *scroll_y)),
             &cached.layout,
-            &[color.into()],
+            &cached.brushes,
             true,
         );
         for (range, diagnostic_color) in diagnostic_visible_byte_ranges {
@@ -395,6 +378,7 @@ impl LayoutState {
         key: LayoutCacheKey,
         typography: &TypographyRegistry,
         document_font_role: FontRole,
+        default_color: Color,
         style_runs: Vec<VisibleTextStyleRun>,
     ) {
         let (font_context, layout_context) = ctx.text_contexts();
@@ -406,6 +390,7 @@ impl LayoutState {
             DOCUMENT_LINE_HEIGHT_MULTIPLIER as f32,
         )));
         builder.push_default(StyleProperty::Brush(BrushIndex(0)));
+        let mut brush_colors = vec![default_color];
         for run in &style_runs {
             let profile = typography.profile(run.font_role);
             builder.push(
@@ -431,6 +416,19 @@ impl LayoutState {
             if run.attributes.strike {
                 builder.push(StyleProperty::Strikethrough(true), run.range.clone());
             }
+            if let Some(color) = run.color {
+                let brush_index = brush_colors
+                    .iter()
+                    .position(|candidate| *candidate == color)
+                    .unwrap_or_else(|| {
+                        brush_colors.push(color);
+                        brush_colors.len() - 1
+                    });
+                builder.push(
+                    StyleProperty::Brush(BrushIndex(brush_index)),
+                    run.range.clone(),
+                );
+            }
         }
 
         let mut layout = builder.build(display_text);
@@ -446,6 +444,7 @@ impl LayoutState {
             layout,
             text_len: display_text.len(),
             style_runs,
+            brushes: brush_colors.into_iter().map(Into::into).collect(),
         });
     }
 
@@ -478,13 +477,19 @@ impl LayoutState {
             DOCUMENT_LINE_HEIGHT_MULTIPLIER as f32,
         )));
         builder.push_default(StyleProperty::Brush(BrushIndex(0)));
-        for run in style_runs {
+        for (index, run) in style_runs.iter().enumerate() {
             let profile = typography.profile(run.font_role);
             builder.push(
                 StyleProperty::FontStack(profile.font_stack()),
                 run.range.clone(),
             );
             builder.push(StyleProperty::FontSize(profile.size()), run.range.clone());
+            if run.color.is_some() {
+                builder.push(
+                    StyleProperty::Brush(BrushIndex(index + 1)),
+                    run.range.clone(),
+                );
+            }
         }
 
         let mut layout = builder.build(display_text);
@@ -504,6 +509,7 @@ impl LayoutState {
             layout: Layout::default(),
             text_len: 0,
             style_runs: Vec::new(),
+            brushes: Vec::new(),
         });
     }
 
@@ -514,6 +520,7 @@ impl LayoutState {
             layout: Self::build_layout_for_test(display_text, max_width),
             text_len: display_text.len(),
             style_runs: Vec::new(),
+            brushes: Vec::new(),
         });
     }
 
@@ -536,6 +543,7 @@ impl LayoutState {
             ),
             text_len: display_text.len(),
             style_runs: Vec::new(),
+            brushes: Vec::new(),
         });
     }
 }
@@ -639,12 +647,37 @@ mod tests {
                 range: 1..2,
                 font_role: FontRole::Monospace,
                 attributes: TextAttributes::default(),
+                color: None,
             }],
         );
 
         assert!(
             layout.get(0).unwrap().metrics().line_height
                 >= typography.document_line_height() as f32
+        );
+    }
+
+    #[test]
+    fn decoration_range_uses_a_non_default_text_brush() {
+        let typography = TypographyRegistry::default();
+        let layout = LayoutState::build_layout_with_typography_for_test(
+            "let value",
+            300.0,
+            &typography,
+            FontRole::Monospace,
+            &[VisibleTextStyleRun {
+                range: 0..3,
+                font_role: FontRole::Monospace,
+                attributes: TextAttributes::default(),
+                color: Some(masonry::peniko::color::palette::css::RED),
+            }],
+        );
+
+        assert!(
+            layout
+                .styles()
+                .iter()
+                .any(|style| style.brush == masonry::core::BrushIndex(1))
         );
     }
 

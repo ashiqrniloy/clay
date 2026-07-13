@@ -104,7 +104,7 @@ Manifest payloads are minified to stay under the behavior-manifest payload budge
 5. Registers the status item via `serverRegisterComponentContribution` with `kind: "statusItem"`.
 6. For Markdown only, retains `parser.js` as a registered Tier 3 fallback; the package manifest no longer advertises it as the default decoration contribution.
 
-On document open, generic classification returns the package/mode key. `ClayRuntimeEvaluation` carries grammar metadata and engine preferences; `register_native_syntax_handler` selects the path-matching native descriptor, compiles its query from bundled package query text, and installs it before any same-key JS fallback. `schedule_open_parse` then enqueues bounded background work. Markdown native spans carry builtin provenance, while its preview remains independently opt-in package-JS SDUI.
+On document open, generic classification returns the package/mode key. `ClayRuntimeEvaluation` carries grammar metadata and engine preferences; `register_native_syntax_handler` selects the path-matching native descriptor, compiles its query from bundled package query text, and installs it under the selected grammar ID. `schedule_open_parse` then enqueues bounded background work against that ID; the package/mode JS fallback remains separately keyed. This lets TypeScript and TSX handlers coexist. Markdown native spans carry builtin provenance, while its preview remains independently opt-in package-JS SDUI.
 
 ### Behavior manifest helper
 

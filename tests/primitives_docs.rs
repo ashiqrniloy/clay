@@ -2721,8 +2721,8 @@ fn phase18_18_markdown_native_decoration_split_is_documented() {
     }
     assert!(languages.contains("register_native_syntax_handler"));
     assert!(languages.contains("preview remains independently opt-in package-JS SDUI"));
-    assert!(syntax.contains("same-generation package/mode JS fallback"));
-    assert!(syntax.contains("multiple compiled grammars under one mode key"));
+    assert!(syntax.contains("package/mode JS fallback remains separately keyed"));
+    assert!(syntax.contains("document-selected grammar contribution ID"));
 }
 
 #[test]

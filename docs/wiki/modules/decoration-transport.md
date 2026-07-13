@@ -28,7 +28,7 @@ The decoration transport carries package-produced inline editor decorations as b
 - Accept a small language-neutral style-token allowlist for both Markdown markup scopes and future code modes such as Python (`keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`) without adding parser-specific Rust branches.
 - Provide the runtime-backed `clay:decorations` facade and explicit `op_clay_decorations_publish_decorations` wrapper for package-side publication.
 - Route `ServerMessage::DecorationSet` through the client connection event loop into `EditorWidget::apply_connection_event`.
-- Store current validated spans in `EditorSurface`, render native highlight rectangles, and normalize viewport-bounded syntax/semantic presentation runs for `LayoutState::paint_text`.
+- Store current validated spans in `EditorSurface` and normalize viewport-bounded syntax/semantic presentation runs into cached Parley foreground brushes for `LayoutState::paint_text`.
 
 ## Primitive Coverage
 
@@ -47,7 +47,7 @@ The decoration transport carries package-produced inline editor decorations as b
 6. The client connection task converts the message into `ClientConnectionEvent::DecorationSet`.
 7. `EditorWidget::apply_connection_event` installs the chunk through `EditorSurface::apply_decoration_set`, which rejects mismatched document IDs or versions.
 8. `EditorSurface` stores the validated chunk by `DecorationChunkKey`, drops stale chunks on document version changes, prunes chunks outside the current visible/near-viewport guard, and keeps retained serialized chunk memory under `SYNTAX_CACHE_BUDGET_BYTES`.
-9. When the cached Parley layout misses, `EditorSurface` intersects cached local chunks with the current `VisibleSnapshot`, rejects malformed/out-of-document/non-UTF-8-boundary ranges again, maps known kind/style tokens to local Rust colors and attributes, then normalizes non-overlapping presentation runs. Font roles are considered only for `Syntax`/`Semantic`: higher priority wins, then semantic over syntax, then stable provenance; attributes compose. `LayoutState` applies Clay-resolved Parley properties to those ranges and retains runs with its layout. Diagnostics/search keep rectangle/attribute styling but cannot alter a font role. Cache-hit paint does not rescan spans.
+9. When the cached Parley layout misses, `EditorSurface` intersects cached local chunks with the current `VisibleSnapshot`, rejects malformed/out-of-document/non-UTF-8-boundary ranges again, maps known kind/style tokens to local Rust colors and attributes, then normalizes non-overlapping presentation runs. Font roles and foreground colors are considered only for `Syntax`/`Semantic`: higher priority wins, then semantic over syntax, then stable provenance; attributes compose. `LayoutState` assigns ranged `BrushIndex` values, caches the corresponding native brush table, and renders glyphs with theme colors instead of background highlight rectangles. Selection and range-diagnostic squiggles remain separate paint layers. Cache-hit paint does not rescan spans.
 
 Phase 18.17 adds a parallel inert path for `ServerMessage::DiagnosticSet` / `ClientConnectionEvent::DiagnosticSet` / `EditorSurface::apply_diagnostic_set`. Source-keyed diagnostic chunks share the connection drain from `ParseCoordinator` updates, use `DIAGNOSTIC_CACHE_BUDGET_BYTES`, and remain independent from decoration chunk lifecycle. See [Phase 18.17 range diagnostics primitive review](phase18.17-range-diagnostics-primitive-review.md).
 
@@ -72,7 +72,7 @@ let message = ServerMessage::DecorationSet(set);
 ## Tests
 
 - `tests/decoration_transport.rs`: oversized payload rejection, stale-version rejection, invalid range/unknown token rejection, off-viewport rejection, generic non-Markdown language package syntax-span acceptance, representative Markdown decoration payload budget coverage, near-viewport client pruning, stale-version cache clearing, protocol codec round trip, and client render-hook application.
-- `tests/syntax_grammar.rs`: native Tree-sitter fixtures for Rust, TypeScript, TSX, JavaScript, and Markdown produce bounded vocabulary decorations; tier selection, unmapped captures, per-viewport overflow, cached parsing, package provenance, semantic style-map roles, and concrete-font rejection are covered.
+- `tests/syntax_grammar.rs`: native Tree-sitter fixtures for Rust, TypeScript, TSX, JavaScript, and Markdown produce bounded vocabulary decorations; tier selection, unmapped captures, transport-safe overflow truncation, scroll-sized source degradation, cached parsing, package provenance, semantic style-map roles, and concrete-font rejection are covered.
 - `tests/typography_protocol.rs::decoration_font_role_is_limited_to_syntax_and_semantic_layers`: rejects diagnostic/search font-role transport before publication.
 - `src/editor/surface.rs`: verifies Markdown code uses monospace inside a proportional document, overlap resolution/attribute composition is deterministic, and diagnostic or invalid UTF-8 spans cannot affect font roles; `src/editor/layout.rs` verifies typography/style/default-role cache invalidation.
 - `src/server/decorations.rs::tests::large_file_decoration_cache_respects_30_mib_budget`: verifies server-side chunk-cache budget accounting and LRU eviction.

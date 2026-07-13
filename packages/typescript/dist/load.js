@@ -18,7 +18,7 @@ export function typescriptGrammarContract() {
     permissions: ["parse-document", "render-decorations"],
     syntaxGrammar: {
       languageId: "typescript",
-      filePatterns: { extensions: ["ts", "tsx"] },
+      filePatterns: { extensions: ["ts", "tsx", "mts", "cts"] },
       grammar: { kind: "native", source: "tree-sitter-typescript" },
       queries: { highlights: "./queries/highlights.scm" },
       styleMap: {

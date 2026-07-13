@@ -69,7 +69,7 @@ The implemented render hook preserves these boundaries:
 
 - `src/masonry_editor.rs::EditorWidget::apply_connection_event` receives `ClientConnectionEvent::DecorationSet` and stores validated updates before paint.
 - `src/editor/surface.rs::EditorSurface` holds current document/version-matched decoration state near visible snapshot/layout-cache computation.
-- `src/editor/layout.rs::LayoutState::paint_text` fills native highlight rectangles for visible decoration ranges before text rendering; future richer text styling can extend this Parley/Vello boundary.
+- `src/editor/layout.rs::LayoutState::paint_text` renders syntax/semantic ranges with cached Parley foreground brushes; selection fills and diagnostic squiggles remain separate Vello layers.
 - `src/masonry_editor.rs::EditorWidget::paint` does not run package JavaScript, validate large payloads, or parse package declarations. It only renders already-applied state.
 - `src/masonry_sdui.rs::SduiNativeState::apply_snapshot` and `apply_update` remain the SDUI panel/status application path, while `SduiNativeState::paint` renders the validated native UI tree.
 

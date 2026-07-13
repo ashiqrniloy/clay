@@ -728,7 +728,7 @@ impl ClayJsRuntimeService {
         evaluation: &ClayRuntimeEvaluation,
         path: &str,
         package_prefix: &str,
-        mode_id: &str,
+        _mode_id: &str,
     ) -> Result<
         Option<(
             crate::server::parse_coordinator::ParseHandlerMeta,
@@ -746,21 +746,6 @@ impl ClayJsRuntimeService {
         if contribution.engine_tier != crate::server::syntax::SyntaxEngineTier::Native {
             return Ok(None);
         }
-        // ponytail: ParseCoordinator keys handlers by package/mode. Skip modes
-        // with multiple native grammars until its key carries document-selected
-        // grammar identity; replacing here would make last-opened grammar win.
-        if evaluation
-            .syntax_grammars
-            .iter()
-            .filter(|grammar| {
-                grammar.engine_tier == crate::server::syntax::SyntaxEngineTier::Native
-                    && grammar.package_prefix == contribution.package_prefix
-            })
-            .count()
-            != 1
-        {
-            return Ok(None);
-        }
         let policy = crate::protocol::ParsePolicy::new(
             contribution
                 .max_window_bytes
@@ -773,7 +758,7 @@ impl ClayJsRuntimeService {
         let key = (
             generation_id,
             package_prefix.to_string(),
-            mode_id.to_string(),
+            contribution.id.clone(),
         );
         let mut native_syntax_handlers = self
             .native_syntax_handlers
@@ -783,7 +768,7 @@ impl ClayJsRuntimeService {
             return Ok(Some((
                 crate::server::parse_coordinator::ParseHandlerMeta {
                     package_prefix: package_prefix.to_string(),
-                    mode_id: mode_id.to_string(),
+                    mode_id: contribution.id.clone(),
                 },
                 policy,
             )));
@@ -800,7 +785,7 @@ impl ClayJsRuntimeService {
             generation_id,
             crate::server::parse_coordinator::ParseHandlerMeta {
                 package_prefix: package_prefix.to_string(),
-                mode_id: mode_id.to_string(),
+                mode_id: contribution.id.clone(),
             },
             handler,
         ) {
@@ -2327,6 +2312,51 @@ mod tests {
                 .is_none(),
             "explicit JavaScript preference must suppress native handler installation"
         );
+    }
+
+    #[tokio::test]
+    async fn typescript_and_tsx_install_their_selected_native_handlers() {
+        let root = config_fixture("typescript-native-handlers");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/typescript");
+            "#,
+        )
+        .unwrap();
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .load_configuration_from_root(root)
+            .await
+            .expect("TypeScript package loads");
+        let coordinator = ParseCoordinator::new();
+
+        let typescript = service
+            .register_native_syntax_handler(
+                &coordinator,
+                1,
+                &evaluation,
+                "app.ts",
+                "typescript",
+                "typescript",
+            )
+            .expect("TypeScript native selection")
+            .expect("TypeScript native handler");
+        let tsx = service
+            .register_native_syntax_handler(
+                &coordinator,
+                1,
+                &evaluation,
+                "app.tsx",
+                "typescript",
+                "typescript",
+            )
+            .expect("TSX native selection")
+            .expect("TSX native handler");
+
+        assert_eq!(typescript.0.mode_id, "typescript.typescript");
+        assert_eq!(tsx.0.mode_id, "typescript.tsx");
     }
 
     #[tokio::test]

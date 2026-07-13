@@ -1604,7 +1604,10 @@ mod tests {
                 }
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             };
-        let _manifest = codec.read_server_message(&mut stream).await.unwrap();
+        let behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            message => panic!("expected BehaviorManifest, got {message:?}"),
+        };
         let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
         let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
         assert!(matches!(
@@ -1620,7 +1623,7 @@ mod tests {
                     client_id,
                     lease_id: Some(lease_id),
                     base_version: version,
-                    behavior_version: 1,
+                    behavior_version,
                     transaction_id: 12,
                     operation: EditOperation::Insert {
                         byte_offset: 1,
@@ -1631,19 +1634,27 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::EditRejected {
-                document_id: rejected_document_id,
-                transaction_id: 12,
-                reason: EditRejection::RegionLocked { conflict },
-            } if rejected_document_id == document_id
-                && conflict.lock_id == lock_id
-                && conflict.start == 0
-                && conflict.end == 7
-                && conflict.owner == LockOwner::Server
-                && conflict.created_at_version == version
-        ));
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::EditRejected {
+                    document_id: rejected_document_id,
+                    transaction_id: 12,
+                    reason: EditRejection::RegionLocked { conflict },
+                } if rejected_document_id == document_id
+                    && conflict.lock_id == lock_id
+                    && conflict.start == 0
+                    && conflict.end == 7
+                    && conflict.owner == LockOwner::Server
+                    && conflict.created_at_version == version =>
+                {
+                    break;
+                }
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                other => panic!("expected region-lock rejection, got {other:?}"),
+            }
+        }
 
         server_task.abort();
         let _ = fs::remove_file(&socket_path);
