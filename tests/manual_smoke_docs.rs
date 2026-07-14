@@ -183,26 +183,22 @@ fn phase18_16_5_typography_smoke_covers_fallback_geometry_and_authority() {
 }
 
 #[test]
-fn phase18_17_manual_smoke_documents_invalid_repair_lifecycle() {
+fn phase18_17_manual_smoke_documents_analyzer_only_diagnostics() {
     let launch_doc = launch_smoke_doc();
 
     for expected in [
-        "Phase 18.17 range diagnostics and syntax-error smoke",
+        "Phase 18.17 range diagnostic transport smoke",
         "DiagnosticSet",
-        "ERROR",
-        "MISSING",
+        "explicit analyzer packages",
         "serverPublishDiagnostics",
         "RuntimeDiagnostic",
         "cargo run -- smoke-gui --config-fixture syntax-grammars",
-        "invalid `.rs`, `.ts`, `.tsx`, `.js`, and `.md`",
-        "text paints first",
-        "themed squiggle",
-        "tree-sitter",
+        "without red squiggles from Tree-sitter",
+        "bounded-fragment recovery nodes are not correctness authority",
         "Local typing/scroll remain responsive",
-        "invalid_to_valid_edit_clears_squiggle_after_current_parse",
-        "valid_to_invalid_edit_keeps_local_typing_non_blocking",
+        "tree_sitter_highlighting_does_not_emit_range_diagnostics",
+        "first_party_invalid_fixtures_do_not_masquerade_as_analyzer_diagnostics",
         "runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline",
-        "valid_tree_fast_path_skips_error_node_traversal",
         "range_diagnostics_do_not_enter_editor_hot_paths",
     ] {
         assert!(
@@ -233,7 +229,7 @@ fn phase18_18_manual_smoke_documents_first_party_language_matrix() {
         "Gruvbox-themed native vocabulary highlighting",
         "keyword completion",
         "indent, pairs, and comment behavior",
-        "themed syntax-error squiggle",
+        "without a grammar-produced squiggle",
         "Typing/scroll remain responsive",
         "graceful fallback to `core.code` (Rust/TypeScript/JavaScript) or `core.text` (Markdown)",
         "no secrets, real paths, or executable authority",

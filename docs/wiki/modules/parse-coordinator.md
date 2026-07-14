@@ -24,7 +24,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 - Provide the public `clay:parse` facade and explicit `op_clay_parse_register_parse_handler` wrapper for package registration metadata.
 - Schedule per-document parse work for `(document_id, package_prefix, mode_id)`, including the bounded initial parse used by selected-file open-time activation.
 - Schedule bounded parse-window work with `ParseWindowSnapshot`, `ParsePolicy`, and `SyntaxMemoryBudget` metadata for large-file modes and grammar-only syntax packages.
-- Abort superseded in-flight tasks when a newer version for the same document/package/mode is scheduled.
+- Abort superseded in-flight tasks while allowing contiguous sibling viewport chunks for one document/package/mode group to complete together.
 - Replace parse handlers by runtime generation during hot reload and cancel old-generation parse tasks before they can publish.
 - Sort invalidated ranges so viewport-intersecting work is handled first, using only generic byte-range metadata that token-stream adapters for Markdown, Python, or other modes can consume.
 - Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, optional parse-produced decoration and range-diagnostic metadata, their viewport/provenance identity, component payload budgets, and `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
@@ -37,7 +37,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 
 The live JS bridge is deliberately split across the facade and the op. Package load code imports its parser module and passes the module object/export name to `serverRegisterParseHandler`; the facade stores that function in `globalThis.__clayParseHandlers[token]` after the op accepts the package metadata. Rust never receives a JS function value. `ClayJsRuntimeService::register_parse_handlers` adapts each accepted `JsParseHandlerRegistration` into the existing `ParseHandler` trait with `ParseCoordinator::register_handler_meta`, so the coordinator still sees only a normal Rust handler.
 
-`ParseCoordinator::schedule_parse` takes a `ParseScheduleRequest` containing document/version metadata, behavior version, package prefix, mode ID, viewport byte range, and invalidated ranges. Scheduling is intentionally cheap: it validates range shape, snapshots the currently registered handler generation into the task key, records the latest document version, aborts any active task for the same document/package/mode/generation, spawns a Tokio background task, and returns immediately.
+`ParseCoordinator::schedule_parse` takes a `ParseScheduleRequest` containing document/version metadata, behavior version, package prefix, mode ID, viewport byte range, and invalidated ranges. Scheduling is intentionally cheap: it validates range shape, snapshots the registered handler generation and viewport start into the task key, records the latest document version, replaces only an exact sibling task, spawns Tokio background work, and returns immediately. Native connection scheduling first calls `cancel_document_handler_tasks` for an older viewport group, then schedules contiguous 256-byte sibling viewports over one bounded parse window.
 
 `ParseCoordinator::schedule_parse_with_windows` is the Phase 18.5 large-file path. The caller prepares bounded server-canonical snapshots from already-open document text, then the coordinator validates each snapshot before any package handler can observe it: document ID and version must match the request, package prefix and mode ID must match handler provenance, `byte_end - byte_start` must equal the UTF-8 byte length of `text`, every window must fit `ParsePolicy::max_window_bytes`, and total retained window text must fit `ParsePolicy::memory_budget_bytes` and `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB). Valid windows are delivered in `ParseEditNotification::parse_windows` with `SyntaxMemoryBudget` metadata.
 
@@ -111,7 +111,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`
 - `src/server/js_runtime.rs::runtime_boundary_does_not_expose_platform_authorities`
 - `src/server/connection.rs::open_document_renders_before_background_parse_completes`
-- `src/server/connection.rs::nonzero_viewports_produce_typescript_and_markdown_decorations`
+- `src/server/connection.rs::native_viewport_chunks_decorate_all_first_party_languages_beyond_first_lines`
 - `src/server/connection.rs::selected_markdown_file_publishes_manifest_and_decorations`
 - `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow`
 - `tests/syntax_grammar.rs::tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`

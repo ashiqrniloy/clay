@@ -8,7 +8,7 @@
 - `src/server/diagnostics.rs` — `validate_diagnostic_publication`, `validate_diagnostic_set`, `DiagnosticChunkCache`, `DiagnosticValidationError`.
 - `src/server/ops/diagnostics.rs` — `op_clay_diagnostics_publish_diagnostics`.
 - `src/server/parse_coordinator.rs` — side-channel validation and `next_update` / `next_diagnostic` delivery.
-- `src/server/syntax.rs` — `collect_syntax_diagnostics`, `diagnostics_for_window`, `visible_scalar_range`.
+- `src/server/syntax.rs` — native highlighting deliberately leaves `diagnostic_update` empty.
 - `src/server/connection.rs` — connection `select!` drains parse decorations + diagnostic sets.
 - `src/server/ops/mod.rs` — `ClayOpState::published_diagnostic_set` / `publish_diagnostic_set`.
 - `src/client/mod.rs` — `ClientConnectionEvent::DiagnosticSet`.
@@ -25,13 +25,13 @@
 
 ## Overview
 
-Phase 18.17 adds source-associated range diagnostics as an additive editor layer. Tree-sitter `ERROR`/`MISSING` recovery and package analyzers publish viewport-bounded `DiagnosticSet` values. The server validates them, ships `ServerMessage::DiagnosticSet`, and the client caches source-keyed chunks for paint-only severity squiggles. Status failures stay on `RuntimeDiagnostic`; range diagnostics never choose font roles or replace syntax/semantic decoration state.
+Phase 18.17 adds source-associated range diagnostics as an additive editor layer. Explicit analyzer packages publish viewport-bounded `DiagnosticSet` values. Native Tree-sitter highlighting does not publish diagnostics: recovery nodes from bounded parse fragments are not correctness authority and caused false squiggles. The server validates analyzer output, ships `ServerMessage::DiagnosticSet`, and the client caches source-keyed chunks for paint-only severity squiggles. Status failures stay on `RuntimeDiagnostic`; range diagnostics never choose font roles or replace syntax/semantic decoration state.
 
 ## Responsibilities
 
 - Own inert `DiagnosticSpan` / `DiagnosticSet` protocol shapes, budgets, and deterministic ordering.
-- Extract grammar-neutral Tree-sitter recovery captures into a `tree-sitter` source set on the parse side channel.
-- Validate package publication through `render-decorations` + provenance without a new permission.
+- Keep grammar highlighting separate from analyzer-owned diagnostic authority.
+- Validate explicit package publication through `render-decorations` + provenance without a new permission.
 - Deliver diagnostics asynchronously beside decorations; keep typing/open non-blocking.
 - Cache source-keyed chunks near-viewport under `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 - Paint severity squiggles from cached Parley geometry and theme-owned colors only.
@@ -46,9 +46,9 @@ Phase 18.17 adds source-associated range diagnostics as an additive editor layer
 
 `IncrementalParseUpdate.diagnostic_update` rides beside optional decorations. `ParseCoordinator::validate_update` requires matching document/version/viewport/provenance for both channels and accepts or rejects them together. Connection loops drain `next_update()` → `DecorationSet` / `DiagnosticSet` and `next_diagnostic()` → sanitized status `RuntimeDiagnostic`.
 
-### Tree-sitter extraction
+### Diagnostic authority
 
-`collect_syntax_diagnostics` short-circuits when `!root.has_error()`. Otherwise it walks error-bearing nodes with `is_error`/`is_missing`/`byte_range`/`walk`, clips to viewport, deduplicates nested ranges, caps at `DIAGNOSTIC_MAX_SPANS_PER_SET`, and anchors zero-width `MISSING` nodes via `visible_scalar_range` (next UTF-8 scalar, else previous). Codes/messages are Clay-owned (`syntax.error` / `syntax.missing`). Tier 2 mirrors captures in `collectWebTreeSitterDiagnostics`; no language-name branches.
+Tree-sitter `ERROR`/`MISSING` recovery nodes are parser recovery details, especially for bounded viewport fragments; they are not proof that user code is invalid. Tier 1 native highlighting therefore returns `diagnostic_update: None`. First-party language packages emit no squiggles until an explicit analyzer such as a future Phase 18.21 LSP package publishes a validated `DiagnosticSet`. The generic diagnostic transport and package facade remain available without language-name branches.
 
 ### Server/client chunk lifecycle
 
@@ -91,7 +91,7 @@ cargo test --test primitives_docs range_diagnostics
 ## Primitive Coverage
 
 - **Range diagnostic publication** — `DiagnosticSet` in `src/protocol/diagnostics.rs`; facade `runtime/js/diagnostics.ts::serverPublishDiagnostics`.
-- **Engine-neutral recovery** — `SyntaxDiagnosticCapture` → Tree-sitter / web-tree-sitter / JS parse records.
+- **Analyzer-neutral transport** — explicit package analyzers and future LSP bridges publish the same inert `DiagnosticSet` records.
 - **Permissions / budgets** — reuses `render-decorations`; `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 - **Hot-path policy** — parse/validate/serialize on background server path; paint uses cached spans + Parley rects + theme colors only.
 - **Reuse rule** — future analyzers/LSP bridges publish `DiagnosticSet`; they do not add schedulers, language paint branches, or font-role authority.
@@ -103,12 +103,13 @@ cargo test --test primitives_docs range_diagnostics
 - Empty source chunk clears only that source.
 - No language-name branches in server/client/editor diagnostic code.
 - No raw Deno ops, CSS, callbacks, native handles, or LSP process spawning in this phase.
+- Tree-sitter highlighting never masquerades as analyzer diagnostics.
 - Paint-path sources must not hardcode diagnostic colors (`tests/editor_performance_invariants.rs`).
 
 ## Tests
 
 - `tests/range_diagnostics.rs` — transport, client apply, multi-source clear, paint/layout invariants, facade authority denial.
-- `tests/syntax_grammar.rs` — ERROR/MISSING extraction, valid-tree clear, UTF-8 anchors, viewport/cap/dedupe, no language branches.
+- `tests/syntax_grammar.rs` — native highlighting emits decorations but no analyzer diagnostics, including invalid first-party fixtures.
 - `tests/performance_protocol.rs` — non-blocking typing under slow parse.
 - `tests/editor_performance_invariants.rs` — no hot-path extraction, theme-owned paint colors.
 - `tests/primitives_docs.rs` — reference + wiki coverage guards.

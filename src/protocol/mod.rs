@@ -13,9 +13,10 @@ pub use sdui::*;
 
 /// Current wire protocol version for the local Clay IPC boundary.
 ///
-/// Version 2 adds `DecorationViewportRequest` to `ClientMessage`; version 1
-/// peers must not decode the changed enum discriminants.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// Version 2 added `DecorationViewportRequest`; version 3 adds grouped native
+/// decoration chunks and removes grammar-recovery diagnostics. Older server
+/// processes must not retain the previous wire semantics.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;

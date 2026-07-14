@@ -247,20 +247,19 @@ Manual matrix:
 
 Automated coverage: `unicode_and_emoji_shape_with_unavailable_named_font_fallback`, `live_typography_update_requests_layout_render_and_accessibility`, `ui_size_change_scales_row_hit_and_accessibility_bounds_together`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`, `typography_updates_do_not_enter_editor_hot_paths`, protocol/configuration rejection tests, viewport-bounded editor benchmarks, and large-file Markdown decoration budgets.
 
-### Phase 18.17 range diagnostics and syntax-error smoke
+### Phase 18.17 range diagnostic transport smoke
 
-Phase 18.17 adds viewport-bounded `DiagnosticSet` squiggles from Tree-sitter `ERROR`/`MISSING` nodes and package `clay:diagnostics.serverPublishDiagnostics`. Status-level `RuntimeDiagnostic` stays in the chrome; range diagnostics stay paint-only.
+Phase 18.17 adds viewport-bounded `DiagnosticSet` transport for explicit analyzer packages through `clay:diagnostics.serverPublishDiagnostics`. Native Tree-sitter highlighting does not emit diagnostics: bounded-fragment recovery nodes are not correctness authority. Status-level `RuntimeDiagnostic` stays in the chrome; analyzer-owned range diagnostics stay paint-only.
 
 Manual matrix:
 
 1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` (or load `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` in `~/.config/clay/init.js`).
-2. Open invalid `.rs`, `.ts`, `.tsx`, `.js`, and `.md` snippets (for example incomplete `fn main() { let = ;`, `const = ;`, or broken Markdown fence). Confirm text paints first, then a themed squiggle arrives asynchronously under the bad range.
-3. Repair each file to valid syntax. Confirm the current `tree-sitter` source chunk clears and the squiggle disappears after the next accepted parse.
-4. Type and scroll while a slow reparse is outstanding. Local typing/scroll remain responsive; diagnostics never block keypress paint.
-5. Confirm syntax/semantic token tints remain visible under/around squiggles, and a status-level runtime diagnostic (if present) does not become an inline mark.
-6. Unload language packages and reopen. Documents stay editable with no syntax highlights and no Tree-sitter squiggles.
+2. Open valid and incomplete `.rs`, `.ts`, `.tsx`, `.js`, and `.md` snippets. Confirm syntax highlighting appears without red squiggles from Tree-sitter.
+3. Type and scroll while a slow reparse is outstanding. Local typing/scroll remain responsive and no parser-recovery diagnostics appear.
+4. If testing an explicit analyzer package, confirm only its validated `DiagnosticSet` produces themed squiggles and that a status-level runtime diagnostic does not become an inline mark.
+5. Unload language packages and reopen. Documents stay editable with no syntax highlights or grammar-produced squiggles.
 
-Automated coverage (no manual execution needed): `invalid_to_valid_edit_clears_squiggle_after_current_parse`, `valid_to_invalid_edit_keeps_local_typing_non_blocking`, `runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline`, `valid_tree_fast_path_skips_error_node_traversal`, `range_diagnostics_do_not_enter_editor_hot_paths`, plus prior Phase 18.17 suite coverage in `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, and `tests/performance_protocol.rs`.
+Automated coverage (no manual execution needed): `tree_sitter_highlighting_does_not_emit_range_diagnostics`, `first_party_invalid_fixtures_do_not_masquerade_as_analyzer_diagnostics`, `runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline`, and `range_diagnostics_do_not_enter_editor_hot_paths`, plus generic transport coverage in `tests/range_diagnostics.rs`, `tests/parse_coordinator.rs`, and `tests/performance_protocol.rs`.
 
 ### Phase 18.18 first-party language package smoke
 
@@ -285,13 +284,13 @@ Manual matrix:
 2. Confirm Gruvbox-themed native vocabulary highlighting appears after text paints: code keywords/strings/comments/functions/types for Rust, TypeScript, and JavaScript; headings, list markers, code, links, quotes, strong, and emphasis for Markdown. Markdown decoration is Tier 1 native; its optional preview/status remains independent package-JS SDUI and does not open a default panel.
 3. Trigger keyword completion with the listed one-character trigger. Confirm bounded priority-0 static text items from `rust.keywords`, `typescript.keywords`, `javascript.keywords`, or `markdown.keywords`; snippets are not expected in Phase 18.18.
 4. Exercise indent, pairs, and comment behavior in each code fixture. Confirm Rust uses four spaces; TypeScript/JavaScript use two; Markdown continues list markers. Command/status metadata is package-prefixed (`rust.status.mode`, `typescript.status.mode`, `javascript.status.mode`, `markdown.status.mode`).
-5. Open each invalid fixture. Confirm text paints first and a themed syntax-error squiggle arrives asynchronously. Repair the error, then confirm the current parse clears its squiggle without blocking local typing or scroll.
+5. Open each invalid fixture. Confirm text remains editable and highlighted without a grammar-produced squiggle; syntax correctness diagnostics wait for an explicit analyzer such as a future LSP package.
 6. Type and scroll during background parse. Typing/scroll remain responsive; package JavaScript, parser work, IPC, or full-document serialization must not enter input/paint/scroll hot paths.
 7. Remove one package `loadPackage` line, relaunch, and open its fixture. Confirm graceful fallback to `core.code` (Rust/TypeScript/JavaScript) or `core.text` (Markdown), with no package status/completion/highlighting error. Restore the line before testing the next package.
 
 Fixtures contain only short synthetic source text—no secrets, real paths, or executable authority.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover vocabulary decorations, range diagnostics, and no-hot-path behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover full-window vocabulary decoration chunks, analyzer-only range diagnostics, and no-hot-path behavior.
 
 ### End-to-end file browser workflow smoke
 

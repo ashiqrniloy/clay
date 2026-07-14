@@ -10,7 +10,7 @@
 
 ## Overview
 
-The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 accompanies `DecorationViewportRequest`; older version-1 servers are rejected before changed `ClientMessage` enum discriminants can be decoded.
+The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
 
 ## Responsibilities
 

@@ -83,7 +83,7 @@ Document line/scroll/caret geometry derives from resolved document profiles and 
 Range diagnostics are a distinct rendering path documented in [Range Diagnostics](diagnostics.md). They do not overload `DecorationSpan` metadata:
 
 - `DiagnosticSet` publishes versioned, viewport-bounded, source-keyed `DiagnosticSpan` records with severity, code, message, and provenance;
-- Tree-sitter `ERROR`/`MISSING` extraction and package `serverPublishDiagnostics` share one validation/transport/paint contract;
+- explicit analyzer packages and future LSP bridges share the `serverPublishDiagnostics` validation/transport/paint contract; Tree-sitter recovery nodes do not publish diagnostics;
 - paint draws theme-owned squiggles from `StyleRegistry::diagnostic_style` and cached Parley line rectangles;
 - Syntax, Semantic, Diagnostic, and Search layers remain additive; diagnostics cannot choose font roles or erase syntax/semantic styling;
 - payload/count/cache limits use `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, and `DIAGNOSTIC_CACHE_BUDGET_BYTES`.

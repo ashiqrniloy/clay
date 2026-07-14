@@ -3,8 +3,8 @@ use clay::packages::{
     record::{PackageRecord, PackageRecordRule, assemble_package_record},
 };
 use clay::protocol::{
-    DiagnosticSeverity, DocumentFontRole, Modifiers, ParseByteRange, ParseEditNotification,
-    ParsePolicy, ParseWindowSnapshot, TokenType,
+    DocumentFontRole, Modifiers, ParseByteRange, ParseEditNotification, ParsePolicy,
+    ParseWindowSnapshot, TokenType,
 };
 #[cfg(any(unix, windows))]
 use clay::server::{
@@ -1475,99 +1475,26 @@ fn tree_sitter_handler_extracts_highlight_captures_as_bounded_decorations() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn tree_sitter_error_and_missing_nodes_emit_range_diagnostics() {
+fn tree_sitter_highlighting_does_not_emit_range_diagnostics() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
     let handler = TreeSitterSyntaxHandler::new(contribution, rust_language(), "")
         .expect("empty highlight query compiles");
 
-    let error = handler
-        .parse_sync(parse_notification(1, "fn main() { let value = ; }"))
-        .expect("invalid Rust parses")
-        .diagnostic_update
-        .expect("current diagnostic set");
-    let missing = handler
-        .parse_sync(parse_notification(2, "fn main() { let x = 1 let y = 2; }"))
-        .expect("incomplete Rust parses")
-        .diagnostic_update
-        .expect("current diagnostic set");
-
-    assert!(error.spans.iter().any(|span| span.code == "syntax.error"));
-    assert!(
-        missing
-            .spans
-            .iter()
-            .any(|span| span.code == "syntax.missing")
-    );
-    assert!(
-        error
-            .spans
-            .iter()
-            .chain(&missing.spans)
-            .all(|span| span.severity == DiagnosticSeverity::Error
-                && span.source == "tree-sitter"
-                && span.message
-                    == if span.code == "syntax.error" {
-                        "syntax error"
-                    } else {
-                        "missing syntax"
-                    })
-    );
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn valid_tree_emits_empty_set_that_clears_prior_syntax_errors() {
-    let record = rust_record();
-    let contribution = rust_contribution(&record);
-    let handler = TreeSitterSyntaxHandler::new(contribution, rust_language(), "")
-        .expect("empty highlight query compiles");
-
-    let invalid = handler
-        .parse_sync(parse_notification(1, "fn main() { let value = ; }"))
-        .expect("invalid Rust parses")
-        .diagnostic_update
-        .expect("invalid diagnostic set");
-    let valid = handler
-        .parse_sync(parse_notification(2, "fn main() {}"))
-        .expect("valid Rust parses")
-        .diagnostic_update
-        .expect("empty current diagnostic set");
-
-    assert!(!invalid.spans.is_empty());
-    assert!(valid.spans.is_empty());
-    assert_eq!(valid.source, "tree-sitter");
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn syntax_diagnostics_are_viewport_bounded_deduplicated_and_capped() {
-    let record = rust_record();
-    let contribution = rust_contribution(&record);
-    let handler = TreeSitterSyntaxHandler::new(contribution, rust_language(), "")
-        .expect("empty highlight query compiles");
-    let text = (0..160)
-        .map(|index| format!("fn broken_{index}(;"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut notification = parse_notification(1, &text);
-    notification.viewport = ParseByteRange::new(0, text.len() as u64 / 2);
-
-    let set = handler
-        .parse_sync(notification)
-        .expect("bounded invalid Rust parses")
-        .diagnostic_update
-        .expect("current diagnostic set");
-
-    assert!(set.spans.len() <= 128);
-    assert!(set.spans.iter().all(|span| {
-        span.byte_start >= set.viewport_byte_start && span.byte_end <= set.viewport_byte_end
-    }));
-    assert!(set.spans.iter().enumerate().all(|(index, span)| {
-        !set.spans[..index]
-            .iter()
-            .any(|prior| span.byte_start <= prior.byte_start && prior.byte_end <= span.byte_end)
-    }));
+    for (version, text) in [
+        (1, "fn main() { let value = ; }"),
+        (2, "fn main() { let x = 1 let y = 2; }"),
+        (3, "fn main() {}"),
+    ] {
+        assert!(
+            handler
+                .parse_sync(parse_notification(version, text))
+                .expect("tree-sitter parse succeeds")
+                .diagnostic_update
+                .is_none(),
+            "syntax highlighting must not masquerade as analyzer diagnostics"
+        );
+    }
 }
 
 #[cfg(any(unix, windows))]
@@ -1651,7 +1578,7 @@ fn scroll_sized_native_sources_produce_bounded_decorations() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn first_party_invalid_fixtures_emit_diagnostics_without_language_branches() {
+fn first_party_invalid_fixtures_do_not_masquerade_as_analyzer_diagnostics() {
     let registry = SyntaxGrammarRegistry::with_first_party_native();
     for (contribution_id, language, source) in [
         (
@@ -1681,19 +1608,17 @@ fn first_party_invalid_fixtures_emit_diagnostics_without_language_branches() {
             .clone();
         let handler = TreeSitterSyntaxHandler::new(contribution, language, "")
             .unwrap_or_else(|error| panic!("{contribution_id} handler: {error}"));
-        let set = handler
-            .parse_sync(parse_notification_for(
-                contribution_id.split('.').next().unwrap(),
-                1,
-                source,
-            ))
-            .unwrap_or_else(|error| panic!("{contribution_id} invalid parse: {error}"))
-            .diagnostic_update
-            .unwrap_or_else(|| panic!("{contribution_id} diagnostic set"));
-
         assert!(
-            !set.spans.is_empty(),
-            "{contribution_id} should report invalid syntax"
+            handler
+                .parse_sync(parse_notification_for(
+                    contribution_id.split('.').next().unwrap(),
+                    1,
+                    source,
+                ))
+                .unwrap_or_else(|error| panic!("{contribution_id} invalid parse: {error}"))
+                .diagnostic_update
+                .is_none(),
+            "{contribution_id} highlighting must not publish diagnostics"
         );
     }
 
@@ -1703,57 +1628,6 @@ fn first_party_invalid_fixtures_emit_diagnostics_without_language_branches() {
     ))
     .expect("read generic syntax handler source");
     assert!(!syntax_source.contains("match self.contribution.language_id"));
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn valid_tree_fast_path_skips_error_node_traversal() {
-    let syntax_source = std::fs::read_to_string(format!(
-        "{}/src/server/syntax.rs",
-        env!("CARGO_MANIFEST_DIR")
-    ))
-    .expect("read generic syntax handler source");
-    let collect_body = syntax_source
-        .split("fn collect_syntax_diagnostics")
-        .nth(1)
-        .expect("collect_syntax_diagnostics")
-        .split("fn visible_scalar_range")
-        .next()
-        .expect("collect body");
-    assert!(
-        collect_body.contains("if !root.has_error() || text.is_empty()"),
-        "valid trees must short-circuit before walk"
-    );
-    assert!(
-        collect_body.contains("return Vec::new()"),
-        "valid trees must emit no captures"
-    );
-
-    let diagnostics_body = syntax_source
-        .split("fn diagnostics_for_window")
-        .nth(1)
-        .expect("diagnostics_for_window")
-        .split("fn decorations_for_window")
-        .next()
-        .expect("diagnostics body");
-    assert!(diagnostics_body.contains("\"syntax error\""));
-    assert!(diagnostics_body.contains("\"missing syntax\""));
-    assert!(
-        !diagnostics_body.contains("window.text[") && !diagnostics_body.contains("&window.text["),
-        "diagnostic messages must stay Clay-owned literals, not source slices"
-    );
-
-    let record = rust_record();
-    let contribution = rust_contribution(&record);
-    let handler = TreeSitterSyntaxHandler::new(contribution, rust_language(), "")
-        .expect("empty highlight query compiles");
-    let set = handler
-        .parse_sync(parse_notification(1, "fn main() {}"))
-        .expect("valid Rust parses")
-        .diagnostic_update
-        .expect("empty current diagnostic set");
-    assert!(set.spans.is_empty());
-    assert_eq!(set.source, "tree-sitter");
 }
 
 #[cfg(any(unix, windows))]

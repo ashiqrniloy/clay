@@ -1,6 +1,6 @@
 # Range Diagnostics
 
-Phase 18.17 defines one reusable byte-range diagnostic contract for Tree-sitter recovery nodes, package analyzers, and future LSP bridges. Status-level failures stay on `RuntimeDiagnostic`. Visual syntax/semantic styling stays on `DecorationSpan`. Range diagnostics carry severity, code, message, and source through a separate validated lifecycle and paint as theme-owned squiggles.
+Phase 18.17 defines one reusable byte-range diagnostic contract for explicit package analyzers and future LSP bridges. Tree-sitter recovery nodes are excluded because bounded syntax fragments are not correctness authority. Status-level failures stay on `RuntimeDiagnostic`. Visual syntax/semantic styling stays on `DecorationSpan`. Range diagnostics carry severity, code, message, and source through a separate validated lifecycle and paint as theme-owned squiggles.
 
 ## Ownership Split
 
@@ -38,26 +38,11 @@ pub struct DiagnosticSet {
 
 Replacement key is `DiagnosticChunkKey`: document, version, source, package prefix, and viewport. An empty `spans` array clears that source chunk without touching other sources.
 
-## Tree-sitter Extraction
+## Diagnostic Authority
 
-First-party Tier 1 native parses and Tier 2 web-tree-sitter adapters extract recovery nodes generically:
+First-party Tier 1 native highlighting and Tier 2 web-tree-sitter highlighting do not publish range diagnostics. Tree-sitter `ERROR` and `MISSING` nodes describe parser recovery and can appear when a valid document is split at a bounded viewport edge. Converting them to error squiggles would falsely claim analyzer authority.
 
-- short-circuit when `root.has_error()` is false and still publish an empty `tree-sitter` source set so prior syntax errors clear;
-- walk only error-bearing children with `Node::{is_error,is_missing,byte_range,walk}`;
-- clip to the parse window and requested viewport, deduplicate nested ranges, and cap at `DIAGNOSTIC_MAX_SPANS_PER_SET`;
-- emit Clay-owned metadata only (`source = "tree-sitter"`, `syntax.error` / `syntax.missing`, `syntax error` / `missing syntax`, severity `Error`).
-
-No language-name or package-name branch is allowed. Raw source snippets, node names, query text, paths, and parser internals must not leak.
-
-### Zero-width `MISSING` anchors
-
-Tree-sitter `MISSING` nodes may be zero-width. Before publication, Clay anchors them to a visible UTF-8 scalar:
-
-1. next UTF-8 scalar inside the parse window when available;
-2. previous scalar at window/document end;
-3. no span for an empty document.
-
-Non-empty `ERROR` ranges keep their clipped byte range.
+Only an explicit analyzer package may publish `DiagnosticSet` data through the validated facade. No language-name or package-name branch is allowed in transport or paint. Raw source snippets, parser internals, paths, callbacks, and executable authority must not leak. Future LSP packages reuse this contract when they land.
 
 ## Parse Side Channel
 

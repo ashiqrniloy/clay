@@ -197,6 +197,7 @@ struct HandlerKeyWithDocument {
     document_id: DocumentId,
     package_prefix: String,
     mode_id: String,
+    viewport_start: u64,
 }
 
 impl ParseCoordinator {
@@ -355,6 +356,26 @@ impl ParseCoordinator {
         abort_tasks(&mut inner, task_keys);
     }
 
+    pub(crate) fn cancel_document_handler_tasks(
+        &self,
+        document_id: DocumentId,
+        package_prefix: &str,
+        mode_id: &str,
+    ) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let task_keys = inner
+            .active_tasks
+            .keys()
+            .filter(|key| {
+                key.document_id == document_id
+                    && key.package_prefix == package_prefix
+                    && key.mode_id == mode_id
+            })
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+    }
+
     /// Schedule parse work after an edit/viewport change has already been
     /// accepted. This method only records metadata, aborts superseded work, and
     /// spawns a background task; it does not wait for parse completion.
@@ -389,6 +410,7 @@ impl ParseCoordinator {
             document_id: request.document_id,
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
+            viewport_start: request.viewport.start,
         };
         let mut notification = request.into_notification();
         if let Some(policy) = policy {

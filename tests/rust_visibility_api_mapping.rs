@@ -1128,17 +1128,9 @@ fn range_diagnostics_public_rust_surfaces_have_js_api_or_are_crate_private() {
     );
 
     assert!(
-        syntax.contains("fn collect_syntax_diagnostics("),
-        "Tree-sitter extraction helper must stay private"
-    );
-    assert!(
-        !syntax.contains("pub fn collect_syntax_diagnostics(")
-            && !syntax.contains("pub(crate) fn collect_syntax_diagnostics("),
-        "Tree-sitter extraction helper must not become a public API"
-    );
-    assert!(
-        syntax.contains("fn diagnostics_for_window("),
-        "window diagnostic helper must stay private"
+        !syntax.contains("collect_syntax_diagnostics")
+            && !syntax.contains("diagnostics_for_window"),
+        "Tree-sitter highlighting must not own analyzer diagnostic helpers"
     );
     assert!(
         layout.contains("fn paint_squiggle("),
@@ -1155,6 +1147,6 @@ fn range_diagnostics_public_rust_surfaces_have_js_api_or_are_crate_private() {
         !inventory_text
             .contains("backing_rust = \"src/server/syntax.rs::collect_syntax_diagnostics\"")
             && !inventory_text.contains("backing_rust = \"src/editor/layout.rs::paint_squiggle\""),
-        "Tree-sitter extraction and squiggle paint helpers must not become Clay JS backing surfaces"
+        "removed Tree-sitter extraction and squiggle paint helpers must not become Clay JS backing surfaces"
     );
 }

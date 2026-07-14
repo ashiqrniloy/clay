@@ -1,5 +1,7 @@
 # Phase 18.17 Range Diagnostics Primitive Review
 
+> **Current implementation note:** the generic `DiagnosticSet` transport, validation, cache, facade, and squiggle renderer remain active for explicit analyzers. Automatic Tree-sitter `ERROR`/`MISSING` publication described in this historical review was removed: bounded parse-fragment recovery nodes are not correctness authority. First-party syntax highlighting emits no diagnostics; future LSP/analyzer packages must publish them explicitly.
+
 ## Source
 
 - Plan: `plans/049-Phase18.17-Range-Diagnostics-and-Syntax-Error-Highlighting.md` (task 2).

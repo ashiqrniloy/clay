@@ -703,6 +703,7 @@ fn decoration_viewport_scroll_flow_is_documented() {
     assert!(coordinator.contains("schedule_parse_window"));
     assert!(protocol.contains("never carries document text"));
     assert!(protocol.contains("Wire protocol version 2"));
+    assert!(protocol.contains("version 3 accompanies grouped native decoration chunks"));
     assert!(protocol.contains("requires incrementing `PROTOCOL_VERSION`"));
 }
 
@@ -2295,17 +2296,16 @@ fn range_diagnostics_reference_is_indexed_and_complete() {
     assert!(parse_strategy.contains("DIAGNOSTIC_PAYLOAD_BUDGET_BYTES"));
     assert!(security.contains("## Range Diagnostics Authority Boundary"));
     assert!(package_guide.contains("### Phase 18.17 range diagnostics publication"));
-    assert!(launch.contains("Phase 18.17 range diagnostics and syntax-error smoke"));
+    assert!(launch.contains("Phase 18.17 range diagnostic transport smoke"));
 
     for marker in [
         "DiagnosticSpan",
         "DiagnosticSet",
         "RuntimeDiagnostic",
         "DecorationSpan",
-        "ERROR",
-        "MISSING",
-        "next UTF-8 scalar",
-        "previous scalar",
+        "Diagnostic Authority",
+        "bounded syntax fragments are not correctness authority",
+        "do not publish range diagnostics",
         "diagnostic_update",
         "serverPublishDiagnostics",
         "diagnosticError",
@@ -2348,7 +2348,7 @@ fn range_diagnostics_implementation_wiki_is_linked_and_complete() {
         "## How It Works",
         "Protocol and validation",
         "Parse side channel",
-        "Tree-sitter extraction",
+        "Diagnostic authority",
         "Server/client chunk lifecycle",
         "Package publication",
         "Theme and paint",
@@ -2361,8 +2361,7 @@ fn range_diagnostics_implementation_wiki_is_linked_and_complete() {
         "DiagnosticSet",
         "DiagnosticChunkCache",
         "EditorDiagnosticState",
-        "collect_syntax_diagnostics",
-        "visible_scalar_range",
+        "recovery nodes from bounded parse fragments are not correctness authority",
         "diagnostic_update",
         "serverPublishDiagnostics",
         "op_clay_diagnostics_publish_diagnostics",

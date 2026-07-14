@@ -5,7 +5,7 @@ use std::{
 };
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
+use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, Tree};
 
 const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 32;
 
@@ -14,14 +14,10 @@ use crate::{
         modes::{DocumentClassificationInput, MajorModeActivation},
         record::{PackageRecord, SyntaxGrammarContributionDescriptor},
     },
-    perf::budgets::{
-        DECORATION_PAYLOAD_BUDGET_BYTES, DIAGNOSTIC_MAX_SPANS_PER_SET,
-        INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
-    },
+    perf::budgets::{DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
     protocol::{
-        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
-        DiagnosticSeverity, DiagnosticSpan, DocumentId, IncrementalParseUpdate, Modifiers,
-        ParseEditNotification, ParseUnit, SyntaxDiagnosticCapture, SyntaxDiagnosticKind, TokenType,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentId,
+        IncrementalParseUpdate, Modifiers, ParseEditNotification, ParseUnit, TokenType,
     },
     server::{
         decorations::{DecorationValidationError, SyntaxChunkCache, validate_decoration_set},
@@ -1097,7 +1093,6 @@ impl TreeSitterSyntaxHandler {
         };
 
         let decoration_update = self.decorations_for_window(&notification, window, &tree)?;
-        let diagnostic_update = self.diagnostics_for_window(&notification, window, &tree);
         self.trees
             .lock()
             .expect("syntax tree cache lock poisoned")
@@ -1129,7 +1124,10 @@ impl TreeSitterSyntaxHandler {
                 }
             )),
             decoration_update: Some(decoration_update),
-            diagnostic_update: Some(diagnostic_update),
+            // Tree-sitter recovery nodes are unreliable on bounded viewport
+            // fragments. Diagnostics remain reserved for explicit analyzers
+            // (including future LSP packages), not syntax highlighting.
+            diagnostic_update: None,
         })
     }
 
@@ -1143,49 +1141,6 @@ impl TreeSitterSyntaxHandler {
 
     pub fn parser_cache_id(&self) -> usize {
         Arc::as_ptr(&self.parser) as usize
-    }
-
-    fn diagnostics_for_window(
-        &self,
-        notification: &ParseEditNotification,
-        window: &crate::protocol::ParseWindowSnapshot,
-        tree: &Tree,
-    ) -> DiagnosticSet {
-        let captures = collect_syntax_diagnostics(
-            tree.root_node(),
-            &window.text,
-            window.byte_start,
-            notification.viewport,
-            DIAGNOSTIC_MAX_SPANS_PER_SET,
-        );
-        let provenance = self.contribution.provenance();
-        DiagnosticSet {
-            document_id: notification.document_id,
-            document_version: notification.document_version,
-            viewport_byte_start: notification.viewport.start,
-            viewport_byte_end: notification.viewport.end,
-            source: "tree-sitter".to_string(),
-            provenance: provenance.clone(),
-            spans: captures
-                .into_iter()
-                .map(|capture| {
-                    let (code, message) = match capture.kind {
-                        SyntaxDiagnosticKind::Error => ("syntax.error", "syntax error"),
-                        SyntaxDiagnosticKind::Missing => ("syntax.missing", "missing syntax"),
-                    };
-                    DiagnosticSpan {
-                        byte_start: capture.byte_start,
-                        byte_end: capture.byte_end,
-                        severity: DiagnosticSeverity::Error,
-                        code: code.to_string(),
-                        message: message.to_string(),
-                        source: "tree-sitter".to_string(),
-                        provenance: provenance.clone(),
-                    }
-                })
-                .collect(),
-        }
-        .sorted()
     }
 
     fn decorations_for_window(
@@ -1269,108 +1224,12 @@ impl TreeSitterSyntaxHandler {
     }
 }
 
-fn collect_syntax_diagnostics(
-    root: Node<'_>,
-    text: &str,
-    window_start: u64,
-    viewport: crate::protocol::ParseByteRange,
-    limit: usize,
-) -> Vec<SyntaxDiagnosticCapture> {
-    if !root.has_error() || text.is_empty() {
-        return Vec::new();
-    }
-
-    let viewport_start = viewport
-        .start
-        .saturating_sub(window_start)
-        .min(text.len() as u64) as usize;
-    let viewport_end = viewport
-        .end
-        .saturating_sub(window_start)
-        .min(text.len() as u64) as usize;
-    let mut stack = vec![root];
-    let mut captures = Vec::new();
-    while let Some(node) = stack.pop() {
-        if node.is_error() || node.is_missing() {
-            let range = if node.is_missing() {
-                visible_scalar_range(text, node.start_byte())
-            } else {
-                Some(node.byte_range())
-            };
-            if let Some(range) = range {
-                let start = range.start.max(viewport_start);
-                let end = range.end.min(viewport_end);
-                if start < end {
-                    captures.push(SyntaxDiagnosticCapture {
-                        byte_start: window_start.saturating_add(start as u64),
-                        byte_end: window_start.saturating_add(end as u64),
-                        kind: if node.is_missing() {
-                            SyntaxDiagnosticKind::Missing
-                        } else {
-                            SyntaxDiagnosticKind::Error
-                        },
-                    });
-                }
-            }
-        }
-
-        let mut cursor = node.walk();
-        if cursor.goto_first_child() {
-            loop {
-                let child = cursor.node();
-                if child.has_error() || child.is_error() || child.is_missing() {
-                    stack.push(child);
-                }
-                if !cursor.goto_next_sibling() {
-                    break;
-                }
-            }
-        }
-    }
-
-    captures.sort_by_key(|capture| {
-        (
-            capture.byte_end.saturating_sub(capture.byte_start),
-            capture.byte_start,
-            capture.byte_end,
-            match capture.kind {
-                SyntaxDiagnosticKind::Missing => 0,
-                SyntaxDiagnosticKind::Error => 1,
-            },
-        )
-    });
-    let mut deduplicated = Vec::<SyntaxDiagnosticCapture>::new();
-    for capture in captures {
-        if deduplicated
-            .iter()
-            .any(|kept| capture.byte_start <= kept.byte_start && kept.byte_end <= capture.byte_end)
-        {
-            continue;
-        }
-        deduplicated.push(capture);
-        if deduplicated.len() == limit {
-            break;
-        }
-    }
-    deduplicated.sort_by_key(|capture| (capture.byte_start, capture.byte_end));
-    deduplicated
-}
-
 fn end_point(text: &str) -> Point {
     let row = text.bytes().filter(|byte| *byte == b'\n').count();
     let column = text
         .rsplit_once('\n')
         .map_or(text.len(), |(_, tail)| tail.len());
     Point::new(row, column)
-}
-
-fn visible_scalar_range(text: &str, byte_offset: usize) -> Option<std::ops::Range<usize>> {
-    if byte_offset < text.len() {
-        let scalar = text.get(byte_offset..)?.chars().next()?;
-        return Some(byte_offset..byte_offset + scalar.len_utf8());
-    }
-    let (start, scalar) = text.char_indices().next_back()?;
-    Some(start..start + scalar.len_utf8())
 }
 
 pub fn map_capture_to_vocabulary(
@@ -1454,15 +1313,4 @@ fn empty_update(notification: ParseEditNotification) -> IncrementalParseUpdate {
 
 fn map_decoration_error(error: DecorationValidationError) -> TreeSitterSyntaxError {
     TreeSitterSyntaxError::DecorationInvalid(format!("{error:?}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::visible_scalar_range;
-
-    #[test]
-    fn missing_node_anchor_is_utf8_safe_at_middle_and_eof() {
-        assert_eq!(visible_scalar_range("aéb", 1), Some(1..3));
-        assert_eq!(visible_scalar_range("aé", 3), Some(1..3));
-    }
 }

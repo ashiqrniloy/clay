@@ -64,9 +64,9 @@ Phase 18.11's `CompletionTriggerAndResult` framework exposes `runtime/js/complet
 
 ### Parse coordinator, incremental updates, and diagnostics
 
-`src/server/parse_coordinator.rs::ParseCoordinator` owns background scheduling, cancellation, generation replacement, viewport prioritization, stale-version rejection, and the `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` gate. `IncrementalParseUpdate` carries optional `decoration_update` and (Phase 18.17) `diagnostic_update` side channels. `TreeSitterSyntaxHandler` reuses cached parsers/trees, maps generic captures through one language-neutral path, and emits Phase 18.17 `ERROR`/`MISSING` range diagnostics with no per-language branch.
+`src/server/parse_coordinator.rs::ParseCoordinator` owns background scheduling, cancellation, generation replacement, viewport prioritization, stale-version rejection, and the `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` gate. `IncrementalParseUpdate` carries optional `decoration_update` and (Phase 18.17) `diagnostic_update` side channels. `TreeSitterSyntaxHandler` reuses cached parsers/trees and maps generic captures through one language-neutral decoration path; it does not claim diagnostic authority.
 
-First-party languages already get syntax-error squiggles through this generic path. Phase 18.18 changes nothing here; the vocabulary styleMap change flows through the same `decoration_update` channel.
+First-party languages do not derive diagnostics from Tree-sitter recovery nodes: bounded syntax fragments are not correctness authority. Vocabulary styleMap output remains decoration-only; future explicit analyzers or LSP packages publish through the separate generic diagnostic path.
 
 ### Markdown decoration versus preview SDUI
 
@@ -110,7 +110,7 @@ Without new scheduling, package execution authority, typography, or rendering au
 
 - run Tier 1 native Tree-sitter for rust/typescript/tsx/javascript/markdown asynchronously over bounded server-provided windows, reusing cached parsers/trees;
 - cancel superseded work and stale-drop old document/runtime generations;
-- emit Phase 18.17 syntax-error range diagnostics from `ERROR`/`MISSING` nodes with no per-language branch;
+- leave diagnostics to explicit analyzers or future LSP packages rather than Tree-sitter recovery nodes;
 - transport versioned viewport decoration/diagnostic chunks through validated `rkyv` messages;
 - resolve all editor colors through `StyleRegistry` from `TokenType + Modifiers`;
 - apply cached Parley typography-aware geometry and paint native Vello spans;
@@ -140,7 +140,7 @@ Future first-party language additions and Phase 18.21 LSP enrichment reuse this 
 
 | Work | Allowed location |
 | --- | --- |
-| Tree-sitter parse, capture extraction, vocabulary mapping, `ERROR`/`MISSING` traversal | server background parse task over bounded windows |
+| Tree-sitter parse, capture extraction, and vocabulary mapping | server background parse task over bounded windows |
 | styleMap validation, capture-to-vocabulary resolution, serialization | grammar registration (load) and parser result path |
 | `queries/highlights.scm` query compilation | grammar registration (load), cached thereafter |
 | Mode/completion/command/UI contribution registration | package load time only |

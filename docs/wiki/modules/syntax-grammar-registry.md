@@ -147,24 +147,20 @@ Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE
 8. reuses a cached prior `Tree` for later document versions on the same window, applying a whole-window `InputEdit` before incremental reparsing so stale recovery nodes cannot survive changed text
 9. extracts query captures with `QueryCursor::set_byte_range`
 10. maps captures to inert `DecorationSpan` values with package provenance
-11. walks the same cached parse tree only when `root.has_error()` and emits generic Tree-sitter `ERROR`/`MISSING` recovery nodes through `diagnostic_update`
-12. rejects per-viewport highlight capture output above the syntax span cap instead of silently truncating query output
-13. validates the resulting `DecorationSet` with the existing decoration validator
+11. leaves `diagnostic_update` empty because parser recovery nodes from bounded fragments are not analyzer authority
+12. caps each 256-byte decoration viewport chunk at the transport-safe syntax span limit
+13. validates each resulting `DecorationSet` with the existing decoration validator
 14. enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion or publication
-15. inserts the validated set into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
-16. returns one `IncrementalParseUpdate` containing both current syntax decorations and the current `tree-sitter` diagnostic source set
+15. inserts validated sets into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
+16. returns decoration-only `IncrementalParseUpdate` chunks; explicit analyzers own future diagnostic publication
 
 Capture extraction is engine-neutral after parse: Tree-sitter and future web-tree-sitter adapters produce `SyntaxCapture { byte_start, byte_end, capture_name }` records. `map_capture_to_vocabulary` is the one shared capture-to-vocabulary mapper. Direct entries copy closed `token_type` + `modifiers` and emit scope-less spans; legacy entries are normalized through `TokenType::classify_style_token` and preserve the validated original token as `scope`. Extraction skips absent mappings, while direct calls remain fallible. Native and WASM tiers feed the same `DecorationSpan` construction path.
 
-### Generic Tree-sitter Recovery Diagnostics
+### Diagnostic Authority
 
-Native extraction uses only grammar-neutral `Node::has_error`, `is_error`, `is_missing`, `byte_range`, and `walk` APIs. A valid root takes the constant-time empty path and still emits an empty current-source `DiagnosticSet`, allowing replacement semantics to clear old syntax errors. Error roots are traversed iteratively over the already bounded parse window; only error-bearing children are visited. Candidate ranges are clipped to the viewport, nested/equal ranges are reduced deterministically to innermost visible ranges, and output stops at `DIAGNOSTIC_MAX_SPANS_PER_SET`.
+Tree-sitter `ERROR` and `MISSING` nodes are recovery artifacts, not correctness judgments. Bounded viewport parsing can create such nodes at otherwise valid fragment boundaries, so native syntax handlers never convert them into `DiagnosticSet` squiggles. First-party language packages remain decoration-only until an explicit analyzer, including future LSP packages, publishes diagnostics through the generic validated diagnostic facade. This keeps highlighting, diagnostic authority, and language-specific analysis separate without callbacks or language-name branches.
 
-Tree-sitter `MISSING` nodes have zero-width ranges. `visible_scalar_range` anchors them to the next UTF-8 scalar, or the previous scalar at end-of-window; empty text emits no span. Published metadata is Clay-owned and fixed: source `tree-sitter`, severity `Error`, codes `syntax.error` / `syntax.missing`, and messages `syntax error` / `missing syntax`. Raw source snippets, parser node names, query text, and paths never enter diagnostic metadata. Provenance comes from the selected `SyntaxGrammarContribution`.
-
-Tier 2 mirrors the local capture contract through `collectWebTreeSitterDiagnostics` in `runtime/js/web-tree-sitter-host.ts`; Tier 3 uses the already documented inert parse diagnostic records. Neither adapter adds callbacks or language-name branches.
-
-The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. A classified grammar-backed mode with no Tier 3 JS handler treats `ParseCoordinatorError::HandlerNotRegistered` as the normal native/WASM path rather than publishing `clay.parse.open_activation_failed`; registered-handler failures and invalid results still publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives the normal decoration/diagnostic transport message path; no package code runs in the Rust client.
+The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. A classified grammar-backed mode with no Tier 3 JS handler treats `ParseCoordinatorError::HandlerNotRegistered` as the normal native/WASM path rather than publishing `clay.parse.open_activation_failed`; registered-handler failures and invalid results still publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives decoration updates and any separately authorized analyzer diagnostics through their normal transport paths; no package code runs in the Rust client.
 
 ## Hot Path and Security Boundary
 
@@ -217,11 +213,11 @@ Coverage:
 - Tree-sitter highlight query capture extraction into bounded decoration spans
 - direct first-party capture mapping for code/prose `TokenType` families and declaration/bold/italic modifiers, plus legacy style-token compatibility
 - cached-tree reuse for later document versions with whole-window `InputEdit` correctness
-- generic `ERROR` and `MISSING` extraction, valid-tree empty-set clearing, UTF-8-safe missing anchors, viewport/deduplication/count bounds, first-party invalid grammar coverage, and no language-specific branches
-- Tier 2 host-side generic error/missing capture contract
+- first-party valid and invalid grammar fixtures remain decoration-only and never masquerade as analyzer diagnostics
+- Tier 2 host-side highlighting remains separate from explicit analyzer diagnostic publication
 - invalid query fail-closed behavior and unmapped-capture no-color-leak behavior
 - parse-window budget enforcement before parsing
-- per-viewport capture overflow rejection before decoration publication
+- transport-safe capture caps across contiguous 256-byte decoration viewport chunks
 - parse coordinator publication through existing `IncrementalParseUpdate`/`DecorationSet` path
 
 ## Related

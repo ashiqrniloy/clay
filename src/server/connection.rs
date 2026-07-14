@@ -1295,6 +1295,8 @@ async fn schedule_open_parse(
     )
 }
 
+const NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES: usize = 256;
+
 #[allow(clippy::too_many_arguments)]
 fn schedule_parse_window(
     parse_coordinator: &ParseCoordinator,
@@ -1306,50 +1308,70 @@ fn schedule_parse_window(
     policy: ParsePolicy,
     requested: ParseByteRange,
 ) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
-    let mut byte_start = requested.start.min(text.len() as u64) as usize;
-    while !text.is_char_boundary(byte_start) {
-        byte_start = byte_start.saturating_sub(1);
+    let mut window_start = requested.start.min(text.len() as u64) as usize;
+    while !text.is_char_boundary(window_start) {
+        window_start = window_start.saturating_sub(1);
     }
-    let requested_end = requested.end.max(byte_start as u64).min(text.len() as u64);
-    let mut byte_end =
-        requested_end.min((byte_start as u64).saturating_add(policy.max_window_bytes)) as usize;
-    while !text.is_char_boundary(byte_end) {
-        byte_end = byte_end.saturating_sub(1);
+    let requested_end = requested
+        .end
+        .max(window_start as u64)
+        .min(text.len() as u64);
+    let mut window_end =
+        requested_end.min((window_start as u64).saturating_add(policy.max_window_bytes)) as usize;
+    while !text.is_char_boundary(window_end) {
+        window_end = window_end.saturating_sub(1);
     }
-    if byte_start >= byte_end {
+    if window_start >= window_end {
         return Ok(None);
     }
 
-    let viewport = ParseByteRange::new(byte_start as u64, byte_end as u64);
-    let request = ParseScheduleRequest {
-        document_id: metadata.document_id,
-        document_version: metadata.version,
-        behavior_version,
-        package_prefix: package_prefix.to_string(),
-        mode_id: mode_id.to_string(),
-        viewport,
-        invalidated_ranges: vec![viewport],
-    };
-    let windows = vec![ParseWindowSnapshot {
+    let window = ParseWindowSnapshot {
         document_id: metadata.document_id,
         document_version: metadata.version,
         package_prefix: package_prefix.to_string(),
         mode_id: mode_id.to_string(),
-        byte_start: viewport.start,
-        byte_end: viewport.end,
-        base_line: text[..byte_start]
+        byte_start: window_start as u64,
+        byte_end: window_end as u64,
+        base_line: text[..window_start]
             .bytes()
             .filter(|byte| *byte == b'\n')
             .count() as u64,
-        text: text[byte_start..byte_end].to_string(),
-    }];
-    match parse_coordinator.schedule_parse_with_windows(request, windows, Some(policy)) {
-        Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
-        Err(error) => Err(RuntimeDiagnostic::error(
-            "clay.parse.viewport_activation_failed",
-            format!("Viewport parse scheduling failed: {error:?}"),
-        )),
+        text: text[window_start..window_end].to_string(),
+    };
+
+    parse_coordinator.cancel_document_handler_tasks(metadata.document_id, package_prefix, mode_id);
+    let mut chunk_start = window_start;
+    while chunk_start < window_end {
+        let mut chunk_end = (chunk_start + NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES).min(window_end);
+        while !text.is_char_boundary(chunk_end) {
+            chunk_end -= 1;
+        }
+        let viewport = ParseByteRange::new(chunk_start as u64, chunk_end as u64);
+        let request = ParseScheduleRequest {
+            document_id: metadata.document_id,
+            document_version: metadata.version,
+            behavior_version,
+            package_prefix: package_prefix.to_string(),
+            mode_id: mode_id.to_string(),
+            viewport,
+            invalidated_ranges: vec![viewport],
+        };
+        match parse_coordinator.schedule_parse_with_windows(
+            request,
+            vec![window.clone()],
+            Some(policy),
+        ) {
+            Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => {}
+            Err(error) => {
+                return Err(RuntimeDiagnostic::error(
+                    "clay.parse.viewport_activation_failed",
+                    format!("Viewport parse scheduling failed: {error:?}"),
+                ));
+            }
+        }
+        chunk_start = chunk_end;
     }
+    Ok(None)
 }
 
 fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
@@ -1767,7 +1789,7 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
-    async fn version_one_client_is_rejected_after_viewport_message_schema_change() {
+    async fn stale_client_is_rejected_after_native_decoration_semantics_change() {
         let (client, server) = duplex(4096);
         let codec = Codec::default();
         let server_task = tokio::spawn(handle_connection(
@@ -1789,7 +1811,7 @@ await loadPackage("@clay/markdown");"#,
             .write_client_message(
                 &mut client,
                 &ClientMessage::Hello {
-                    protocol_version: 1,
+                    protocol_version: 2,
                     client_name: "stale-client".to_string(),
                 },
             )
@@ -2862,14 +2884,16 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
-    async fn nonzero_viewports_produce_typescript_and_markdown_decorations() {
+    async fn native_viewport_chunks_decorate_all_first_party_languages_beyond_first_lines() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let config_root = temp_workspace("viewport-native-decoration");
         fs::write(
             config_root.join("init.js"),
             r#"
             import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/rust");
             await loadPackage("@clay/typescript");
+            await loadPackage("@clay/javascript");
             await loadPackage("@clay/markdown");
             "#,
         )
@@ -2883,6 +2907,15 @@ await loadPackage("@clay/markdown");"#,
 
         for (document_id, path, package_prefix, start_marker, text) in [
             (
+                19,
+                "main.rs",
+                "rust",
+                "fn value150",
+                (0..300)
+                    .map(|line| format!("fn value{line}() -> usize {{ {line} }}\n"))
+                    .collect::<String>(),
+            ),
+            (
                 20,
                 "main.ts",
                 "typescript",
@@ -2893,6 +2926,15 @@ await loadPackage("@clay/markdown");"#,
             ),
             (
                 21,
+                "main.js",
+                "javascript",
+                "const value150",
+                (0..300)
+                    .map(|line| format!("const value{line} = {line};\n"))
+                    .collect::<String>(),
+            ),
+            (
+                22,
                 "notes.md",
                 "markdown",
                 "## Heading 150",
@@ -2936,12 +2978,48 @@ await loadPackage("@clay/markdown");"#,
                 super::ParseByteRange::new(0, text.len() as u64),
             )
             .expect("opening viewport schedules");
-            tokio::select! {
-                update = coordinator.next_update() => update.expect("opening native update"),
-                diagnostic = coordinator.next_diagnostic() => {
-                    panic!("opening viewport parse failed: {:?}", diagnostic)
-                }
-            };
+            let opening_end = text.len().min(policy.max_window_bytes as usize);
+            let chunk_count = opening_end.div_ceil(super::NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES);
+            let mut opening_ranges = Vec::with_capacity(chunk_count);
+            let mut latest_decorated_byte = 0;
+            for _ in 0..chunk_count {
+                let update = tokio::select! {
+                    update = coordinator.next_update() => update.expect("opening native update"),
+                    diagnostic = coordinator.next_diagnostic() => {
+                        panic!("opening viewport parse failed: {:?}", diagnostic)
+                    }
+                };
+                let set = update.decoration_update.expect("opening decorations");
+                latest_decorated_byte = latest_decorated_byte.max(
+                    set.spans
+                        .iter()
+                        .map(|span| span.byte_end)
+                        .max()
+                        .unwrap_or_default(),
+                );
+                opening_ranges.push((set.viewport_byte_start, set.viewport_byte_end));
+            }
+            opening_ranges.sort_unstable();
+            assert_eq!(
+                opening_ranges.first().map(|range| range.0),
+                Some(0),
+                "{path}"
+            );
+            assert_eq!(
+                opening_ranges.last().map(|range| range.1),
+                Some(opening_end as u64),
+                "{path}"
+            );
+            assert!(
+                opening_ranges
+                    .windows(2)
+                    .all(|ranges| ranges[0].1 == ranges[1].0),
+                "{path}"
+            );
+            assert!(
+                latest_decorated_byte > opening_end as u64 * 3 / 4,
+                "{path} decorations must extend beyond the first few lines"
+            );
 
             let start = text.find(start_marker).expect("middle line marker") as u64;
             super::schedule_parse_window(
@@ -2955,24 +3033,29 @@ await loadPackage("@clay/markdown");"#,
                 super::ParseByteRange::new(start, text.len() as u64),
             )
             .expect("nonzero viewport schedules");
-            let update = tokio::select! {
-                update = coordinator.next_update() => update.expect("nonzero native update"),
-                diagnostic = coordinator.next_diagnostic() => {
-                    panic!("nonzero viewport parse failed: {:?}", diagnostic)
-                }
-            };
-            let set = update
-                .decoration_update
-                .expect("nonzero viewport decorations");
-
-            assert!(set.viewport_byte_start >= start, "{path}");
-            assert!(!set.spans.is_empty(), "{path}");
-            assert!(
-                set.spans
-                    .iter()
-                    .all(|span| span.byte_start >= set.viewport_byte_start),
-                "{path}"
-            );
+            let nonzero_bytes = (text.len() as u64 - start).min(policy.max_window_bytes) as usize;
+            let chunk_count = nonzero_bytes.div_ceil(super::NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES);
+            let mut saw_decorations = false;
+            for _ in 0..chunk_count {
+                let update = tokio::select! {
+                    update = coordinator.next_update() => update.expect("nonzero native update"),
+                    diagnostic = coordinator.next_diagnostic() => {
+                        panic!("nonzero viewport parse failed: {:?}", diagnostic)
+                    }
+                };
+                let set = update
+                    .decoration_update
+                    .expect("nonzero viewport decorations");
+                assert!(set.viewport_byte_start >= start, "{path}");
+                saw_decorations |= !set.spans.is_empty();
+                assert!(
+                    set.spans
+                        .iter()
+                        .all(|span| span.byte_start >= set.viewport_byte_start),
+                    "{path}"
+                );
+            }
+            assert!(saw_decorations, "{path}");
         }
 
         let _ = fs::remove_file(config_root.join("init.js"));
@@ -3038,23 +3121,35 @@ await loadPackage("@clay/markdown");"#,
             "open follow-up must not wait for parse output"
         );
 
-        let update = timeout(Duration::from_secs(1), coordinator.next_update())
-            .await
-            .unwrap()
-            .unwrap();
-        let set = update.decoration_update.expect("background decorations");
-
-        let native_window = crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES as u64;
-        assert_eq!(set.document_id, 2);
-        assert_eq!(set.viewport_byte_start, 0);
-        assert_eq!(set.viewport_byte_end, native_window);
-        assert!(set.spans.iter().all(|span| span.byte_end <= native_window));
-        assert!(
-            set.spans
+        let native_window = crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES;
+        let chunk_count = native_window.div_ceil(super::NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES);
+        let mut ranges = Vec::with_capacity(chunk_count);
+        let mut saw_heading = false;
+        for _ in 0..chunk_count {
+            let update = timeout(Duration::from_secs(1), coordinator.next_update())
+                .await
+                .unwrap()
+                .unwrap();
+            let set = update.decoration_update.expect("background decorations");
+            assert_eq!(set.document_id, 2);
+            assert!(
+                set.spans
+                    .iter()
+                    .all(|span| span.byte_end <= native_window as u64)
+            );
+            saw_heading |= set
+                .spans
                 .iter()
-                .any(|span| span.token_type == TokenType::Heading1)
+                .any(|span| span.token_type == TokenType::Heading1);
+            ranges.push((set.viewport_byte_start, set.viewport_byte_end));
+        }
+        ranges.sort_unstable();
+        assert_eq!(ranges.first().map(|range| range.0), Some(0));
+        assert_eq!(
+            ranges.last().map(|range| range.1),
+            Some(native_window as u64)
         );
-        assert!(!set.spans.iter().any(|span| span.byte_start > 64 * 1024));
+        assert!(saw_heading);
     }
 
     #[tokio::test]

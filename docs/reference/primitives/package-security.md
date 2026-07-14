@@ -155,7 +155,7 @@ Validation rejects unknown roles and concrete or executable fields including `fo
 
 ## Range Diagnostics Authority Boundary
 
-[Range diagnostics](diagnostics.md) publish inert `DiagnosticSet` data under existing `render-decorations`. Packages call `clay.diagnostics.serverPublishDiagnostics`; Tree-sitter recovery extraction uses the same validator. Publication grants no filesystem, network, shell, AI, WASM, workspace, language-server process, raw-op, client-JavaScript, CSS, draw-callback, or native-render authority. Metadata must be bounded/sanitized; empty source chunks clear only that source. Diagnostics cannot choose font roles or replace syntax/semantic decoration state. LSP process spawning remains deferred to Phase 18.20+.
+[Range diagnostics](diagnostics.md) publish inert `DiagnosticSet` data under existing `render-decorations`. Explicit analyzer packages call `clay.diagnostics.serverPublishDiagnostics`; Tree-sitter highlighting does not publish recovery-node diagnostics. Publication grants no filesystem, network, shell, AI, WASM, workspace, language-server process, raw-op, client-JavaScript, CSS, draw-callback, or native-render authority. Metadata must be bounded/sanitized; empty source chunks clear only that source. Diagnostics cannot choose font roles or replace syntax/semantic decoration state. LSP process spawning remains deferred to Phase 18.20+.
 
 ## Server-Side Validation Checklist
 
