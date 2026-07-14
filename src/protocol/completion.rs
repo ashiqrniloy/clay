@@ -11,7 +11,11 @@
 //! with executable transforms, command side effects on accept, raw op names,
 //! native handles, CSS, file paths, shell/network/AI directives, or client-side
 //! JavaScript fields are represented here. A `CompletionItem` carries `label`,
-//! `insert_text`, `detail`, `commit_characters`, and provenance only.
+//! `insert_text`, `detail`, `commit_characters`, `text_format`, and provenance
+//! only. `text_format` selects between verbatim `PlainText` insertion and
+//! `Snippet` insertion, where `Snippet` carries inert LSP snippet syntax
+//! (tabstops, placeholders, choices) expanded client-locally by a bounded
+//! parser; snippet syntax carries no executable transforms.
 //!
 //! These shapes add no filesystem, network, shell, AI, workspace-index, WASM,
 //! raw-op, native-widget, client-runtime, package-manager, or package-enable
@@ -115,6 +119,22 @@ pub struct CompletionRequest {
     pub provider_generation: CompletionProviderGeneration,
 }
 
+/// How a [`CompletionItem`]'s `insert_text` is interpreted on accept. `PlainText`
+/// is inserted verbatim; `Snippet` carries inert LSP snippet syntax (tabstops,
+/// placeholders, choices) expanded client-locally by the bounded
+/// `crate::editor::snippet::parse_snippet` parser. Snippet syntax carries no
+/// executable transforms, commands, or externally-resolved variables.
+#[derive(
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+pub enum CompletionItemTextFormat {
+    /// `insert_text` is inserted verbatim. The default and historic behavior.
+    #[default]
+    PlainText,
+    /// `insert_text` is LSP snippet syntax expanded client-locally on accept.
+    Snippet,
+}
+
 /// One inert completion suggestion. Fields are text-replacement data only.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct CompletionItem {
@@ -129,6 +149,9 @@ pub struct CompletionItem {
     /// the item. May be empty. Carried as inert data; the client maps commit
     /// characters to local picker behavior only.
     pub commit_characters: String,
+    /// How `insert_text` is interpreted on accept. Defaults to `PlainText`;
+    /// `Snippet` triggers client-local expansion via `parse_snippet`.
+    pub text_format: CompletionItemTextFormat,
     pub provenance: CompletionProvenance,
 }
 
@@ -143,8 +166,16 @@ impl CompletionItem {
             insert_text: insert_text.into(),
             detail: String::new(),
             commit_characters: String::new(),
+            text_format: CompletionItemTextFormat::default(),
             provenance,
         }
+    }
+
+    /// Marks this item's `insert_text` as LSP snippet syntax for client-local
+    /// expansion on accept.
+    pub fn with_snippet(mut self) -> Self {
+        self.text_format = CompletionItemTextFormat::Snippet;
+        self
     }
 
     /// Encoded byte length of this item's string fields. Used by the result
@@ -489,5 +520,47 @@ mod tests {
             rkyv::from_bytes::<_, rkyv::rancor::Error>(&archived).unwrap();
         assert_eq!(restored, trigger);
         assert_eq!(restored, CompletionTrigger::Character(".".to_string()));
+    }
+
+    #[test]
+    fn plain_text_item_round_trips_unchanged_through_rkyv() {
+        let item = CompletionItem::new("foo", "foo", CompletionProvenance::builtin_core());
+        assert_eq!(item.text_format, CompletionItemTextFormat::PlainText);
+        let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&item).unwrap();
+        let restored: CompletionItem =
+            rkyv::from_bytes::<_, rkyv::rancor::Error>(&archived).unwrap();
+        assert_eq!(restored, item);
+    }
+
+    #[test]
+    fn snippet_item_round_trips_through_rkyv() {
+        let item = CompletionItem::new(
+            "fn",
+            "fn ${1:name}() {\n\t$0\n}",
+            CompletionProvenance::builtin_core(),
+        )
+        .with_snippet();
+        let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&item).unwrap();
+        let restored: CompletionItem =
+            rkyv::from_bytes::<_, rkyv::rancor::Error>(&archived).unwrap();
+        assert_eq!(restored, item);
+        assert_eq!(restored.text_format, CompletionItemTextFormat::Snippet);
+    }
+
+    #[test]
+    fn validate_passes_for_snippet_item_and_rejects_oversize_insert_text() {
+        let prov = CompletionProvenance::builtin_core();
+        let ok = CompletionItem::new("fn", "fn ${1:name}() {}", prov.clone()).with_snippet();
+        assert!(sample_result(6, vec![ok]).validate().is_ok());
+
+        let mut big = CompletionItem::new("fn", "x", prov).with_snippet();
+        big.insert_text = "x".repeat(COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS + 1);
+        assert!(matches!(
+            sample_result(7, vec![big]).validate(),
+            Err(CompletionRejection::ItemFieldTooLong {
+                field: CompletionItemField::InsertText,
+                ..
+            })
+        ));
     }
 }

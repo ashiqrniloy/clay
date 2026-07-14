@@ -449,6 +449,20 @@ export function serverRegisterCompletionProvider(options) {
   }
   return parse(ops.op_clay_completion_register_completion_provider(JSON.stringify(options ?? null)));
 }
+export function serverDisableCompletion(options) {
+  for (const key of Object.keys(options ?? {})) {
+    if (key !== "provider" && key !== "packagePrefix") {
+      throw new Error("clay.completion.invalid_disable: only provider or packagePrefix is accepted");
+    }
+  }
+  const provider = (options ?? {}).provider;
+  const packagePrefix = (options ?? {}).packagePrefix;
+  const targets = [provider, packagePrefix].filter((value) => typeof value === "string" && value.trim().length > 0);
+  if (targets.length !== 1) {
+    throw new Error("clay.completion.invalid_disable: provide exactly one non-empty provider or packagePrefix");
+  }
+  return parse(ops.op_clay_completion_disable(JSON.stringify(options)));
+}
 export function serverListCompletionProvidersForTrigger(options) {
   const trigger = (options ?? {}).trigger;
   if (typeof trigger !== "string" || trigger.length === 0) {
@@ -2447,7 +2461,7 @@ mod tests {
         let evaluation = service
             .evaluate_controlled_module(
                 r#"
-                import { serverRegisterCompletionProvider } from "clay:completion";
+                import { serverListCompletionProvidersForTrigger, serverRegisterCompletionProvider } from "clay:completion";
                 const result = serverRegisterCompletionProvider({
                   packageName: "@vendor/words",
                   packageVersion: "0.1.0",
@@ -2457,22 +2471,96 @@ mod tests {
                   triggerCharacters: ["."],
                   wordBoundaryChars: [".", ","],
                   priority: 2,
+                  exclusive: true,
                   timeoutMs: 50,
                   maxItems: 20
                 });
-                Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.providers[0]}:${result.registeredProviderCount}:${result.runtimeBridge}`);
+                const listed = serverListCompletionProvidersForTrigger({ trigger: "." });
+                Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.providers[0]}:${result.registeredProviderCount}:${result.runtimeBridge}:${listed.providers[0].exclusive}`);
                 "#,
             )
             .await
             .unwrap();
 
-        assert_eq!(evaluation.op_records, vec!["words:words.buffer:1:false"]);
+        assert_eq!(
+            evaluation.op_records,
+            vec!["words:words.buffer:1:false:true"]
+        );
         assert_eq!(evaluation.completion_providers.len(), 1);
         assert_eq!(evaluation.completion_providers[0].id, "words.buffer");
+        assert!(evaluation.completion_providers[0].exclusive);
         assert_eq!(
             evaluation.completion_providers[0].provenance.package_prefix,
             "words"
         );
+    }
+
+    #[tokio::test]
+    async fn completion_facade_disables_provider_and_filters_trigger_listing() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverDisableCompletion, serverListCompletionProvidersForTrigger, serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({
+                  packageName: "@vendor/words",
+                  packagePrefix: "words",
+                  permissions: ["completion-provider"],
+                  providerId: "words.buffer",
+                  triggerCharacters: ["."]
+                });
+                serverRegisterCompletionProvider({
+                  packageName: "@vendor/other",
+                  packagePrefix: "other",
+                  permissions: ["completion-provider"],
+                  providerId: "other.buffer",
+                  triggerCharacters: ["."]
+                });
+                const disabled = serverDisableCompletion({ provider: "words.buffer" });
+                const repeated = serverDisableCompletion({ provider: "words.buffer" });
+                const packageDisabled = serverDisableCompletion({ packagePrefix: "@vendor/other" });
+                const listed = serverListCompletionProvidersForTrigger({ trigger: "." });
+                Deno.core.ops.op_clay_runtime_record(`${disabled.target}:${disabled.disabled}:${disabled.providerGeneration}:${repeated.disabled}:${packageDisabled.providerGeneration}:${listed.providers.length}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(evaluation.op_records, vec!["words.buffer:true:1:false:2:0"]);
+        assert!(evaluation.completion_providers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn completion_disable_facade_rejects_empty_ambiguous_and_authority_fields() {
+        let service = ClayJsRuntimeService::default();
+        for source in [
+            r#"
+            import { serverDisableCompletion } from "clay:completion";
+            serverDisableCompletion({});
+            "#,
+            r#"
+            import { serverDisableCompletion } from "clay:completion";
+            serverDisableCompletion({ provider: "words.buffer", packagePrefix: "words" });
+            "#,
+            r#"
+            import { serverDisableCompletion } from "clay:completion";
+            serverDisableCompletion({ provider: "words.buffer", handler() {} });
+            "#,
+            r#"
+            import { serverDisableCompletion } from "clay:completion";
+            serverDisableCompletion({ provider: "x".repeat(129) });
+            "#,
+        ] {
+            let error = service
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("clay.completion.invalid_disable")
+            );
+        }
     }
 
     #[tokio::test]
@@ -2529,7 +2617,7 @@ mod tests {
             .evaluate_controlled_module(
                 r##"
                 import { loadPackage } from "clay:packages";
-                import { serverListCompletionProvidersForTrigger } from "clay:completion";
+                import { serverDisableCompletion, serverListCompletionProvidersForTrigger } from "clay:completion";
 
                 await loadPackage("@clay/rust");
                 await loadPackage("@clay/typescript");
@@ -2540,15 +2628,20 @@ mod tests {
                 const rustScopeProviders = serverListCompletionProvidersForTrigger({ trigger: ":" });
                 const markdownProviders = serverListCompletionProvidersForTrigger({ trigger: "#" });
                 const noProviders = serverListCompletionProvidersForTrigger({ trigger: "?" });
+                serverDisableCompletion({ packagePrefix: "@clay/rust" });
+                const dotProvidersAfterRustDisable = serverListCompletionProvidersForTrigger({ trigger: "." });
 
                 Deno.core.ops.op_clay_runtime_record(JSON.stringify({
                   dotIds: dotProviders.providers.map((p) => p.id).sort(),
                   rustScopeIds: rustScopeProviders.providers.map((p) => p.id).sort(),
                   noCount: noProviders.providers.length,
+                  rustIdsAfterDisable: dotProvidersAfterRustDisable.providers.filter((p) => p.packagePrefix === "rust").map((p) => p.id),
                   rustTriggerCharacters: dotProviders.providers.find((p) => p.id === "rust.keywords")?.triggerCharacters ?? [],
                   typescriptTriggerCharacters: dotProviders.providers.find((p) => p.id === "typescript.keywords")?.triggerCharacters ?? [],
                   rustPriority: dotProviders.providers.find((p) => p.id === "rust.keywords")?.priority,
                   rustItems: dotProviders.providers.find((p) => p.id === "rust.keywords")?.items ?? [],
+                  rustSnippetItems: dotProviders.providers.find((p) => p.id === "rust.snippets")?.items ?? [],
+                  typescriptSnippetItems: dotProviders.providers.find((p) => p.id === "typescript.snippets")?.items ?? [],
                   markdownIds: markdownProviders.providers.map((p) => p.id),
                   markdownItems: markdownProviders.providers.find((p) => p.id === "markdown.keywords")?.items ?? [],
                 }));
@@ -2557,6 +2650,12 @@ mod tests {
             .await
             .unwrap();
 
+        assert!(
+            evaluation
+                .completion_providers
+                .iter()
+                .all(|provider| provider.provenance.package_prefix != "rust")
+        );
         let record = evaluation
             .op_records
             .into_iter()
@@ -2568,11 +2667,17 @@ mod tests {
             serde_json::json!([
                 "javascript.keywords",
                 "rust.keywords",
-                "typescript.keywords"
+                "rust.snippets",
+                "typescript.keywords",
+                "typescript.snippets"
             ])
         );
-        assert_eq!(parsed["rustScopeIds"], serde_json::json!(["rust.keywords"]));
+        assert_eq!(
+            parsed["rustScopeIds"],
+            serde_json::json!(["rust.keywords", "rust.snippets"])
+        );
         assert_eq!(parsed["noCount"], 0);
+        assert_eq!(parsed["rustIdsAfterDisable"], serde_json::json!([]));
         assert_eq!(
             parsed["rustTriggerCharacters"],
             serde_json::json!([".", ":"])
@@ -2582,11 +2687,22 @@ mod tests {
             serde_json::json!(["."])
         );
         assert_eq!(parsed["rustPriority"], 0);
+        assert!(parsed["rustItems"].as_array().unwrap().iter().any(|item| {
+            item["label"] == "fn" && item["insertText"] == "fn" && item["textFormat"] == "plainText"
+        }));
         assert!(
-            parsed["rustItems"]
+            parsed["rustSnippetItems"]
                 .as_array()
                 .unwrap()
-                .contains(&serde_json::json!("fn"))
+                .iter()
+                .any(|item| item["label"] == "fn" && item["textFormat"] == "snippet")
+        );
+        assert!(
+            parsed["typescriptSnippetItems"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["label"] == "interface" && item["textFormat"] == "snippet")
         );
         assert_eq!(
             parsed["markdownIds"],
@@ -2596,7 +2712,8 @@ mod tests {
             parsed["markdownItems"]
                 .as_array()
                 .unwrap()
-                .contains(&serde_json::json!("# "))
+                .iter()
+                .any(|item| item["label"] == "# " && item["textFormat"] == "plainText")
         );
     }
 
@@ -4632,13 +4749,15 @@ mod tests {
                 "typescript.toggleLineComment"
             ])
         );
-        assert_eq!(parsed["providerCount"], 3);
+        assert_eq!(parsed["providerCount"], 5);
         assert_eq!(
             parsed["providerIds"],
             serde_json::json!([
                 "javascript.keywords",
                 "rust.keywords",
-                "typescript.keywords"
+                "rust.snippets",
+                "typescript.keywords",
+                "typescript.snippets"
             ])
         );
     }

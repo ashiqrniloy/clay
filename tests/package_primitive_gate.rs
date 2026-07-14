@@ -215,8 +215,29 @@ fn completion_provider_contributions_require_permission_and_inert_metadata() {
         "words.buffer"
     );
     assert_eq!(
-        valid.contributions.completion_providers[0].items,
+        valid.contributions.completion_providers[0]
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
         vec!["alpha", "await"]
+    );
+
+    let mut structured = completion_provider_fixture();
+    structured["clay"]["contributions"]["completionProviders"][0]["items"] = json!([{
+        "label": "fn",
+        "insertText": "fn ${1:name}() {$0}",
+        "detail": "function snippet",
+        "textFormat": "snippet"
+    }]);
+    let structured = assemble_package_record(&structured).unwrap();
+    let item = &structured.contributions.completion_providers[0].items[0];
+    assert_eq!(item.label, "fn");
+    assert_eq!(item.insert_text, "fn ${1:name}() {$0}");
+    assert_eq!(item.detail, "function snippet");
+    assert_eq!(
+        item.text_format,
+        clay::protocol::CompletionItemTextFormat::Snippet
     );
 
     let mut missing_permission = completion_provider_fixture();
@@ -272,6 +293,23 @@ fn completion_provider_contributions_reject_conflicts_and_oversize_metadata() {
     let error = assemble_package_record(&duplicate_item).unwrap_err();
     assert_eq!(error.rule, PackageRecordRule::DuplicateContributionId);
 
+    let mut mixed_formats = completion_provider_fixture();
+    mixed_formats["clay"]["contributions"]["completionProviders"][0]["items"] = json!([
+        "await",
+        { "label": "fn", "insertText": "fn ${1:name}() {$0}", "textFormat": "snippet" }
+    ]);
+    let error = assemble_package_record(&mixed_formats).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(error.message.contains("separate providers"));
+
+    let mut bad_text_format = completion_provider_fixture();
+    bad_text_format["clay"]["contributions"]["completionProviders"][0]["items"] = json!([{
+        "label": "fn", "insertText": "fn", "textFormat": "transform"
+    }]);
+    let error = assemble_package_record(&bad_text_format).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(error.message.contains("plainText` or `snippet"));
+
     let mut too_many_items = completion_provider_fixture();
     too_many_items["clay"]["contributions"]["completionProviders"][0]["items"] = json!(
         (0..33)
@@ -286,6 +324,14 @@ fn completion_provider_contributions_reject_conflicts_and_oversize_metadata() {
         json!(["x".repeat(129)]);
     let error = assemble_package_record(&oversized_item).unwrap_err();
     assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    let mut oversized_insert_text = completion_provider_fixture();
+    oversized_insert_text["clay"]["contributions"]["completionProviders"][0]["items"] = json!([{
+        "label": "snippet", "insertText": "x".repeat(257), "textFormat": "snippet"
+    }]);
+    let error = assemble_package_record(&oversized_insert_text).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+    assert!(error.message.contains("insertText exceeds 256"));
 
     let mut oversize = completion_provider_fixture();
     oversize["clay"]["contributions"]["completionProviders"][0]["detail"] =

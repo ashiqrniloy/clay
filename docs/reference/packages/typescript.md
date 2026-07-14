@@ -1,6 +1,6 @@
 # @clay/typescript Package
 
-`@clay/typescript` is Clay's first-party TypeScript language package. Phase 18.14 expanded it from a grammar-only syntax highlighter into a full language package: it contributes a `typescript` major mode, behavior manifest, package-prefixed command, keyword completion provider, and an optional status-item UI contribution with Phase 18.18 native grammar metadata and a direct vocabulary styleMap.
+`@clay/typescript` is Clay's first-party TypeScript language package. Phase 18.14 expanded it from a grammar-only syntax highlighter into a full language package: it contributes a `typescript` major mode, behavior manifest, package-prefixed command, keyword/snippet completion providers, and an optional status-item UI contribution with Phase 18.18 native grammar metadata and a direct vocabulary styleMap.
 
 ## End-User Setup
 
@@ -43,7 +43,8 @@ The package now declares:
 - **Major mode `typescript`**: registered with generic file-extension probes (`*.ts`, `*.tsx`, `*.mts`, `*.cts`). No TypeScript-specific classification branch lives in Clay core.
 - **Behavior manifest**: indentation (2 spaces), bracket/quote/template-literal pairs, line-comment continuation (`//`), and electric `}`/`)`/`]` outdent rules. These are expressed through generic `EditorBehaviorRules` primitives.
 - **Command `typescript.toggleLineComment`**: a server-first command registered for validated execution through the Clay `CommandExecution` path.
-- **Completion provider `typescript.keywords`**: priority-0 metadata-only provider with 32 inert TypeScript keyword text replacements, `.` trigger, language-appropriate boundaries, and 300 ms/32-item budgets. Snippet transforms remain deferred to Phase 18.19.
+- **Completion provider `typescript.keywords`**: priority-0 metadata-only provider carrying 32 inert TypeScript keyword text replacements.
+- **Completion provider `typescript.snippets`**: priority-0 provider carrying inert client-expanded `interface` and `type` templates. Both providers share the `.` trigger and 300 ms/32-item budgets, load through the same `loadPackage("@clay/typescript")` call, and require only `completion-provider`; snippet accept selects the first placeholder and Tab advances.
 - **Status item `typescript.status.mode`**: an inert `statusItem` component contribution validated by Clay before client publication.
 
 Active syntax grammar remains selectable independently of active major mode, so a `.ts` file can use the TypeScript grammar while its major mode is still `core.code`, and loading the package does not silently change the mode of already-open documents.

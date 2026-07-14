@@ -2,6 +2,7 @@ pub(crate) mod buffer;
 pub(crate) mod cursor;
 mod layout;
 pub(crate) mod selection;
+pub(crate) mod snippet;
 pub mod surface;
 pub mod theme;
 pub(crate) mod typography;

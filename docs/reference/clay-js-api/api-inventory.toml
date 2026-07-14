@@ -1200,10 +1200,33 @@ deno_op = "op_clay_completion_register_completion_provider"
 deno_op_path = "src/server/ops/completion.rs::op_clay_completion_register_completion_provider"
 documentation_path = "docs/reference/clay-js-api/completion/server-register-completion-provider.md"
 key_bindings = []
-custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=completion-provider", "completionProvider:object=required-without-packageManifest", "providerId:string=package-prefixed", "triggerCharacters:string[]=inert", "wordBoundaryChars:string[]=inert", "items:string[]=bounded-static-text", "priority:number=0", "timeoutMs:number=500", "maxItems:number=64"]
+custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=completion-provider", "completionProvider:object=required-without-packageManifest", "providerId:string=package-prefixed", "triggerCharacters:string[]=inert", "wordBoundaryChars:string[]=inert", "items:string-or-structured-item=bounded-static-text-or-snippet", "exclusive:boolean=false", "textFormat:plainText-or-snippet=plainText", "priority:number=0", "timeoutMs:number=500", "maxItems:number=64"]
 permissions = ["completion-provider"]
-security_notes = "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.11 public API registers metadata only; JS provider execution tokens are intentionally not exposed yet. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
+security_notes = "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.19 public API registers inert keyword/snippet items; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, executable-snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
 current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::CompletionProviderMeta"
+registry_public = true
+
+[[api]]
+id = "clay.completion.serverDisableCompletion"
+category = "completion-provider-configuration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:completion"
+js_export = "serverDisableCompletion"
+user_facing_name = "Disable Completion Provider"
+authority = "server-first-completion-metadata-suppression"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Provider disable is configuration/load-time metadata work; disabled set is consulted before selection scheduling and never runs on paint, layout, scroll, pointer, text-event, key local-edit, or keypress-to-local-paint hot paths."
+facade_path = "runtime/js/completion.ts::serverDisableCompletion"
+backing_rust = "src/server/completion.rs::CompletionProviderRegistry::disable_completion"
+deno_op = "op_clay_completion_disable"
+deno_op_path = "src/server/ops/completion.rs::op_clay_completion_disable"
+documentation_path = "docs/reference/clay-js-api/completion/server-disable-completion.md"
+key_bindings = []
+custom_properties = ["provider:string=optional", "packagePrefix:string=optional"]
+permissions = []
+security_notes = "Suppresses registered completion providers from selection, stale-drops in-flight results, and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw-op, native-widget, or package-manager authority. Does not remove registered metadata. Requires no permission entry."
+current_rust_owner = "src/server/ops/completion.rs::op_clay_completion_disable; src/server/completion.rs::CompletionProviderRegistry"
 registry_public = true
 
 [[api]]

@@ -122,7 +122,10 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
     ("runtime/js/syntax.ts", &["serverRegisterSyntaxGrammar"]),
     (
         "runtime/js/completion.ts",
-        &["serverRegisterCompletionProvider"],
+        &[
+            "serverRegisterCompletionProvider",
+            "serverDisableCompletion",
+        ],
     ),
 ];
 

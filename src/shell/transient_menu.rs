@@ -69,6 +69,7 @@ pub(crate) struct CompletionMenuAcceptAction {
     pub(crate) behavior_version: BehaviorVersion,
     pub(crate) replacement_range: CompletionReplacementRange,
     pub(crate) insert_text: String,
+    pub(crate) text_format: crate::protocol::CompletionItemTextFormat,
     pub(crate) commit_characters: String,
 }
 
@@ -321,6 +322,7 @@ fn completion_item_to_menu_item(
         behavior_version: result.behavior_version,
         replacement_range: result.replacement_range,
         insert_text: item.insert_text.clone(),
+        text_format: item.text_format,
         commit_characters: item.commit_characters.clone(),
     };
     let detail = if item.detail.is_empty() {
@@ -579,6 +581,7 @@ mod tests {
                 insert_text: "println!".to_string(),
                 detail: "macro".to_string(),
                 commit_characters: ";".to_string(),
+                text_format: crate::protocol::CompletionItemTextFormat::PlainText,
                 provenance: crate::protocol::CompletionProvenance::builtin_core(),
             }],
             provenance: crate::protocol::CompletionProvenance::builtin_core(),
@@ -600,6 +603,10 @@ mod tests {
             CompletionReplacementRange::new(3, 5)
         );
         assert_eq!(accept.insert_text, "println!");
+        assert_eq!(
+            accept.text_format,
+            crate::protocol::CompletionItemTextFormat::PlainText
+        );
         assert_eq!(accept.commit_characters, ";");
     }
 }

@@ -13,12 +13,14 @@ use tokio::{
 
 use crate::{
     packages::commands::CommandRegistry,
+    perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
     protocol::{
         ClientId, ClientMessage, CompletionProvenance, CompletionRequest, CompletionResultSet,
         CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata, PROTOCOL_VERSION,
         ParseByteRange, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
         SduiActionArgument, SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
+        completion::estimated_result_payload_bytes,
     },
 };
 
@@ -26,7 +28,7 @@ use super::{
     RuntimeGenerationStore,
     behavior::ActiveBehaviorManifest,
     command_execution::{CommandExecutionRequest, CommandExecutionTarget, CommandExecutor},
-    completion::CompletionProviderMeta,
+    completion::{CompletionProviderMeta, apply_exclusive_suppression},
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
     parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
@@ -1043,7 +1045,7 @@ fn static_package_completion_result(
     providers: &[CompletionProviderMeta],
 ) -> Option<CompletionResultSet> {
     let package_prefix = manifest_id.split('.').next()?;
-    let provider = providers
+    let mut matched: Vec<_> = providers
         .iter()
         .filter(|provider| {
             provider.provenance.package_prefix == package_prefix
@@ -1056,23 +1058,19 @@ fn static_package_completion_result(
                         .any(|trigger| trigger == character),
                 }
         })
-        .max_by(|left, right| {
-            left.priority
-                .cmp(&right.priority)
-                .then_with(|| right.id.cmp(&left.id))
-        })?;
+        .collect();
+    matched.sort_by(|left, right| {
+        right
+            .priority
+            .cmp(&left.priority)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    apply_exclusive_suppression(&mut matched);
+    let provenance = matched.first()?.provenance.clone();
     let start = usize::try_from(request.replacement_range.byte_start).ok()?;
     let end = usize::try_from(request.replacement_range.byte_end).ok()?;
     let prefix = document_text.get(start..end)?;
-    let items: Vec<_> = provider
-        .items
-        .iter()
-        .filter(|item| item.insert_text.starts_with(prefix))
-        .take(provider.max_items)
-        .cloned()
-        .collect();
-
-    Some(CompletionResultSet {
+    let mut result = CompletionResultSet {
         request_id: request.request_id,
         client_id: request.client_id,
         document_id: request.document_id,
@@ -1080,14 +1078,33 @@ fn static_package_completion_result(
         behavior_version: request.behavior_version,
         provider_generation: request.provider_generation,
         replacement_range: request.replacement_range,
-        status: if items.is_empty() {
-            CompletionStatus::Empty
-        } else {
-            CompletionStatus::Ok
-        },
-        items,
-        provenance: provider.provenance.clone(),
-    })
+        status: CompletionStatus::Empty,
+        items: Vec::new(),
+        provenance,
+    };
+
+    'providers: for provider in matched {
+        for item in provider
+            .items
+            .iter()
+            .filter(|item| item.insert_text.starts_with(prefix))
+            .take(provider.max_items)
+        {
+            let mut candidate = result.clone();
+            candidate.items.push(item.clone());
+            if candidate.items.len() > COMPLETION_RESULT_MAX_ITEMS
+                || estimated_result_payload_bytes(&candidate)
+                    > COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES
+            {
+                break 'providers;
+            }
+            result.items.push(item.clone());
+        }
+    }
+    if !result.items.is_empty() {
+        result.status = CompletionStatus::Ok;
+    }
+    Some(result)
 }
 
 async fn document_status_response(
@@ -1444,6 +1461,7 @@ mod tests {
             id: "javascript.keywords".to_string(),
             provenance: provenance.clone(),
             priority: 0,
+            exclusive: false,
             trigger_metadata: crate::server::completion::CompletionTriggerMetadata {
                 trigger_characters: vec![".".to_string()],
             },
@@ -1481,6 +1499,63 @@ mod tests {
             vec!["function"]
         );
         assert_eq!(result.provenance, provenance);
+    }
+
+    #[test]
+    fn static_package_completion_merges_equal_priority_plain_and_snippet_providers() {
+        let provenance = crate::protocol::CompletionProvenance {
+            package_name: "@clay/rust".to_string(),
+            package_version: "0.1.0".to_string(),
+            package_prefix: "rust".to_string(),
+        };
+        let provider = |id: &str, item: crate::protocol::CompletionItem| {
+            crate::server::completion::CompletionProviderMeta {
+                id: id.to_string(),
+                provenance: provenance.clone(),
+                priority: 0,
+                exclusive: false,
+                trigger_metadata: crate::server::completion::CompletionTriggerMetadata {
+                    trigger_characters: vec![".".to_string()],
+                },
+                word_boundary: crate::server::completion::WordBoundaryRule::default(),
+                items: vec![item],
+                timeout_ms: 300,
+                max_items: 32,
+                generation: 0,
+            }
+        };
+        let keyword = crate::protocol::CompletionItem::new("fn", "fn", provenance.clone());
+        let snippet = crate::protocol::CompletionItem::new(
+            "fn",
+            "fn ${1:name}(${2:args}) {\n\t$0\n}",
+            provenance.clone(),
+        )
+        .with_snippet();
+        let providers = [
+            provider("rust.keywords", keyword),
+            provider("rust.snippets", snippet),
+        ];
+        let request = crate::protocol::CompletionRequest {
+            request_id: 1,
+            client_id: 2,
+            document_id: 3,
+            document_version: 4,
+            behavior_version: 5,
+            cursor_byte_offset: 2,
+            replacement_range: crate::protocol::CompletionReplacementRange::new(0, 2),
+            trigger: crate::protocol::CompletionTrigger::Character(".".to_string()),
+            provider_generation: 0,
+        };
+
+        let result =
+            static_package_completion_result(&request, "rust.rust", "fn", &providers).unwrap();
+
+        assert_eq!(result.items.len(), 2);
+        assert_eq!(
+            result.items[1].text_format,
+            crate::protocol::CompletionItemTextFormat::Snippet
+        );
+        assert!(result.validate().is_ok());
     }
 
     fn runtime_generation() -> super::RuntimeGenerationStore {

@@ -312,6 +312,8 @@ Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through se
 
 If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
 
+A single `loadPackage("@clay/<lang>")` activates every contribution the package's `loadEntry` registers — modes, commands, parse handlers, decorations, UI components, and any number of completion providers. A package declares multiple providers in its `completionProviders` array (for example `rust.keywords` plus `rust.snippets`) and submits that package manifest once to `serverRegisterCompletionProvider`; generic `completion_provider_metas` maps the full array and `register_completion_provider_metadata` registers all distinct IDs together while rejecting duplicates. End-user config stays one line — `await loadPackage("@clay/rust")` — with no copied manifest, manual primitive registration, or low-level facade plumbing. Phase 18.19 snippets ride this same path: `textFormat: "snippet"` is inert item data, not a separate loader, op, permission, or subsystem.
+
 ## Package Code Shape
 
 A typical package should separate:
@@ -1625,6 +1627,47 @@ Trigger classification is local manifest lookup: typing a trigger character edit
 Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 18.18 package providers registered through `clay.completion.serverRegisterCompletionProvider` remain callback-free: registered static strings normalize to provenance-bearing `CompletionItem` text replacements, and the connection path filters the active package's Rust snapshot by replacement prefix without running package JavaScript. A future constrained handler bridge may add computed package providers; current package execution is limited to bounded static text. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
 
 See [`clay.completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/modules/phase18.11-completion-provider-primitive-review.md`](../../wiki/modules/phase18.11-completion-provider-primitive-review.md) for the implementation review.
+
+## Phase 18.19 authoring contract: snippets, exclusive claim, and disable-native
+
+Phase 18.19 extends the package completion contract with three capabilities: inert snippet items, exclusive provider claim, and a `serverDisableCompletion` configuration API.
+
+### Snippet items (`textFormat: "snippet"`)
+
+Package completion provider `items` now accept structured objects alongside plain strings:
+
+```jsonc
+{
+  "completionProviders": [{
+    "id": "rust.snippets",
+    "priority": 0,
+    "triggerCharacters": ["."],
+    "items": [
+      { "label": "fn", "insertText": "fn ${1:name}(${2:args}) {\n\t$0\n}", "textFormat": "snippet", "detail": "function" }
+    ]
+  }]
+}
+```
+
+Snippet `insertText` carries inert LSP placeholder syntax (`$1`, `${2:default}`, `$0`). Accepting a snippet item expands the text client-local, selects the first non-final placeholder, and Tab/Shift-Tab navigates between placeholders with Escape to exit. No provider code runs on accept. Mixing plain-text and snippet items in one provider is rejected so independently targetable providers stay explicit.
+
+### Exclusive claim (`exclusive: true`)
+
+A completion provider may set `exclusive: true` to suppress strictly lower-priority matching providers. When the exclusive provider is in the highest-priority tier for a trigger, all lower-priority matches are dropped from the result set; equal-priority peers remain. A lower-priority exclusive provider cannot claim a request from a higher-priority non-exclusive match. The field is inert metadata consulted at selection time with no provider execution.
+
+### Disable-native (`serverDisableCompletion`)
+
+`clay.completion.serverDisableCompletion` suppresses a registered completion provider by exact ID (`core.bufferWords`, `rust.snippets`) or package prefix (`rust`). Use from `~/.config/clay/init.js`:
+
+```js
+import { serverDisableCompletion } from "clay:completion";
+serverDisableCompletion({ provider: "core.bufferWords" });
+serverDisableCompletion({ packagePrefix: "rust" });
+```
+
+The target is recorded in a server-side disabled-provider set consulted by every trigger selection path. In-flight results are stale-dropped via a provider generation bump. Disabled state persists across runtime reloads; re-enabling requires a package reload or runtime restart. The API grants no filesystem, network, shell, AI, workspace, or other authority; it only suppresses already-registered inert metadata.
+
+See [`clay.completion.serverDisableCompletion`](../clay-js-api/completion/server-disable-completion.md) for the full API reference.
 
 ## Documentation Requirements
 

@@ -1,7 +1,7 @@
 // @clay/typescript load entry. Phase 18.18 language package:
 // registers native grammar/vocabulary metadata plus a TypeScript major mode
-// with editor behavior rules, one server-first command, a keyword completion
-// provider, and an optional status-item UI contribution.
+// with editor behavior rules, one server-first command, keyword/snippet
+// completion providers, and an optional status-item UI contribution.
 
 import { serverRegisterSyntaxGrammar } from "clay:syntax";
 import { serverRegisterModePattern } from "clay:modes";
@@ -59,6 +59,11 @@ const typescriptKeywords = Object.freeze([
   "instanceof", "interface", "let", "new", "return", "true", "type", "while"
 ]);
 
+const typescriptSnippets = Object.freeze([
+  { label: "interface", insertText: "interface ${1:Name} {\n  $0\n}", textFormat: "snippet", detail: "interface snippet" },
+  { label: "type", insertText: "type ${1:Name} = ${2:Type};$0", textFormat: "snippet", detail: "type alias snippet" }
+]);
+
 const typescriptPackageManifest = () => ({
   name: "@clay/typescript",
   version: "0.1.0",
@@ -105,6 +110,14 @@ const typescriptPackageManifest = () => ({
           wordBoundaryChars: [".", ";", ","],
           items: typescriptKeywords,
           budgets: { timeoutMs: 300, maxItems: 32 }
+        },
+        {
+          id: "typescript.snippets",
+          priority: 0,
+          triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
+          wordBoundaryChars: [".", ";", ","],
+          items: typescriptSnippets,
+          budgets: { timeoutMs: 300, maxItems: 32 }
         }
       ],
       ui: {
@@ -136,13 +149,7 @@ export default async function loadTypescriptPackage() {
     permissions: []
   });
   await serverRegisterCompletionProvider({
-    packageManifest: typescriptPackageManifest(),
-    providerId: "typescript.keywords",
-    priority: 0,
-    triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
-    wordBoundaryChars: [".", ";", ","],
-    items: typescriptKeywords,
-    budgets: { timeoutMs: 300, maxItems: 32 }
+    packageManifest: typescriptPackageManifest()
   });
   await serverRegisterComponentContribution(typescriptPackageManifest(), {
     kind: "statusItem",

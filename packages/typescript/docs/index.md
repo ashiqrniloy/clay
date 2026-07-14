@@ -22,7 +22,8 @@
 - **Major mode `typescript`**: registered with generic file-extension probes.
 - **Behavior manifest**: 2-space indentation, bracket/quote/template-literal pairs, `//` comment continuation, and electric `}`/`)`/`]` outdent.
 - **Command `typescript.toggleLineComment`**: server-first command registered through the Clay `CommandExecution` path.
-- **Completion provider `typescript.keywords`**: priority-0 metadata-only provider carrying 32 inert TypeScript keyword text replacements with `.` trigger and 300 ms/32-item budgets. Snippet transforms remain deferred to Phase 18.19.
+- **Completion provider `typescript.keywords`**: priority-0 provider carrying 32 inert TypeScript keyword text replacements.
+- **Completion provider `typescript.snippets`**: priority-0 provider carrying inert `interface` and `type` templates. Both share the `.` trigger and 300 ms/32-item budgets and ride the same one-line package load/`completion-provider` permission; client-local accept expands snippets and Tab navigates placeholders.
 - **Status item `typescript.status.mode`**: inert `statusItem` component contribution.
 
 Phase 18.18 promotes the grammar contribution from legacy WASM/style-token metadata to native `TokenType` + `Modifiers` metadata. Active syntax grammar remains selectable independently of active major mode, so a `.ts` file can use the TypeScript grammar while its major mode stays `core.code`. Loading the package does not silently change the mode of already-open documents.

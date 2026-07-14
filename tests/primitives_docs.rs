@@ -1329,6 +1329,13 @@ fn phase18_18_language_package_primitive_review() -> String {
     .expect("read Phase 18.18 first-party language package full implementation primitive review")
 }
 
+fn phase18_19_completion_extensions_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.19-completion-extensions-primitive-review.md",
+    ))
+    .expect("read Phase 18.19 completion extensions primitive review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -2723,6 +2730,129 @@ fn phase18_18_language_package_primitive_review_is_linked_and_complete() {
         assert!(
             review.contains(required),
             "Phase 18.18 primitive review must preserve boundary {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_19_completion_extensions_primitive_review_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let registry = fs::read_to_string(repository_path("docs/reference/primitives/registry.md"))
+        .expect("read primitive registry");
+    let review = phase18_19_completion_extensions_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.19-completion-extensions-primitive-review.md"),
+        "wiki index must link the Phase 18.19 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.19-completion-extensions-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.19 primitive review"
+    );
+    assert!(
+        registry.contains("phase18.19-completion-extensions-primitive-review.md"),
+        "primitive registry must reference the Phase 18.19 completion extensions review"
+    );
+    assert!(
+        registry.contains("Phase 18.19 adds three generic extensions")
+            && registry.contains("disabled-target `BTreeSet`")
+            && registry.contains("coordinator rejects disabled scheduling")
+            && registry.contains("Task 8 adds generic structured item normalization")
+            && registry.contains("`rust.snippets` and `typescript.snippets`"),
+        "primitive registry must record the Phase 18.19 implemented extensions"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Completion protocol shapes",
+        "Provider registry and coordinator",
+        "ClayOpState provider listing",
+        "Accept path and transient menu",
+        "Package completionProviders descriptor",
+        "Clay JS facade and permissions",
+        "Docs registry and wiki coverage",
+        "`src/protocol/completion.rs::CompletionItem`",
+        "`src/server/completion.rs::CompletionProviderMeta`",
+        "`src/server/ops/mod.rs::ClayOpState`",
+        "`src/shell/transient_menu.rs::CompletionMenuAcceptAction`",
+        "`src/editor/surface.rs::accept_completion_with_event`",
+        "`runtime/js/completion.ts`",
+        "`src/server/ops/completion.rs::completion_provider_metas`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.19 primitive review must inventory {required}"
+        );
+    }
+
+    for required in [
+        "Generic Phase 18.19 Gaps",
+        "Snippet `text_format`, bounded parser, and client-local session",
+        "Opt-in `exclusive` claim and shared suppression helper",
+        "`serverDisableCompletion` Clay JS API and disabled-provider set",
+        "Structured item descriptor and first-party snippet sets",
+        "CompletionItemTextFormat { PlainText, Snippet }",
+        "implemented in tasks 4-5",
+        "implemented in task 6",
+        "implemented in task 7",
+        "implemented in task 8",
+        "`src/editor/snippet.rs::parse_snippet`",
+        "`SnippetSession { placeholders, active_index }`",
+        "active-placeholder edits shift later ranges",
+        "`SNIPPET_MAX_TABSTOPS`",
+        "Backslash escapes, variable resolution, and nested placeholders",
+        "`apply_exclusive_suppression`",
+        "retains that whole tier and drops strictly lower priorities",
+        "Lower-priority exclusive providers cannot claim a request",
+        "`disabled_completion_providers: Mutex<BTreeSet<String>>`",
+        "`completion_provider_generation`",
+        "`completion_provider_is_disabled`",
+        "`op_clay_completion_disable`",
+        "matches exact IDs",
+        "bump provider generation",
+        "refuses rescheduling the disabled provider",
+        "`src/packages/record.rs::CompletionItemContributionDescriptor`",
+        "must use separate providers",
+        "`rust.snippets`",
+        "`typescript.snippets`",
+        "static_package_completion_result",
+        "first_party_rust_and_typescript_packages_ship_dedicated_snippet_providers",
+        "snippets **with executable transforms**",
+        "`core.bufferWords`",
+        "priority-merge default unchanged",
+        "bounded synchronous Rust text op",
+        "No provider code, direct IPC/op",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.19 primitive review must lock generic gap/rule {required}"
+        );
+    }
+
+    for required in [
+        "Hot-Path Classification",
+        "no IPC, no provider code",
+        "`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`",
+        "`COMPLETION_RESULT_MAX_ITEMS`",
+        "`KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`",
+        "Security and Authority Boundary",
+        "No new `PackagePermission` and no new decision log",
+        "Rejected Implementation Shapes",
+        "Do not add a `snippet_text: Option<String>` field",
+        "Do not add a separate snippet provider subsystem",
+        "Do not expand snippets server-side",
+        "Do not add a per-language or mode-specific Rust branch",
+        "Do not overload `setPackageOption`",
+        "Do not implement LSP process spawning",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.19 primitive review must preserve boundary {required}"
         );
     }
 }

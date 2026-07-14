@@ -16,10 +16,11 @@ use crate::perf::{
     metrics::PerfRecorder,
 };
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, CompletionReplacementRange, CompletionTrigger,
-    DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan, DiagnosticChunkKey,
-    DiagnosticSet, DiagnosticSpan, DocumentAccess, DocumentFontRole, DocumentId, DocumentVersion,
-    EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule, FontRole, KeyStroke, PairRule,
+    BehaviorManifest, BehaviorVersion, CompletionItemTextFormat, CompletionReplacementRange,
+    CompletionTrigger, DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan,
+    DiagnosticChunkKey, DiagnosticSet, DiagnosticSpan, DocumentAccess, DocumentFontRole,
+    DocumentId, DocumentVersion, EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule,
+    FontRole, KeyCode, KeyStroke, PairRule,
 };
 use crate::shell::CompletionMenuAcceptAction;
 
@@ -28,6 +29,7 @@ use super::cursor::CursorState;
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState, VisibleTextStyleRun};
 use super::selection::SelectionState;
+use super::snippet::{SnippetPlaceholder, parse_snippet};
 use super::theme::{StyleRegistry, TextAttributes};
 use super::typography::TypographyRegistry;
 use super::viewport::{Viewport, visible_line_count_from_height};
@@ -610,12 +612,27 @@ fn is_completion_word_character(character: char) -> bool {
     character == '_' || character.is_alphanumeric()
 }
 
+fn shift_snippet_offset(offset: usize, removed_len: usize, inserted_len: usize) -> Option<usize> {
+    if inserted_len >= removed_len {
+        offset.checked_add(inserted_len - removed_len)
+    } else {
+        offset.checked_sub(removed_len - inserted_len)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SnippetSession {
+    placeholders: Vec<SnippetPlaceholder>,
+    active_index: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct EditorSurface {
     buffer: EditorBuffer,
     document: EditorDocumentState,
     cursor: CursorState,
     selection: Option<SelectionState>,
+    snippet_session: Option<SnippetSession>,
     viewport: Viewport,
     layout: LayoutState,
     decorations: EditorDecorationState,
@@ -656,6 +673,7 @@ impl EditorSurface {
         self.document.access = access;
         self.cursor.set_caret(0);
         self.selection = None;
+        self.snippet_session = None;
         self.viewport = Viewport::default();
         self.layout = LayoutState::default();
         self.decorations = EditorDecorationState::default();
@@ -782,6 +800,18 @@ impl EditorSurface {
     }
 
     pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
+        if matches!(key.key, KeyCode::Tab) && self.snippet_session.is_some() {
+            let changed = if key.modifiers.shift {
+                self.select_previous_snippet_placeholder()
+            } else {
+                self.select_next_snippet_placeholder()
+            };
+            return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(changed));
+        }
+        if matches!(key.key, KeyCode::Escape) && self.snippet_session.take().is_some() {
+            return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(true));
+        }
+
         let Some(manifest) = &self.document.behavior_manifest else {
             return EditorKeyOutcome::unhandled();
         };
@@ -890,7 +920,26 @@ impl EditorSurface {
         if end > self.buffer.document_end_byte() {
             return EditorCommandOutcome::unchanged();
         }
-        let mut text = action.insert_text.clone();
+        let (mut text, snippet_placeholders) = match action.text_format {
+            CompletionItemTextFormat::PlainText => (action.insert_text.clone(), None),
+            CompletionItemTextFormat::Snippet => {
+                let Ok(expansion) = parse_snippet(&action.insert_text) else {
+                    return EditorCommandOutcome::unchanged();
+                };
+                let mut placeholders = expansion.placeholders;
+                for placeholder in &mut placeholders {
+                    let Some(byte_start) = start.checked_add(placeholder.byte_start) else {
+                        return EditorCommandOutcome::unchanged();
+                    };
+                    let Some(byte_end) = start.checked_add(placeholder.byte_end) else {
+                        return EditorCommandOutcome::unchanged();
+                    };
+                    placeholder.byte_start = byte_start;
+                    placeholder.byte_end = byte_end;
+                }
+                (expansion.text, Some(placeholders))
+            }
+        };
         if let Some(commit_character) = commit_character {
             text.push_str(commit_character);
         }
@@ -903,7 +952,143 @@ impl EditorSurface {
             text: text.clone(),
         };
         let result = self.buffer.replace_range(start..end, &text);
-        self.finish_edit_with_operation(result, operation)
+        let mut outcome = self.finish_edit_with_operation(result, operation);
+        if let Some(placeholders) = snippet_placeholders
+            && self.install_snippet_session(placeholders)
+        {
+            outcome.changed = true;
+        }
+        outcome
+    }
+
+    pub(crate) fn has_active_snippet_session(&self) -> bool {
+        self.snippet_session.is_some()
+    }
+
+    fn install_snippet_session(&mut self, mut placeholders: Vec<SnippetPlaceholder>) -> bool {
+        placeholders.sort_by_key(|placeholder| {
+            (
+                placeholder.final_tabstop,
+                placeholder.index,
+                placeholder.byte_start,
+            )
+        });
+        let had_session = self.snippet_session.take().is_some();
+        let Some(first) = placeholders.first().copied() else {
+            return had_session;
+        };
+        if first.final_tabstop {
+            return self.collapse_selection_to(first.byte_end) || had_session;
+        }
+        self.snippet_session = Some(SnippetSession {
+            placeholders,
+            active_index: 0,
+        });
+        self.select_snippet_placeholder(first);
+        true
+    }
+
+    fn select_next_snippet_placeholder(&mut self) -> bool {
+        let Some(session) = &mut self.snippet_session else {
+            return false;
+        };
+        let Some(next_index) = session.active_index.checked_add(1) else {
+            return false;
+        };
+        let Some(placeholder) = session.placeholders.get(next_index).copied() else {
+            let caret = session.placeholders[session.active_index].byte_end;
+            self.snippet_session = None;
+            self.collapse_selection_to(caret);
+            return true;
+        };
+        if placeholder.final_tabstop {
+            self.snippet_session = None;
+            self.collapse_selection_to(placeholder.byte_end);
+        } else {
+            session.active_index = next_index;
+            self.select_snippet_placeholder(placeholder);
+        }
+        true
+    }
+
+    fn select_previous_snippet_placeholder(&mut self) -> bool {
+        let Some(session) = &mut self.snippet_session else {
+            return false;
+        };
+        if session.active_index == 0 {
+            return true;
+        }
+        session.active_index -= 1;
+        let placeholder = session.placeholders[session.active_index];
+        self.select_snippet_placeholder(placeholder);
+        true
+    }
+
+    fn select_snippet_placeholder(&mut self, placeholder: SnippetPlaceholder) {
+        self.cursor.set_caret(placeholder.byte_end);
+        let selection = SelectionState::new(placeholder.byte_start, placeholder.byte_end);
+        self.selection = (!selection.is_collapsed()).then_some(selection);
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+    }
+
+    fn update_snippet_session_after_edit(&mut self, operation: &EditOperation) {
+        let edit = match operation {
+            EditOperation::Insert { byte_offset, text } => usize::try_from(*byte_offset)
+                .ok()
+                .map(|start| (start, start, text.len())),
+            EditOperation::Delete { start, end } => usize::try_from(*start)
+                .ok()
+                .zip(usize::try_from(*end).ok())
+                .map(|(start, end)| (start, end, 0)),
+            EditOperation::Replace { start, end, text } => usize::try_from(*start)
+                .ok()
+                .zip(usize::try_from(*end).ok())
+                .map(|(start, end)| (start, end, text.len())),
+        };
+        let Some((start, end, inserted_len)) = edit else {
+            self.snippet_session = None;
+            return;
+        };
+        let Some(session) = &mut self.snippet_session else {
+            return;
+        };
+        let active = session.placeholders[session.active_index];
+        if start < active.byte_start || end > active.byte_end {
+            self.snippet_session = None;
+            return;
+        }
+
+        let removed_len = end - start;
+        for (index, placeholder) in session.placeholders.iter_mut().enumerate() {
+            if index == session.active_index {
+                let Some(byte_end) =
+                    shift_snippet_offset(placeholder.byte_end, removed_len, inserted_len)
+                else {
+                    self.snippet_session = None;
+                    return;
+                };
+                placeholder.byte_end = byte_end;
+            } else if placeholder.byte_start >= end {
+                let Some(byte_start) =
+                    shift_snippet_offset(placeholder.byte_start, removed_len, inserted_len)
+                else {
+                    self.snippet_session = None;
+                    return;
+                };
+                let Some(byte_end) =
+                    shift_snippet_offset(placeholder.byte_end, removed_len, inserted_len)
+                else {
+                    self.snippet_session = None;
+                    return;
+                };
+                placeholder.byte_start = byte_start;
+                placeholder.byte_end = byte_end;
+            } else if placeholder.byte_end > start {
+                self.snippet_session = None;
+                return;
+            }
+        }
     }
 
     pub fn insert_text_with_event(&mut self, text: &str) -> EditorCommandOutcome {
@@ -1107,6 +1292,7 @@ impl EditorSurface {
 
         let previous = self.cursor.caret();
         let had_selection = self.selection.is_some();
+        self.snippet_session = None;
         self.cursor.set_caret(caret);
         self.selection = None;
         self.follow_visual_end = false;
@@ -1121,6 +1307,7 @@ impl EditorSurface {
 
         let previous_caret = self.cursor.caret();
         let previous_selection = self.selection;
+        self.snippet_session = None;
         let anchor = self
             .selection
             .map_or(previous_caret, |selection| selection.anchor());
@@ -1759,6 +1946,7 @@ impl EditorSurface {
     fn collapse_selection_to(&mut self, caret: usize) -> bool {
         let previous_caret = self.cursor.caret();
         let had_selection = self.selection.is_some();
+        self.snippet_session = None;
         self.cursor.set_caret(caret);
         self.selection = None;
         self.ensure_caret_line_visible();
@@ -1792,6 +1980,9 @@ impl EditorSurface {
         operation: EditOperation,
         caret: usize,
     ) -> EditorCommandOutcome {
+        if result.changed {
+            self.update_snippet_session_after_edit(&operation);
+        }
         self.cursor.set_caret(self.buffer.clamp_byte_offset(caret));
         self.selection = None;
         if !result.changed {
@@ -1845,6 +2036,7 @@ impl EditorSurface {
         &mut self,
         movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
     ) -> bool {
+        self.snippet_session = None;
         let had_selection = self.selection.is_some();
         let changed = movement(&mut self.cursor, &self.buffer);
         self.selection = None;
@@ -1859,6 +2051,7 @@ impl EditorSurface {
         &mut self,
         movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
     ) -> bool {
+        self.snippet_session = None;
         let anchor = self
             .selection
             .map_or_else(|| self.cursor.caret(), |selection| selection.anchor());
@@ -1992,9 +2185,10 @@ mod tests {
     use crate::perf::metrics::PerfRecorder;
     use crate::protocol::{
         ActiveTypography, BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration,
-        CompletionTrigger, DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan,
-        DocumentAccess, DocumentFontRole, EditOperation, KeyBindingContext, KeyBindingRule,
-        KeyCode, KeyModifiers, KeyStroke, Modifiers, RoutingPolicy, TabMode, TokenType,
+        CompletionItemTextFormat, CompletionTrigger, DecorationKind, DecorationProvenance,
+        DecorationSet, DecorationSpan, DocumentAccess, DocumentFontRole, EditOperation,
+        KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, KeyStroke, Modifiers,
+        RoutingPolicy, TabMode, TokenType,
     };
     use crate::shell::CompletionMenuAcceptAction;
     use masonry::kurbo::Rect;
@@ -2021,6 +2215,19 @@ mod tests {
                 package_version: "1.0.0".to_string(),
                 package_prefix: "test".to_string(),
             },
+        }
+    }
+
+    fn snippet_completion_action(insert_text: &str) -> CompletionMenuAcceptAction {
+        CompletionMenuAcceptAction {
+            request_id: 1,
+            document_id: 7,
+            document_version: 12,
+            behavior_version: 3,
+            replacement_range: crate::protocol::CompletionReplacementRange::new(0, 3),
+            insert_text: insert_text.to_string(),
+            text_format: CompletionItemTextFormat::Snippet,
+            commit_characters: String::new(),
         }
     }
 
@@ -2505,6 +2712,7 @@ mod tests {
             behavior_version: 3,
             replacement_range: crate::protocol::CompletionReplacementRange::new(0, 3),
             insert_text: "println!".to_string(),
+            text_format: CompletionItemTextFormat::PlainText,
             commit_characters: ";".to_string(),
         };
 
@@ -2520,6 +2728,114 @@ mod tests {
                 text: "println!;".to_string()
             }
         );
+        assert!(!editor.has_active_snippet_session());
+    }
+
+    #[test]
+    fn editor_accepts_snippet_as_local_expansion_and_selects_first_placeholder() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "pri".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+
+        let outcome = editor.accept_completion_with_event(
+            &snippet_completion_action("fn ${1:name}(${2:args}) {\n\t$0\n}"),
+            None,
+        );
+
+        assert_eq!(editor.visible_text(), "fn name(args) {\n\t\n}");
+        assert_eq!(editor.selection_for_test(), Some((3, 7)));
+        assert!(editor.has_active_snippet_session());
+        assert_eq!(
+            outcome.edit_event.unwrap().operation,
+            EditOperation::Replace {
+                start: 0,
+                end: 3,
+                text: "fn name(args) {\n\t\n}".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn snippet_tab_navigation_moves_forward_backward_and_ends_at_final_tabstop() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "pri".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.accept_completion_with_event(
+            &snippet_completion_action("fn ${1:name}(${2:args}) {\n\t$0\n}"),
+            None,
+        );
+
+        editor.route_key_with_event(&KeyStroke::new(KeyCode::Tab));
+        assert_eq!(editor.selection_for_test(), Some((8, 12)));
+
+        editor.route_key_with_event(&KeyStroke {
+            key: KeyCode::Tab,
+            modifiers: KeyModifiers {
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        });
+        assert_eq!(editor.selection_for_test(), Some((3, 7)));
+
+        editor.route_key_with_event(&KeyStroke::new(KeyCode::Tab));
+        editor.route_key_with_event(&KeyStroke::new(KeyCode::Tab));
+        assert!(!editor.has_active_snippet_session());
+        assert_eq!(editor.caret_for_test(), 17);
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn snippet_escape_exits_session_without_an_edit() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "pri".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor
+            .accept_completion_with_event(&snippet_completion_action("fn ${1:name}() {$0}"), None);
+
+        let outcome = editor.route_key_with_event(&KeyStroke::new(KeyCode::Escape));
+
+        assert!(outcome.command_outcome.changed);
+        assert_eq!(outcome.command_outcome.edit_event, None);
+        assert!(!editor.has_active_snippet_session());
+        assert_eq!(editor.visible_text(), "fn name() {}");
+    }
+
+    #[test]
+    fn editing_active_placeholder_shifts_later_snippet_ranges() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            "pri".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        editor.accept_completion_with_event(
+            &snippet_completion_action("fn ${1:name}(${2:args}) {\n\t$0\n}"),
+            None,
+        );
+
+        editor.insert_text_with_event("x");
+        editor.route_key_with_event(&KeyStroke::new(KeyCode::Tab));
+
+        assert_eq!(editor.visible_text(), "fn x(args) {\n\t\n}");
+        assert_eq!(editor.selection_for_test(), Some((5, 9)));
+        assert_eq!(editor.selected_text().as_deref(), Some("args"));
     }
 
     #[test]

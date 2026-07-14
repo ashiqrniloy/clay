@@ -1892,8 +1892,16 @@ fn first_party_language_packages_load_with_required_assets() {
 
         assert_eq!(contributions.commands.len(), 1);
         assert_eq!(contributions.commands[0].id, command_id);
-        assert_eq!(contributions.completion_providers.len(), 1);
-        assert_eq!(contributions.completion_providers[0].id, provider_id);
+        assert_eq!(
+            contributions.completion_providers.len(),
+            if package_dir == "javascript" { 1 } else { 2 }
+        );
+        assert!(
+            contributions
+                .completion_providers
+                .iter()
+                .any(|provider| provider.id == provider_id)
+        );
         assert_eq!(contributions.ui_components.len(), 1);
         assert_eq!(contributions.ui_components[0].id, status_id);
 

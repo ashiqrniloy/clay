@@ -20,8 +20,8 @@ use std::sync::{
 use clay::{
     packages::record::assemble_package_record,
     protocol::{
-        CompletionItem, CompletionProvenance, CompletionReplacementRange, CompletionResultSet,
-        CompletionStatus, CompletionTrigger,
+        CompletionItem, CompletionItemTextFormat, CompletionProvenance, CompletionReplacementRange,
+        CompletionResultSet, CompletionStatus, CompletionTrigger,
         completion::{CompletionProviderGeneration, CompletionRequest},
     },
     server::completion::{
@@ -111,6 +111,7 @@ fn package_provider_meta(
             package_prefix: api_prefix.to_string(),
         },
         priority,
+        exclusive: false,
         trigger_metadata: CompletionTriggerMetadata::default(),
         word_boundary: WordBoundaryRule::default(),
         items: Vec::new(),
@@ -182,11 +183,58 @@ fn each_language_registers_a_base_keyword_completion_provider() {
         assert_eq!(provider.id, provider_id);
         assert_eq!(provider.priority, 0);
         assert_eq!(provider.trigger_characters, expected_triggers);
-        assert!(provider.items.iter().any(|item| item == expected_item));
+        assert!(
+            provider
+                .items
+                .iter()
+                .any(|item| item.label == expected_item)
+        );
         assert!(!provider.items.is_empty());
         assert!(provider.items.len() <= provider.max_items);
         assert_eq!(provider.timeout_ms, 300);
         assert_eq!(provider.max_items, 32);
+    }
+}
+
+#[test]
+fn first_party_rust_and_typescript_packages_ship_dedicated_snippet_providers() {
+    for (package, provider_id, expected_labels) in [
+        ("rust", "rust.snippets", &["fn", "match", "impl"][..]),
+        (
+            "typescript",
+            "typescript.snippets",
+            &["interface", "type"][..],
+        ),
+    ] {
+        let path = format!(
+            "{}/packages/{package}/package.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let record = assemble_package_record(&value).unwrap();
+        let provider = record
+            .contributions
+            .completion_providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .unwrap();
+
+        assert_eq!(provider.priority, 0);
+        assert_eq!(
+            provider
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            expected_labels
+        );
+        assert!(provider.items.iter().all(|item| {
+            item.text_format == CompletionItemTextFormat::Snippet
+                && !item.detail.is_empty()
+                && item.insert_text.contains("$0")
+        }));
+        assert!(provider.items.len() <= provider.max_items);
     }
 }
 
@@ -635,6 +683,53 @@ async fn provider_generation_replacement_drops_old_generation_results() {
 }
 
 #[tokio::test]
+async fn disabling_provider_invalidates_in_flight_generation_and_blocks_reschedule() {
+    let provider = move |request: CompletionRequest,
+                         _window: CompletionDocumentWindow|
+          -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<CompletionResultSet, CompletionProviderError>>
+                + Send,
+        >,
+    > {
+        Box::pin(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Ok(empty_result_for(&request))
+        })
+    };
+    let coordinator = CompletionCoordinator::new();
+    coordinator
+        .register_builtin(builtin_meta("words", 0, 1), provider)
+        .unwrap();
+    let old_request = request(1, 205);
+    coordinator
+        .schedule_completion("core.words", old_request.clone(), window_for(&old_request))
+        .unwrap();
+
+    coordinator.disable_completion("core.words", 2);
+
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            coordinator.next_result()
+        )
+        .await
+        .is_err(),
+        "disabled provider must publish no old-generation result"
+    );
+    let new_request = request(2, 206);
+    assert!(matches!(
+        coordinator.schedule_completion(
+            "core.words",
+            new_request.clone(),
+            window_for(&new_request)
+        ),
+        Err(clay::server::completion::CompletionCoordinatorError::ProviderNotRegistered { .. })
+    ));
+    assert!(coordinator.stats().cancelled_superseded_tasks >= 1);
+}
+
+#[tokio::test]
 async fn stale_document_version_result_is_dropped_after_newer_request() {
     let provider = move |request: CompletionRequest,
                          _window: CompletionDocumentWindow|
@@ -845,6 +940,7 @@ async fn oversized_result_is_rejected_before_publication() {
                         insert_text: "x".to_string(),
                         detail: String::new(),
                         commit_characters: String::new(),
+                        text_format: CompletionItemTextFormat::PlainText,
                         provenance: CompletionProvenance::builtin_core(),
                     }],
                 ))

@@ -69,7 +69,7 @@ Phase 18.14 expands the first-party `@clay/rust`, `@clay/typescript`, and `@clay
 - Register a package-owned major mode with generic file-extension/file-name probes and semantic `defaultFontRole: "monospace"`.
 - Publish a validated `EditorBehaviorRules` manifest (indentation, delimiter pairs, comment continuation, electric outdent, autocomplete triggers).
 - Register one server-first command (`<lang>.toggleLineComment`).
-- Register one priority-0 metadata-only completion provider (`<lang>.keywords`) with trigger characters derived from the behavior manifest and bounded static strings normalized to provenance-bearing `CompletionItem` text replacements.
+- Register priority-0 metadata-only completion providers with trigger characters derived from the behavior manifest: `<lang>.keywords` uses plain strings; Rust and TypeScript also ship dedicated `.snippets` providers whose bounded structured items become provenance-bearing client-expanded `CompletionItem`s.
 - Register one inert `statusItem` UI contribution (`<lang>.status.mode`).
 - Render first-party syntax through compiled Tier 1 grammar descriptors, package queries, direct vocabulary styleMaps, and the generic background parse/decor transport.
 - Remain explicit opt-in via `loadPackage("@clay/*")`; do not auto-activate or shadow built-in `core.code`/`core.text` fallbacks.
@@ -89,7 +89,7 @@ Each package `package.json` declares:
 - `clay.modes`: `["rust"]`, `["typescript"]`, or `["javascript"]`.
 - `clay.permissions`: `mode-registration`, `mode-activation`, `command-registration`, `completion-provider`, `parse-document`, `render-decorations`.
 - `clay.apiDependencies`: the Clay JS APIs the package calls (e.g., `clay.modes.serverRegisterModePattern`, `clay.commands.serverRegisterCommand`, `clay.completion.serverRegisterCompletionProvider`, `clay.ui.serverRegisterComponentContribution`, `clay.behavior.buildCodeEditingManifest`, `clay.completion.completionTriggerCharactersFromEditorRules`).
-- `clay.contributions`: `modePatterns`, `commands`, `completionProviders`, `ui.components`, and `syntaxGrammars`. Completion descriptors carry unique bounded `items`; snippets remain deferred because `CompletionItem` has no snippet kind.
+- `clay.contributions`: `modePatterns`, `commands`, `completionProviders`, `ui.components`, and `syntaxGrammars`. Completion descriptors carry unique bounded string or structured items; structured snippets use inert `insertText` plus `textFormat: "snippet"` and must not mix with plain items in one provider.
 
 Manifest payloads are minified to stay under the behavior-manifest payload budget (`BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` = 2048).
 
@@ -100,7 +100,7 @@ Manifest payloads are minified to stay under the behavior-manifest payload budge
 1. Registers the Phase 18.10 syntax grammar via `serverRegisterSyntaxGrammar`.
 2. Registers the major-mode pattern via `serverRegisterModePattern`, passing `editorRules` built by `buildCodeEditingManifest`.
 3. Registers the line-comment command via `serverRegisterCommand`.
-4. Registers the priority-0 completion provider via `serverRegisterCompletionProvider`, deriving `triggerCharacters` from `editorRules` using `completionTriggerCharactersFromEditorRules` and retaining only bounded static text-replacement items.
+4. Registers priority-0 completion contributions via `serverRegisterCompletionProvider`, deriving `triggerCharacters` from `editorRules`; Rust/TypeScript package manifests include separate keyword and snippet providers, both loaded by the same call/path.
 5. Registers the status item via `serverRegisterComponentContribution` with `kind: "statusItem"`.
 6. For Markdown only, retains `parser.js` as a registered Tier 3 fallback; the package manifest no longer advertises it as the default decoration contribution.
 
@@ -116,7 +116,7 @@ The helper is implemented in `runtime/js/behavior.ts` and mirrored in the hardco
 
 `clay:completion` exposes `completionTriggerCharactersFromEditorRules(editorRules)`, which extracts trigger strings from `editorRules.autocompleteTriggers`. The completion provider declaration uses the returned array as `triggerCharacters`, so behavior-manifest autocomplete triggers and completion-provider selection stay aligned.
 
-Phase 18.14 also adds `serverListCompletionProvidersForTrigger(trigger)` to query the generic completion framework for providers matching a trigger character. Phase 18.18 extends `CompletionProviderContributionDescriptor`/`CompletionProviderMeta` with static `items`; package-record validation rejects empty, duplicate, oversized, or over-budget entries and normalizes accepted strings to `CompletionItem { label, insert_text, provenance, .. }`. `ClayJsRuntimeService` retains the last successful evaluation's inert provider snapshot. On a completion request, `static_package_completion_result` selects the provider matching the active behavior-manifest package prefix and trigger, prefix-filters its static items, and returns versioned provenance-bearing results without package JavaScript. The registry sorts by priority descending then ID ascending, so richer Phase 18.19/18.21 providers can merge ahead of the priority-0 base without replacing it.
+`serverListCompletionProvidersForTrigger(trigger)` queries generic provider metadata and returns structured item fields including `textFormat`. Package-record validation accepts backward-compatible plain strings or exact structured `{ label, insertText, detail?, textFormat? }` objects; it enforces per-field/result budgets, unique labels, and separate plain/snippet providers before normalizing to `CompletionItem`. `ClayJsRuntimeService` retains the last successful evaluation's inert provider snapshot. On a completion request, `static_package_completion_result` selects all active-package providers matching the trigger, applies shared priority/exclusive semantics, prefix-filters and merges items within total result budgets, and returns versioned provenance-bearing results without package JavaScript. Snippet accept then expands locally and uses existing selection state for Tab/Shift-Tab navigation.
 
 ### Classification and fallback
 
@@ -281,6 +281,7 @@ CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs
 - [Behavior Manifests](behavior-manifests.md)
 - [Package Loading](package-loading.md)
 - [Package Primitive Gate](package-primitive-gate.md)
+- [Completion Snippet Expansion](completion-snippet-expansion.md) — Phase 18.19 snippet accept, exclusive claim, and serverDisableCompletion
 - `docs/reference/packages/rust.md`
 - `docs/reference/packages/typescript.md`
 - `docs/reference/packages/javascript.md`

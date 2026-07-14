@@ -15,7 +15,8 @@ use serde_json::Value;
 use crate::packages::manifest::{ClayPackageManifest, PackageDiagnostic, validate_manifest_value};
 use crate::packages::permissions::PackagePermission;
 use crate::perf::budgets::{
-    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS,
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS,
+    COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS, COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS,
     COMPLETION_RESULT_MAX_ITEMS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
     SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
 };
@@ -26,7 +27,7 @@ use crate::shell::{
 };
 
 use crate::editor::theme::{parse_hex_rgba, parse_override_token};
-use crate::protocol::{DocumentFontRole, Modifiers, TokenType};
+use crate::protocol::{CompletionItemTextFormat, DocumentFontRole, Modifiers, TokenType};
 
 // ── Contribution descriptors ─────────────────────────────────────────────────
 
@@ -152,13 +153,27 @@ pub struct SyntaxGrammarContributionDescriptor {
     pub estimated_payload_bytes: usize,
 }
 
+/// One bounded inert item in a package completion-provider contribution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItemContributionDescriptor {
+    /// Picker label.
+    pub label: String,
+    /// Plain text or inert snippet syntax inserted on accept.
+    pub insert_text: String,
+    /// Optional picker detail; empty when omitted.
+    pub detail: String,
+    /// Client-local interpretation of `insert_text`.
+    pub text_format: CompletionItemTextFormat,
+}
+
 /// Inert descriptor for a package-provided completion provider.
 ///
 /// Completion provider contributions are inert metadata: provider ID, priority,
-/// trigger characters, word-boundary rule, bounded static text items, timeout,
-/// and item budgets. No callbacks, snippet transforms, command side effects, or
-/// executable code are represented here. The package's `completion-provider`
-/// permission is the authority gate; the descriptor carries no extra authority.
+/// trigger characters, word-boundary rule, bounded static text/snippet items,
+/// timeout, and item budgets. No callbacks, executable snippet transforms,
+/// command side effects, or executable code are represented here. The package's
+/// `completion-provider` permission is the authority gate; the descriptor
+/// carries no extra authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionProviderContributionDescriptor {
     /// Package-prefixed provider ID (e.g. `<apiPrefix>.words`). Must not claim
@@ -166,14 +181,16 @@ pub struct CompletionProviderContributionDescriptor {
     pub id: String,
     /// Higher priority providers run first when multiple match a trigger.
     pub priority: i32,
+    /// Suppress strictly lower-priority providers when this provider is among
+    /// the highest-priority matches. Defaults to false and grants no authority.
+    pub exclusive: bool,
     /// Inert trigger characters that should request completion from this
     /// provider. Never executed.
     pub trigger_characters: Vec<String>,
     /// Inert word-boundary characters used by the provider to split tokens.
     pub word_boundary_chars: Vec<String>,
-    /// Bounded static text-replacement items. Each value is both the menu label
-    /// and inserted text; snippet transforms remain a later capability.
-    pub items: Vec<String>,
+    /// Bounded static plain-text or client-expanded snippet items.
+    pub items: Vec<CompletionItemContributionDescriptor>,
     /// Per-provider timeout in milliseconds. Must be within `1..=5000`.
     pub timeout_ms: u64,
     /// Per-provider cap on result item count. Must be within `1..=COMPLETION_RESULT_MAX_ITEMS`.
@@ -1701,11 +1718,22 @@ fn parse_completion_provider_contributions(
             ));
         }
         let priority = obj.get("priority").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let exclusive = match obj.get("exclusive") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "completion provider exclusive must be a boolean",
+                ));
+            }
+        };
         let trigger_characters =
             optional_string_vec(obj.get("triggerCharacters"), "triggerCharacters", ctx)?;
         let word_boundary_chars =
             optional_string_vec(obj.get("wordBoundaryChars"), "wordBoundaryChars", ctx)?;
-        let items = optional_string_vec(obj.get("items"), "items", ctx)?;
+        let items = parse_completion_items(obj.get("items"), &id, ctx)?;
         if items.len() > COMPLETION_RESULT_MAX_ITEMS {
             return Err(ctx.error(
                 PackageRecordRule::InvalidContributionDescriptor,
@@ -1715,27 +1743,28 @@ fn parse_completion_provider_contributions(
                 ),
             ));
         }
+        let mut unique_labels = HashSet::new();
         if let Some(item) = items
             .iter()
-            .find(|item| item.chars().count() > COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS)
-        {
-            return Err(ctx.error(
-                PackageRecordRule::InvalidContributionDescriptor,
-                Some(&id),
-                format!(
-                    "completion provider item `{item}` exceeds {COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS} characters"
-                ),
-            ));
-        }
-        let mut unique_items = HashSet::new();
-        if let Some(item) = items
-            .iter()
-            .find(|item| !unique_items.insert(item.as_str()))
+            .find(|item| !unique_labels.insert(item.label.as_str()))
         {
             return Err(ctx.error(
                 PackageRecordRule::DuplicateContributionId,
                 Some(&id),
-                format!("completion provider item `{item}` is duplicated"),
+                format!("completion provider item `{}` is duplicated", item.label),
+            ));
+        }
+        let has_plain_text = items
+            .iter()
+            .any(|item| item.text_format == CompletionItemTextFormat::PlainText);
+        let has_snippets = items
+            .iter()
+            .any(|item| item.text_format == CompletionItemTextFormat::Snippet);
+        if has_plain_text && has_snippets {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                "completion provider items cannot mix plainText and snippet formats; use separate providers",
             ));
         }
         let timeout_ms = optional_u64_budget(
@@ -1781,6 +1810,7 @@ fn parse_completion_provider_contributions(
         descriptors.push(CompletionProviderContributionDescriptor {
             id,
             priority,
+            exclusive,
             trigger_characters,
             word_boundary_chars,
             items,
@@ -3742,6 +3772,124 @@ fn package_owned_field<'a>(
         ));
     }
     Ok(value)
+}
+
+fn parse_completion_items(
+    value: Option<&Value>,
+    provider_id: &str,
+    ctx: &ErrorContext,
+) -> Result<Vec<CompletionItemContributionDescriptor>, PackageRecordError> {
+    let values = match value {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(values)) => values,
+        Some(_) => {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(provider_id),
+                "completion provider items must be an array",
+            ));
+        }
+    };
+
+    values
+        .iter()
+        .map(|value| {
+            let item = match value {
+                Value::String(text) if !text.trim().is_empty() => {
+                    CompletionItemContributionDescriptor {
+                        label: text.clone(),
+                        insert_text: text.clone(),
+                        detail: String::new(),
+                        text_format: CompletionItemTextFormat::PlainText,
+                    }
+                }
+                Value::Object(object) => {
+                    if object.keys().any(|key| {
+                        !matches!(
+                            key.as_str(),
+                            "label" | "insertText" | "detail" | "textFormat"
+                        )
+                    }) {
+                        return Err(ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(provider_id),
+                            "completion provider item objects accept only label, insertText, detail, and textFormat",
+                        ));
+                    }
+                    let label = required_str_field(object, "label", ctx)?.to_string();
+                    let insert_text =
+                        required_str_field(object, "insertText", ctx)?.to_string();
+                    let detail = match object.get("detail") {
+                        None | Some(Value::Null) => String::new(),
+                        Some(Value::String(detail)) => detail.clone(),
+                        Some(_) => {
+                            return Err(ctx.error(
+                                PackageRecordRule::InvalidContributionDescriptor,
+                                Some(provider_id),
+                                "completion provider item detail must be a string",
+                            ));
+                        }
+                    };
+                    let text_format = match object.get("textFormat") {
+                        None | Some(Value::Null) => CompletionItemTextFormat::PlainText,
+                        Some(Value::String(value)) if value == "plainText" => {
+                            CompletionItemTextFormat::PlainText
+                        }
+                        Some(Value::String(value)) if value == "snippet" => {
+                            CompletionItemTextFormat::Snippet
+                        }
+                        _ => {
+                            return Err(ctx.error(
+                                PackageRecordRule::InvalidContributionDescriptor,
+                                Some(provider_id),
+                                "completion provider item textFormat must be `plainText` or `snippet`",
+                            ));
+                        }
+                    };
+                    CompletionItemContributionDescriptor {
+                        label,
+                        insert_text,
+                        detail,
+                        text_format,
+                    }
+                }
+                _ => {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(provider_id),
+                        "completion provider items must be non-empty strings or structured item objects",
+                    ));
+                }
+            };
+
+            for (field, chars, max) in [
+                (
+                    "label",
+                    item.label.chars().count(),
+                    COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS,
+                ),
+                (
+                    "insertText",
+                    item.insert_text.chars().count(),
+                    COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS,
+                ),
+                (
+                    "detail",
+                    item.detail.chars().count(),
+                    COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS,
+                ),
+            ] {
+                if chars > max {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(provider_id),
+                        format!("completion provider item {field} exceeds {max} characters"),
+                    ));
+                }
+            }
+            Ok(item)
+        })
+        .collect()
 }
 
 fn optional_string_vec(

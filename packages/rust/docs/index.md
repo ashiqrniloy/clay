@@ -23,7 +23,8 @@
 - **Major mode `rust`**: registered with generic file-extension/file-name probes.
 - **Behavior manifest**: 4-space indentation, delimiter pairs, `//` comment continuation, electric `}` outdent.
 - **Command `rust.toggleLineComment`**: server-first command registered through the Clay `CommandExecution` path.
-- **Completion provider `rust.keywords`**: priority-0 metadata-only provider carrying 32 inert Rust keyword text replacements with `.`/`:` character triggers (`:` covers the second character of Rust `::`) and 300 ms/32-item budgets. Snippet transforms remain deferred to Phase 18.19.
+- **Completion provider `rust.keywords`**: priority-0 provider carrying 32 inert Rust keyword text replacements.
+- **Completion provider `rust.snippets`**: priority-0 provider carrying inert `fn`, `match`, and `impl` templates. Both share `.`/`:` triggers and 300 ms/32-item budgets and ride the same one-line package load/`completion-provider` permission; client-local accept expands snippets and Tab navigates placeholders.
 - **Status item `rust.status.mode`**: inert `statusItem` component contribution.
 
 Phase 18.18 promotes the grammar contribution from legacy WASM/style-token metadata to native `TokenType` + `Modifiers` metadata. Active syntax grammar remains selectable independently of active major mode, so a `.rs` file can use the Rust grammar while its major mode stays `core.code`.

@@ -339,6 +339,46 @@ fn diagnostic_paint_uses_theme_owned_severity_styles_only() {
 }
 
 #[test]
+fn snippet_accept_is_bounded_client_local_text_work() {
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let snippet = fs::read_to_string("src/editor/snippet.rs").expect("snippet readable");
+    let accept_body = surface
+        .split("pub(crate) fn accept_completion_with_event")
+        .nth(1)
+        .expect("completion accept")
+        .split("pub(crate) fn has_active_snippet_session")
+        .next()
+        .expect("completion accept body");
+    let parser_body = snippet
+        .split("pub(crate) fn parse_snippet")
+        .nth(1)
+        .expect("snippet parser")
+        .split("fn push_text_char")
+        .next()
+        .expect("snippet parser body");
+    let hot_path = format!("{accept_body}\n{parser_body}");
+
+    assert!(accept_body.contains("parse_snippet"));
+    assert!(accept_body.contains("finish_edit_with_operation"));
+    for forbidden in [
+        "Deno.core",
+        "op_clay_",
+        "enqueue_",
+        "serverRegisterCompletionProvider",
+        "std::fs",
+        "std::process",
+        "TcpStream",
+        "reqwest",
+        "ureq",
+    ] {
+        assert!(
+            !hot_path.contains(forbidden),
+            "snippet accept/parser must not run provider code, IPC, filesystem, network, or shell work: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn range_diagnostics_do_not_enter_editor_hot_paths() {
     let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
     let layout = fs::read_to_string("src/editor/layout.rs").expect("layout readable");

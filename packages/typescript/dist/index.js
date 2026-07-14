@@ -46,6 +46,19 @@ export const typescriptCompletionProvider = {
   budgets: { timeoutMs: 300, maxItems: 32 }
 };
 
+export const typescriptSnippetProvider = {
+  providerId: "typescript.snippets",
+  packagePrefix: "typescript",
+  priority: 0,
+  triggerCharacters: completionTriggerCharactersFromEditorRules(typescriptEditorRules),
+  wordBoundaryChars: [".", ";", ","],
+  items: [
+    { label: "interface", insertText: "interface ${1:Name} {\n  $0\n}", textFormat: "snippet", detail: "interface snippet" },
+    { label: "type", insertText: "type ${1:Name} = ${2:Type};$0", textFormat: "snippet", detail: "type alias snippet" }
+  ],
+  budgets: { timeoutMs: 300, maxItems: 32 }
+};
+
 export const typescriptStatusItem = {
   kind: "statusItem",
   id: "typescript.status.mode",
@@ -92,16 +105,14 @@ export function typescriptPackageManifest() {
             routingPolicy: "server-first"
           }
         ],
-        completionProviders: [
-          {
-            id: typescriptCompletionProvider.providerId,
-            priority: typescriptCompletionProvider.priority,
-            triggerCharacters: typescriptCompletionProvider.triggerCharacters,
-            wordBoundaryChars: typescriptCompletionProvider.wordBoundaryChars,
-            items: typescriptCompletionProvider.items,
-            budgets: typescriptCompletionProvider.budgets
-          }
-        ],
+        completionProviders: [typescriptCompletionProvider, typescriptSnippetProvider].map((provider) => ({
+          id: provider.providerId,
+          priority: provider.priority,
+          triggerCharacters: provider.triggerCharacters,
+          wordBoundaryChars: provider.wordBoundaryChars,
+          items: provider.items,
+          budgets: provider.budgets
+        })),
         ui: {
           components: [
             {

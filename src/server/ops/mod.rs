@@ -18,6 +18,7 @@ mod typography;
 mod ui;
 mod workspace;
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -42,7 +43,8 @@ use self::{
         op_clay_commands_register_command,
     },
     completion::{
-        op_clay_completion_providers_for_trigger, op_clay_completion_register_completion_provider,
+        op_clay_completion_disable, op_clay_completion_providers_for_trigger,
+        op_clay_completion_register_completion_provider,
     },
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,
@@ -113,6 +115,8 @@ pub(crate) struct ClayOpState {
     git_status_cache: crate::server::git::GitStatusCache,
     syntax_grammars: Mutex<crate::server::syntax::SyntaxGrammarRegistry>,
     completion_providers: Mutex<Vec<crate::server::completion::CompletionProviderMeta>>,
+    disabled_completion_providers: Mutex<BTreeSet<String>>,
+    completion_provider_generation: Mutex<crate::protocol::CompletionProviderGeneration>,
     /// Resolved active theme snapshot set by the `setTheme` Clay JS op during
     /// `init.js`. Carried out in [`crate::server::js_runtime::ClayRuntimeEvaluation`]
     /// and applied to the shared server slot at load/reload so the welcome
@@ -172,6 +176,8 @@ impl ClayOpState {
                 crate::server::syntax::SyntaxGrammarRegistry::with_first_party_native(),
             ),
             completion_providers: Mutex::new(Vec::new()),
+            disabled_completion_providers: Mutex::new(BTreeSet::new()),
+            completion_provider_generation: Mutex::new(0),
             active_theme: Mutex::new(None),
             active_typography: Mutex::new(None),
             runtime_context: Mutex::new(ClayRuntimeContext {
@@ -647,16 +653,29 @@ impl ClayOpState {
     pub(crate) fn completion_providers(
         &self,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
+        let disabled = self
+            .disabled_completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
         self.completion_providers
             .lock()
             .expect("Clay runtime op state mutex poisoned")
-            .clone()
+            .iter()
+            .filter(|meta| {
+                !crate::server::completion::completion_provider_is_disabled(meta, &disabled)
+            })
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn completion_providers_for_trigger(
         &self,
         trigger: &str,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
+        let disabled = self
+            .disabled_completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
         let providers = self
             .completion_providers
             .lock()
@@ -664,21 +683,57 @@ impl ClayOpState {
         let mut matched: Vec<_> = providers
             .iter()
             .filter(|meta| {
-                meta.trigger_metadata
-                    .trigger_characters
-                    .iter()
-                    .any(|character| character == trigger)
+                !crate::server::completion::completion_provider_is_disabled(meta, &disabled)
+                    && meta
+                        .trigger_metadata
+                        .trigger_characters
+                        .iter()
+                        .any(|character| character == trigger)
             })
-            .cloned()
             .collect();
         matched.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
-        matched
+        crate::server::completion::apply_exclusive_suppression(&mut matched);
+        matched.into_iter().cloned().collect()
+    }
+
+    pub(super) fn disable_completion(
+        &self,
+        target: String,
+    ) -> (bool, crate::protocol::CompletionProviderGeneration) {
+        let inserted = self
+            .disabled_completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .insert(target);
+        let mut generation = self
+            .completion_provider_generation
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        if inserted {
+            *generation = generation.saturating_add(1);
+            for meta in self
+                .completion_providers
+                .lock()
+                .expect("Clay runtime op state mutex poisoned")
+                .iter_mut()
+            {
+                meta.generation = *generation;
+            }
+        }
+        (inserted, *generation)
     }
 
     pub(super) fn register_completion_provider_metadata(
         &self,
-        metas: Vec<crate::server::completion::CompletionProviderMeta>,
+        mut metas: Vec<crate::server::completion::CompletionProviderMeta>,
     ) -> Result<Vec<crate::server::completion::CompletionProviderMeta>, String> {
+        let generation = *self
+            .completion_provider_generation
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        for meta in &mut metas {
+            meta.generation = generation;
+        }
         let mut providers = self
             .completion_providers
             .lock()
@@ -896,6 +951,7 @@ extension!(
         op_clay_syntax_set_engine_preference,
         op_clay_completion_register_completion_provider,
         op_clay_completion_providers_for_trigger,
+        op_clay_completion_disable,
         op_clay_runtime_unavailable,
     ],
 );

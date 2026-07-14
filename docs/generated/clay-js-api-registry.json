@@ -400,6 +400,46 @@
       "async": false
     },
     {
+      "id": "clay.completion.serverDisableCompletion",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/completion/server-disable-completion.md",
+      "js_module": "clay:completion",
+      "js_export": "serverDisableCompletion",
+      "js_facade": "runtime/js/completion.ts::serverDisableCompletion",
+      "backing_rust": "src/server/completion.rs::CompletionProviderRegistry::disable_completion",
+      "deno_op": "op_clay_completion_disable",
+      "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_disable",
+      "name": "serverDisableCompletion",
+      "user_facing_name": "Disable Completion Provider",
+      "summary": "Suppress a registered completion provider by exact ID or package prefix. Does not grant registration, priority, or execution authority.",
+      "owner": "server",
+      "phase": "Phase 18.19",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "provider",
+          "type": "string",
+          "default": "optional",
+          "description": "Exact completion provider ID to disable, e.g. core.bufferWords or rust.snippets. Mutually exclusive with packagePrefix."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "optional",
+          "description": "Package apiPrefix whose every registered completion provider should be disabled. Mutually exclusive with provider."
+        }
+      ],
+      "security": "Suppresses registered completion providers from selection, stale-drops in-flight results, and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw-op, native-widget, or package-manager authority. Does not remove registered metadata.",
+      "agent_guidance": "Use from ~/.config/clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.",
+      "lookup_tags": ["js-api", "completion", "provider", "disable", "phase18.19"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.completion.serverListCompletionProvidersForTrigger",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md",
@@ -445,9 +485,9 @@
       "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_register_completion_provider",
       "name": "serverRegisterCompletionProvider",
       "user_facing_name": "Register Completion Provider",
-      "summary": "Register package-provided completion metadata and bounded static text items for Clay's server-side completion framework.",
+      "summary": "Register package-provided completion metadata and bounded static keyword/snippet items for Clay's server-side completion framework. Phase 18.19 adds inert snippet text-format, exclusive provider claim, and structured item descriptors.",
       "owner": "server",
-      "phase": "Phase 18.18",
+      "phase": "Phase 18.19",
       "visibility": "public",
       "permissions": ["completion-provider"],
       "key_bindings": [],
@@ -502,9 +542,21 @@
         },
         {
           "name": "items",
-          "type": "string[]",
+          "type": "(string|object)[]",
           "default": "[]",
-          "description": "Bounded inert static items; each string is both completion label and inserted text."
+          "description": "Bounded inert static keyword/snippet items. Strings become both label and insertText with textFormat plainText; structured objects carry label, insertText, optional detail, and optional textFormat."
+        },
+        {
+          "name": "exclusive",
+          "type": "boolean",
+          "default": "false",
+          "description": "When true and this provider matches at the highest priority tier, suppresses all strictly lower-priority matching providers while preserving equal-priority peers."
+        },
+        {
+          "name": "textFormat",
+          "type": "plainText\"|\"snippet",
+          "default": "plainText",
+          "description": "Per-item text format. Snippet items carry inert LSP placeholder syntax expanded client-local on accept."
         },
         {
           "name": "priority",
@@ -525,9 +577,9 @@
           "description": "Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS."
         }
       ],
-      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert metadata and static text items only; JS provider execution tokens are intentionally not exposed. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
-      "agent_guidance": "Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, snippets, commands, or UI widget code.",
-      "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.18"],
+      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert keyword/snippet items only; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
+      "agent_guidance": "Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
+      "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.19"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",

@@ -18,6 +18,15 @@ function parseResult(json: string): unknown {
   return JSON.parse(json);
 }
 
+export type CompletionProviderItem =
+  | string
+  | {
+      label: string;
+      insertText: string;
+      detail?: string;
+      textFormat?: "plainText" | "snippet";
+    };
+
 export type ServerRegisterCompletionProviderOptions = {
   packageManifest?: unknown;
   packageName?: string;
@@ -31,8 +40,9 @@ export type ServerRegisterCompletionProviderOptions = {
   triggerCharacters?: string[];
   triggers?: { characters?: string[]; wordBoundary?: boolean };
   wordBoundaryChars?: string[];
-  items?: string[];
+  items?: CompletionProviderItem[];
   priority?: number;
+  exclusive?: boolean;
   timeoutMs?: number;
   maxItems?: number;
   handler?: never;
@@ -52,6 +62,25 @@ export function serverRegisterCompletionProvider(options: ServerRegisterCompleti
     }
   }
   return parseResult(requireOps()["op_clay_completion_register_completion_provider"](JSON.stringify(options ?? null)));
+}
+
+export type ServerDisableCompletionOptions =
+  | { provider: string; packagePrefix?: never }
+  | { provider?: never; packagePrefix: string };
+
+export function serverDisableCompletion(options: ServerDisableCompletionOptions): unknown {
+  for (const key of Object.keys(options ?? {})) {
+    if (key !== "provider" && key !== "packagePrefix") {
+      throw new Error("clay.completion.invalid_disable: only provider or packagePrefix is accepted");
+    }
+  }
+  const provider = (options ?? {}).provider;
+  const packagePrefix = (options ?? {}).packagePrefix;
+  const targets = [provider, packagePrefix].filter((value) => typeof value === "string" && value.trim().length > 0);
+  if (targets.length !== 1) {
+    throw new Error("clay.completion.invalid_disable: provide exactly one non-empty provider or packagePrefix");
+  }
+  return parseResult(requireOps()["op_clay_completion_disable"](JSON.stringify(options)));
 }
 
 export type ServerListCompletionProvidersForTriggerOptions = {

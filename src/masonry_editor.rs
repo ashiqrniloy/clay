@@ -850,8 +850,12 @@ impl Widget for EditorWidget {
             {
                 match &key_event.key {
                     Key::Named(NamedKey::Escape) => {
-                        ctx.submit_action::<Self::Action>(EditorAction::ExitRequested);
-                        ctx.set_handled();
+                        if self.editor.has_active_snippet_session() {
+                            self.local_key(ctx, key_stroke(KeyCode::Escape, key_event));
+                        } else {
+                            ctx.submit_action::<Self::Action>(EditorAction::ExitRequested);
+                            ctx.set_handled();
+                        }
                     }
                     Key::Named(NamedKey::Backspace) => {
                         self.local_command(ctx, EditorCommand::Backspace);
@@ -1019,11 +1023,11 @@ mod tests {
     };
     use crate::editor::EditorCommand;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
-        CompletionReplacementRange, CompletionResultSet, CompletionStatus, DocumentAccess,
-        DocumentMetadata, EditOperation, FontRole, KeyCode, KeyModifiers, RuntimeDiagnostic,
-        SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
-        SduiTreeOperation, SduiTreeUpdate,
+        BehaviorManifest, ClientMessage, CompletionItem, CompletionItemTextFormat,
+        CompletionProvenance, CompletionReplacementRange, CompletionResultSet, CompletionStatus,
+        DocumentAccess, DocumentMetadata, EditOperation, FontRole, KeyCode, KeyModifiers,
+        RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId,
+        SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
@@ -1109,6 +1113,7 @@ mod tests {
                 insert_text: "println!".to_string(),
                 detail: "macro".to_string(),
                 commit_characters: ";".to_string(),
+                text_format: CompletionItemTextFormat::PlainText,
                 provenance: CompletionProvenance::builtin_core(),
             }],
             provenance: CompletionProvenance::builtin_core(),

@@ -1,6 +1,6 @@
 # @clay/rust Package
 
-`@clay/rust` is Clay's first-party Rust language package. Phase 18.14 expanded it from a grammar-only syntax highlighter into a full language package: it contributes a `rust` major mode, behavior manifest, package-prefixed command, keyword completion provider, and an optional status-item UI contribution with Phase 18.18 native grammar metadata and a direct vocabulary styleMap.
+`@clay/rust` is Clay's first-party Rust language package. Phase 18.14 expanded it from a grammar-only syntax highlighter into a full language package: it contributes a `rust` major mode, behavior manifest, package-prefixed command, keyword/snippet completion providers, and an optional status-item UI contribution with Phase 18.18 native grammar metadata and a direct vocabulary styleMap.
 
 ## End-User Setup
 
@@ -43,7 +43,8 @@ The package now declares:
 - **Major mode `rust`**: registered with generic file-extension and file-name probes (`*.rs`, `Cargo.toml`). No Rust-specific classification branch lives in Clay core.
 - **Behavior manifest**: indentation (4 spaces), delimiter pairs, line-comment continuation (`//`), and an electric `}` outdent rule. These are expressed through generic `EditorBehaviorRules` primitives.
 - **Command `rust.toggleLineComment`**: a server-first command registered for validated execution through the Clay `CommandExecution` path.
-- **Completion provider `rust.keywords`**: priority-0 metadata-only provider with 32 inert Rust keyword text replacements, `.` and `:` character triggers (`:` covers the second character of Rust `::`), language-appropriate boundaries, and 300 ms/32-item budgets. Snippet transforms remain deferred to Phase 18.19.
+- **Completion provider `rust.keywords`**: priority-0 metadata-only provider carrying 32 inert Rust keyword text replacements.
+- **Completion provider `rust.snippets`**: priority-0 provider carrying inert client-expanded `fn`, `match`, and `impl` templates. Both providers share `.`/`:` triggers and 300 ms/32-item budgets, load through the same `loadPackage("@clay/rust")` call, and require only `completion-provider`; snippet accept selects the first placeholder and Tab advances.
 - **Status item `rust.status.mode`**: an inert `statusItem` component contribution validated by Clay before client publication.
 
 Active syntax grammar remains selectable independently of active major mode, so a `.rs` file can use the Rust grammar while its major mode is still `core.code`, and loading the package does not silently change the mode of already-open documents.

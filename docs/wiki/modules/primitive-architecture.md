@@ -24,6 +24,7 @@
 - `docs/wiki/modules/phase18.16.5-typography-primitive-review.md`
 - `docs/wiki/modules/phase18.17-range-diagnostics-primitive-review.md`
 - `docs/wiki/modules/phase18.18-language-package-primitive-review.md`
+- `docs/wiki/modules/phase18.19-completion-extensions-primitive-review.md`
 - `docs/wiki/modules/package-input-state-configuration.md`
 - `docs/wiki/modules/slot-aware-package-ui.md`
 - `docs/wiki/modules/masonry-shell.md`

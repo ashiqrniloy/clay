@@ -34,7 +34,8 @@ use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
     perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
     protocol::{
-        BehaviorVersion, ClientId, CompletionItem, CompletionStatus, DocumentId, DocumentVersion,
+        BehaviorVersion, ClientId, CompletionItem, CompletionItemTextFormat, CompletionStatus,
+        DocumentId, DocumentVersion,
         completion::{
             CompletionProvenance, CompletionProviderGeneration, CompletionRejection,
             CompletionReplacementRange, CompletionRequest, CompletionRequestRejection,
@@ -208,6 +209,7 @@ fn buffer_word_result(
             insert_text: word,
             detail: "buffer word".to_string(),
             commit_characters: String::new(),
+            text_format: CompletionItemTextFormat::PlainText,
             provenance: provenance.clone(),
         };
         if item.label.chars().count() > crate::perf::budgets::COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS
@@ -298,6 +300,10 @@ pub struct CompletionProviderMeta {
     /// Higher priority providers run first when multiple providers match a
     /// trigger. Ties break by provider ID for deterministic ordering.
     pub priority: i32,
+    /// When this provider is among the highest-priority matches, suppress
+    /// strictly lower-priority providers for that request. Equal-priority
+    /// providers remain eligible. This inert flag grants no authority.
+    pub exclusive: bool,
     pub trigger_metadata: CompletionTriggerMetadata,
     pub word_boundary: WordBoundaryRule,
     /// Bounded inert static text-replacement items declared by the package.
@@ -338,6 +344,7 @@ impl CompletionProviderMeta {
             id: full_id,
             provenance: CompletionProvenance::builtin_core(),
             priority,
+            exclusive: false,
             trigger_metadata,
             word_boundary,
             items: Vec::new(),
@@ -384,6 +391,7 @@ struct RegisteredProvider {
 #[derive(Default)]
 pub struct CompletionProviderRegistry {
     providers: BTreeMap<String, RegisteredProvider>,
+    disabled: BTreeSet<String>,
 }
 
 impl fmt::Debug for CompletionProviderRegistry {
@@ -391,6 +399,7 @@ impl fmt::Debug for CompletionProviderRegistry {
         f.debug_struct("CompletionProviderRegistry")
             .field("len", &self.providers.len())
             .field("ids", &self.providers.keys().collect::<Vec<_>>())
+            .field("disabled", &self.disabled)
             .finish()
     }
 }
@@ -531,18 +540,30 @@ impl CompletionProviderRegistry {
         self.providers.is_empty()
     }
 
+    /// Disable an exact provider ID or all providers belonging to a package
+    /// name/API prefix. Registration metadata remains available for reload.
+    fn disable_completion(&mut self, target: String) -> bool {
+        self.disabled.insert(target)
+    }
+
     /// Providers whose trigger metadata includes the given trigger character,
-    /// deterministically priority-ordered.
+    /// deterministically priority-ordered with disabled-provider filtering and
+    /// exclusive suppression applied.
     pub fn providers_for_trigger_character(&self, trigger: &str) -> Vec<&CompletionProviderMeta> {
-        self.list_ordered()
+        let mut metas: Vec<_> = self
+            .list_ordered()
             .into_iter()
             .filter(|meta| {
-                meta.trigger_metadata
-                    .trigger_characters
-                    .iter()
-                    .any(|c| c == trigger)
+                !completion_provider_is_disabled(meta, &self.disabled)
+                    && meta
+                        .trigger_metadata
+                        .trigger_characters
+                        .iter()
+                        .any(|c| c == trigger)
             })
-            .collect()
+            .collect();
+        apply_exclusive_suppression(&mut metas);
+        metas
     }
 
     fn provider_clone(
@@ -551,8 +572,34 @@ impl CompletionProviderRegistry {
     ) -> Option<(CompletionProviderMeta, Arc<dyn CompletionProvider>)> {
         self.providers
             .get(id)
-            .map(|r| (r.meta.clone(), r.provider.clone()))
+            .filter(|registered| !completion_provider_is_disabled(&registered.meta, &self.disabled))
+            .map(|registered| (registered.meta.clone(), registered.provider.clone()))
     }
+}
+
+/// Suppress strictly lower-priority providers when any provider in the
+/// highest-priority matching tier claims exclusivity. `metas` must already be
+/// ordered by descending priority, then ascending ID.
+pub(crate) fn apply_exclusive_suppression(metas: &mut Vec<&CompletionProviderMeta>) {
+    let Some(highest_priority) = metas.first().map(|meta| meta.priority) else {
+        return;
+    };
+    if metas
+        .iter()
+        .take_while(|meta| meta.priority == highest_priority)
+        .any(|meta| meta.exclusive)
+    {
+        metas.retain(|meta| meta.priority >= highest_priority);
+    }
+}
+
+pub(crate) fn completion_provider_is_disabled(
+    meta: &CompletionProviderMeta,
+    disabled: &BTreeSet<String>,
+) -> bool {
+    disabled.contains(&meta.id)
+        || disabled.contains(&meta.provenance.package_name)
+        || disabled.contains(&meta.provenance.package_prefix)
 }
 
 fn is_package_owned_id(value: &str, api_prefix: &str) -> bool {
@@ -694,6 +741,33 @@ impl CompletionCoordinator {
             .active_tasks
             .keys()
             .filter(|key| key.document_id == document_id && key.generation < generation)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+    }
+
+    /// Disable a provider ID or package prefix and invalidate in-flight work
+    /// from older generations. Registration metadata remains available so a
+    /// fresh runtime generation can rebuild the registry.
+    pub fn disable_completion(
+        &self,
+        target: impl Into<String>,
+        generation: CompletionProviderGeneration,
+    ) {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("completion coordinator lock poisoned");
+        if !inner.registry.disable_completion(target.into()) {
+            return;
+        }
+        for active in inner.current_generations.values_mut() {
+            *active = (*active).max(generation);
+        }
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|key| key.generation < generation)
             .cloned()
             .collect();
         abort_tasks(&mut inner, task_keys);
@@ -1093,6 +1167,13 @@ mod tests {
         )
     }
 
+    fn triggered_meta(id: &str, priority: i32, exclusive: bool) -> CompletionProviderMeta {
+        let mut meta = builtin_meta(id, priority, 1);
+        meta.exclusive = exclusive;
+        meta.trigger_metadata.trigger_characters = vec![".".to_string()];
+        meta
+    }
+
     fn empty_result_for(request: &CompletionRequest) -> CompletionResultSet {
         CompletionResultSet {
             request_id: request.request_id,
@@ -1166,6 +1247,87 @@ mod tests {
             .collect();
         // Higher priority first; ties break by ascending ID.
         assert_eq!(ordered, vec!["core.high", "core.mid", "core.low"]);
+    }
+
+    #[test]
+    fn trigger_selection_merges_non_exclusive_providers() {
+        let mut registry = CompletionProviderRegistry::new();
+        for meta in [
+            triggered_meta("high", 10, false),
+            triggered_meta("low", 1, false),
+        ] {
+            registry.register_builtin(meta, ok_provider()).unwrap();
+        }
+
+        let ids: Vec<_> = registry
+            .providers_for_trigger_character(".")
+            .into_iter()
+            .map(|meta| meta.id.as_str())
+            .collect();
+
+        assert_eq!(ids, ["core.high", "core.low"]);
+    }
+
+    #[test]
+    fn highest_priority_exclusive_provider_suppresses_only_lower_priorities() {
+        let mut registry = CompletionProviderRegistry::new();
+        for meta in [
+            triggered_meta("exclusive", 10, true),
+            triggered_meta("peer", 10, false),
+            triggered_meta("low", 1, false),
+        ] {
+            registry.register_builtin(meta, ok_provider()).unwrap();
+        }
+
+        let ids: Vec<_> = registry
+            .providers_for_trigger_character(".")
+            .into_iter()
+            .map(|meta| meta.id.as_str())
+            .collect();
+
+        assert_eq!(ids, ["core.exclusive", "core.peer"]);
+    }
+
+    #[test]
+    fn lower_priority_exclusive_provider_does_not_claim_request() {
+        let mut registry = CompletionProviderRegistry::new();
+        for meta in [
+            triggered_meta("high", 10, false),
+            triggered_meta("exclusive", 5, true),
+            triggered_meta("low", 1, false),
+        ] {
+            registry.register_builtin(meta, ok_provider()).unwrap();
+        }
+
+        let ids: Vec<_> = registry
+            .providers_for_trigger_character(".")
+            .into_iter()
+            .map(|meta| meta.id.as_str())
+            .collect();
+
+        assert_eq!(ids, ["core.high", "core.exclusive", "core.low"]);
+    }
+
+    #[test]
+    fn coordinator_registry_filters_disabled_provider_before_selection_or_schedule() {
+        let coordinator = CompletionCoordinator::new();
+        coordinator
+            .register_builtin(triggered_meta("words", 0, false), ok_provider())
+            .unwrap();
+
+        coordinator.disable_completion("core.words", 2);
+
+        let inner = coordinator
+            .inner
+            .lock()
+            .expect("completion coordinator lock poisoned");
+        assert!(
+            inner
+                .registry
+                .providers_for_trigger_character(".")
+                .is_empty()
+        );
+        assert!(inner.registry.provider_clone("core.words").is_none());
     }
 
     #[test]

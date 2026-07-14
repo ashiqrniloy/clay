@@ -248,6 +248,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/completion.rs::CompletionCoordinator::bump_generation",
         "src/server/completion.rs::CompletionCoordinator::cancel_generation",
         "src/server/completion.rs::CompletionCoordinator::cancel_package",
+        "src/server/completion.rs::CompletionCoordinator::disable_completion",
         "src/server/completion.rs::CompletionCoordinator::new",
         "src/server/completion.rs::CompletionCoordinator::next_result",
         "src/server/completion.rs::CompletionCoordinator::providers",

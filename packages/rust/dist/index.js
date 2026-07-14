@@ -65,6 +65,19 @@ export const rustCompletionProvider = Object.freeze({
   budgets: { timeoutMs: 300, maxItems: 32 }
 });
 
+export const rustSnippetProvider = Object.freeze({
+  id: "rust.snippets",
+  priority: 0,
+  triggerCharacters: completionTriggerCharactersFromEditorRules(rustEditorRules),
+  wordBoundaryChars: [".", "::", ";", ","],
+  items: [
+    { label: "fn", insertText: "fn ${1:name}(${2:args}) {\n\t$0\n}", textFormat: "snippet", detail: "function snippet" },
+    { label: "match", insertText: "match ${1:expr} {\n\t$0\n}", textFormat: "snippet", detail: "match snippet" },
+    { label: "impl", insertText: "impl ${1:Type} {\n\t$0\n}", textFormat: "snippet", detail: "implementation snippet" }
+  ],
+  budgets: { timeoutMs: 300, maxItems: 32 }
+});
+
 export const rustStatusItem = Object.freeze({
   kind: "statusItem",
   id: "rust.status.mode",
@@ -122,7 +135,7 @@ export function rustPackageManifest() {
           displayName: command.userFacingName,
           routingPolicy: "server-first"
         })),
-        completionProviders: [rustCompletionProvider],
+        completionProviders: [rustCompletionProvider, rustSnippetProvider],
         ui: {
           components: [rustStatusItem]
         }

@@ -1,7 +1,7 @@
 // @clay/rust load entry. Phase 18.18 registers native grammar/vocabulary
 // metadata plus a `rust` major mode, behavior
-// manifest, package-prefixed command, keyword completion provider, and an
-// optional status-item UI contribution through generic Clay primitives.
+// manifest, package-prefixed command, keyword/snippet completion providers,
+// and an optional status-item UI contribution through generic Clay primitives.
 // No language-specific Rust branches, native widgets, or hot-path JS.
 import { serverRegisterCommand } from "clay:commands";
 import { serverRegisterCompletionProvider } from "clay:completion";
@@ -15,7 +15,6 @@ import {
   packageName,
   packageVersion,
   rustCommands,
-  rustCompletionProvider,
   rustEditorRules,
   rustPackageManifest,
   rustStatusItem,
@@ -64,23 +63,9 @@ export async function loadRustPackage() {
     });
   }
 
-  // Register bounded static keyword text replacements. Snippet transforms land in Phase 18.19.
-  await serverRegisterCompletionProvider({
-    packageManifest: manifest,
-    packageName,
-    packageVersion,
-    packagePrefix: apiPrefix,
-    apiPrefix,
-    permissions: ["completion-provider"],
-    completionProvider: rustCompletionProvider,
-    contribution: rustCompletionProvider,
-    providerId: rustCompletionProvider.id,
-    triggerCharacters: rustCompletionProvider.triggerCharacters,
-    wordBoundaryChars: rustCompletionProvider.wordBoundaryChars,
-    priority: rustCompletionProvider.priority,
-    timeoutMs: rustCompletionProvider.budgets.timeoutMs,
-    maxItems: rustCompletionProvider.budgets.maxItems
-  });
+  // Register every bounded static completion contribution from the manifest;
+  // snippet syntax remains inert until client-local accept expansion.
+  await serverRegisterCompletionProvider({ packageManifest: manifest });
 
   // Register an optional status-item contribution. The item is inert metadata
   // validated by Clay before any client publication.
