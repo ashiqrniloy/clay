@@ -498,7 +498,46 @@ await loadPackage("@vendor/foo");
 await loadPackage("github:user/repo");
 ```
 
-`@clay/*` only means a package was shipped with Clay — it is not a more capable package. After a user installs and authorizes an npm, GitHub, git-URL, tarball, or local-path package, that package loads through the identical `loadPackage` one-line path, the identical resolver + `PackageService` validation, and the identical runtime authority model. `init.js` itself grants no capabilities: it only requests one-line package loads and (optionally) separate documented Clay APIs. Every powerful capability (filesystem, network, shell, AI, WASM, raw-ops, native-ui, client-runtime, package-control) must be a separately implemented, user-approved authorization grant recorded against the package identity/source/provenance — `init.js` cannot silently grant them.
+`@clay/*` only means a package was shipped with Clay — it is not a more capable package. After a user installs and authorizes an npm, GitHub, git-URL, tarball, or local-path package, that package loads through the identical `loadPackage` one-line path, the identical resolver + `PackageService` validation, and the identical runtime authority model. `init.js` itself grants no capabilities: it only requests one-line package loads and (optionally) separate documented Clay APIs. Every powerful capability (filesystem, network, shell, AI, WASM, raw-ops, native-ui, client-runtime, package-control, language-server) must be a separately implemented, user-approved authorization grant recorded against the package identity/source/provenance — `init.js` cannot silently grant them.
+
+#### Language-server packages require grant then load
+
+A process-backed bridge declares `language-server` in `clay.capabilities` and fixed inert launch metadata. Runtime package code cannot choose executable, arguments, cwd, environment values, or roots:
+
+```json
+{
+  "clay": {
+    "apiPrefix": "lsp-rust",
+    "capabilities": ["language-server", "parse-document"],
+    "contributions": {
+      "languageServers": [{
+        "id": "lsp-rust.server",
+        "executable": "rust-analyzer",
+        "args": [],
+        "inheritEnvironment": ["HOME", "RUSTUP_HOME", "CARGO_HOME"]
+      }]
+    }
+  }
+}
+```
+
+User configuration explicitly grants exact contribution and current directory roots before loading:
+
+```js
+import { authorizeLanguageServer } from "clay:language-server";
+import { loadPackage } from "clay:packages";
+
+await authorizeLanguageServer({
+  package: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  workspaceRootIds: [1],
+});
+await loadPackage("@clay/lsp-rust");
+```
+
+`loadPackage` alone neither authorizes nor launches server. First load seals language-server authority changes before package `loadEntry` executes; bundled `@clay/*` trust does not bypass grant. Unknown roots, undeclared/mismatched contributions, changed source/version/descriptor, revoked grants, extra option fields, and post-load authorization fail closed. Grant validation is configuration/load-time work only. Process start/read/write/stop arrives through bounded host session primitive; contribution/grant task itself starts no child.
+
+The grant scopes Clay's launch API and audit identity, not host OS access. Once implemented, same-user child may access files outside selected roots, network, and other processes. Treat approved server as trusted subprocess, not sandboxed code. See `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 
 `loadPackage` executes the package `loadEntry` once per runtime generation. The registered mode patterns, activation metadata, command declarations, and parse-handler token remain resident in that generation. Phase 19 hot reload replaces the runtime generation, reruns `~/.config/clay/init.js`, rebuilds package state, and reruns the same package `loadEntry` with an empty `globalThis.__clayLoadedPackages` cache. Package authors should rebuild all runtime state from `loadEntry`; they should not rely on mutable JavaScript globals surviving reload. Failed reloads keep the previous generation active and report sanitized diagnostics.
 
@@ -519,7 +558,7 @@ Security and authority contract:
 - Handler registration requires `PackagePermission::ParseDocument` / `"parse-document"` in package metadata.
 - Only validated packages register live handlers; install/enable metadata alone does not grant parser execution.
 - `ClayModuleLoader` loads curated `clay:*` facades, controlled config modules, the vendored parser shim, and resolver-validated package `loadEntry` modules through the shared `PackageLoadEntryAllowlist`; hot reload preserves validated package-root confinement and rebuilds the allowlist in the fresh generation. Bundled and installed source-aware packages (npm, GitHub/git, tarball, local path) resolve through the same `PackageService` path after install and user authorization.
-- Packages do not gain filesystem, network, shell, AI, WASM, raw-op, native-widget, package-manager, package-control, or client-JS authority merely through loading, activation, UI contribution registration, or parsing; those capabilities require separate implementation and user approval.
+- Packages do not gain filesystem, network, shell, AI, WASM, raw-op, native-widget, package-manager, package-control, language-server process, or client-JS authority merely through loading, activation, UI contribution registration, or parsing; those capabilities require separate implementation and user approval.
 
 Forbidden anti-patterns:
 
@@ -1172,6 +1211,52 @@ Rules:
 - Themes color squiggles through `diagnosticError` / `diagnosticWarning` / `diagnosticInfo` via `setTheme`; no diagnostic enable/geometry config API exists.
 - Rejected: executable handlers/callbacks, client JavaScript, raw ops, CSS/draw callbacks, native handles, language-server process spawning, filesystem/network/shell/AI authority.
 - Future LSP packages map onto this same inert contract; Phase 18.17 does not add LSP process APIs.
+
+## Phase 18.20 authoring contract: analyzer providers and language-server bridges
+
+Canonical contract: [Language Intelligence and LSP 3.17 Bridge Contract](../primitives/language-intelligence.md). Analyzer packages and future `@clay/lsp-*` bridges share one Clay primitive surface.
+
+### Analyzer providers (no process)
+
+Register a feature-tagged provider that receives only Clay-provided open-document data:
+
+```ts
+import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
+
+serverRegisterLanguageIntelligenceProvider({
+  packageName: "@clay/example",
+  packageVersion: "0.1.0",
+  packagePrefix: "example",
+  permissions: ["parse-document"],
+  id: "example.intelligence",
+  modes: ["example"],
+  features: ["hover", "definition", "codeAction", "signatureHelp"],
+  priority: 10,
+  timeoutMs: 500,
+  exportName: "provideLanguageIntelligence",
+});
+```
+
+Rules:
+
+- Requires `parse-document`. Publishing semantic decorations or diagnostics still needs `render-decorations`; completion needs `completion-provider`.
+- Return UTF-8 byte offsets / ranges only. No LSP `Position`, URI, JSON-RPC ID, or method name crosses the Clay boundary.
+- Hover/signature markdown is inert bounded text. Definition locations use an open document or known workspace root + normalized relative path.
+- Code-action `EditPreview` values are inert versioned previews; command-backed actions execute later through `CommandExecution`.
+- Empty/timeout/error outcomes use typed statuses. Work is cancellable UI-reactive and must not run before local paint.
+
+### Language-server packages (grant then load)
+
+Process-backed bridges declare `language-server`, fixed contribution metadata, and an explicit pre-load grant. See [Language-server packages require grant then load](#language-server-packages-require-grant-then-load) for the manifest and `authorizeLanguageServer` example.
+
+Additional bridge rules:
+
+- Grant-before-load is mandatory; `loadPackage` alone neither authorizes nor launches a server.
+- Contribution executable/argv/inherited-environment names are fixed and validated; runtime code cannot choose shell strings, cwd, or arbitrary environment values.
+- Sessions expose only bounded UTF-8 `send`/`read`/`stop` under `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`, `LANGUAGE_SERVER_MAX_SESSIONS`, `LANGUAGE_SERVER_STDERR_BUDGET_BYTES`, and read timeouts; diagnostics are sanitized.
+- LSP `Content-Length` framing, initialize/capabilities, document sync, cancellation, and position-encoding conversion are Phase 18.21 package adapters layered on the opaque session.
+- Map LSP SemanticTokens, Diagnostic, Completion, Hover, Definition/DefinitionLink, CodeAction/Command/WorkspaceEdit, and SignatureHelp onto the Clay primitives documented in `language-intelligence.md`.
+- External/out-of-root URIs are denied. Treat the child as trusted subprocess authority, not a sandbox: cwd/root identity does not OS-confine filesystem, network, or process access.
 
 ## Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption
 

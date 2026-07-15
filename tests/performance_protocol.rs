@@ -11,7 +11,8 @@ use clay::{
             COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
             DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
             DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
-            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
+            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
+            LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
             SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
         },
         metrics::{PerfConfig, install_global_recorder},
@@ -20,9 +21,11 @@ use clay::{
         BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
         CompletionReplacementRange, CompletionResultSet, CompletionStatus, CompletionTrigger,
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
-        DiagnosticSeverity, DiagnosticSpan, DocumentAccess, EditOperation, IncrementalParseUpdate,
-        ParseByteRange, ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowRequest,
-        ParseWindowSnapshot, ServerMessage, SyntaxMemoryBudget,
+        DiagnosticSeverity, DiagnosticSpan, DocumentAccess, EditOperation, HoverResult,
+        IncrementalParseUpdate, LanguageIntelligenceFeature, LanguageIntelligencePayload,
+        LanguageIntelligenceResult, LanguageIntelligenceStatus, ParseByteRange,
+        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowRequest, ParseWindowSnapshot,
+        ServerMessage, SyntaxMemoryBudget,
         codec::{Codec, CodecError},
     },
     server::{
@@ -362,6 +365,41 @@ fn representative_completion_result_payload_stays_bounded() {
     assert!(
         payload <= COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
         "representative completion result payload {payload} exceeds budget {COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES}"
+    );
+}
+
+#[test]
+fn representative_language_intelligence_result_payload_stays_bounded() {
+    // A representative hover result carrying a large but in-budget Markdown
+    // payload must stay under `LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES`
+    // so language-intelligence publication never blows the protocol frame
+    // budget. Code-action/definition/signature payloads are bounded by the
+    // per-field/count limits enforced by `validate_result`.
+    let codec = Codec::default();
+    let result = LanguageIntelligenceResult {
+        request_id: 42,
+        client_id: 9,
+        document_id: 7,
+        document_version: 31,
+        behavior_version: 3,
+        provider_generation: 2,
+        feature: LanguageIntelligenceFeature::Hover,
+        status: LanguageIntelligenceStatus::Ok,
+        payload: LanguageIntelligencePayload::Hover(HoverResult {
+            range: Some(clay::protocol::TextByteRange::new(10, 14)),
+            markdown: "# Heading\n".repeat(LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS / 10),
+        }),
+        provenance: CompletionProvenance::builtin_core(),
+    };
+    assert!(
+        clay::server::language_intelligence::validate_result(&result).is_ok(),
+        "representative language-intelligence result must pass validation"
+    );
+    let message = ServerMessage::LanguageIntelligenceResult { result };
+    let payload = payload_len(&codec.encode_server_message(&message).unwrap());
+    assert!(
+        payload <= LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES,
+        "representative language-intelligence payload {payload} exceeds budget {LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES}"
     );
 }
 

@@ -8,6 +8,7 @@ pub enum PackagePermission {
     RenderDecorations,
     RenderFolding,
     CompletionProvider,
+    LanguageServer,
     PackageControl,
     PackageImport,
     Filesystem,
@@ -32,6 +33,7 @@ impl PackagePermission {
             Self::RenderDecorations => "render-decorations",
             Self::RenderFolding => "render-folding",
             Self::CompletionProvider => "completion-provider",
+            Self::LanguageServer => "language-server",
             Self::PackageControl => "package-control",
             Self::PackageImport => "package-import",
             Self::Filesystem => "filesystem",
@@ -57,6 +59,7 @@ pub fn parse_permission(value: &str) -> Result<PackagePermission, PermissionVali
         "render-decorations" => Ok(PackagePermission::RenderDecorations),
         "render-folding" => Ok(PackagePermission::RenderFolding),
         "completion-provider" => Ok(PackagePermission::CompletionProvider),
+        "language-server" => Ok(PackagePermission::LanguageServer),
         "package-control" => Ok(PackagePermission::PackageControl),
         "package-import" => Ok(PackagePermission::PackageImport),
         "filesystem" => Ok(PackagePermission::Filesystem),
@@ -86,6 +89,7 @@ pub fn is_prohibited_authority(value: &str) -> bool {
             | "native-ui"
             | "client-runtime"
             | "raw-ops"
+            | "language-server"
             | "package-control"
             | "package-import"
     )

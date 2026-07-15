@@ -425,6 +425,30 @@ Performance and security contract: trigger classification is local manifest look
 
 Automated coverage (no manual execution needed): `tests/completion_provider.rs` covers buffer-word unique sorted prefix matches, empty-match status, result payload caps, bounded-window rejection, package cancellation preserving the built-in provider, registry budget validation, request validation, superseded request abort, generation replacement, priority ordering, non-blocking scheduling, unregistered provider rejection, stale document-version/provider-generation result rejection, duplicate provider-ID conflict diagnostics, disabled package provider fallback, and oversized result rejection. `tests/editor_performance_invariants.rs::completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only` statically guards that completion hot paths use inert state and non-blocking enqueue only. `tests/performance_protocol.rs::representative_completion_result_payload_stays_bounded` checks the completion result payload budget. `tests/package_primitive_gate.rs` covers completion-provider contribution permission/conflict/oversize-metadata rejection. `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`, and `tests/rust_visibility_api_mapping.rs` cover the public `clay:completion` facade, registry/docs entry, and internal-status mapping. `tests/package_loading_docs.rs` and `tests/primitives_docs.rs` cover the package authoring contract and primitive review documentation.
 
+### Phase 18.20 language intelligence / Phase 18.21 LSP bridge smoke markers
+
+Phase 18.20 ships engine-neutral hover, go-to-definition, code-action, and signature-help primitives plus explicit `language-server` authority. First-party LSP bridge packages (`@clay/lsp-*`) and live rust-analyzer / typescript-language-server / marksman smoke are Phase 18.21.
+
+Phase 18.20 discoverable commands (empty default key bindings):
+
+- `clay.language.hover`
+- `clay.language.goToDefinition`
+- `clay.language.codeActions`
+- `clay.language.signatureHelp`
+
+Manual Phase 18.20 smoke (fake analyzer / no language-server required):
+
+1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Ctrl+K Ctrl+I", "clay.language.hover", { scope: "editor" })`.
+2. Launch Clay and place the caret in an editable document.
+3. Invoke the binding. A bottom `TransientMenuSession` should show bounded plain-text hover/signature content or a selectable definitions/code-actions list. Raw HTML must not render as native markup.
+4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `clay.workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.
+5. For code actions, command-backed items reuse `CommandExecution`; direct edit previews display only and must not mutate text in Phase 18.20.
+6. Edit or move the caret before a late result arrives. Stale results must not install a menu.
+
+Phase 18.21 compatibility markers (not executable until bridge packages land): `authorizeLanguageServer`, `@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript`, `@clay/lsp-markdown`, `rust-analyzer`, `typescript-language-server`, `marksman`, LSP 3.17 position-encoding conversion at the package boundary, and no Clay-core `lsp-types`/JSON-RPC dependency.
+
+Automated coverage (no manual execution needed): `tests/language_intelligence.rs` covers protocol validation, provider registry/coordinator cancellation/timeouts, discoverable command mapping, and inert preview/navigation contracts. Editor/client unit tests cover non-blocking request enqueue, bottom transient UI projection, stale-result drop, current-document definition jump, and edit-preview non-mutation. `tests/editor_performance_invariants.rs::language_intelligence_provider_work_is_absent_from_editor_hot_paths` keeps provider/process work off editor hot paths.
+
 ### Foreground server plus clients
 
 Use the default server/client commands to validate second-client observer behavior without endpoint arguments:

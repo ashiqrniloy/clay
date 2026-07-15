@@ -201,6 +201,7 @@ pub(super) fn op_clay_packages_load_package(
             "textTransforms": record.contributions.text_transforms.len(),
             "sdui": record.contributions.sdui.len(),
             "decorations": record.contributions.decorations.len(),
+            "languageServers": record.contributions.language_servers.len(),
             "uiPanels": record.contributions.ui_panels.len(),
             "uiComponents": record.contributions.ui_components.len(),
             "uiOverlays": record.contributions.ui_overlays.len(),
@@ -340,56 +341,15 @@ fn ensure_first_party_record_locked(
     service: &mut crate::packages::service::PackageService,
     specifier: &str,
 ) -> Result<(crate::packages::record::PackageRecord, PathBuf, String), JsErrorBox> {
-    let (resolved_name, package_root) = match service.installed_package_for_specifier(specifier) {
-        Some((name, installed)) => (name, installed.package_root),
-        None => {
-            let Some(package_name) = specifier.strip_prefix("@clay/") else {
-                return Err(JsErrorBox::generic(format!(
-                    "clay.packages.not_installed: package `{specifier}` is not installed or authorized"
-                )));
-            };
-            if !is_valid_first_party_package_segment(package_name) {
-                return Err(invalid_specifier(format!(
-                    "invalid bundled package name in `{specifier}`"
-                )));
-            }
-            let package_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("packages")
-                .join(package_name);
-            let package_json_text =
-                std::fs::read_to_string(package_root.join("package.json")).map_err(|_| {
-                    JsErrorBox::generic(format!(
-                        "clay.packages.not_installed: bundled package `{specifier}` is not installed"
-                    ))
-                })?;
-            let package_json: Value =
-                serde_json::from_str(&package_json_text).map_err(|error| {
-                    JsErrorBox::generic(format!(
-                        "clay.packages.load_failed: invalid package.json for `{specifier}` ({error})"
-                    ))
-                })?;
-            let resolved_name = package_json
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or(specifier)
-                .to_string();
-            service
-                .install_from_value_at_root(package_json.clone(), package_root.clone())
-                .map_err(|error| {
-                    JsErrorBox::generic(format!("clay.packages.load_failed: {error}"))
-                })?;
-            if let Ok(manifest) = crate::packages::manifest::validate_manifest_value(&package_json)
-            {
-                let _ = service.authorize_package(
-                    &resolved_name,
-                    manifest.clay.permissions,
-                    crate::packages::authorization::RuntimeProfile::NativeTrust,
-                    "clay-bundled-default",
-                );
-            }
-            (resolved_name, package_root)
-        }
-    };
+    let (resolved_name, package_root, bundled) =
+        ensure_package_installed_locked(service, specifier)?;
+    if bundled {
+        service
+            .authorize_bundled_defaults(&resolved_name, "clay-bundled-default")
+            .map_err(|error| {
+                JsErrorBox::generic(format!("clay.packages.authorization_failed: {error}"))
+            })?;
+    }
 
     // Reuse the authoritative `PackageService` validation/enable path
     // (`assemble_package_record` + authorization + `check_enabled_packages`).
@@ -412,6 +372,51 @@ fn ensure_first_party_record_locked(
     Ok((record, package_root, resolved_name))
 }
 
+pub(super) fn ensure_package_installed_locked(
+    service: &mut crate::packages::service::PackageService,
+    specifier: &str,
+) -> Result<(String, PathBuf, bool), JsErrorBox> {
+    if let Some((name, installed)) = service.installed_package_for_specifier(specifier) {
+        let bundled = installed.provenance.source_kind
+            == crate::packages::manager::PackageSourceKind::ClayShipped;
+        return Ok((name, installed.package_root, bundled));
+    }
+
+    let Some(package_name) = specifier.strip_prefix("@clay/") else {
+        return Err(JsErrorBox::generic(format!(
+            "clay.packages.not_installed: package `{specifier}` is not installed or authorized"
+        )));
+    };
+    if !is_valid_first_party_package_segment(package_name) {
+        return Err(invalid_specifier(format!(
+            "invalid bundled package name in `{specifier}`"
+        )));
+    }
+    let package_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("packages")
+        .join(package_name);
+    let package_json_text =
+        std::fs::read_to_string(package_root.join("package.json")).map_err(|_| {
+            JsErrorBox::generic(format!(
+                "clay.packages.not_installed: bundled package `{specifier}` is not installed"
+            ))
+        })?;
+    let package_json: Value = serde_json::from_str(&package_json_text).map_err(|error| {
+        JsErrorBox::generic(format!(
+            "clay.packages.load_failed: invalid package.json for `{specifier}` ({error})"
+        ))
+    })?;
+    let resolved_name = package_json
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(specifier)
+        .to_string();
+    service
+        .install_from_value_at_root(package_json, package_root.clone())
+        .map_err(|error| JsErrorBox::generic(format!("clay.packages.load_failed: {error}")))?;
+    Ok((resolved_name, package_root, true))
+}
+
 #[op2]
 #[string]
 pub(super) fn op_clay_packages_load_package_by_specifier(
@@ -431,6 +436,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
     }
 
     let clay_state = state.borrow::<Arc<ClayOpState>>();
+    clay_state.seal_language_server_authority();
 
     let (record, package_root, resolved_name) = {
         let mut service = clay_state
@@ -479,6 +485,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
                 "textTransforms": record.contributions.text_transforms.len(),
                 "sdui": record.contributions.sdui.len(),
                 "decorations": record.contributions.decorations.len(),
+                "languageServers": record.contributions.language_servers.len(),
                 "uiPanels": record.contributions.ui_panels.len(),
                 "uiComponents": record.contributions.ui_components.len(),
                 "uiOverlays": record.contributions.ui_overlays.len(),

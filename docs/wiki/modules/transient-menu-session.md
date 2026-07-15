@@ -66,6 +66,10 @@ Packages reach a transient menu only through server-owned workflows such as the 
 
 Activation from the overlay or from keyboard handlers produces a `TransientMenuAction`. Command actions are normalized into a `CommandExecutionRequest` and routed through `CommandExecutor` from `src/server/command_execution.rs`; for command menu items, the activation path routes it through `CommandExecutor`. Completion actions never enter command execution: `SduiNativeState::menu_activate_completion` returns the inert accept payload to `EditorWidget`, which calls `EditorSurface::accept_completion_with_event` to validate document/version/behavior/range metadata and produce a local text replacement edit for the active document only. `TransientPackageOverlay::from_menu_session` deliberately omits command action targets for completion items, so pointer/action routing cannot turn a completion item into a command.
 
+## Language-intelligence projection
+
+Phase 18.20's `language_intelligence_result_to_menu_session` adapter keeps intelligence UI on this generic primitive. Hover and signature help become modeless inert-text sessions; definitions and code actions become modal selectable sessions. Definition actions carry validated document/root/path/byte-offset metadata, command-backed code actions carry registered command IDs, and edit-only actions carry display-only preview metadata. Markdown is reduced to inert plain text. Empty, timeout, and provider-error statuses remain bounded session status text. `EditorWidget` rejects stale request IDs before installing any session.
+
 ## Invariants and Constraints
 
 - Sessions are generic UI state, not Control Center-specific state.
@@ -125,4 +129,5 @@ CARGO_TARGET_DIR=target/pi-verify cargo test --lib masonry_sdui --quiet
 - [Masonry Shell Runtime](masonry-shell.md)
 - [Phase 18.8 Transient Menu and Command Execution Primitive Review](phase18.8-transient-menu-command-execution-primitive-review.md)
 - [Completion Snippet Expansion](completion-snippet-expansion.md) — Phase 18.19 snippet accept path and session
+- [Language Intelligence](language-intelligence.md) — Phase 18.20 hover/signature/definition/code-action projection
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)

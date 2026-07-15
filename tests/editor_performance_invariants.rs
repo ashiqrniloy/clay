@@ -184,6 +184,55 @@ fn completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only() {
 }
 
 #[test]
+fn language_server_process_work_is_absent_from_editor_hot_paths() {
+    let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let widget_source =
+        fs::read_to_string("src/masonry_editor.rs").expect("editor widget readable");
+    let client_source = fs::read_to_string("src/client/mod.rs").expect("client readable");
+    let combined = format!("{surface_source}\n{widget_source}\n{client_source}");
+    for forbidden in [
+        "LanguageServerProcessService",
+        "startLanguageServerSession",
+        "language_server_process",
+        "op_clay_language_server_start_session",
+        "op_clay_language_server_send_message",
+        "op_clay_language_server_read_message",
+        "tokio::process::Command",
+        "std::process::Command",
+    ] {
+        assert!(
+            !combined.contains(forbidden),
+            "editor key/text/paint/client path must not run language-server process/session work: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn language_intelligence_provider_work_is_absent_from_editor_hot_paths() {
+    let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let widget_source =
+        fs::read_to_string("src/masonry_editor.rs").expect("editor widget readable");
+    let client_source = fs::read_to_string("src/client/mod.rs").expect("client readable");
+    let combined = format!("{surface_source}\n{widget_source}\n{client_source}");
+    for forbidden in [
+        "LanguageIntelligenceCoordinator",
+        "schedule_language_intelligence",
+        "serverRegisterLanguageIntelligenceProvider",
+        "op_clay_language_register_intelligence_provider",
+        "LanguageIntelligenceProviderRegistry",
+        "__clayLanguageIntelligenceHandlers",
+        "provideLanguageIntelligence",
+        "LanguageServerProcessService",
+        "tokio::process::Command",
+    ] {
+        assert!(
+            !combined.contains(forbidden),
+            "editor key/text/paint/client path must not run language-intelligence provider work: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn markdown_full_document_adapter_is_not_large_file_hot_path_static_guard() {
     let bench_source = fs::read_to_string("tools/bench/markdown-parser.mjs")
         .expect("Markdown benchmark script readable");
@@ -409,6 +458,45 @@ fn range_diagnostics_do_not_enter_editor_hot_paths() {
         assert!(
             !hot_paths.contains(forbidden),
             "range-diagnostic paint/layout/input paths must not run parser/JS/IPC/validation work: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn semantic_intelligence_reuses_existing_decoration_paths_without_hot_path_work() {
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let theme = fs::read_to_string("src/editor/theme.rs").expect("theme readable");
+    let widget = fs::read_to_string("src/masonry_editor.rs").expect("widget readable");
+    let decorations_facade =
+        fs::read_to_string("runtime/js/decorations.ts").expect("decorations facade readable");
+    let hot_paths = format!(
+        "{}\n{}\n{}",
+        non_test_body(&surface),
+        non_test_body(&theme),
+        non_test_body(&widget)
+    );
+
+    assert!(surface.contains("normalize_visible_text_style_runs"));
+    assert!(surface.contains("DecorationKind::Semantic"));
+    assert!(theme.contains("DecorationKind::Syntax | DecorationKind::Semantic"));
+    assert!(decorations_facade.contains("tokenType?"));
+    assert!(decorations_facade.contains("modifiers?"));
+    assert!(decorations_facade.contains("\"semantic\""));
+
+    for forbidden in [
+        "serverPublishDecorations",
+        "op_clay_decorations_publish_decorations",
+        "LanguageServerProcessService",
+        "startLanguageServerSession",
+        "provideLanguageIntelligence",
+        "__clayLanguageIntelligenceHandlers",
+        "tokio::process::Command",
+        "std::process::Command",
+        "Deno.core",
+    ] {
+        assert!(
+            !hot_paths.contains(forbidden),
+            "semantic paint/layout must stay additive over cached spans without publish/process/JS work: {forbidden}"
         );
     }
 }

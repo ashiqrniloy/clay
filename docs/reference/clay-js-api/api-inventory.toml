@@ -2187,3 +2187,72 @@ permissions = []
 security_notes = "Accepts one bounded inert three-profile value; performs no installed-font validation, font-file access, URL fetch, or download and does not grant filesystem, network, shell, package, extension loading, workspace mutation, AI mutation, native widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Packages may select semantic roles but cannot override concrete user values."
 current_rust_owner = "src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography"
 registry_public = true
+
+[[api]]
+id = "clay.language.serverRegisterLanguageIntelligenceProvider"
+category = "language-intelligence"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:language"
+js_export = "serverRegisterLanguageIntelligenceProvider"
+user_facing_name = "Register Language Intelligence Provider"
+authority = "parse-document-provider-registration"
+runtime_path = "package-load-op-to-coordinator-registry"
+hot_path_policy = "Registration is package-load time only; requests are cancellable UiReactivePriority work that never blocks typing, local paint, or layout. Provider JS runs on the persistent Deno worker thread with per-request timeout and bounded document window."
+facade_path = "runtime/js/language.ts::serverRegisterLanguageIntelligenceProvider"
+backing_rust = "src/server/language_intelligence.rs::LanguageIntelligenceProviderMeta; src/server/ops/language_intelligence.rs"
+deno_op = "op_clay_language_register_intelligence_provider"
+deno_op_path = "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider"
+documentation_path = "docs/reference/clay-js-api/language/server-register-language-intelligence-provider.md"
+key_bindings = []
+custom_properties = ["packageName:string=required", "packageVersion:string=required", "packagePrefix:string=required", "permissions:string[]=required", "id:string=required", "modes:string[]=optional", "features:string[]=required", "priority:number=0", "exportName:string=provideLanguageIntelligence", "timeoutMs:number=500", "module:object=optional"]
+permissions = ["parse-document"]
+security_notes = "Requires parse-document; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields rejected; results are inert validated data; code-action edits are preview-only in Phase 18.20; provider provenance stamped by coordinator."
+current_rust_owner = "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider; src/server/language_intelligence.rs"
+registry_public = true
+
+[[api]]
+id = "clay.language-server.authorizeLanguageServer"
+category = "language-server"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:language-server"
+js_export = "authorizeLanguageServer"
+user_facing_name = "Authorize Language Server"
+authority = "configuration-only-grant-before-seal"
+runtime_path = "init-js-op-to-grant-registry"
+hot_path_policy = "Configuration root evaluation only (init.js); sealed before first loadPackage. Never executes during typing, parsing, layout, or paint hot paths."
+facade_path = "runtime/js/language-server.ts::authorizeLanguageServer"
+backing_rust = "src/server/language_server.rs PackageService grant registry; src/server/ops/language_server.rs"
+deno_op = "op_clay_language_server_authorize"
+deno_op_path = "src/server/ops/language_server.rs::op_clay_language_server_authorize"
+documentation_path = "docs/reference/clay-js-api/language-server/authorize-language-server.md"
+key_bindings = []
+custom_properties = ["package:string=required", "contribution:string=required", "workspaceRootIds:array<number|string>=required"]
+permissions = ["language-server"]
+security_notes = "Deny-by-default; never auto-authorized for bundled packages; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; binds exact package provenance, contribution fingerprint, canonical executable, inherited-environment declaration, and approved directory roots; starts no process at grant time; loaded package code cannot self-grant; revocation/update/contribution-change/root-removal terminates all sessions."
+current_rust_owner = "src/server/ops/language_server.rs::op_clay_language_server_authorize; src/packages/authorization.rs grant registry"
+registry_public = true
+
+[[api]]
+id = "clay.language-server.startLanguageServerSession"
+category = "language-server"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:language-server"
+js_export = "startLanguageServerSession"
+user_facing_name = "Start Language Server Session"
+authority = "opaque-bounded-process-session"
+runtime_path = "package-op-to-background-thread-session"
+hot_path_policy = "Async background-thread I/O only; spawn and message read/write run on a dedicated clay-language-server thread with its own tokio runtime. Never blocks the Deno worker thread, typing, layout, or paint hot paths."
+facade_path = "runtime/js/language-server.ts::startLanguageServerSession"
+backing_rust = "src/server/language_server.rs::LanguageServerProcessService"
+deno_op = "op_clay_language_server_start_session"
+deno_op_path = "src/server/ops/language_server.rs::op_clay_language_server_start_session"
+documentation_path = "docs/reference/clay-js-api/language-server/start-language-server-session.md"
+key_bindings = []
+custom_properties = ["package:string=required", "contribution:string=required", "workspaceRootId:number|string=required"]
+permissions = ["language-server"]
+security_notes = "Requires prior authorizeLanguageServer grant with matching package/contribution/root; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; spawn uses fixed contribution executable/argv/env_clear+declared inherits; session exposes only bounded send/read/stop with compiled budget caps; kill_on_drop safety net; trusted subprocess authority not an OS sandbox; LSP framing deferred to Phase 18.21."
+current_rust_owner = "src/server/language_server.rs::LanguageServerProcessService; src/server/ops/language_server.rs"
+registry_public = true

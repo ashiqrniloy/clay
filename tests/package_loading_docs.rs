@@ -2735,3 +2735,200 @@ fn first_party_language_package_docs_are_indexed_and_complete() {
         "docs/index.md must not contain stale 'grammar-only' descriptions for first-party packages"
     );
 }
+
+#[test]
+fn phase18_20_language_server_grant_boundary_is_documented_and_pinned() {
+    let permissions = read("src/packages/permissions.rs");
+    let record = read("src/packages/record.rs");
+    let service = read("src/packages/service.rs");
+    let op = read("src/server/ops/language_server.rs");
+    let op_state = read("src/server/ops/mod.rs");
+    let package_op = read("src/server/ops/packages.rs");
+    let facade = read("runtime/js/language-server.ts");
+    let security = read("docs/reference/primitives/package-security.md");
+    let authoring = read("docs/reference/packages/creating-packages.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+
+    assert!(permissions.contains("LanguageServer") && permissions.contains("language-server"));
+    for phrase in [
+        "LanguageServerContributionDescriptor",
+        "inherit_environment",
+        "language_servers",
+    ] {
+        assert!(record.contains(phrase), "record must retain `{phrase}`");
+    }
+    for phrase in [
+        "authorize_language_server",
+        "authorize_bundled_defaults",
+        "MissingLanguageServerGrant",
+        "revoke_language_server_grants",
+    ] {
+        assert!(service.contains(phrase), "service must enforce `{phrase}`");
+    }
+    assert!(op_state.contains("configuration_evaluation"));
+    for phrase in [
+        "authorization_sealed",
+        "unknown_workspace_root",
+        "resolve_language_server_executable",
+    ] {
+        assert!(
+            op.contains(phrase),
+            "authorization op must enforce `{phrase}`"
+        );
+    }
+    assert!(package_op.contains("seal_language_server_authority"));
+    assert!(facade.contains("export async function authorizeLanguageServer"));
+    for phrase in [
+        "Language-Server Authority Boundary",
+        "bundled `NativeTrust` defaults exclude `language-server`",
+        "starts no process",
+        "not an OS filesystem/network/process sandbox",
+    ] {
+        assert!(
+            security.contains(phrase) || authoring.contains(phrase) || wiki.contains(phrase),
+            "language-server docs/wiki must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn package_author_guide_documents_explicit_language_server_authority() {
+    let authoring = read("docs/reference/packages/creating-packages.md");
+    let security = read("docs/reference/primitives/package-security.md");
+    let contract = read("docs/reference/primitives/language-intelligence.md");
+
+    for phrase in [
+        "## Phase 18.20 authoring contract: analyzer providers and language-server bridges",
+        "serverRegisterLanguageIntelligenceProvider",
+        "grant then load",
+        "authorizeLanguageServer",
+        "loadPackage",
+        "LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES",
+        "LANGUAGE_SERVER_MAX_SESSIONS",
+        "LANGUAGE_SERVER_STDERR_BUDGET_BYTES",
+        "fixed",
+        "Content-Length",
+        "trusted subprocess authority",
+        "not a sandbox",
+        "SemanticTokens",
+        "DefinitionLink",
+        "WorkspaceEdit",
+        "SignatureHelp",
+    ] {
+        assert!(
+            authoring.contains(phrase) || security.contains(phrase) || contract.contains(phrase),
+            "package author/language-server docs must preserve `{phrase}`"
+        );
+    }
+
+    assert!(
+        authoring.contains("Grant-before-load is mandatory"),
+        "package author guide must require grant-before-load"
+    );
+    assert!(
+        authoring.contains("workspace root") || authoring.contains("workspaceRootIds"),
+        "package author guide must document workspace scope"
+    );
+    assert!(
+        contract.contains("containment") || authoring.contains("containment"),
+        "docs must disclose containment semantics"
+    );
+}
+
+#[test]
+fn language_server_configuration_api_is_documented_and_sealed() {
+    let api_page = read("docs/reference/clay-js-api/language-server/authorize-language-server.md");
+    let inventory = read("docs/reference/clay-js-api/api-inventory.toml");
+    let index = read("docs/index.md");
+    let configuration = read("docs/reference/clay-js-api/configuration.md");
+
+    // API page contains all required frontmatter and sections.
+    for marker in [
+        "id: clay.language-server.authorizeLanguageServer",
+        "js_module: \"clay:language-server\"",
+        "js_export: authorizeLanguageServer",
+        "op_clay_language_server_authorize",
+        "user_facing_name: Authorize Language Server",
+        "permissions: [\"language-server\"]",
+        "key_bindings: []",
+        "custom_properties:",
+        "package",
+        "contribution",
+        "workspaceRootIds",
+        "hot_path_policy:",
+        "configuration root evaluation only",
+        "authorization_sealed",
+        "executable_not_found",
+        "unknown_workspace_root",
+        "duplicate_grant",
+        "before loadPackage seals authority",
+        "starts no process at grant time",
+        "cannot self-grant",
+        "lookup_tags:",
+        "configuration",
+        "deny-by-default",
+        "phase18.20",
+        "app_visible: true",
+        "help_visible: true",
+    ] {
+        assert!(
+            api_page.contains(marker),
+            "authorizeLanguageServer API page must document `{marker}`"
+        );
+    }
+
+    // Inventory entry contains required metadata.
+    assert!(inventory.contains("clay.language-server.authorizeLanguageServer"));
+    for field in [
+        "category = \"language-server\"",
+        "status = \"runtime-backed\"",
+        "authority = \"configuration-only-grant-before-seal\"",
+        "hot_path_policy",
+        "sealed before first loadPackage",
+        "documentation_path",
+        "authorize-language-server.md",
+        "custom_properties",
+        "permissions = [\"language-server\"]",
+        "Deny-by-default",
+        "registry_public = true",
+    ] {
+        assert!(
+            inventory.contains(field),
+            "authorizeLanguageServer inventory entry must include `{field}`"
+        );
+    }
+
+    // Index links the page.
+    assert!(
+        index.contains("authorize-language-server.md"),
+        "docs/index.md must link authorizeLanguageServer API page"
+    );
+
+    // No hidden env/config key exists.
+    let forbidden_env_keys = [
+        "CLAY_LANGUAGE_SERVER",
+        "CLAY_LSP",
+        "languageServerEnabled",
+        "languageServerDisable",
+        "autoAuthorizeLanguageServer",
+        "languageServerDefaultGrant",
+    ];
+    for key in forbidden_env_keys {
+        assert!(
+            !api_page.contains(key) && !configuration.contains(key) && !inventory.contains(key),
+            "no hidden language-server env/config key `{key}` may exist"
+        );
+    }
+
+    // The page explicitly rejects hidden keys.
+    assert!(api_page.contains("Never expose hidden env vars"));
+    assert!(api_page.contains("JSON/TOML keys"));
+
+    // Configuration-only seal.
+    for phrase in ["configuration-only", "seals authority", "cannot self-grant"] {
+        assert!(
+            api_page.contains(phrase) || configuration.contains(phrase),
+            "configuration docs must document `{phrase}`"
+        );
+    }
+}

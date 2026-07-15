@@ -24,7 +24,10 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::packages::authorization::{PackageAuthorizationRecord, RuntimeProfile};
+use crate::packages::authorization::{
+    LanguageServerGrant, PackageAuthorizationRecord, RuntimeProfile,
+    resolve_language_server_executable,
+};
 use crate::packages::conflict::{
     PackageConflictDiagnostic, PackageConflictProvenance, PackageConflictResolutionDiagnostic,
     PackageConflictResolutionPolicy, PackageConflictResolutionReason,
@@ -80,6 +83,10 @@ pub enum PackageServiceError {
         package_name: String,
         capability: PackagePermission,
     },
+    /// A language-server capability lacks a current contribution/root-scoped grant.
+    MissingLanguageServerGrant { package_name: String },
+    /// Bundled-default trust was requested for a non-Clay-shipped package.
+    BundledTrustDenied { package_name: String },
     /// A graph relation referenced a package that is not installed.
     MissingGraphTarget {
         package_name: String,
@@ -125,6 +132,14 @@ impl std::fmt::Display for PackageServiceError {
                 f,
                 "package `{package_name}` requested capability `{}` without a user authorization grant",
                 capability.as_str()
+            ),
+            Self::MissingLanguageServerGrant { package_name } => write!(
+                f,
+                "package `{package_name}` requested `language-server` without a current contribution/root grant"
+            ),
+            Self::BundledTrustDenied { package_name } => write!(
+                f,
+                "package `{package_name}` is not Clay-shipped and cannot receive bundled defaults"
             ),
             Self::MissingGraphTarget {
                 package_name,
@@ -234,6 +249,8 @@ pub struct PackageService {
     enabled: HashMap<String, PackageRecord>,
     /// User/admin grants keyed by package name.
     authorizations: HashMap<String, PackageAuthorizationRecord>,
+    /// Exact language-server grants keyed by package and contribution ID.
+    language_server_grants: HashMap<(String, String), LanguageServerGrant>,
     /// Explicit user-selected winners for contribution conflicts.
     conflict_policy: PackageConflictResolutionPolicy,
     /// Last conflict/package-control resolutions applied during enable/load.
@@ -258,6 +275,7 @@ impl PackageService {
             installed: HashMap::new(),
             enabled: HashMap::new(),
             authorizations: HashMap::new(),
+            language_server_grants: HashMap::new(),
             conflict_policy: PackageConflictResolutionPolicy::default(),
             conflict_resolutions: Vec::new(),
             package_generation: 0,
@@ -507,6 +525,149 @@ impl PackageService {
         Ok(())
     }
 
+    /// Record one exact user-approved language-server contribution/root grant.
+    pub fn authorize_language_server(
+        &mut self,
+        package_name: &str,
+        contribution_id: &str,
+        canonical_executable: PathBuf,
+        workspace_root_ids: Vec<crate::protocol::WorkspaceRootId>,
+        approved_by: impl Into<String>,
+    ) -> Result<&LanguageServerGrant, PackageServiceError> {
+        let approved_by = approved_by.into();
+        let installed = self.installed.get(package_name).cloned().ok_or_else(|| {
+            PackageServiceError::NotInstalled {
+                package_name: package_name.to_string(),
+            }
+        })?;
+        let record = assemble_package_record(&installed.package_json)
+            .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
+        let descriptor = record
+            .contributions
+            .language_servers
+            .iter()
+            .find(|descriptor| descriptor.id == contribution_id)
+            .ok_or_else(|| PackageServiceError::MissingLanguageServerGrant {
+                package_name: package_name.to_string(),
+            })?;
+        if resolve_language_server_executable(&descriptor.executable).as_ref()
+            != Some(&canonical_executable)
+        {
+            return Err(PackageServiceError::MissingLanguageServerGrant {
+                package_name: package_name.to_string(),
+            });
+        }
+        let grant = LanguageServerGrant::new(
+            &installed.provenance,
+            &record.manifest.clay.api_prefix,
+            descriptor,
+            canonical_executable,
+            workspace_root_ids,
+            &approved_by,
+        );
+        if grant.workspace_root_ids.is_empty() {
+            return Err(PackageServiceError::MissingLanguageServerGrant {
+                package_name: package_name.to_string(),
+            });
+        }
+        self.language_server_grants.insert(
+            (package_name.to_string(), contribution_id.to_string()),
+            grant,
+        );
+
+        let mut capabilities = self
+            .authorizations
+            .get(package_name)
+            .filter(|authorization| authorization_matches(&installed.provenance, authorization))
+            .map(|authorization| authorization.approved_capabilities.clone())
+            .unwrap_or_default();
+        if !capabilities.contains(&PackagePermission::LanguageServer) {
+            capabilities.push(PackagePermission::LanguageServer);
+        }
+        let runtime_profile = self
+            .authorizations
+            .get(package_name)
+            .filter(|authorization| authorization_matches(&installed.provenance, authorization))
+            .map_or(RuntimeProfile::Restricted, |authorization| {
+                authorization.runtime_profile
+            });
+        self.authorizations.insert(
+            package_name.to_string(),
+            PackageAuthorizationRecord::new(
+                &installed.provenance,
+                record.manifest.clay.api_prefix,
+                capabilities,
+                runtime_profile,
+                approved_by,
+            ),
+        );
+        Ok(self
+            .language_server_grants
+            .get(&(package_name.to_string(), contribution_id.to_string()))
+            .expect("inserted language-server grant must be present"))
+    }
+
+    /// Grant bundled defaults except process authority, preserving only an
+    /// already-current exact language-server grant.
+    pub fn authorize_bundled_defaults(
+        &mut self,
+        package_name: &str,
+        approved_by: impl Into<String>,
+    ) -> Result<(), PackageServiceError> {
+        let installed = self.installed.get(package_name).cloned().ok_or_else(|| {
+            PackageServiceError::NotInstalled {
+                package_name: package_name.to_string(),
+            }
+        })?;
+        if installed.provenance.source_kind
+            != crate::packages::manager::PackageSourceKind::ClayShipped
+        {
+            return Err(PackageServiceError::BundledTrustDenied {
+                package_name: package_name.to_string(),
+            });
+        }
+        let record = assemble_package_record(&installed.package_json)
+            .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
+        let mut capabilities: Vec<_> = record
+            .manifest
+            .clay
+            .permissions
+            .iter()
+            .copied()
+            .filter(|permission| *permission != PackagePermission::LanguageServer)
+            .collect();
+        if self.has_current_language_server_grant(package_name, &installed.provenance, &record) {
+            capabilities.push(PackagePermission::LanguageServer);
+        }
+        self.authorize_package(
+            package_name,
+            capabilities,
+            RuntimeProfile::NativeTrust,
+            approved_by,
+        )
+    }
+
+    pub fn language_server_grant(
+        &self,
+        package_name: &str,
+        contribution_id: &str,
+    ) -> Option<&LanguageServerGrant> {
+        self.language_server_grants
+            .get(&(package_name.to_string(), contribution_id.to_string()))
+    }
+
+    pub fn revoke_language_server_grants(&mut self, package_name: &str) -> usize {
+        let before = self.language_server_grants.len();
+        self.language_server_grants
+            .retain(|(name, _), _| name != package_name);
+        if let Some(authorization) = self.authorizations.get_mut(package_name) {
+            authorization
+                .approved_capabilities
+                .retain(|permission| *permission != PackagePermission::LanguageServer);
+        }
+        before.saturating_sub(self.language_server_grants.len())
+    }
+
     /// Enable a previously installed package.
     ///
     /// Runs the Clay-owned [`assemble_package_record`] validator before activating
@@ -558,6 +719,8 @@ impl PackageService {
             .remove(package_name, &self.store)
             .map_err(PackageServiceError::BackendError)?;
         self.installed.remove(package_name);
+        self.authorizations.remove(package_name);
+        self.revoke_language_server_grants(package_name);
         Ok(())
     }
 
@@ -832,7 +995,45 @@ impl PackageService {
                 });
             }
         }
+        if record
+            .manifest
+            .clay
+            .permissions
+            .contains(&PackagePermission::LanguageServer)
+        {
+            let installed = self
+                .installed
+                .get(package_name)
+                .expect("enabled package must remain installed");
+            if !self.has_current_language_server_grant(package_name, &installed.provenance, record)
+            {
+                return Err(PackageServiceError::MissingLanguageServerGrant {
+                    package_name: package_name.to_string(),
+                });
+            }
+        }
         Ok(())
+    }
+
+    fn has_current_language_server_grant(
+        &self,
+        package_name: &str,
+        provenance: &PackageProvenance,
+        record: &PackageRecord,
+    ) -> bool {
+        record
+            .contributions
+            .language_servers
+            .iter()
+            .any(|descriptor| {
+                self.language_server_grants
+                    .get(&(package_name.to_string(), descriptor.id.clone()))
+                    .is_some_and(|grant| {
+                        grant.matches(provenance, &record.manifest.clay.api_prefix, descriptor)
+                            && resolve_language_server_executable(&descriptor.executable).as_ref()
+                                == Some(&grant.canonical_executable)
+                    })
+            })
     }
 
     fn authorization_for(&self, package_name: &str) -> Option<&PackageAuthorizationRecord> {
@@ -922,6 +1123,16 @@ impl PackageService {
                 .map(|record| record.runtime_profile.as_str().to_string()),
         }
     }
+}
+
+fn authorization_matches(
+    provenance: &PackageProvenance,
+    authorization: &PackageAuthorizationRecord,
+) -> bool {
+    authorization.package_name == provenance.resolved_name
+        && authorization.requested_spec == provenance.requested_spec
+        && authorization.source_kind == provenance.source_kind
+        && authorization.resolved_version == provenance.resolved_version
 }
 
 fn requested_capability_names(package_json: &Value) -> Vec<String> {

@@ -11,6 +11,10 @@ pub(crate) mod document;
 pub(crate) mod git;
 #[allow(dead_code)]
 mod js_runtime;
+#[doc(hidden)]
+pub mod language_intelligence;
+#[doc(hidden)]
+pub mod language_server;
 #[allow(dead_code)]
 mod ops;
 pub mod parse_coordinator;
@@ -63,8 +67,8 @@ use crate::{
 
 use self::{
     behavior::ActiveBehaviorManifest, connection::handle_connection, document::DocumentState,
-    js_runtime::ClayJsRuntimeService, parse_coordinator::ParseCoordinator, sdui::StaticSduiState,
-    workspace::WorkspaceState,
+    js_runtime::ClayJsRuntimeService, language_intelligence::LanguageIntelligenceCoordinator,
+    parse_coordinator::ParseCoordinator, sdui::StaticSduiState, workspace::WorkspaceState,
 };
 
 #[cfg(windows)]
@@ -244,6 +248,7 @@ pub struct IpcServer {
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     #[allow(dead_code)]
     parse_coordinator: ParseCoordinator,
+    language_intelligence: LanguageIntelligenceCoordinator,
     runtime_generation: RuntimeGenerationStore,
     next_client_id: AtomicU64,
 }
@@ -277,6 +282,7 @@ impl IpcServer {
             active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
+            language_intelligence: LanguageIntelligenceCoordinator::new(),
             runtime_generation: RuntimeGenerationStore::initial(),
             next_client_id: AtomicU64::new(1),
         })
@@ -410,6 +416,8 @@ impl IpcServer {
                 }
                 self.parse_coordinator
                     .cancel_generation(previous_generation_id);
+                self.language_intelligence
+                    .cancel_generation(previous_generation_id);
                 self.runtime_generation
                     .swap(RuntimeGeneration {
                         id: next_generation_id,
@@ -518,6 +526,22 @@ impl IpcServer {
                 ));
         }
 
+        if let Err(error) = service.register_language_intelligence_providers(
+            &self.language_intelligence,
+            generation_id,
+            &evaluation,
+        ) {
+            self.runtime_diagnostics
+                .lock()
+                .await
+                .push(RuntimeDiagnostic::error(
+                    "clay.language.registration_failed",
+                    format!(
+                        "Runtime language-intelligence provider registration failed: {error:?}"
+                    ),
+                ));
+        }
+
         // Startup reads the shared behavior/SDUI state lazily during the
         // welcome handshake, so only validation failures produce diagnostics
         // here. Decorations are pass-through (no startup client / decoration store).
@@ -555,6 +579,7 @@ impl IpcServer {
         let runtime_diagnostics = Arc::clone(&self.runtime_diagnostics);
         let runtime_generation = self.runtime_generation.clone();
         let parse_coordinator = self.parse_coordinator.clone();
+        let language_intelligence = self.language_intelligence.clone();
         let codec = self.codec;
         connections.spawn(async move {
             if let Err(error) = handle_connection(
@@ -568,6 +593,7 @@ impl IpcServer {
                 runtime_diagnostics,
                 runtime_generation,
                 parse_coordinator,
+                language_intelligence,
                 codec,
             )
             .await
@@ -1079,6 +1105,8 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            language_intelligence_providers: vec![],
+            js_language_intelligence_providers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1117,6 +1145,8 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            language_intelligence_providers: vec![],
+            js_language_intelligence_providers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1157,6 +1187,8 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            language_intelligence_providers: vec![],
+            js_language_intelligence_providers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1196,6 +1228,8 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            language_intelligence_providers: vec![],
+            js_language_intelligence_providers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1524,7 +1558,10 @@ mod tests {
     use tokio::{net::UnixStream, sync::Mutex};
 
     use super::{ActiveBehaviorManifest, IpcServer, RuntimeGenerationStore, ServerConfig};
-    use crate::server::{ParseCoordinator, sdui::StaticSduiState};
+    use crate::server::{
+        language_intelligence::LanguageIntelligenceCoordinator,
+        parse_coordinator::ParseCoordinator, sdui::StaticSduiState,
+    };
     use crate::{
         protocol::{
             ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
@@ -1558,6 +1595,7 @@ mod tests {
             active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
+            language_intelligence: LanguageIntelligenceCoordinator::new(),
             runtime_generation: RuntimeGenerationStore::initial(),
             next_client_id: AtomicU64::new(1),
         }

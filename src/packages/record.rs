@@ -17,7 +17,8 @@ use crate::packages::permissions::PackagePermission;
 use crate::perf::budgets::{
     BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS,
     COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS, COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS,
-    COMPLETION_RESULT_MAX_ITEMS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
+    COMPLETION_RESULT_MAX_ITEMS, LANGUAGE_INTELLIGENCE_DEFAULT_TIMEOUT_MS,
+    LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
     SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
 };
 use crate::shell::{
@@ -27,7 +28,9 @@ use crate::shell::{
 };
 
 use crate::editor::theme::{parse_hex_rgba, parse_override_token};
-use crate::protocol::{CompletionItemTextFormat, DocumentFontRole, Modifiers, TokenType};
+use crate::protocol::{
+    CompletionItemTextFormat, DocumentFontRole, LanguageIntelligenceFeature, Modifiers, TokenType,
+};
 
 // ── Contribution descriptors ─────────────────────────────────────────────────
 
@@ -195,6 +198,40 @@ pub struct CompletionProviderContributionDescriptor {
     pub timeout_ms: u64,
     /// Per-provider cap on result item count. Must be within `1..=COMPLETION_RESULT_MAX_ITEMS`.
     pub max_items: usize,
+    /// Estimated bounded metadata payload for the contribution.
+    pub estimated_payload_bytes: usize,
+}
+
+/// Fixed launch metadata for one separately authorized language-server process.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LanguageServerContributionDescriptor {
+    pub id: String,
+    pub executable: String,
+    pub args: Vec<String>,
+    pub inherit_environment: Vec<String>,
+}
+
+/// Inert descriptor for a language-intelligence provider contribution.
+///
+/// Declares feature/mode/timeout metadata only. Handler binding happens at
+/// registration time through a resolver-validated module/export token; no
+/// callback, process, or language-server authority is granted here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageIntelligenceProviderContributionDescriptor {
+    /// Package-prefixed provider ID.
+    pub id: String,
+    /// Modes this provider serves. Empty means all modes.
+    pub modes: Vec<String>,
+    /// Feature kinds this provider serves. Must be non-empty.
+    pub features: Vec<LanguageIntelligenceFeature>,
+    /// Higher priority providers are preferred.
+    pub priority: i32,
+    /// Optional package-root-relative module path for documentation/diagnostics.
+    pub module: Option<String>,
+    /// Export name expected when the package binds a handler token.
+    pub export_name: String,
+    /// Per-provider timeout in milliseconds.
+    pub timeout_ms: u64,
     /// Estimated bounded metadata payload for the contribution.
     pub estimated_payload_bytes: usize,
 }
@@ -371,6 +408,8 @@ pub struct PackageContributions {
     pub decorations: Vec<DecorationContributionDescriptor>,
     pub syntax_grammars: Vec<SyntaxGrammarContributionDescriptor>,
     pub completion_providers: Vec<CompletionProviderContributionDescriptor>,
+    pub language_servers: Vec<LanguageServerContributionDescriptor>,
+    pub language_intelligence_providers: Vec<LanguageIntelligenceProviderContributionDescriptor>,
     pub ui_panels: Vec<UiPanelContributionDescriptor>,
     pub ui_components: Vec<UiComponentContributionDescriptor>,
     pub ui_overlays: Vec<UiOverlayContributionDescriptor>,
@@ -528,6 +567,18 @@ pub fn assemble_package_record(value: &Value) -> Result<PackageRecord, PackageRe
         )?,
         None => PackageContributions::default(),
     };
+    if manifest
+        .clay
+        .permissions
+        .contains(&PackagePermission::LanguageServer)
+        && contributions.language_servers.is_empty()
+    {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            "packages requesting `language-server` must declare at least one clay.contributions.languageServers entry",
+        ));
+    }
 
     // Step 3: required docs path.
     let docs = parse_docs_metadata(clay.get("docs"), &ctx)?;
@@ -770,6 +821,16 @@ fn parse_contributions(
         Some(v) => parse_completion_provider_contributions(v, api_prefix, permissions, ctx)?,
         None => Vec::new(),
     };
+    let language_servers = match map.get("languageServers") {
+        Some(v) => parse_language_server_contributions(v, api_prefix, permissions, ctx)?,
+        None => Vec::new(),
+    };
+    let language_intelligence_providers = match map.get("languageIntelligenceProviders") {
+        Some(v) => {
+            parse_language_intelligence_provider_contributions(v, api_prefix, permissions, ctx)?
+        }
+        None => Vec::new(),
+    };
     let theme_tokens = match map.get("themeTokens") {
         Some(v) => parse_theme_token_contributions(v, api_prefix, ctx)?,
         None => Vec::new(),
@@ -823,6 +884,8 @@ fn parse_contributions(
         decorations,
         syntax_grammars,
         completion_providers,
+        language_servers,
+        language_intelligence_providers,
         ui_panels,
         ui_components,
         ui_overlays,
@@ -1820,6 +1883,389 @@ fn parse_completion_provider_contributions(
         });
     }
     Ok(descriptors)
+}
+
+fn parse_language_server_contributions(
+    value: &Value,
+    api_prefix: &str,
+    permissions: &[PackagePermission],
+    ctx: &ErrorContext,
+) -> Result<Vec<LanguageServerContributionDescriptor>, PackageRecordError> {
+    const MAX_SERVERS: usize = 8;
+    const MAX_ARGS: usize = 32;
+    const MAX_ENVIRONMENT_NAMES: usize = 32;
+    const MAX_VALUE_BYTES: usize = 4096;
+
+    let entries = array_field(value, "clay.contributions.languageServers", ctx)?;
+    if entries.len() > MAX_SERVERS {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            format!("languageServers must contain at most {MAX_SERVERS} entries"),
+        ));
+    }
+    if !entries.is_empty() && !permissions.contains(&PackagePermission::LanguageServer) {
+        return Err(ctx.error(
+            PackageRecordRule::UndeclaredPermissionForContribution,
+            None,
+            "language-server contributions require the `language-server` capability",
+        ));
+    }
+
+    let mut seen_ids = HashSet::new();
+    let mut descriptors = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let obj = object_field(entry, "language-server contribution", ctx)?;
+        for field in obj.keys() {
+            if !matches!(
+                field.as_str(),
+                "id" | "executable" | "args" | "inheritEnvironment"
+            ) {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    None,
+                    format!("language-server contribution field `{field}` is not allowed"),
+                ));
+            }
+        }
+        let id = package_owned_field(obj, "id", api_prefix, ctx)?.to_string();
+        if id.len() > 128 || !seen_ids.insert(id.clone()) {
+            return Err(ctx.error(
+                if id.len() > 128 {
+                    PackageRecordRule::InvalidContributionDescriptor
+                } else {
+                    PackageRecordRule::DuplicateContributionId
+                },
+                Some(&id),
+                "language-server contribution IDs must be unique and at most 128 bytes",
+            ));
+        }
+        let executable = obj
+            .get("executable")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "language-server executable must be a non-empty string",
+                )
+            })?;
+        if executable.len() > MAX_VALUE_BYTES || executable.chars().any(char::is_control) {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                "language-server executable must be at most 4096 bytes without control characters",
+            ));
+        }
+        let args =
+            bounded_string_array(obj.get("args"), "args", MAX_ARGS, MAX_VALUE_BYTES, &id, ctx)?;
+        let inherit_environment = bounded_string_array(
+            obj.get("inheritEnvironment"),
+            "inheritEnvironment",
+            MAX_ENVIRONMENT_NAMES,
+            128,
+            &id,
+            ctx,
+        )?;
+        let mut seen_environment = HashSet::new();
+        for name in &inherit_environment {
+            let valid = name.bytes().enumerate().all(|(index, byte)| {
+                byte == b'_' || byte.is_ascii_alphabetic() || (index > 0 && byte.is_ascii_digit())
+            });
+            if !valid || !seen_environment.insert(name.as_str()) {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "inheritEnvironment names must be unique ASCII environment variable names",
+                ));
+            }
+        }
+        descriptors.push(LanguageServerContributionDescriptor {
+            id,
+            executable: executable.to_string(),
+            args,
+            inherit_environment,
+        });
+    }
+    Ok(descriptors)
+}
+
+fn parse_language_intelligence_provider_contributions(
+    value: &Value,
+    api_prefix: &str,
+    permissions: &[PackagePermission],
+    ctx: &ErrorContext,
+) -> Result<Vec<LanguageIntelligenceProviderContributionDescriptor>, PackageRecordError> {
+    const MAX_PROVIDERS: usize = 32;
+    const MAX_MODES: usize = 32;
+    const MAX_FEATURES: usize = 4;
+
+    let entries = array_field(
+        value,
+        "clay.contributions.languageIntelligenceProviders",
+        ctx,
+    )?;
+    if entries.len() > MAX_PROVIDERS {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            format!("languageIntelligenceProviders must contain at most {MAX_PROVIDERS} entries"),
+        ));
+    }
+    if !entries.is_empty() && !permissions.contains(&PackagePermission::ParseDocument) {
+        return Err(ctx.error(
+            PackageRecordRule::UndeclaredPermissionForContribution,
+            None,
+            "language-intelligence provider contributions require `parse-document` permission",
+        ));
+    }
+
+    let mut seen_ids = HashSet::new();
+    let mut descriptors = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let estimated_payload_bytes = contribution_payload_size(entry);
+        if estimated_payload_bytes > BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES {
+            return Err(ctx.error(
+                PackageRecordRule::PayloadBudgetExceeded,
+                None,
+                format!(
+                    "language-intelligence provider metadata payload ({estimated_payload_bytes} bytes) exceeds BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES ({BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_language_intelligence_prohibited_authority(entry, ctx)?;
+        let obj = object_field(entry, "language-intelligence provider contribution", ctx)?;
+        let id = package_owned_field(obj, "id", api_prefix, ctx)?.to_string();
+        if !seen_ids.insert(id.clone()) {
+            return Err(ctx.error(
+                PackageRecordRule::DuplicateContributionId,
+                Some(&id),
+                "language-intelligence provider IDs must be unique within a package",
+            ));
+        }
+        let modes = optional_string_vec(obj.get("modes"), "modes", ctx)?;
+        if modes.len() > MAX_MODES {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "language-intelligence provider modes must contain at most {MAX_MODES} entries"
+                ),
+            ));
+        }
+        let features = parse_language_intelligence_features(obj.get("features"), &id, ctx)?;
+        if features.is_empty() || features.len() > MAX_FEATURES {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "language-intelligence provider features must contain 1..={MAX_FEATURES} entries"
+                ),
+            ));
+        }
+        let priority = obj.get("priority").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let module = match obj.get("module") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(path)) => {
+                if path.is_empty()
+                    || path.len() > 512
+                    || path.chars().any(char::is_control)
+                    || path.contains("..")
+                    || path.starts_with('/')
+                {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(&id),
+                        "language-intelligence provider module must be a bounded package-relative path",
+                    ));
+                }
+                Some(path.clone())
+            }
+            Some(_) => {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "language-intelligence provider module must be a string path",
+                ));
+            }
+        };
+        let export_name = match obj.get("exportName") {
+            None | Some(Value::Null) => "provideLanguageIntelligence".to_string(),
+            Some(Value::String(name))
+                if !name.is_empty() && name.len() <= 128 && !name.chars().any(char::is_control) =>
+            {
+                name.clone()
+            }
+            Some(_) => {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    "language-intelligence provider exportName must be a non-empty bounded string",
+                ));
+            }
+        };
+        let timeout_ms = optional_u64_budget(
+            obj.get("budgets").and_then(Value::as_object),
+            "timeoutMs",
+            &id,
+            ctx,
+        )?
+        .or_else(|| obj.get("timeoutMs").and_then(Value::as_u64))
+        .unwrap_or(LANGUAGE_INTELLIGENCE_DEFAULT_TIMEOUT_MS);
+        if timeout_ms == 0 || timeout_ms > LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(&id),
+                format!(
+                    "language-intelligence provider timeoutMs must be within 1..={LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS}"
+                ),
+            ));
+        }
+        descriptors.push(LanguageIntelligenceProviderContributionDescriptor {
+            id,
+            modes,
+            features,
+            priority,
+            module,
+            export_name,
+            timeout_ms,
+            estimated_payload_bytes,
+        });
+    }
+    Ok(descriptors)
+}
+
+fn parse_language_intelligence_features(
+    value: Option<&Value>,
+    contribution_id: &str,
+    ctx: &ErrorContext,
+) -> Result<Vec<LanguageIntelligenceFeature>, PackageRecordError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(values) = value else {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(contribution_id),
+            "language-intelligence provider features must be an array of strings",
+        ));
+    };
+    let mut features = Vec::with_capacity(values.len());
+    let mut seen = HashSet::new();
+    for value in values {
+        let Some(name) = value.as_str() else {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(contribution_id),
+                "language-intelligence provider features must be strings",
+            ));
+        };
+        let feature = match name {
+            "hover" | "Hover" => LanguageIntelligenceFeature::Hover,
+            "definition" | "goToDefinition" | "GoToDefinition" => {
+                LanguageIntelligenceFeature::GoToDefinition
+            }
+            "codeAction" | "CodeAction" => LanguageIntelligenceFeature::CodeAction,
+            "signatureHelp" | "SignatureHelp" => LanguageIntelligenceFeature::SignatureHelp,
+            other => {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(contribution_id),
+                    format!("unsupported language-intelligence feature `{other}`"),
+                ));
+            }
+        };
+        if seen.insert(feature) {
+            features.push(feature);
+        }
+    }
+    Ok(features)
+}
+
+fn reject_language_intelligence_prohibited_authority(
+    value: &Value,
+    ctx: &ErrorContext,
+) -> Result<(), PackageRecordError> {
+    match value {
+        Value::Object(object) => {
+            for (key, nested) in object {
+                if matches!(
+                    key.as_str(),
+                    "handler"
+                        | "callback"
+                        | "function"
+                        | "clientJavaScript"
+                        | "nativeHandle"
+                        | "rawOps"
+                        | "shellCommand"
+                        | "executable"
+                        | "languageServer"
+                        | "process"
+                ) {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        None,
+                        format!(
+                            "language-intelligence provider metadata must not include executable or process authority field `{key}`"
+                        ),
+                    ));
+                }
+                reject_language_intelligence_prohibited_authority(nested, ctx)?;
+            }
+            Ok(())
+        }
+        Value::Array(values) => {
+            for nested in values {
+                reject_language_intelligence_prohibited_authority(nested, ctx)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn bounded_string_array(
+    value: Option<&Value>,
+    field: &str,
+    max_items: usize,
+    max_bytes: usize,
+    contribution_id: &str,
+    ctx: &ErrorContext,
+) -> Result<Vec<String>, PackageRecordError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(values) = value else {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(contribution_id),
+            format!("language-server {field} must be an array of strings"),
+        ));
+    };
+    if values.len() > max_items {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(contribution_id),
+            format!("language-server {field} must contain at most {max_items} entries"),
+        ));
+    }
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|text| !text.is_empty() && text.len() <= max_bytes && !text.chars().any(char::is_control))
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(contribution_id),
+                        format!("language-server {field} entries must be non-empty bounded strings without control characters"),
+                    )
+                })
+        })
+        .collect()
 }
 
 fn reject_completion_provider_prohibited_authority(

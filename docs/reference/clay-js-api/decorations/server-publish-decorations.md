@@ -66,6 +66,7 @@ Use this API when a package parse/render provider has produced syntax, semantic,
 ```ts
 import { serverPublishDecorations } from "clay:decorations";
 
+// Legacy styleToken path (classified into TokenType + Modifiers server-side).
 serverPublishDecorations({
   packageName: "@clay/markdown",
   packageVersion: "0.1.0",
@@ -80,6 +81,25 @@ serverPublishDecorations({
     kind: "syntax",
     styleToken: "markup.heading.1",
     priority: 10,
+  }],
+});
+
+// Direct two-axis semantic publication for analyzer/LSP bridge packages.
+serverPublishDecorations({
+  packageName: "@clay/lsp-rust",
+  packageVersion: "0.1.0",
+  packagePrefix: "lsprust",
+  permissions: ["render-decorations"],
+  documentId,
+  documentVersion,
+  viewport: { byteStart, byteEnd },
+  spans: [{
+    byteStart,
+    byteEnd,
+    kind: "semantic",
+    tokenType: "Function",
+    modifiers: ["Declaration", "Readonly"],
+    priority: 20,
   }],
 });
 ```
@@ -107,7 +127,7 @@ serverPublishDecorations({
 - `viewportByteRange` / `viewport` (`{ byteStart: number; byteEnd: number }`, required): Viewport byte range.
 - `spans` (`DecorationSpan[]`, required): Known inert span records.
 
-Known span kinds are `syntax`, `semantic`, `diagnostic`, and `search-match`. Style tokens are bounded Clay tokens such as `markup.heading.1`, `markup.strong`, `markup.emphasis`, `markup.inline-code`, `markup.code-block`, `markup.list-marker`, `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `diagnostic.error`, and `search.match`.
+Known span kinds are `syntax`, `semantic`, `diagnostic`, and `search-match`. Each span must provide either direct two-axis vocabulary (`tokenType` such as `Function`/`Variable`/`Keyword` plus optional `modifiers` such as `Declaration`/`Readonly`/`Bold`) or a legacy `styleToken` compatibility string such as `markup.heading.1`, `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `diagnostic.error`, and `search.match`. `language-server` permission does not grant decoration publication; packages still need `render-decorations`.
 
 ## Key bindings
 

@@ -20,4 +20,5 @@ export * as decorations from "./decorations.ts";
 export * as diagnostics from "./diagnostics.ts";
 export * as parse from "./parse.ts";
 export * as completion from "./completion.ts";
+export * as language from "./language.ts";
 export * as theme from "./theme.ts";

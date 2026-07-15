@@ -2,12 +2,14 @@ pub mod codec;
 pub mod completion;
 pub mod decorations;
 pub mod diagnostics;
+pub mod language_intelligence;
 pub mod parse;
 pub mod sdui;
 
 pub use completion::*;
 pub use decorations::*;
 pub use diagnostics::*;
+pub use language_intelligence::*;
 pub use parse::*;
 pub use sdui::*;
 
@@ -202,6 +204,13 @@ fn default_commands() -> Vec<CommandDeclaration> {
         CommandDeclaration::client_edit("text.insert_newline", "Insert Newline"),
         CommandDeclaration::client_edit("text.insert_tab", "Insert Tab"),
         CommandDeclaration::ui_reactive("completion.trigger", "Trigger Completion"),
+        // Phase 18.20: discoverable language-intelligence commands with empty
+        // default key bindings. Client captures cursor/version locally and
+        // enqueues LanguageIntelligenceRequest (UI-reactive, like completion).
+        CommandDeclaration::ui_reactive("clay.language.hover", "Hover"),
+        CommandDeclaration::ui_reactive("clay.language.goToDefinition", "Go to Definition"),
+        CommandDeclaration::ui_reactive("clay.language.codeActions", "Code Actions"),
+        CommandDeclaration::ui_reactive("clay.language.signatureHelp", "Signature Help"),
     ]
 }
 
@@ -681,6 +690,17 @@ pub enum ClientMessage {
     CompletionRequest {
         request: CompletionRequest,
     },
+    /// Phase 18.20 engine-neutral language-intelligence request. Enqueued after a
+    /// local-first hover/definition/code-action/signature-help intent captures
+    /// the current document/version/cursor byte offset. Carries typed request
+    /// metadata only (no document text); the server-side provider lane
+    /// stale-drops older requests against `document_version`/
+    /// `behavior_version`/`provider_generation`. Canonical positions are UTF-8
+    /// byte offsets; LSP line/character/URI conversion lives in Phase 18.21
+    /// package adapters.
+    LanguageIntelligenceRequest {
+        request: LanguageIntelligenceRequest,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -952,6 +972,22 @@ pub enum ServerMessage {
     CompletionRejected {
         request_id: CompletionRequestId,
         reason: CompletionRejection,
+    },
+    /// Phase 18.20 language-intelligence result. Bounded, versioned,
+    /// provenance-bearing, feature-tagged result payload published after
+    /// server-side validation. Inert data only; code-action edits are inert
+    /// previews and command-backed actions execute later through
+    /// `CommandExecution`.
+    LanguageIntelligenceResult {
+        result: LanguageIntelligenceResult,
+    },
+    /// Phase 18.20 language-intelligence result rejection. Published in place of
+    /// a result when validation fails (stale version/generation, invalid byte
+    /// range/path/command, payload/count/field budget) before client
+    /// publication.
+    LanguageIntelligenceRejected {
+        request_id: LanguageIntelligenceRequestId,
+        reason: LanguageIntelligenceRejection,
     },
     /// Phase 18.15 (Plan 046) resolved active theme snapshot. Sent once after
     /// the welcome `BehaviorManifest` when `setTheme("...")` ran in `init.js`;

@@ -91,8 +91,10 @@ fn set_attr_bit(bits: &mut u16, flag: u16, opt: Option<bool>) {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StyleRegistry {
     pub base: BaseUiColors,
-    // Decoration-layer fallback colors (kind-first authoritatively; `Syntax`
-    // falls through to the per-`TokenType` table below).
+    // Decoration-layer fallback colors (kind-first for Diagnostic/SearchMatch;
+    // Syntax and Semantic both fall through to the per-`TokenType` table).
+    // `semantic` remains the Clay default prose family color shared by headings
+    // and other text tokens in the syntax table.
     semantic: Color,
     /// Legacy `DecorationKind::Diagnostic` fill tint (error-severity default).
     diagnostic: Color,
@@ -202,12 +204,11 @@ impl StyleRegistry {
         }
     }
 
-    /// Resolved style for one span. `kind` is authoritative first (the
-    /// Diagnostic/SearchMatch/Semantic layers color by layer, not by token
-    /// family); for `Syntax` the closed `TokenType` selects the family color.
-    /// The text attributes come from the span's `modifiers` (theme-declared
-    /// per-token defaults arrive in task 5; for now the defaults are all
-    /// `false` and the modifiers drive the bits).
+    /// Resolved style for one span. `Diagnostic`/`SearchMatch` color by layer;
+    /// `Syntax` and `Semantic` both select the closed `TokenType` family color
+    /// so LSP semantic tokens refine vocabulary without a second theme table.
+    /// Text attributes come from the span's `modifiers` (OR'd with theme
+    /// per-token defaults).
     pub fn style_for(
         &self,
         kind: DecorationKind,
@@ -217,8 +218,7 @@ impl StyleRegistry {
         let color = match kind {
             DecorationKind::Diagnostic => self.diagnostic,
             DecorationKind::SearchMatch => self.search_match,
-            DecorationKind::Semantic => self.semantic,
-            DecorationKind::Syntax => self.syntax_color(token_type),
+            DecorationKind::Syntax | DecorationKind::Semantic => self.syntax_color(token_type),
         };
         // Theme-declared per-token text-attribute defaults upgrade the span
         // modifiers (OR): a theme that makes `Keyword` bold renders keywords
@@ -234,9 +234,10 @@ impl StyleRegistry {
         }
     }
 
-    /// `Syntax`-layer color for one closed `TokenType`. The Clay default table
-    /// reproduces the prior prefix-based family mapping, while active themes can
-    /// override each token independently.
+    /// Vocabulary color for one closed `TokenType`. Shared by `Syntax` and
+    /// `Semantic` layers. The Clay default table reproduces the prior
+    /// prefix-based family mapping; active themes can override each token
+    /// independently.
     fn syntax_color(&self, token_type: TokenType) -> Color {
         self.syntax[token_type.index()]
     }
@@ -516,7 +517,7 @@ mod tests {
                 Modifiers::NONE
             )
             .color,
-            r.semantic
+            r.syntax_color(TokenType::Function)
         );
         assert_eq!(
             r.style_for(

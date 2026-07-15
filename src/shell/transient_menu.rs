@@ -22,6 +22,8 @@ use crate::perf::budgets::{
 use crate::protocol::{
     BehaviorVersion, CompletionItem, CompletionReplacementRange, CompletionRequestId,
     CompletionResultSet, CompletionStatus, DocumentId, DocumentVersion,
+    LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
+    LanguageIntelligenceStatus, TextLocation,
 };
 
 const MAX_ITEMS: usize = TRANSIENT_MENU_MAX_ITEMS;
@@ -353,6 +355,282 @@ fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
+/// Project Markdown to bounded plain text for the bottom transient UI.
+/// Strips common Markdown markers and HTML tags; never executes markup.
+pub(crate) fn markdown_to_plain_text(markdown: &str) -> String {
+    let without_tags = strip_angle_bracket_tags(markdown);
+    let mut plain = String::with_capacity(without_tags.len());
+    let mut chars = without_tags.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '#' | '*' | '_' | '`' => {
+                // Skip runs of Markdown emphasis/heading markers.
+                while chars.peek().copied() == Some(ch) {
+                    chars.next();
+                }
+            }
+            '[' => {
+                // Keep link label text; drop `](url)` targets.
+                let mut label = String::new();
+                while let Some(next) = chars.peek().copied() {
+                    chars.next();
+                    if next == ']' {
+                        break;
+                    }
+                    label.push(next);
+                }
+                if chars.peek() == Some(&'(') {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if next == ')' {
+                            break;
+                        }
+                    }
+                }
+                plain.push_str(&label);
+            }
+            _ => plain.push(ch),
+        }
+    }
+    truncate(
+        plain.trim(),
+        MAX_LABEL_CHARS.saturating_mul(4).max(MAX_DETAIL_CHARS),
+    )
+}
+
+fn strip_angle_bracket_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for ch in input.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Project a language-intelligence result onto the existing bottom transient UI.
+/// Hover/signature use a modeless single-item (or empty status) presentation.
+/// Multiple definitions/actions become selectable menu items.
+pub(crate) fn language_intelligence_result_to_menu_session(
+    result: &LanguageIntelligenceResult,
+) -> TransientMenuSession {
+    let prompt = match result.feature {
+        LanguageIntelligenceFeature::Hover => "Hover",
+        LanguageIntelligenceFeature::GoToDefinition => "Definitions",
+        LanguageIntelligenceFeature::CodeAction => "Code Actions",
+        LanguageIntelligenceFeature::SignatureHelp => "Signature Help",
+    };
+    let empty_status = match result.status {
+        LanguageIntelligenceStatus::Ok | LanguageIntelligenceStatus::Empty => {
+            match result.feature {
+                LanguageIntelligenceFeature::Hover => "No hover information",
+                LanguageIntelligenceFeature::GoToDefinition => "No definitions",
+                LanguageIntelligenceFeature::CodeAction => "No code actions",
+                LanguageIntelligenceFeature::SignatureHelp => "No signature help",
+            }
+        }
+        LanguageIntelligenceStatus::Timeout => "Language intelligence timed out",
+        LanguageIntelligenceStatus::ProviderError => "Language intelligence provider error",
+    };
+
+    let items = match &result.payload {
+        LanguageIntelligencePayload::Hover(hover) => {
+            let plain = markdown_to_plain_text(&hover.markdown);
+            if plain.is_empty() {
+                Vec::new()
+            } else {
+                vec![
+                    TransientMenuItem::new(
+                        "hover.0",
+                        plain.clone(),
+                        TransientMenuAction::new("clay.language.dismissResult"),
+                    )
+                    .with_detail(format!(
+                        "{} {}",
+                        result.provenance.package_name, result.provenance.package_version
+                    ))
+                    .with_accessibility_label(format!("Hover {plain}"))
+                    .with_package_provenance(
+                        result.provenance.package_name.clone(),
+                        result.provenance.package_version.clone(),
+                    ),
+                ]
+            }
+        }
+        LanguageIntelligencePayload::SignatureHelp(help) => {
+            if help.signatures.is_empty() {
+                Vec::new()
+            } else {
+                let active = help
+                    .active_signature
+                    .map(usize::from)
+                    .unwrap_or(0)
+                    .min(help.signatures.len().saturating_sub(1));
+                help.signatures
+                    .iter()
+                    .enumerate()
+                    .map(|(index, signature)| {
+                        let documentation = markdown_to_plain_text(&signature.documentation);
+                        let detail = if index == active {
+                            if documentation.is_empty() {
+                                "active signature".to_string()
+                            } else {
+                                format!("active · {documentation}")
+                            }
+                        } else {
+                            documentation
+                        };
+                        TransientMenuItem::new(
+                            format!("signature.{index}"),
+                            signature.label.clone(),
+                            TransientMenuAction::new("clay.language.dismissResult"),
+                        )
+                        .with_detail(detail)
+                        .with_accessibility_label(format!("Signature {}", signature.label))
+                        .with_package_provenance(
+                            result.provenance.package_name.clone(),
+                            result.provenance.package_version.clone(),
+                        )
+                    })
+                    .collect()
+            }
+        }
+        LanguageIntelligencePayload::GoToDefinition(definition) => definition
+            .locations
+            .iter()
+            .enumerate()
+            .filter_map(|(index, location)| definition_location_to_menu_item(index, location))
+            .collect(),
+        LanguageIntelligencePayload::CodeAction(actions) => actions
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| {
+                let mut detail_parts = Vec::new();
+                if let Some(preview) = &action.edit {
+                    let edit_summary = preview
+                        .edits
+                        .iter()
+                        .map(|edit| {
+                            format!(
+                                "[{}-{}] {}",
+                                edit.range.byte_start,
+                                edit.range.byte_end,
+                                truncate(&edit.replacement, 64)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    detail_parts.push(format!("preview: {edit_summary}"));
+                }
+                if let Some(command_id) = &action.command_id {
+                    detail_parts.push(format!("command: {command_id}"));
+                }
+                let detail = if detail_parts.is_empty() {
+                    format!(
+                        "{} {}",
+                        result.provenance.package_name, result.provenance.package_version
+                    )
+                } else {
+                    detail_parts.join(" · ")
+                };
+                let menu_action = if let Some(command_id) = &action.command_id {
+                    TransientMenuAction::new(command_id.clone())
+                } else {
+                    // Inert edit-preview-only actions never mutate text in Phase 18.20.
+                    TransientMenuAction::new("clay.language.previewEdit").with_arguments(
+                        serde_json::json!({
+                            "title": action.title,
+                            "previewOnly": true,
+                        }),
+                    )
+                };
+                TransientMenuItem::new(
+                    format!("codeAction.{index}"),
+                    action.title.clone(),
+                    menu_action,
+                )
+                .with_detail(detail)
+                .with_accessibility_label(format!("Code action {}", action.title))
+                .with_package_provenance(
+                    result.provenance.package_name.clone(),
+                    result.provenance.package_version.clone(),
+                )
+            })
+            .collect(),
+    };
+
+    let focus = match result.feature {
+        LanguageIntelligenceFeature::Hover | LanguageIntelligenceFeature::SignatureHelp => {
+            TransientMenuFocusPolicy::Modeless
+        }
+        LanguageIntelligenceFeature::GoToDefinition | LanguageIntelligenceFeature::CodeAction => {
+            TransientMenuFocusPolicy::Modal
+        }
+    };
+
+    let session = TransientMenuSession::new(TransientMenuSessionId(result.request_id), prompt)
+        .with_focus_policy(focus)
+        .with_items(items);
+    if session.items().is_empty() {
+        session.with_empty_status(empty_status)
+    } else {
+        session
+    }
+}
+
+fn definition_location_to_menu_item(
+    index: usize,
+    location: &TextLocation,
+) -> Option<TransientMenuItem> {
+    match location {
+        TextLocation::OpenDocument { document_id, range } => {
+            let label = format!(
+                "document {document_id} [{}-{}]",
+                range.byte_start, range.byte_end
+            );
+            let action = TransientMenuAction::new("clay.language.navigateDefinition")
+                .with_arguments(serde_json::json!({
+                    "kind": "openDocument",
+                    "documentId": document_id,
+                    "byteStart": range.byte_start,
+                    "byteEnd": range.byte_end,
+                }));
+            Some(
+                TransientMenuItem::new(format!("definition.{index}"), label.clone(), action)
+                    .with_accessibility_label(format!("Go to {label}")),
+            )
+        }
+        TextLocation::WorkspaceFile {
+            workspace_root_id,
+            relative_path,
+            range,
+        } => {
+            let label = format!("{relative_path} [{}-{}]", range.byte_start, range.byte_end);
+            // Reuse the existing workspace open command; pending caret jump is
+            // applied client-side after DocumentOpened.
+            let action = TransientMenuAction::new("clay.workspace.openFile").with_arguments(
+                serde_json::json!({
+                    "workspaceRootId": workspace_root_id,
+                    "relativePath": relative_path,
+                    "byteStart": range.byte_start,
+                    "byteEnd": range.byte_end,
+                    "languageIntelligenceNavigation": true,
+                }),
+            );
+            Some(
+                TransientMenuItem::new(format!("definition.{index}"), label.clone(), action)
+                    .with_detail(format!("workspace root {workspace_root_id}"))
+                    .with_accessibility_label(format!("Go to {label}")),
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,5 +886,163 @@ mod tests {
             crate::protocol::CompletionItemTextFormat::PlainText
         );
         assert_eq!(accept.commit_characters, ";");
+    }
+
+    #[test]
+    fn markdown_to_plain_text_strips_html_and_common_markers() {
+        let plain = markdown_to_plain_text(
+            "# Title\n**bold** and <script>alert(1)</script> [link](https://evil.example)",
+        );
+        assert!(plain.contains("Title"));
+        assert!(plain.contains("bold"));
+        assert!(plain.contains("link"));
+        assert!(!plain.contains("<script>"));
+        assert!(!plain.contains("https://evil.example"));
+        assert!(!plain.contains("**"));
+    }
+
+    #[test]
+    fn language_intelligence_hover_projects_to_modeless_plain_text_menu() {
+        use crate::protocol::{
+            CompletionProvenance, HoverResult, LanguageIntelligenceFeature,
+            LanguageIntelligencePayload, LanguageIntelligenceResult, LanguageIntelligenceStatus,
+        };
+
+        let result = LanguageIntelligenceResult {
+            request_id: 9,
+            client_id: 1,
+            document_id: 7,
+            document_version: 3,
+            behavior_version: 2,
+            provider_generation: 0,
+            feature: LanguageIntelligenceFeature::Hover,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::Hover(HoverResult {
+                range: None,
+                markdown: "**fn** `main` <b>doc</b>".to_string(),
+            }),
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let session = language_intelligence_result_to_menu_session(&result);
+        assert_eq!(session.prompt(), "Hover");
+        assert_eq!(session.focus_policy(), TransientMenuFocusPolicy::Modeless);
+        assert_eq!(session.items().len(), 1);
+        assert!(!session.items()[0].label.contains("<"));
+        assert!(!session.items()[0].label.contains("**"));
+        assert_eq!(
+            session.items()[0].action.command_id,
+            "clay.language.dismissResult"
+        );
+    }
+
+    #[test]
+    fn language_intelligence_definitions_and_code_actions_project_to_selectable_menu() {
+        use crate::protocol::{
+            CodeAction, CodeActionResult, CompletionProvenance, EditPreview, GoToDefinitionResult,
+            LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
+            LanguageIntelligenceStatus, RangeEdit, TextByteRange, TextLocation,
+        };
+
+        let definition = LanguageIntelligenceResult {
+            request_id: 1,
+            client_id: 1,
+            document_id: 7,
+            document_version: 1,
+            behavior_version: 1,
+            provider_generation: 0,
+            feature: LanguageIntelligenceFeature::GoToDefinition,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::GoToDefinition(GoToDefinitionResult {
+                locations: vec![
+                    TextLocation::OpenDocument {
+                        document_id: 7,
+                        range: TextByteRange {
+                            byte_start: 4,
+                            byte_end: 8,
+                        },
+                    },
+                    TextLocation::WorkspaceFile {
+                        workspace_root_id: 1,
+                        relative_path: "src/lib.rs".to_string(),
+                        range: TextByteRange {
+                            byte_start: 10,
+                            byte_end: 14,
+                        },
+                    },
+                ],
+            }),
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let definition_menu = language_intelligence_result_to_menu_session(&definition);
+        assert_eq!(definition_menu.prompt(), "Definitions");
+        assert_eq!(
+            definition_menu.focus_policy(),
+            TransientMenuFocusPolicy::Modal
+        );
+        assert_eq!(definition_menu.items().len(), 2);
+        assert_eq!(
+            definition_menu.items()[0].action.command_id,
+            "clay.language.navigateDefinition"
+        );
+        assert_eq!(
+            definition_menu.items()[1].action.command_id,
+            "clay.workspace.openFile"
+        );
+        assert_eq!(
+            definition_menu.items()[1].action.arguments["relativePath"],
+            "src/lib.rs"
+        );
+
+        let actions = LanguageIntelligenceResult {
+            request_id: 2,
+            client_id: 1,
+            document_id: 7,
+            document_version: 1,
+            behavior_version: 1,
+            provider_generation: 0,
+            feature: LanguageIntelligenceFeature::CodeAction,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::CodeAction(CodeActionResult {
+                actions: vec![
+                    CodeAction {
+                        range: TextByteRange {
+                            byte_start: 0,
+                            byte_end: 1,
+                        },
+                        title: "Rename symbol".to_string(),
+                        command_id: Some("pkg.rename".to_string()),
+                        edit: None,
+                    },
+                    CodeAction {
+                        range: TextByteRange {
+                            byte_start: 0,
+                            byte_end: 1,
+                        },
+                        title: "Inline preview".to_string(),
+                        command_id: None,
+                        edit: Some(EditPreview {
+                            document_id: 7,
+                            document_version: 1,
+                            edits: vec![RangeEdit {
+                                range: TextByteRange {
+                                    byte_start: 0,
+                                    byte_end: 1,
+                                },
+                                replacement: "X".to_string(),
+                            }],
+                        }),
+                    },
+                ],
+            }),
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let action_menu = language_intelligence_result_to_menu_session(&actions);
+        assert_eq!(action_menu.items().len(), 2);
+        assert_eq!(action_menu.items()[0].action.command_id, "pkg.rename");
+        assert_eq!(
+            action_menu.items()[1].action.command_id,
+            "clay.language.previewEdit"
+        );
+        assert_eq!(action_menu.items()[1].action.arguments["previewOnly"], true);
     }
 }

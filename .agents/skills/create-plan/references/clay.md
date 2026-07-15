@@ -48,6 +48,18 @@ Place this task after the primitive-review task and before broad implementation 
 
 Decision source: `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`.
 
+## External Process Authority Task
+
+Each Clay plan that introduces or materially changes a package-triggered external process must include an authority-decision task before implementation. The task must require:
+
+- A dedicated deny-by-default capability and explicit user approval bound to package provenance, a fixed contribution, canonical executable/literal argv, explicit inherited-environment names, and known workspace roots.
+- No implicit grant from package load, bundled/first-party trust, `shell`, or `filesystem`; no runtime-selected executable, arguments, cwd, shell, or unrestricted environment.
+- Bounded asynchronous I/O, timeout/concurrency budgets, sanitized diagnostics, revocation/reload/root-removal/runtime-replacement cleanup, and no process work in editor hot paths.
+- Truthful containment language: cwd/root grants constrain Clay's API and audit record, not same-user OS filesystem/network/process access. Do not call the child sandboxed or workspace/filesystem confined without separately approved OS enforcement.
+- Realistic alternatives, explicit user approval, a decision log, reusable project-pattern updates, and deny/revocation/lifecycle tests before process code starts.
+
+Decision source: `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
+
 ## Package-Provided Grammar Task
 
 Each Clay phase plan that implements or materially changes syntax highlighting, language grammar support, Tree-sitter integration, language packages, or language-mode expansion must include acceptance criteria and/or a dedicated task for package-provided grammar contributions.

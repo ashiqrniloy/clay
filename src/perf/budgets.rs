@@ -1,3 +1,19 @@
+// Phase 18.20 language-server process/session budgets. A language-server
+// session is an authorized, host-owned child process speaking an opaque
+// bounded byte stream (UTF-8 JSON-RPC for LSP adapters in Phase 18.21). These
+// are server-owned security/performance ceilings, not user configuration:
+// every read/write/stderr/process-count is hard-capped before it can allocate
+// or linger, and diagnostics are sanitized. These bytes never enter the IPC
+// codec frame budget; they cross only the host<->child stdio boundary.
+/// Maximum bytes for one language-server stdin write / stdout read.
+pub const LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES: usize = 256 * 1024;
+/// Maximum accumulated child stderr retained for sanitized diagnostics.
+pub const LANGUAGE_SERVER_STDERR_BUDGET_BYTES: usize = 64 * 1024;
+/// Maximum concurrent language-server sessions per runtime generation.
+pub const LANGUAGE_SERVER_MAX_SESSIONS: usize = 16;
+/// Default wall-clock timeout for a single language-server stdout read.
+pub const LANGUAGE_SERVER_READ_TIMEOUT_MS: u64 = 30_000;
+
 pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
 // Edit acknowledgement payload budget.  Advisory: rkyv union-layout sizing means
 // the serialized size of `ServerMessage::EditAck` grows with the largest enum
@@ -74,6 +90,35 @@ pub const COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_COMMIT_CHARS: usize = 32;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
+
+// Phase 18.20 engine-neutral language-intelligence budgets. Canonical
+// positions are UTF-8 byte offsets against Clay documents or known
+// workspace-root-relative paths; LSP line/character/URI conversion lives in
+// Phase 18.21 package adapters, never in core protocol types.
+pub const LANGUAGE_INTELLIGENCE_REQUEST_PAYLOAD_BUDGET_BYTES: usize = 512;
+pub const LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
+pub const LANGUAGE_INTELLIGENCE_MAX_DEFINITION_LOCATIONS: usize = 64;
+pub const LANGUAGE_INTELLIGENCE_MAX_CODE_ACTIONS: usize = 64;
+pub const LANGUAGE_INTELLIGENCE_MAX_SIGNATURES: usize = 16;
+pub const LANGUAGE_INTELLIGENCE_MAX_PARAMETERS: usize = 32;
+pub const LANGUAGE_INTELLIGENCE_MAX_EDITS_PER_PREVIEW: usize = 32;
+pub const LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS: usize = 4096;
+pub const LANGUAGE_INTELLIGENCE_MAX_TITLE_CHARS: usize = 256;
+pub const LANGUAGE_INTELLIGENCE_MAX_LABEL_CHARS: usize = 256;
+pub const LANGUAGE_INTELLIGENCE_MAX_DOCUMENTATION_CHARS: usize = 1024;
+pub const LANGUAGE_INTELLIGENCE_MAX_EDIT_CHARS: usize = 4096;
+pub const LANGUAGE_INTELLIGENCE_MAX_RELATIVE_PATH_CHARS: usize = 512;
+pub const LANGUAGE_INTELLIGENCE_MAX_PROVENANCE_FIELD_CHARS: usize = 256;
+/// Hard ceiling on concurrent in-flight language-intelligence tasks per
+/// coordinator. Additional schedule attempts fail closed until a slot frees.
+pub const LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS: usize = 16;
+/// Default per-provider timeout when a contribution omits `timeoutMs`.
+pub const LANGUAGE_INTELLIGENCE_DEFAULT_TIMEOUT_MS: u64 = 500;
+/// Hard ceiling on per-provider timeout. Matches the completion lane.
+pub const LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS: u64 = 5_000;
+/// Bounded open-document text slice handed to a provider. Same size as the
+/// completion window so analyzers never see an unbounded document.
+pub const LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
 
 // Phase 18.8 command execution and transient menu budgets.
 pub const COMMAND_ARGUMENT_BUDGET_BYTES: usize = 4 * 1024;

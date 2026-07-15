@@ -8,7 +8,7 @@ use crate::{
     packages::record::{PackageRecord, assemble_package_record},
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentFontRole,
-        DocumentId, DocumentVersion,
+        DocumentId, DocumentVersion, Modifiers, TokenType,
     },
     server::decorations::{DecorationValidationError, validate_decoration_publication},
 };
@@ -121,20 +121,77 @@ fn span_from_value(
             ));
         }
     };
-    let mut span = DecorationSpan::from_style_token(
-        required_u64(object, "byteStart", "clay.decorations.invalid_span")?,
-        required_u64(object, "byteEnd", "clay.decorations.invalid_span")?,
-        kind,
-        required_str(object, "styleToken", "clay.decorations.invalid_span")?,
-        optional_u64(object.get("priority"))?.unwrap_or(0) as u16,
-        DecorationProvenance {
-            package_name: package.manifest.name.clone(),
-            package_version: package.manifest.version.clone(),
-            package_prefix: package.manifest.clay.api_prefix.clone(),
-        },
-    );
+    let byte_start = required_u64(object, "byteStart", "clay.decorations.invalid_span")?;
+    let byte_end = required_u64(object, "byteEnd", "clay.decorations.invalid_span")?;
+    let priority = optional_u64(object.get("priority"))?.unwrap_or(0) as u16;
+    let provenance = DecorationProvenance {
+        package_name: package.manifest.name.clone(),
+        package_version: package.manifest.version.clone(),
+        package_prefix: package.manifest.clay.api_prefix.clone(),
+    };
+
+    let token_type_raw = object
+        .get("tokenType")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let style_token_raw = object
+        .get("styleToken")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let mut span = match (token_type_raw, style_token_raw) {
+        (Some(token_type_name), _) => {
+            let token_type = TokenType::from_name(token_type_name).ok_or_else(|| {
+                clay_error(format!(
+                    "clay.decorations.invalid_span: unknown tokenType `{token_type_name}`"
+                ))
+            })?;
+            let modifiers = modifiers_from_value(object.get("modifiers"))?;
+            DecorationSpan::from_vocabulary(
+                byte_start, byte_end, kind, token_type, modifiers, priority, provenance,
+            )
+        }
+        (None, Some(style_token)) => DecorationSpan::from_style_token(
+            byte_start,
+            byte_end,
+            kind,
+            style_token,
+            priority,
+            provenance,
+        ),
+        (None, None) => {
+            return Err(clay_error(
+                "clay.decorations.invalid_span: span must provide tokenType or styleToken",
+            ));
+        }
+    };
     span.font_role = font_role;
     Ok(span)
+}
+
+fn modifiers_from_value(value: Option<&Value>) -> Result<Modifiers, JsErrorBox> {
+    match value {
+        None | Some(Value::Null) => Ok(Modifiers::NONE),
+        Some(Value::Array(names)) => {
+            let mut owned = Vec::with_capacity(names.len());
+            for entry in names {
+                let name = entry.as_str().ok_or_else(|| {
+                    clay_error(
+                        "clay.decorations.invalid_span: modifiers must be an array of strings",
+                    )
+                })?;
+                owned.push(name);
+            }
+            let borrowed = owned.to_vec();
+            Modifiers::from_names(&borrowed)
+                .ok_or_else(|| clay_error("clay.decorations.invalid_span: unknown modifiers entry"))
+        }
+        Some(_) => Err(clay_error(
+            "clay.decorations.invalid_span: modifiers must be an array of strings",
+        )),
+    }
 }
 
 pub(super) fn package_from_options(

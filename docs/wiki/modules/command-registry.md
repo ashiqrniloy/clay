@@ -61,6 +61,10 @@ Phase 18.12 registers four built-in server-first commands for the Clay-owned fil
 
 These commands carry bounded workspace authority only: they cannot access paths outside known roots or selected-file grants, cannot add roots or markers, and cannot perform save/save-as/rename/delete operations. Save-related destructive operations remain deferred per roadmap.
 
+### Phase 18.20 language-intelligence commands
+
+Four built-in `UiReactivePriority` commands—`clay.language.hover`, `clay.language.goToDefinition`, `clay.language.codeActions`, and `clay.language.signatureHelp`—are discoverable with empty default key bindings. Client routing captures current document/version/cursor metadata and emits a `LanguageIntelligenceRequest` rather than executing through a package callback. Definition and code-action menu selections return to the shared command path: workspace definitions reuse `clay.workspace.openFile`; command-backed actions must already be registered and validated by `CommandExecution`; edit previews never mutate text in Phase 18.20.
+
 ## Code Examples
 
 ```rust
@@ -111,6 +115,7 @@ cargo test --lib editor
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Mode Registry](mode-registry.md)
 - [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
+- [Language Intelligence](language-intelligence.md)
 - `docs/reference/primitives/registry.md#CommandDeclaration`
 - `docs/reference/primitives/registry.md#KeyRoutingOverride`
 - `docs/reference/primitives/registry.md#TextTransform`

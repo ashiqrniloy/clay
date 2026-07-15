@@ -610,6 +610,13 @@ pub fn builtin_server_command_ids() -> &'static [&'static str] {
         "clay.workspace.toggleFileBrowser",
         "clay.git.listStatuses",
         "clay.git.refreshStatus",
+        "clay.language.hover",
+        "clay.language.goToDefinition",
+        "clay.language.codeActions",
+        "clay.language.signatureHelp",
+        "clay.language.previewEdit",
+        "clay.language.dismissResult",
+        "clay.language.navigateDefinition",
     ]
 }
 
@@ -627,7 +634,14 @@ pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
         | "clay.workspace.openDirectory"
         | "clay.workspace.toggleFileBrowser"
         | "clay.git.listStatuses"
-        | "clay.git.refreshStatus" => Some(RegisteredCommand {
+        | "clay.git.refreshStatus"
+        | "clay.language.hover"
+        | "clay.language.goToDefinition"
+        | "clay.language.codeActions"
+        | "clay.language.signatureHelp"
+        | "clay.language.previewEdit"
+        | "clay.language.dismissResult"
+        | "clay.language.navigateDefinition" => Some(RegisteredCommand {
             package_name: "clay".to_string(),
             package_version: env!("CARGO_PKG_VERSION").to_string(),
             api_prefix: "clay".to_string(),
@@ -657,6 +671,13 @@ fn builtin_display_name(command_id: &str) -> &'static str {
         "clay.workspace.toggleFileBrowser" => "Toggle File Browser",
         "clay.git.listStatuses" => "List Git Statuses",
         "clay.git.refreshStatus" => "Refresh Git Status",
+        "clay.language.hover" => "Hover",
+        "clay.language.goToDefinition" => "Go to Definition",
+        "clay.language.codeActions" => "Code Actions",
+        "clay.language.signatureHelp" => "Signature Help",
+        "clay.language.previewEdit" => "Preview Edit (Deferred)",
+        "clay.language.dismissResult" => "Dismiss Language Result",
+        "clay.language.navigateDefinition" => "Navigate Definition",
         _ => "Built-in Command",
     }
 }

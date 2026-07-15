@@ -28,6 +28,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Text Vocabulary and Two-Axis Decoration Contract](reference/primitives/syntax-vocabulary.md) — Phase 18.15 locked LSP-based `TokenType` + `Modifiers` vocabulary, Clay prose/text-attribute extensions, open-string scope escape, compatibility mapping from free-form `style_token`, and single-source-of-color `StyleRegistry` invariant.
 - [Semantic Typography Roles](reference/primitives/typography.md) — Phase 18.16.5 package/mode authoring contract for semantic document, range, and component roles with user-owned concrete typography.
 - [Range Diagnostics](reference/primitives/diagnostics.md) — Phase 18.17 byte-range diagnostic primitive for explicit analyzers, theme-owned squiggles, and future LSP bridges; Tree-sitter highlighting has no diagnostic authority.
+- [Language Intelligence and LSP 3.17 Bridge Contract](reference/primitives/language-intelligence.md) — Phase 18.20 analyzer-neutral intelligence primitives, `language-server` authority, and the LSP 3.17 → Clay mapping contract for Phase 18.21 bridge packages.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, tiered syntax-engine smoke, `smoke-gui`, foreground server/client, GUI status, and local IPC validation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
@@ -87,6 +88,9 @@ The generated documentation registry must read this section as the explicit incl
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `clay.completion.serverListCompletionProvidersForTrigger`
 - [serverDisableCompletion](reference/clay-js-api/completion/server-disable-completion.md) — `clay.completion.serverDisableCompletion`
 - [serverRegisterCompletionProvider](reference/clay-js-api/completion/server-register-completion-provider.md) — `clay.completion.serverRegisterCompletionProvider`
+- [serverRegisterLanguageIntelligenceProvider](reference/clay-js-api/language/server-register-language-intelligence-provider.md) — `clay.language.serverRegisterLanguageIntelligenceProvider`
+- [authorizeLanguageServer](reference/clay-js-api/language-server/authorize-language-server.md) — `clay.language-server.authorizeLanguageServer`
+- [startLanguageServerSession](reference/clay-js-api/language-server/start-language-server-session.md) — `clay.language-server.startLanguageServerSession`
 - [serverValidatePackageManifest](reference/clay-js-api/packages/server-validate-package-manifest.md) — `clay.packages.serverValidatePackageManifest`
 - [serverValidatePackagePermissions](reference/clay-js-api/packages/server-validate-package-permissions.md) — `clay.packages.serverValidatePackagePermissions`
 - [setPackageOption](reference/clay-js-api/configuration/set-package-option.md) — `clay.configuration.setPackageOption`

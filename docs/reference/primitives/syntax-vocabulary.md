@@ -20,7 +20,7 @@ DecorationSpan {
 }
 ```
 
-`kind` (`Syntax`, `Semantic`, `Diagnostic`, `SearchMatch`) is the **decoration layer**. It is orthogonal to the token vocabulary: diagnostics/search/semantic layers may color by layer, while syntax uses the token table.
+`kind` (`Syntax`, `Semantic`, `Diagnostic`, `SearchMatch`) is the **decoration layer**. It is orthogonal to the token vocabulary: `Diagnostic`/`SearchMatch` color by layer, while `Syntax` and `Semantic` both use the closed `TokenType` color table so semantic intelligence refines vocabulary without a second theme path.
 
 ## Axis 1: `TokenType`
 

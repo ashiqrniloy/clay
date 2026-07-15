@@ -182,13 +182,25 @@ impl SduiNativeState {
         if action.completion_accept.is_some() {
             return None;
         }
-        Some(crate::protocol::SduiActionIntent::command(
-            action.command_id.clone(),
-            crate::protocol::SduiActionSource::ListItem {
+        Some(crate::protocol::SduiActionIntent {
+            command_id: action.command_id.clone(),
+            source: crate::protocol::SduiActionSource::ListItem {
                 node_id: crate::protocol::SduiNodeId(menu.session_id().0),
                 item_id: menu.selected_index().to_string(),
             },
-        ))
+            arguments: json_object_to_sdui_arguments(&action.arguments),
+        })
+    }
+
+    /// Returns the selected transient-menu action without converting to SDUI,
+    /// so local language-intelligence handlers can inspect typed arguments.
+    pub(crate) fn menu_selected_action(
+        &self,
+    ) -> Option<crate::shell::transient_menu::TransientMenuAction> {
+        self.active_menu
+            .as_ref()
+            .and_then(crate::shell::TransientMenuSession::activate_selected)
+            .cloned()
     }
 
     pub(crate) fn menu_activate_completion(&mut self) -> Option<CompletionMenuAcceptAction> {
@@ -1649,6 +1661,39 @@ fn package_action_intent(command_id: &str, source_id: &str) -> SduiActionIntent 
             node_id: SduiNodeId(stable_package_source_id(source_id)),
         },
     )
+}
+
+fn json_object_to_sdui_arguments(
+    value: &serde_json::Value,
+) -> Vec<crate::protocol::SduiActionArgument> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    object
+        .iter()
+        .filter_map(|(name, value)| {
+            let sdui_value = match value {
+                serde_json::Value::String(text) => {
+                    crate::protocol::SduiActionValue::String(text.clone())
+                }
+                serde_json::Value::Bool(flag) => crate::protocol::SduiActionValue::Bool(*flag),
+                serde_json::Value::Number(number) => {
+                    if let Some(v) = number.as_u64() {
+                        crate::protocol::SduiActionValue::U64(v)
+                    } else if let Some(v) = number.as_i64() {
+                        crate::protocol::SduiActionValue::I64(v)
+                    } else {
+                        return None;
+                    }
+                }
+                _ => return None,
+            };
+            Some(crate::protocol::SduiActionArgument {
+                name: name.clone(),
+                value: sdui_value,
+            })
+        })
+        .collect()
 }
 
 fn stable_package_source_id(source_id: &str) -> u64 {

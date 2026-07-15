@@ -15,7 +15,10 @@ pub(crate) use package_ui::{
     PackageUiRuntimeError, PackageUiRuntimeState, PackageUiRuntimeUpdate, TransientPackageOverlay,
 };
 pub(crate) use transient_menu::TransientMenuSession;
-pub(crate) use transient_menu::{CompletionMenuAcceptAction, completion_result_to_menu_session};
+pub(crate) use transient_menu::{
+    CompletionMenuAcceptAction, completion_result_to_menu_session,
+    language_intelligence_result_to_menu_session,
+};
 
 #[cfg(test)]
 pub(crate) use layout::{

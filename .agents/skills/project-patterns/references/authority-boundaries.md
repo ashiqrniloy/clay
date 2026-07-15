@@ -40,6 +40,15 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Mode-discovery commands (`clay.modes.listActiveModes`/`explainActiveMode`) are read-only `ServerFirst` built-ins with empty permissions resolved via `CommandExecutor::execute_discovery`; they carry no execution/document/workspace authority.
 - Decision log source: `decision-logs/2026-07-01-0350-phase18-9-generic-text-code-fallback-modes-and-key-behavior.md`.
 
+## External Process Authority
+
+- Package-triggered external processes require a dedicated deny-by-default capability and an approved decision log; never silently compose them from package load, first-party trust, `shell`, or `filesystem`.
+- Bind approval to package provenance, a fixed inert contribution, canonical executable, literal argv, explicit inherited-environment names, and known workspace roots. Runtime input selects only an already-approved contribution/root.
+- Launch directly without a shell, clear environment by default, bound all I/O/time/concurrency, and terminate on revocation, reload, root removal, runtime replacement, or shutdown.
+- Working directory and root-bound grants constrain Clay's API/audit identity, not the operating system. A same-user child may access other files, network, and processes; call it trusted subprocess authority, never sandboxed or workspace/filesystem confined.
+- Keep process work asynchronous and outside typing, paint, layout, scroll, and local text-application paths.
+- Decision log source: `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
+
 ## Planning Guidance
 
 - Do not describe the server as a stateless behavior service.

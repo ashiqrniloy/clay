@@ -526,3 +526,46 @@ fn diagnostics_facade_exposes_no_raw_op_or_additional_authority() {
     assert!(!op.contains("LanguageServer"));
     assert!(!op.contains("std::process"));
 }
+
+#[test]
+fn lsp_compatible_diagnostic_mapping_preserves_fields_and_source_replacement() {
+    // Phase 18.20 handoff: analyzer/LSP publishDiagnostics maps onto DiagnosticSet
+    // without a parallel transport. Severity/code/message/source survive validation
+    // and empty source-keyed replacement clears only that source's chunk.
+    let package = package();
+    let mut first = set(5);
+    first.source = "analyzer".to_string();
+    first.spans[0].source = "analyzer".to_string();
+    first.spans[0].severity = DiagnosticSeverity::Warning;
+    first.spans[0].code = "unused_mut".to_string();
+    first.spans[0].message = "variable does not need to be mutable".to_string();
+    let first = validate_diagnostic_publication(&package, 5, first).unwrap();
+
+    assert_eq!(first.source, "analyzer");
+    assert_eq!(first.spans[0].severity, DiagnosticSeverity::Warning);
+    assert_eq!(first.spans[0].code, "unused_mut");
+    assert_eq!(
+        first.spans[0].message,
+        "variable does not need to be mutable"
+    );
+    assert_eq!(first.spans[0].source, "analyzer");
+
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        5,
+        "let mut x = 1;".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    assert!(editor.apply_diagnostic_set(first.clone()));
+    assert_eq!(editor.diagnostic_span_count(), 1);
+
+    let mut replacement = first;
+    replacement.spans.clear();
+    assert!(editor.apply_diagnostic_set(replacement));
+    assert_eq!(
+        editor.diagnostic_span_count(),
+        0,
+        "empty source replacement must clear only the analyzer chunk"
+    );
+}

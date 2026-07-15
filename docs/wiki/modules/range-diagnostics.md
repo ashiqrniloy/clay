@@ -58,6 +58,10 @@ Tree-sitter `ERROR`/`MISSING` recovery nodes are parser recovery details, especi
 
 `serverPublishDiagnostics` → `op_clay_diagnostics_publish_diagnostics` → `validate_diagnostic_publication` → `ClayOpState::publish_diagnostic_set`. JS facade rejects executable/raw-authority fields. No LSP process, hover, quick-fix, or filesystem/network/shell authority.
 
+### Language-intelligence/LSP reuse
+
+Phase 18.20 leaves this transport unchanged and records it as the diagnostic handoff for analyzers and Phase 18.21 LSP bridges. Bridges convert negotiated LSP positions to Clay UTF-8 byte ranges, preserve severity/code/message/source, and publish source replacement through `serverPublishDiagnostics`. `language-server` authority alone cannot publish diagnostics; `render-decorations`, provenance, version, viewport, and payload validation still apply.
+
 ### Theme and paint
 
 `StyleRegistry::diagnostic_style(severity)` maps Error/Warning/Info to theme keys `diagnosticError` / `diagnosticWarning` / `diagnosticInfo`. `visible_diagnostic_ranges` maps spans to colors; `paint_text` strokes zig-zag paths via `paint_squiggle` after text. `apply_diagnostic_set` requests render but does not bump `layout_style_revision`.
@@ -124,5 +128,6 @@ cargo test --test primitives_docs range_diagnostics
 - [Editor Theme Registry](editor-theme-registry.md)
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
 - [Typography Registry and Font Roles](typography-registry-and-font-roles.md)
+- [Language Intelligence](language-intelligence.md)
 - [Diagnostics primitive](../../reference/primitives/diagnostics.md)
 - [`serverPublishDiagnostics`](../../reference/clay-js-api/diagnostics/server-publish-diagnostics.md)

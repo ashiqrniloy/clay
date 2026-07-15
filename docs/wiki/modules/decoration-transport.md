@@ -50,6 +50,8 @@ The decoration transport carries package-produced inline editor decorations as b
 9. `EditorSurface` stores the validated chunk by `DecorationChunkKey`, drops stale chunks on document version changes, prunes chunks outside the current visible/near-viewport guard, and keeps retained serialized chunk memory under `SYNTAX_CACHE_BUDGET_BYTES`. Individual spans are intersected with the visible snapshot before local offset subtraction, preventing stale earlier spans in an overlapping chunk from underflowing during scroll.
 10. When the cached Parley layout misses, `EditorSurface` intersects cached local chunks with the current `VisibleSnapshot`, rejects malformed/out-of-document/non-UTF-8-boundary ranges again, maps known kind/style tokens to local Rust colors and attributes, then normalizes non-overlapping presentation runs. Font roles and foreground colors are considered only for `Syntax`/`Semantic`: higher priority wins, then semantic over syntax, then stable provenance; attributes compose. `LayoutState` assigns ranged `BrushIndex` values, caches the corresponding native brush table, and renders glyphs with theme colors instead of background highlight rectangles. Selection and range-diagnostic squiggles remain separate paint layers. Cache-hit paint does not rescan spans.
 
+Phase 18.20 semantic intelligence reuses this path directly. `DecorationSpan::from_vocabulary` and `serverPublishDecorations({ kind: "semantic", tokenType, modifiers })` publish scope-less two-axis spans; legacy `styleToken` input remains compatible. `StyleRegistry` resolves both Syntax and Semantic through the same per-`TokenType` color table, while additive chunks retain syntax beneath semantic refinements. The `language-server` permission does not bypass `render-decorations`.
+
 Phase 18.17 adds a parallel inert path for `ServerMessage::DiagnosticSet` / `ClientConnectionEvent::DiagnosticSet` / `EditorSurface::apply_diagnostic_set`. Source-keyed diagnostic chunks share the connection drain from `ParseCoordinator` updates, use `DIAGNOSTIC_CACHE_BUDGET_BYTES`, and remain independent from decoration chunk lifecycle. See [Phase 18.17 range diagnostics primitive review](phase18.17-range-diagnostics-primitive-review.md).
 
 ## Code Examples
@@ -88,6 +90,7 @@ let message = ServerMessage::DecorationSet(set);
 - [Protocol Codec](protocol-codec.md)
 - [Rendering Primitives](rendering-primitives.md)
 - [Range Diagnostics](range-diagnostics.md)
+- [Language Intelligence](language-intelligence.md)
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
 - `docs/reference/primitives/rendering-strategy.md`
 - `docs/reference/primitives/package-security.md`

@@ -16,9 +16,11 @@ use crate::{
     perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
     protocol::{
         ClientId, ClientMessage, CompletionProvenance, CompletionRequest, CompletionResultSet,
-        CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata, PROTOCOL_VERSION,
-        ParseByteRange, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
-        SduiActionArgument, SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
+        CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata,
+        LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
+        LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParsePolicy,
+        ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
+        SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
@@ -31,6 +33,10 @@ use super::{
     completion::{CompletionProviderMeta, apply_exclusive_suppression},
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
+    language_intelligence::{
+        LanguageIntelligenceCoordinator, LanguageIntelligenceCoordinatorError,
+        LanguageIntelligenceDocumentWindow,
+    },
     parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
     sdui::{StaticSduiState, sdui_action_response},
     workspace::{
@@ -55,12 +61,15 @@ pub(crate) async fn handle_connection<S>(
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     runtime_generation: RuntimeGenerationStore,
     parse_coordinator: ParseCoordinator,
+    language_intelligence: LanguageIntelligenceCoordinator,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut typography_updates = runtime_generation.subscribe_typography();
+    let (language_intelligence_tx, mut language_intelligence_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
     let first_message = codec.read_client_message(&mut stream).await?;
     let mut file_open_capabilities = match first_message {
         ClientMessage::Hello {
@@ -166,6 +175,12 @@ where
                             &ServerMessage::RuntimeDiagnostic(diagnostic),
                         )
                         .await?;
+                }
+                continue;
+            }
+            message = language_intelligence_rx.recv() => {
+                if let Some(message) = message {
+                    codec.write_server_message(&mut stream, &message).await?;
                 }
                 continue;
             }
@@ -584,6 +599,106 @@ where
                 codec
                     .write_server_message(&mut stream, &ServerMessage::CompletionResult { result })
                     .await?;
+            }
+            ClientMessage::LanguageIntelligenceRequest { mut request } => {
+                // Stamp the connection's client identity; ignore any client-supplied
+                // client_id so results cannot be forged across clients.
+                request.client_id = client_id;
+                if let Err(rejection) = request.validate() {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message: format!(
+                                    "language-intelligence request rejected: {rejection:?}"
+                                ),
+                            },
+                        )
+                        .await?;
+                    continue;
+                }
+
+                let document_text = document.lock().await.text();
+                let window = language_intelligence_document_window_for_behavior(
+                    &request,
+                    &document_text,
+                    &*behavior.lock().await,
+                );
+                match language_intelligence.schedule(None, request.clone(), window) {
+                    Ok(reply_rx) => {
+                        let tx = language_intelligence_tx.clone();
+                        tokio::spawn(async move {
+                            match reply_rx.await {
+                                Ok(result) => {
+                                    let _ = tx
+                                        .send(ServerMessage::LanguageIntelligenceResult { result });
+                                }
+                                Err(_canceled) => {
+                                    // Stale/canceled work drops silently so a newer
+                                    // cursor/edit request can replace it without a
+                                    // late empty/error flash.
+                                }
+                            }
+                        });
+                    }
+                    Err(LanguageIntelligenceCoordinatorError::NoProviderForFeature) => {
+                        let empty_payload = empty_language_intelligence_payload(request.feature);
+                        let result = LanguageIntelligenceResult {
+                            request_id: request.request_id,
+                            client_id: request.client_id,
+                            document_id: request.document_id,
+                            document_version: request.document_version,
+                            behavior_version: request.behavior_version,
+                            provider_generation: request.provider_generation,
+                            feature: request.feature,
+                            status: LanguageIntelligenceStatus::Empty,
+                            payload: empty_payload,
+                            provenance: CompletionProvenance::builtin_core(),
+                        };
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::LanguageIntelligenceResult { result },
+                            )
+                            .await?;
+                    }
+                    Err(LanguageIntelligenceCoordinatorError::OutstandingRequestLimit {
+                        ..
+                    }) => {
+                        let result = LanguageIntelligenceResult {
+                            request_id: request.request_id,
+                            client_id: request.client_id,
+                            document_id: request.document_id,
+                            document_version: request.document_version,
+                            behavior_version: request.behavior_version,
+                            provider_generation: request.provider_generation,
+                            feature: request.feature,
+                            status: LanguageIntelligenceStatus::ProviderError,
+                            payload: empty_language_intelligence_payload(request.feature),
+                            provenance: CompletionProvenance::builtin_core(),
+                        };
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::LanguageIntelligenceResult { result },
+                            )
+                            .await?;
+                    }
+                    Err(error) => {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::Error {
+                                    code: ProtocolErrorCode::InvalidMessage,
+                                    message: format!(
+                                        "language-intelligence schedule rejected: {error}"
+                                    ),
+                                },
+                            )
+                            .await?;
+                    }
+                }
             }
             ClientMessage::Hello { .. } => {
                 codec
@@ -1038,6 +1153,79 @@ async fn reload_document_response(
     }
 }
 
+fn empty_language_intelligence_payload(
+    feature: LanguageIntelligenceFeature,
+) -> LanguageIntelligencePayload {
+    match feature {
+        LanguageIntelligenceFeature::Hover => {
+            LanguageIntelligencePayload::Hover(crate::protocol::HoverResult {
+                range: None,
+                markdown: String::new(),
+            })
+        }
+        LanguageIntelligenceFeature::GoToDefinition => {
+            LanguageIntelligencePayload::GoToDefinition(crate::protocol::GoToDefinitionResult {
+                locations: Vec::new(),
+            })
+        }
+        LanguageIntelligenceFeature::CodeAction => {
+            LanguageIntelligencePayload::CodeAction(crate::protocol::CodeActionResult {
+                actions: Vec::new(),
+            })
+        }
+        LanguageIntelligenceFeature::SignatureHelp => {
+            LanguageIntelligencePayload::SignatureHelp(crate::protocol::SignatureHelpResult {
+                signatures: Vec::new(),
+                active_signature: None,
+                active_parameter: None,
+            })
+        }
+    }
+}
+
+fn language_intelligence_document_window_for_behavior(
+    request: &crate::protocol::LanguageIntelligenceRequest,
+    text: &str,
+    behavior: &ActiveBehaviorManifest,
+) -> LanguageIntelligenceDocumentWindow {
+    language_intelligence_document_window(request, text, &behavior.manifest().manifest_id)
+}
+
+fn language_intelligence_document_window(
+    request: &crate::protocol::LanguageIntelligenceRequest,
+    text: &str,
+    active_mode: &str,
+) -> LanguageIntelligenceDocumentWindow {
+    use crate::perf::budgets::LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES;
+
+    let cursor = (request.cursor_byte_offset as usize).min(text.len());
+    let half = LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES / 2;
+    let mut start = cursor.saturating_sub(half);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (start + LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES).min(text.len());
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    while end > start && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end < start {
+        end = start;
+    }
+
+    LanguageIntelligenceDocumentWindow {
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        byte_start: start as u64,
+        byte_end: end as u64,
+        text: text[start..end].to_string(),
+        active_mode: active_mode.to_string(),
+    }
+}
+
 fn static_package_completion_result(
     request: &CompletionRequest,
     manifest_id: &str,
@@ -1413,7 +1601,8 @@ mod tests {
     };
 
     use super::{
-        execute_command_intent, handle_connection, sdui_command_request,
+        execute_command_intent, handle_connection,
+        language_intelligence_document_window_for_behavior, sdui_command_request,
         static_package_completion_result,
     };
     use crate::server::command_execution::{CommandExecutionRequest, CommandExecutionTarget};
@@ -1448,6 +1637,28 @@ mod tests {
 
     fn js_runtime() -> ClayJsRuntimeService {
         ClayJsRuntimeService::default()
+    }
+
+    #[test]
+    fn language_intelligence_window_uses_active_behavior_mode() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.manifest_id = "rust.rust".to_string();
+        let behavior = ActiveBehaviorManifest::new(manifest).unwrap();
+        let request = crate::protocol::LanguageIntelligenceRequest {
+            request_id: 1,
+            client_id: 2,
+            document_id: 3,
+            document_version: 4,
+            behavior_version: 3,
+            cursor_byte_offset: 1,
+            feature: crate::protocol::LanguageIntelligenceFeature::Hover,
+            provider_generation: 0,
+        };
+
+        let window =
+            language_intelligence_document_window_for_behavior(&request, "fn main() {}", &behavior);
+
+        assert_eq!(window.active_mode, "rust.rust");
     }
 
     #[test]
@@ -1577,6 +1788,10 @@ mod tests {
         ParseCoordinator::default()
     }
 
+    fn language_intelligence_coordinator() -> LanguageIntelligenceCoordinator {
+        LanguageIntelligenceCoordinator::new()
+    }
+
     async fn load_markdown_runtime(
         runtime: &ClayJsRuntimeService,
         coordinator: &ParseCoordinator,
@@ -1617,8 +1832,9 @@ await loadPackage("@clay/markdown");"#,
         },
         server::{
             behavior::ActiveBehaviorManifest, document::DocumentState,
-            js_runtime::ClayJsRuntimeService, parse_coordinator::ParseCoordinator,
-            sdui::StaticSduiState, workspace::WorkspaceState,
+            js_runtime::ClayJsRuntimeService,
+            language_intelligence::LanguageIntelligenceCoordinator,
+            parse_coordinator::ParseCoordinator, sdui::StaticSduiState, workspace::WorkspaceState,
         },
         shell::file_browser::FileBrowserState,
     };
@@ -1826,6 +2042,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1878,6 +2095,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1919,6 +2137,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation.clone(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -1984,6 +2203,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2031,6 +2251,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2127,6 +2348,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2182,6 +2404,7 @@ await loadPackage("@clay/markdown");"#,
             diagnostics,
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2236,6 +2459,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2311,6 +2535,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2417,6 +2642,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2495,6 +2721,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2664,6 +2891,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation_from(runtime),
             coordinator,
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -2793,6 +3021,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation_from(runtime),
             coordinator,
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -3255,6 +3484,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -3374,6 +3604,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -3447,6 +3678,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -3519,6 +3751,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;
@@ -3608,6 +3841,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
 
@@ -3646,6 +3880,7 @@ await loadPackage("@clay/markdown");"#,
             runtime_diagnostics(),
             runtime_generation(),
             parse_coordinator(),
+            language_intelligence_coordinator(),
             codec,
         ));
         let mut client = client;

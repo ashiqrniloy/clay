@@ -100,6 +100,13 @@ fn diagnostics_contract() -> String {
         .expect("read range diagnostics contract")
 }
 
+fn language_intelligence_contract() -> String {
+    fs::read_to_string(repository_path(
+        "docs/reference/primitives/language-intelligence.md",
+    ))
+    .expect("read language intelligence bridge contract")
+}
+
 fn package_security() -> String {
     fs::read_to_string(repository_path(
         "docs/reference/primitives/package-security.md",
@@ -1336,6 +1343,13 @@ fn phase18_19_completion_extensions_primitive_review() -> String {
     .expect("read Phase 18.19 completion extensions primitive review")
 }
 
+fn phase18_20_language_intelligence_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.20-language-intelligence-primitive-review.md",
+    ))
+    .expect("read Phase 18.20 language intelligence primitive review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -2333,6 +2347,231 @@ fn range_diagnostics_reference_is_indexed_and_complete() {
 }
 
 #[test]
+fn language_intelligence_reference_is_indexed_and_complete() {
+    let docs_index = fs::read_to_string(repository_path("docs/index.md")).expect("read docs index");
+    let primitive_index = primitives_index();
+    let registry = primitives_registry();
+    let backlog = fs::read_to_string(repository_path("docs/reference/primitives/backlog.md"))
+        .expect("read primitive backlog");
+    let security = package_security();
+    let package_guide = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package author guide");
+    let contract = language_intelligence_contract();
+
+    assert!(
+        docs_index.contains("reference/primitives/language-intelligence.md"),
+        "docs/index.md must link the language-intelligence bridge contract"
+    );
+    assert!(
+        primitive_index.contains("language-intelligence.md"),
+        "primitives index must link language-intelligence.md"
+    );
+    assert!(
+        registry.contains("| LanguageIntelligenceRequestAndResult |"),
+        "primitive registry must record LanguageIntelligenceRequestAndResult"
+    );
+    assert!(
+        registry.contains("| LanguageServerSession |"),
+        "primitive registry must record LanguageServerSession"
+    );
+    assert!(
+        backlog.contains("| LanguageIntelligenceRequestAndResult |"),
+        "primitive backlog must mark LanguageIntelligenceRequestAndResult"
+    );
+    assert!(
+        backlog.contains("| LanguageServerSession |"),
+        "primitive backlog must mark LanguageServerSession"
+    );
+    assert!(
+        backlog.contains("Phase 18.21") && backlog.contains("pending"),
+        "primitive backlog must record Phase 18.21 bridge packages as pending"
+    );
+    assert!(
+        security.contains("`LanguageIntelligenceRequestAndResult`"),
+        "package-security must list LanguageIntelligenceRequestAndResult permission boundary"
+    );
+    assert!(
+        security.contains("## Language-Server Authority Boundary"),
+        "package-security must keep the language-server authority boundary"
+    );
+    assert!(
+        package_guide.contains(
+            "## Phase 18.20 authoring contract: analyzer providers and language-server bridges"
+        ),
+        "package author guide must document the Phase 18.20 authoring contract"
+    );
+
+    for marker in [
+        "LSP 3.17",
+        "SemanticTokens",
+        "Diagnostic",
+        "Completion",
+        "Hover",
+        "Definition",
+        "DefinitionLink",
+        "CodeAction",
+        "Command",
+        "WorkspaceEdit",
+        "SignatureHelp",
+        "DecorationKind::Semantic",
+        "DiagnosticSet",
+        "CompletionResultSet",
+        "LanguageIntelligencePayload::Hover",
+        "LanguageIntelligencePayload::GoToDefinition",
+        "LanguageIntelligencePayload::CodeAction",
+        "LanguageIntelligencePayload::SignatureHelp",
+        "LanguageServerSession",
+        "Position-encoding",
+        "negotiated utf-8",
+        "utf-16",
+        "utf-32",
+        "UTF-8 byte offset",
+        "WorkspaceRootId",
+        "normalized relative path",
+        "reject",
+        "Markdown",
+        "inert",
+        "LanguageIntelligenceStatus",
+        "Empty",
+        "Timeout",
+        "ProviderError",
+        "deterministic",
+        "cancellable",
+        "provider-generation",
+        "viewport",
+        "No LSP, provider, process, JavaScript, or IPC wait occurs before local text paint",
+        "authorizeLanguageServer",
+        "loadPackage",
+        "LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES",
+        "LANGUAGE_SERVER_MAX_SESSIONS",
+        "external",
+        "EditPreview",
+        "sanitized",
+        "trusted subprocess authority",
+        "OS filesystem/network/process sandbox",
+        "no LSP `Position`",
+        "Phase 18.21",
+        "@clay/lsp-rust",
+        "Content-Length",
+        "tests/language_intelligence.rs",
+        "tests/language_server_authority.rs",
+    ] {
+        assert!(
+            contract.contains(marker),
+            "language intelligence bridge contract must document {marker}"
+        );
+    }
+
+    for row in [
+        "LanguageIntelligenceRequestAndResult",
+        "LanguageServerSession",
+    ] {
+        assert!(
+            registry.contains(&format!("| {row} |")) && backlog.contains(&format!("| {row} |")),
+            "{row} must keep registry and backlog metadata"
+        );
+    }
+
+    assert!(
+        registry.contains("`parse-document`") && registry.contains("`language-server`"),
+        "registry rows must retain permission metadata for both intelligence and process primitives"
+    );
+    assert!(
+        registry.contains("no-hot-path") && registry.contains("`UiReactivePriority`"),
+        "registry rows must retain hot-path metadata for both intelligence and process primitives"
+    );
+    assert!(
+        registry.contains("language-intelligence.md")
+            && backlog.contains("language-intelligence.md"),
+        "registry/backlog must retain docs metadata for language intelligence"
+    );
+    assert!(
+        backlog.contains("`src/protocol/language_intelligence.rs`")
+            && backlog.contains("`src/server/language_server.rs`"),
+        "backlog must retain source metadata for language intelligence primitives"
+    );
+    assert!(
+        registry.contains("Codec round trips")
+            && registry.contains("Deny-by-default without grant"),
+        "registry must retain test expectation metadata"
+    );
+    assert!(
+        backlog.contains("tests") || registry.contains("fake non-LSP analyzer"),
+        "registry/backlog must retain test coverage metadata"
+    );
+}
+
+#[test]
+fn language_intelligence_implementation_wikis_are_indexed_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let intelligence = fs::read_to_string(repository_path(
+        "docs/wiki/modules/language-intelligence.md",
+    ))
+    .expect("read language intelligence implementation wiki");
+    let process = fs::read_to_string(repository_path(
+        "docs/wiki/modules/language-server-process-service.md",
+    ))
+    .expect("read language server process implementation wiki");
+
+    for path in [
+        "modules/language-intelligence.md",
+        "modules/language-server-process-service.md",
+    ] {
+        assert!(
+            wiki_index.contains(path),
+            "docs/wiki/index.md must link {path}"
+        );
+    }
+
+    for marker in [
+        "src/protocol/language_intelligence.rs",
+        "src/server/language_intelligence.rs",
+        "serverRegisterLanguageIntelligenceProvider",
+        "LanguageIntelligenceCoordinator",
+        "per-request oneshot",
+        "UTF-8 byte offsets",
+        "LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS",
+        "UiReactivePriority",
+        "parse-document",
+        "EditPreview",
+        "Phase 18.21 Publish Handoff",
+        "tests/language_intelligence.rs",
+        "language-server-process-service.md",
+    ] {
+        assert!(
+            intelligence.contains(marker),
+            "language intelligence implementation wiki must document {marker}"
+        );
+    }
+
+    for marker in [
+        "src/server/language_server.rs",
+        "LanguageServerProcessService",
+        "authorizeLanguageServer",
+        "startLanguageServerSession",
+        "configuration root",
+        "env_clear",
+        "tokio::process::Command",
+        "LANGUAGE_SERVER_MAX_SESSIONS",
+        "LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES",
+        "kill_on_drop",
+        "trusted same-user subprocess authority",
+        "not an operating-system sandbox",
+        "Phase 18.21 Publish Handoff",
+        "tests/language_server_authority.rs",
+        "language-intelligence.md",
+    ] {
+        assert!(
+            process.contains(marker),
+            "language server process implementation wiki must document {marker}"
+        );
+    }
+}
+
+#[test]
 fn range_diagnostics_implementation_wiki_is_linked_and_complete() {
     let wiki_index =
         fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
@@ -2853,6 +3092,109 @@ fn phase18_19_completion_extensions_primitive_review_is_linked_and_complete() {
         assert!(
             review.contains(required),
             "Phase 18.19 primitive review must preserve boundary {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_20_language_intelligence_primitive_review_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_20_language_intelligence_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.20-language-intelligence-primitive-review.md"),
+        "wiki index must link the Phase 18.20 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.20-language-intelligence-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.20 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "Text vocabulary and semantic decorations",
+        "Range diagnostics",
+        "Completion requests/results",
+        "Command execution and transient menus",
+        "Workspace roots and navigation",
+        "Document identity/version state",
+        "Package permissions and authorization",
+        "Persistent runtime handler tokens",
+        "Existing process precedents",
+        "`src/protocol/decorations.rs`",
+        "`DiagnosticSpan`, `DiagnosticSet`",
+        "`CompletionProviderRegistry`",
+        "`TransientMenuSession`",
+        "`src/server/workspace.rs::WorkspaceState`",
+        "`PackageAuthorizationRecord`",
+        "`src/server/parse_coordinator.rs::JsParseHandlerRegistration`",
+        "`RuntimeSandboxSupervisor`",
+        "`GitDiscoveryService`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.20 primitive review must inventory {required}"
+        );
+    }
+
+    for required in [
+        "What Existing Primitives Already Achieve",
+        "Generic Phase 18.20 Gaps",
+        "`LanguageIntelligenceRequestAndResult`",
+        "`LanguageIntelligenceProvider`",
+        "`LanguageServerSession`",
+        "`Hover`",
+        "`GoToDefinition`",
+        "`CodeAction`",
+        "`SignatureHelp`",
+        "LSP `Position`, `Range`, `Location`, URI, JSON-RPC ID",
+        "Clay canonical positions are byte offsets",
+        "LSP SemanticTokens -> DecorationSet(kind = Semantic)",
+        "LSP Diagnostic     -> DiagnosticSet",
+        "LSP CompletionItem -> CompletionResultSet",
+        "newer edit, cursor request, package withdrawal/reload",
+        "direct code-action edits remain inert previews",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.20 primitive review must lock generic gap/reuse rule {required}"
+        );
+    }
+
+    for required in [
+        "Budgets and Hot-Path Policy",
+        "`DECORATION_PAYLOAD_BUDGET_BYTES`",
+        "`DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`",
+        "`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`",
+        "`DEFAULT_MAX_FRAME_SIZE`",
+        "No provider/process/JavaScript/IPC wait occurs before local text paint",
+        "Security and Authority Boundary",
+        "Provider authority and process authority are separate",
+        "`parse-document`",
+        "`language-server` is a deny-by-default process capability",
+        "generic shell strings",
+        "arbitrary runtime argv",
+        "external URIs",
+        "raw absolute filesystem paths",
+        "raw ops",
+        "client JavaScript",
+        "unvalidated action edits",
+        "Rejected Implementation Shapes",
+        "LSP-shaped Rust core",
+        "Per-language branches",
+        "Second diagnostics/completion renderer",
+        "New menu widget",
+        "Raw line/UTF-16 positions",
+        "False sandbox claims",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.20 primitive review must preserve boundary {required}"
         );
     }
 }

@@ -1001,3 +1001,143 @@ async fn window_metadata_mismatch_is_rejected() {
         clay::server::completion::CompletionCoordinatorError::WindowMetadataMismatch
     ));
 }
+
+#[tokio::test]
+async fn lsp_compatible_completion_mapping_preserves_snippet_priority_exclusive_and_disable() {
+    // Phase 18.20 handoff: LSP CompletionItem maps onto CompletionResultSet with
+    // PlainText|Snippet text_format, deterministic priority, exclusive claim, and
+    // user/package disable via cancel_package. language-server never bypasses
+    // completion-provider permission.
+    let coordinator = CompletionCoordinator::new();
+    let exclusive_package = completion_package("@org/lspcomp", "lspcomp");
+    let peer_package = completion_package("@org/peercomp", "peercomp");
+
+    let mut exclusive = package_provider_meta("lspcomp.completions", "lspcomp", 20, 1);
+    exclusive.exclusive = true;
+    let snippet_item = CompletionItem::new(
+        "fn",
+        "fn ${1:name}() {\n\t$0\n}",
+        exclusive.provenance.clone(),
+    )
+    .with_snippet();
+    exclusive.items = vec![snippet_item.clone()];
+    exclusive.trigger_metadata.trigger_characters = vec![".".to_string()];
+
+    let mut peer = package_provider_meta("peercomp.completions", "peercomp", 5, 1);
+    peer.items = vec![CompletionItem::new(
+        "plain",
+        "plain",
+        peer.provenance.clone(),
+    )];
+    peer.trigger_metadata.trigger_characters = vec![".".to_string()];
+
+    let snippet_provider = {
+        let item = snippet_item.clone();
+        let provenance = exclusive.provenance.clone();
+        move |request: CompletionRequest, _window: CompletionDocumentWindow| {
+            let mut result = result_with_items(&request, vec![item.clone()]);
+            result.provenance = provenance.clone();
+            Box::pin(async move { Ok(result) })
+                as std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<
+                                Output = Result<CompletionResultSet, CompletionProviderError>,
+                            > + Send,
+                    >,
+                >
+        }
+    };
+
+    coordinator
+        .register_package(&exclusive_package, exclusive, snippet_provider)
+        .unwrap();
+    coordinator
+        .register_package(&peer_package, peer, immediate_provider())
+        .unwrap();
+
+    let ordered = coordinator.providers();
+    assert_eq!(ordered[0].id, "lspcomp.completions");
+    assert_eq!(ordered[0].priority, 20);
+    assert!(ordered[0].exclusive);
+    assert_eq!(ordered[1].id, "peercomp.completions");
+    assert!(!ordered[1].exclusive);
+
+    let request = {
+        let mut request = request(1, 700);
+        request.trigger = CompletionTrigger::Character(".".to_string());
+        request.cursor_byte_offset = 1;
+        request.replacement_range = CompletionReplacementRange::new(0, 1);
+        request
+    };
+    let window = CompletionDocumentWindow {
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        package_prefix: "lspcomp".to_string(),
+        byte_start: 0,
+        byte_end: 2,
+        text: "x.".to_string(),
+    };
+    coordinator
+        .schedule_completion("lspcomp.completions", request, window)
+        .unwrap();
+    let result = coordinator.next_result().await.unwrap();
+    assert_eq!(result.status, CompletionStatus::Ok);
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(
+        result.items[0].text_format,
+        CompletionItemTextFormat::Snippet
+    );
+    assert!(result.items[0].insert_text.contains("$0"));
+    assert_eq!(result.provenance.package_prefix, "lspcomp");
+
+    coordinator.cancel_package("lspcomp");
+    assert!(
+        coordinator
+            .providers()
+            .iter()
+            .all(|meta| meta.id != "lspcomp.completions"),
+        "user/package disable must remove the exclusive LSP-mapped provider"
+    );
+    assert!(
+        coordinator
+            .providers()
+            .iter()
+            .any(|meta| meta.id == "peercomp.completions"),
+        "disabling one package must not remove peer providers"
+    );
+
+    let missing_permission = assemble_package_record(&json!({
+        "name": "@org/noperm",
+        "version": "1.0.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "noperm",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "capabilities": ["language-server"],
+            "modes": [],
+            "docs": "./docs/index.md",
+            "contributions": {
+                "languageServers": [{
+                    "id": "noperm.server",
+                    "executable": "/bin/true",
+                    "args": ["--stdio"]
+                }]
+            }
+        }
+    }))
+    .unwrap();
+    let err = coordinator
+        .register_package(
+            &missing_permission,
+            package_provider_meta("noperm.completions", "noperm", 1, 1),
+            immediate_provider(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        CompletionProviderRegistryError::MissingPermission { .. }
+    ));
+}

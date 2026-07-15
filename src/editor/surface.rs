@@ -6,7 +6,7 @@ use masonry::peniko::{Color, Fill};
 
 use crate::client::behavior::{
     ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, CompletionTriggerRoute,
-    RoutedBehavior, ServerIntentRoute,
+    LanguageIntelligenceTriggerRoute, RoutedBehavior, ServerIntentRoute,
 };
 use crate::perf::{
     budgets::{
@@ -84,6 +84,7 @@ pub(crate) struct EditorKeyOutcome {
     pub(crate) server_intent: Option<ServerIntentRoute>,
     pub(crate) client_ui_command: Option<ClientUiCommandRoute>,
     pub(crate) completion_request: Option<EditorCompletionRequestEvent>,
+    pub(crate) language_intelligence_request: Option<EditorLanguageIntelligenceRequestEvent>,
 }
 
 impl EditorKeyOutcome {
@@ -93,6 +94,7 @@ impl EditorKeyOutcome {
             server_intent: None,
             client_ui_command: None,
             completion_request: None,
+            language_intelligence_request: None,
         }
     }
 
@@ -102,6 +104,7 @@ impl EditorKeyOutcome {
             server_intent: Some(server_intent),
             client_ui_command: None,
             completion_request: None,
+            language_intelligence_request: None,
         }
     }
 
@@ -111,6 +114,7 @@ impl EditorKeyOutcome {
             server_intent: None,
             client_ui_command: Some(client_ui_command),
             completion_request: None,
+            language_intelligence_request: None,
         }
     }
 
@@ -120,6 +124,19 @@ impl EditorKeyOutcome {
             server_intent: None,
             client_ui_command: None,
             completion_request: Some(completion_request),
+            language_intelligence_request: None,
+        }
+    }
+
+    fn language_intelligence(
+        language_intelligence_request: EditorLanguageIntelligenceRequestEvent,
+    ) -> Self {
+        Self {
+            command_outcome: EditorCommandOutcome::unchanged(),
+            server_intent: None,
+            client_ui_command: None,
+            completion_request: None,
+            language_intelligence_request: Some(language_intelligence_request),
         }
     }
 
@@ -141,6 +158,15 @@ pub(crate) struct EditorCompletionRequestEvent {
     pub(crate) cursor_byte_offset: u64,
     pub(crate) replacement_range: CompletionReplacementRange,
     pub(crate) trigger: CompletionTrigger,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorLanguageIntelligenceRequestEvent {
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) cursor_byte_offset: u64,
+    pub(crate) feature: crate::protocol::LanguageIntelligenceFeature,
 }
 
 impl EditorCommandOutcome {
@@ -843,6 +869,10 @@ impl EditorSurface {
                 .completion_request_event(completion_trigger)
                 .map(EditorKeyOutcome::completion)
                 .unwrap_or_else(EditorKeyOutcome::unhandled),
+            RoutedBehavior::LanguageIntelligence(route) => self
+                .language_intelligence_request_event(route)
+                .map(EditorKeyOutcome::language_intelligence)
+                .unwrap_or_else(EditorKeyOutcome::unhandled),
             RoutedBehavior::ServerIntent(intent) => EditorKeyOutcome::server(intent),
             RoutedBehavior::ClientUiCommand(command) => EditorKeyOutcome::client_ui(command),
             RoutedBehavior::Unhandled => EditorKeyOutcome::unhandled(),
@@ -871,6 +901,15 @@ impl EditorSurface {
 
     pub fn command(&mut self, command: EditorCommand<'_>) -> bool {
         self.command_with_event(command).changed
+    }
+
+    /// Jump the caret to a UTF-8 byte offset for definition navigation.
+    /// Clamps to a valid scalar boundary; does not mutate document text.
+    pub fn navigate_to_byte_offset(&mut self, byte_offset: u64) -> bool {
+        let caret = self
+            .buffer
+            .clamp_byte_offset(usize::try_from(byte_offset).unwrap_or(usize::MAX));
+        self.collapse_selection_to(caret)
     }
 
     pub fn command_with_event(&mut self, command: EditorCommand<'_>) -> EditorCommandOutcome {
@@ -1768,6 +1807,35 @@ impl EditorSurface {
             cursor_byte_offset: cursor as u64,
             replacement_range: CompletionReplacementRange::new(start as u64, cursor as u64),
             trigger: route.trigger,
+        })
+    }
+
+    fn language_intelligence_request_event(
+        &self,
+        route: LanguageIntelligenceTriggerRoute,
+    ) -> Option<EditorLanguageIntelligenceRequestEvent> {
+        if !matches!(
+            route.routing_policy,
+            crate::protocol::RoutingPolicy::UiReactivePriority
+        ) {
+            return None;
+        }
+        self.language_intelligence_request_for_feature(route.feature)
+    }
+
+    /// Captures the current document/version/cursor for a language-intelligence
+    /// feature request. Used by keybindings and Control Center interception.
+    pub(crate) fn language_intelligence_request_for_feature(
+        &self,
+        feature: crate::protocol::LanguageIntelligenceFeature,
+    ) -> Option<EditorLanguageIntelligenceRequestEvent> {
+        let cursor = self.buffer.clamp_byte_offset(self.cursor.caret());
+        Some(EditorLanguageIntelligenceRequestEvent {
+            document_id: self.document.document_id,
+            document_version: self.document.document_version,
+            behavior_version: self.document.behavior_version,
+            cursor_byte_offset: cursor as u64,
+            feature,
         })
     }
 
@@ -3968,11 +4036,7 @@ mod tests {
                 .style_for(DecorationKind::Syntax, h1, Modifiers::NONE)
                 .color,
             registry
-                .style_for(
-                    DecorationKind::Semantic,
-                    TokenType::Function,
-                    Modifiers::NONE
-                )
+                .style_for(DecorationKind::Semantic, h1, Modifiers::NONE)
                 .color
         );
     }
@@ -4031,16 +4095,20 @@ mod tests {
             Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
             "markup.* Syntax",
         );
-        // Semantic/Diagnostic/SearchMatch color by layer (kind-first),
-        // token_type is inert for them.
-        let (any_tt, _) = TokenType::classify_style_token("function");
+        // Semantic uses the same TokenType family table as Syntax so LSP
+        // semantic tokens refine vocabulary without a second theme path.
+        // Diagnostic/SearchMatch remain kind-first layer colors.
+        let (function_tt, _) = TokenType::classify_style_token("function");
         assert_eq!(
             registry
-                .style_for(DecorationKind::Semantic, any_tt, Modifiers::NONE)
+                .style_for(DecorationKind::Semantic, function_tt, Modifiers::NONE)
                 .color,
-            Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
-            "Semantic layer baseline"
+            registry
+                .style_for(DecorationKind::Syntax, function_tt, Modifiers::NONE)
+                .color,
+            "Semantic layer shares Syntax TokenType colors"
         );
+        let (any_tt, _) = TokenType::classify_style_token("function");
         assert_eq!(
             registry
                 .style_for(DecorationKind::Diagnostic, any_tt, Modifiers::NONE)

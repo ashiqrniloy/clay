@@ -1563,6 +1563,192 @@
       "async": false
     },
     {
+      "id": "clay.language-server.authorizeLanguageServer",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/language-server/authorize-language-server.md",
+      "js_module": "clay:language-server",
+      "js_export": "authorizeLanguageServer",
+      "js_facade": "runtime/js/language-server.ts::authorizeLanguageServer",
+      "backing_rust": "src/server/language_server.rs PackageService grant registry; src/server/ops/language_server.rs",
+      "deno_op": "op_clay_language_server_authorize",
+      "deno_op_path": "src/server/ops/language_server.rs::op_clay_language_server_authorize",
+      "name": "authorizeLanguageServer",
+      "user_facing_name": "Authorize Language Server",
+      "summary": "Approve one fixed package language-server contribution for current workspace roots before loadPackage seals authority.",
+      "owner": "server",
+      "phase": "Phase 18.20",
+      "visibility": "public",
+      "permissions": ["language-server"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "package",
+          "type": "string",
+          "default": "required",
+          "description": "Package name/version/specifier of the installed package that owns the contribution."
+        },
+        {
+          "name": "contribution",
+          "type": "string",
+          "default": "required",
+          "description": "Package-prefixed contribution id declared in clay.contributions.languageServers."
+        },
+        {
+          "name": "workspaceRootIds",
+          "type": "array<number|string>",
+          "default": "required",
+          "description": "Known directory workspace-root ids the session may bind to."
+        }
+      ],
+      "security": "deny-by-default; never auto-authorized for bundled packages; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; binds exact package provenance, contribution fingerprint, canonical executable, inherited-environment declaration, and approved directory roots; starts no process at grant time; grant evaluation happens before any package code executes; loaded package code cannot self-grant even though it can import the same facade.",
+      "agent_guidance": "Use only for documented language-server contributions. Never expose hidden env vars, JSON/TOML keys, shell strings, or unvalidated executables.",
+      "lookup_tags": ["configuration", "language-server", "grant", "init-js", "phase18.20", "runtime-backed", "deny-by-default"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "clay.language-server.startLanguageServerSession",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/language-server/start-language-server-session.md",
+      "js_module": "clay:language-server",
+      "js_export": "startLanguageServerSession",
+      "js_facade": "runtime/js/language-server.ts::startLanguageServerSession",
+      "backing_rust": "src/server/language_server.rs::LanguageServerProcessService",
+      "deno_op": "op_clay_language_server_start_session",
+      "deno_op_path": "src/server/ops/language_server.rs::op_clay_language_server_start_session",
+      "name": "startLanguageServerSession",
+      "user_facing_name": "Start Language Server Session",
+      "summary": "Spawn an authorized language-server child process for one contribution + workspace root and return an opaque bounded session handle.",
+      "owner": "server",
+      "phase": "Phase 18.20",
+      "visibility": "public",
+      "permissions": ["language-server"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "package",
+          "type": "string",
+          "default": "required",
+          "description": "Package name that owns the contribution and holds an active grant."
+        },
+        {
+          "name": "contribution",
+          "type": "string",
+          "default": "required",
+          "description": "Contribution id matching an active authorizeLanguageServer grant."
+        },
+        {
+          "name": "workspaceRootId",
+          "type": "number|string",
+          "default": "required",
+          "description": "One approved directory workspace-root id from the grant's workspaceRootIds."
+        }
+      ],
+      "security": "Requires prior authorizeLanguageServer grant; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; revalidates grant identity on every operation; spawn uses fixed contribution executable/argv/env_clear+declared inherits; session exposes only bounded send/read/stop; kill_on_drop safety net; trusted subprocess authority not an OS sandbox; LSP framing deferred to Phase 18.21.",
+      "agent_guidance": "Use only with an existing grant. Never expose raw process handles, stdio, or shell execution through the session object.",
+      "lookup_tags": ["language-server", "session", "process", "phase18.20", "runtime-backed", "deny-by-default"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "clay.language.serverRegisterLanguageIntelligenceProvider",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/language/server-register-language-intelligence-provider.md",
+      "js_module": "clay:language",
+      "js_export": "serverRegisterLanguageIntelligenceProvider",
+      "js_facade": "runtime/js/language.ts::serverRegisterLanguageIntelligenceProvider",
+      "backing_rust": "src/server/language_intelligence.rs::LanguageIntelligenceProviderMeta; src/server/ops/language_intelligence.rs",
+      "deno_op": "op_clay_language_register_intelligence_provider",
+      "deno_op_path": "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider",
+      "name": "serverRegisterLanguageIntelligenceProvider",
+      "user_facing_name": "Register Language Intelligence Provider",
+      "summary": "Register a feature-tagged language-intelligence provider (hover, definition, code action, signature help) under `parse-document` authority for cancellable UI-reactive requests.",
+      "owner": "server",
+      "phase": "Phase 18.20",
+      "visibility": "public",
+      "permissions": ["parse-document"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "packageName",
+          "type": "string",
+          "default": "required",
+          "description": "Package name used for provider provenance."
+        },
+        {
+          "name": "packageVersion",
+          "type": "string",
+          "default": "required",
+          "description": "Package version used for provider provenance."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "required",
+          "description": "Package apiPrefix used for provider ID ownership."
+        },
+        {
+          "name": "permissions",
+          "type": "string[]",
+          "default": "required",
+          "description": "Must include parse-document."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "default": "required",
+          "description": "Package-prefixed provider ID (e.g. example.intelligence)."
+        },
+        {
+          "name": "modes",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Language modes the provider handles; empty matches all modes."
+        },
+        {
+          "name": "features",
+          "type": "string[]",
+          "default": "required",
+          "description": "One or more of hover, definition, codeAction, signatureHelp."
+        },
+        {
+          "name": "priority",
+          "type": "number",
+          "default": "0",
+          "description": "Higher priority providers are selected first for scheduling."
+        },
+        {
+          "name": "exportName",
+          "type": "string",
+          "default": "provideLanguageIntelligence",
+          "description": "Export name on the optional module for JS-backed providers."
+        },
+        {
+          "name": "timeoutMs",
+          "type": "number",
+          "default": "500",
+          "description": "Per-request timeout budget, bounded 1..=5000."
+        },
+        {
+          "name": "module",
+          "type": "object",
+          "default": "optional",
+          "description": "Token-keyed module object for JS-backed providers; never a cross-package or native handle."
+        }
+      ],
+      "security": "Requires parse-document. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript. Providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields are rejected. Hover/definition/code-action/signature results are inert validated data with UTF-8 byte offsets; no commands auto-execute. Code-action edits are inert versioned previews in Phase 18.20. Provider provenance is stamped by the coordinator, not trusted from provider output.",
+      "agent_guidance": "Use only from package load entries. Prefer loadPackage from user configuration. Do not pass callbacks, modules from other packages, raw Deno ops, shell commands, process handles, or network/data authorities.",
+      "lookup_tags": ["js-api", "language-intelligence", "provider", "package", "phase18.20", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.modes.serverActivateMajorMode",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/modes/server-activate-major-mode.md",

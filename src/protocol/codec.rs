@@ -260,10 +260,13 @@ mod tests {
             BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
             CompletionRejection, CompletionReplacementRange, CompletionRequest,
             CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentAccess,
-            DocumentMetadata, EditOperation, EditRejection, FileErrorCode, LockOwner,
-            PROTOCOL_VERSION, RegionLockConflict, RuntimeDiagnostic, SduiActionIntent,
-            SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
-            SduiTreeUpdate, ServerMessage, representative_panel_update, representative_sdui_tree,
+            DocumentMetadata, EditOperation, EditRejection, FileErrorCode,
+            LanguageIntelligenceFeature, LanguageIntelligencePayload,
+            LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceResult,
+            LanguageIntelligenceStatus, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
+            RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
+            SduiNodeId, SduiNodeKind, SduiTree, SduiTreeUpdate, ServerMessage,
+            representative_panel_update, representative_sdui_tree,
         },
     };
 
@@ -748,6 +751,102 @@ mod tests {
             reason: CompletionRejection::StaleDocumentVersion {
                 result_version: 30,
                 current_version: 31,
+            },
+        };
+
+        let frame = codec.encode_server_message(&message).unwrap();
+        let decoded = codec.decode_server_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn language_intelligence_request_round_trips() {
+        let codec = Codec::default();
+        let request = LanguageIntelligenceRequest {
+            request_id: 7,
+            client_id: 9,
+            document_id: 3,
+            document_version: 12,
+            behavior_version: 2,
+            cursor_byte_offset: 40,
+            feature: LanguageIntelligenceFeature::Hover,
+            provider_generation: 1,
+        };
+        let message = ClientMessage::LanguageIntelligenceRequest { request };
+
+        let frame = codec.encode_client_message(&message).unwrap();
+        let decoded = codec.decode_client_message(&frame).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn language_intelligence_hover_and_definition_results_round_trip() {
+        let codec = Codec::default();
+        let provenance = CompletionProvenance::builtin_core();
+
+        let hover = LanguageIntelligenceResult {
+            request_id: 7,
+            client_id: 9,
+            document_id: 3,
+            document_version: 12,
+            behavior_version: 2,
+            provider_generation: 1,
+            feature: LanguageIntelligenceFeature::Hover,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::Hover(crate::protocol::HoverResult {
+                range: Some(crate::protocol::TextByteRange::new(10, 14)),
+                markdown: "# Heading\ninfo".to_string(),
+            }),
+            provenance: provenance.clone(),
+        };
+        let hover_message = ServerMessage::LanguageIntelligenceResult { result: hover };
+        let frame = codec.encode_server_message(&hover_message).unwrap();
+        assert_eq!(codec.decode_server_message(&frame).unwrap(), hover_message);
+
+        let definition = LanguageIntelligenceResult {
+            request_id: 8,
+            client_id: 9,
+            document_id: 3,
+            document_version: 12,
+            behavior_version: 2,
+            provider_generation: 1,
+            feature: LanguageIntelligenceFeature::GoToDefinition,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::GoToDefinition(
+                crate::protocol::GoToDefinitionResult {
+                    locations: vec![
+                        crate::protocol::TextLocation::OpenDocument {
+                            document_id: 3,
+                            range: crate::protocol::TextByteRange::new(0, 4),
+                        },
+                        crate::protocol::TextLocation::WorkspaceFile {
+                            workspace_root_id: 1,
+                            relative_path: "src/lib.rs".to_string(),
+                            range: crate::protocol::TextByteRange::new(20, 28),
+                        },
+                    ],
+                },
+            ),
+            provenance,
+        };
+        let definition_message = ServerMessage::LanguageIntelligenceResult { result: definition };
+        let frame = codec.encode_server_message(&definition_message).unwrap();
+        assert_eq!(
+            codec.decode_server_message(&frame).unwrap(),
+            definition_message
+        );
+    }
+
+    #[test]
+    fn language_intelligence_rejected_round_trips() {
+        let codec = Codec::default();
+        let message = ServerMessage::LanguageIntelligenceRejected {
+            request_id: 7,
+            reason: LanguageIntelligenceRejection::UnorderedByteRange {
+                byte_start: 20,
+                byte_end: 10,
             },
         };
 

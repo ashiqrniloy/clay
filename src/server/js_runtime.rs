@@ -47,6 +47,7 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
         "clay:keybindings" => Some(CLAY_FACADE_KEYBINDINGS),
         "clay:behavior" => Some(CLAY_FACADE_BEHAVIOR),
         "clay:packages" => Some(CLAY_FACADE_PACKAGES),
+        "clay:language-server" => Some(CLAY_FACADE_LANGUAGE_SERVER),
         "clay:modes" => Some(CLAY_FACADE_MODES),
         "clay:commands" => Some(CLAY_FACADE_COMMANDS),
         "clay:decorations" => Some(CLAY_FACADE_DECORATIONS),
@@ -54,6 +55,7 @@ fn clay_facade_source(specifier: &str) -> Option<&'static str> {
         "clay:parse" => Some(CLAY_FACADE_PARSE),
         "clay:syntax" => Some(CLAY_FACADE_SYNTAX),
         "clay:completion" => Some(CLAY_FACADE_COMPLETION),
+        "clay:language" => Some(CLAY_FACADE_LANGUAGE),
         "clay:application" => Some(CLAY_FACADE_APPLICATION),
         "clay:editor" => Some(CLAY_FACADE_EDITOR),
         "clay:theme" => Some(CLAY_FACADE_THEME),
@@ -295,6 +297,56 @@ export async function loadPackage(specifier) {
 }
 "#;
 
+const CLAY_FACADE_LANGUAGE_SERVER: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+/** Approve one fixed contribution/root set from init.js before loadPackage. */
+export async function authorizeLanguageServer(options) {
+  return parse(await ops.op_clay_language_server_authorize(JSON.stringify(options ?? null)));
+}
+/** Start an authorized language-server child session for one contribution+root.
+ * Returns an opaque session id used by the bounded session wrapper below. */
+export async function serverStartSession(options) {
+  return parse(await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null))).sessionId;
+}
+/** Open a bounded language-server session. The wrapper exposes opaque
+ * read/write/stop only; no process or stdio handle is exposed. */
+export class LanguageServerSession {
+  #sessionId;
+  #pkg;
+  #contribution;
+  constructor(sessionId, pkg, contribution) {
+    this.#sessionId = sessionId;
+    this.#pkg = pkg;
+    this.#contribution = contribution;
+  }
+  async send(message) {
+    if (typeof message !== "string") {
+      throw new Error("clay.language_server.invalid_message: message must be a string");
+    }
+    return parse(await ops.op_clay_language_server_send_message(JSON.stringify({
+      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution, message,
+    })));
+  }
+  async read(maxBytes, timeoutMs) {
+    return parse(await ops.op_clay_language_server_read_message(JSON.stringify({
+      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
+      maxBytes, timeoutMs,
+    }))).message;
+  }
+  async stop() {
+    return parse(await ops.op_clay_language_server_stop_session(JSON.stringify({
+      sessionId: this.#sessionId,
+    })));
+  }
+}
+/** Start a session and return its opaque wrapper. */
+export async function startLanguageServerSession(options) {
+  const sessionId = await serverStartSession(options);
+  return new LanguageServerSession(sessionId, options.package, options.contribution);
+}
+"#;
+
 const CLAY_FACADE_MODES: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
@@ -480,6 +532,29 @@ export function completionTriggerCharactersFromEditorRules(editorRules) {
     }
   }
   return characters;
+}
+"#;
+
+const CLAY_FACADE_LANGUAGE: &str = r#"
+const ops = Deno.core.ops;
+const parse = (json) => JSON.parse(json);
+export function serverRegisterLanguageIntelligenceProvider(options) {
+  for (const key of ["handler", "callback", "function", "clientJavaScript", "nativeHandle", "rawOps", "executable", "process", "languageServer"]) {
+    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
+      throw new Error(`clay.language.invalid_provider: executable or process authority field ${key} is not accepted by the public registration contract`);
+    }
+  }
+  const { module, exportName = "provideLanguageIntelligence", ...opOptions } = options ?? {};
+  const registration = parse(ops.op_clay_language_register_intelligence_provider(JSON.stringify({ ...(opOptions ?? {}), exportName, runtimeBridge: module !== undefined })));
+  if (module !== undefined) {
+    const handler = module?.[exportName];
+    if (typeof handler !== "function") {
+      throw new Error(`clay.language.invalid_provider: module export ${exportName} must be a function`);
+    }
+    globalThis.__clayLanguageIntelligenceHandlers ??= Object.create(null);
+    globalThis.__clayLanguageIntelligenceHandlers[registration.token] = handler;
+  }
+  return registration;
 }
 "#;
 
@@ -735,6 +810,39 @@ impl ClayJsRuntimeService {
         Ok(registered)
     }
 
+    pub(crate) fn register_language_intelligence_providers(
+        &self,
+        coordinator: &crate::server::language_intelligence::LanguageIntelligenceCoordinator,
+        generation_id: u64,
+        evaluation: &ClayRuntimeEvaluation,
+    ) -> Result<
+        Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta>,
+        crate::server::language_intelligence::LanguageIntelligenceProviderRegistryError,
+    > {
+        let mut registered = Vec::new();
+        for registration in &evaluation.js_language_intelligence_providers {
+            let mut meta = registration.meta.clone();
+            meta.generation = generation_id;
+            match coordinator.register_package(
+                &registration.package,
+                meta.clone(),
+                JsLanguageIntelligenceProvider {
+                    runtime: self.clone(),
+                    registration: registration.clone(),
+                },
+            ) {
+                Ok(()) => registered.push(meta),
+                Err(
+                    crate::server::language_intelligence::LanguageIntelligenceProviderRegistryError::ProviderAlreadyRegistered {
+                        ..
+                    },
+                ) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(registered)
+    }
+
     pub(crate) fn register_native_syntax_handler(
         &self,
         coordinator: &crate::server::parse_coordinator::ParseCoordinator,
@@ -891,6 +999,43 @@ impl ClayJsRuntimeService {
         result
     }
 
+    async fn invoke_language_intelligence_provider(
+        &self,
+        registration: crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+        request: crate::protocol::LanguageIntelligenceRequest,
+        window: crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
+    ) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(ClayRuntimeError::Runtime(
+                "persistent JavaScript runtime worker stopped".to_string(),
+            ));
+        }
+        let (response, receiver) = oneshot::channel();
+        self.worker()
+            .sender
+            .send(RuntimeCommand::LanguageIntelligence {
+                registration,
+                request,
+                window,
+                response,
+            })
+            .map_err(|_| {
+                ClayRuntimeError::Runtime(
+                    "persistent JavaScript runtime worker stopped".to_string(),
+                )
+            })?;
+        let result = receiver.await.map_err(|_| {
+            ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
+        })?;
+        if matches!(
+            result,
+            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
+        ) {
+            self.poisoned.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+
     fn worker(&self) -> Arc<RuntimeWorker> {
         Arc::clone(
             &self
@@ -939,6 +1084,34 @@ impl crate::server::parse_coordinator::ParseHandler for JsParseHandler {
     }
 }
 
+struct JsLanguageIntelligenceProvider {
+    runtime: ClayJsRuntimeService,
+    registration: crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+}
+
+impl crate::server::language_intelligence::LanguageIntelligenceProvider
+    for JsLanguageIntelligenceProvider
+{
+    fn provide(
+        &self,
+        request: crate::protocol::LanguageIntelligenceRequest,
+        window: crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
+    ) -> crate::server::language_intelligence::LanguageIntelligenceProviderFuture {
+        let runtime = self.runtime.clone();
+        let registration = self.registration.clone();
+        Box::pin(async move {
+            runtime
+                .invoke_language_intelligence_provider(registration, request, window)
+                .await
+                .map_err(|error| {
+                    crate::server::language_intelligence::LanguageIntelligenceProviderError::ProviderFailed(
+                        error.to_string(),
+                    )
+                })
+        })
+    }
+}
+
 /// Result of one JavaScript evaluation returned across the Rust boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClayRuntimeEvaluation {
@@ -954,6 +1127,10 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) syntax_engine_preferences:
         std::collections::BTreeMap<String, crate::server::syntax::SyntaxEngineTier>,
     pub(crate) completion_providers: Vec<crate::server::completion::CompletionProviderMeta>,
+    pub(crate) language_intelligence_providers:
+        Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta>,
+    pub(crate) js_language_intelligence_providers:
+        Vec<crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration>,
     /// Resolved active theme snapshot from `setTheme` (`clay:theme` facade). `None`
     /// when `init.js` did not select a theme (Clay default applies). Applied to
     /// the shared server slot at load/reload so the welcome handshake ships it.
@@ -1144,6 +1321,14 @@ enum RuntimeCommand {
         notification: ParseEditNotification,
         response: oneshot::Sender<Result<IncrementalParseUpdate, ClayRuntimeError>>,
     },
+    LanguageIntelligence {
+        registration:
+            crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+        request: crate::protocol::LanguageIntelligenceRequest,
+        window: crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
+        response:
+            oneshot::Sender<Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError>>,
+    },
     Shutdown,
 }
 
@@ -1196,11 +1381,13 @@ fn run_runtime_worker(
                 response,
             } => {
                 controlled_evaluation_id = controlled_evaluation_id.saturating_add(1);
+                let configuration_evaluation = matches!(&entry, RuntimeEntry::ConfigurationRoot(_));
                 let result = prepare_runtime_entry(entry, controlled_evaluation_id).and_then(
                     |loaded_entry| {
                         op_state.set_runtime_context(
                             workspace.unwrap_or_else(|| Arc::clone(&default_workspace)),
                             runtime_document_id,
+                            configuration_evaluation,
                         );
                         op_state.begin_evaluation();
                         heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -1244,6 +1431,31 @@ fn run_runtime_worker(
                     &registration,
                     notification,
                     timeout.min(Duration::from_millis(registration.timeout_ms)),
+                    &heap_limit_hit,
+                ));
+                let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
+                let heap_limited = matches!(result, Err(ClayRuntimeError::HeapLimit));
+                let _ = response.send(result);
+                if timed_out || heap_limited {
+                    break;
+                }
+            }
+            RuntimeCommand::LanguageIntelligence {
+                registration,
+                request,
+                window,
+                response,
+            } => {
+                op_state.begin_evaluation();
+                heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
+                let result = tokio_runtime.block_on(evaluate_js_language_intelligence_provider(
+                    &mut runtime,
+                    &op_state,
+                    &loader,
+                    &registration,
+                    request,
+                    window,
+                    timeout.min(Duration::from_millis(registration.meta.timeout_ms)),
                     &heap_limit_hit,
                 ));
                 let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
@@ -1371,6 +1583,8 @@ async fn evaluate_loaded_module(
             syntax_grammars: op_state.syntax_grammars(),
             syntax_engine_preferences: op_state.syntax_engine_preferences(),
             completion_providers: op_state.completion_providers(),
+            language_intelligence_providers: op_state.language_intelligence_providers(),
+            js_language_intelligence_providers: op_state.js_language_intelligence_providers(),
             active_theme: op_state.active_theme(),
             active_typography: op_state.active_typography(),
         })
@@ -1432,6 +1646,424 @@ Deno.core.ops.op_clay_parse_store_update(JSON.stringify(update ?? null));
         )
     })?;
     parse_update_json(&update_json, registration, notification)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "language-intelligence JS bridge mirrors the parse-handler worker path and needs request+window inputs together"
+)]
+async fn evaluate_js_language_intelligence_provider(
+    runtime: &mut JsRuntime,
+    op_state: &Arc<ClayOpState>,
+    loader: &Rc<ClayModuleLoader>,
+    registration: &crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+    request: crate::protocol::LanguageIntelligenceRequest,
+    window: crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
+    timeout: Duration,
+    heap_limit_hit: &std::sync::atomic::AtomicBool,
+) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
+    let source = format!(
+        r#"
+const registry = globalThis.__clayLanguageIntelligenceHandlers ?? Object.create(null);
+const handler = registry[{token:?}];
+if (typeof handler !== "function") {{
+  throw new Error("clay.language.handler_missing: registered language-intelligence handler is unavailable");
+}}
+const request = {request};
+const window = {window};
+const result = await handler(request, window);
+Deno.core.ops.op_clay_language_store_intelligence_result(JSON.stringify(result ?? null));
+"#,
+        token = registration.token,
+        request = language_intelligence_request_json(&request),
+        window = language_intelligence_window_json(&window),
+    );
+    let loaded = LoadedRuntimeEntry {
+        main_specifier: ModuleSpecifier::parse(&format!(
+            "clay://runtime/language-intelligence-{}.js",
+            registration.token.replace(':', "-")
+        ))
+        .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
+        main_source: Some(source),
+        configuration: None,
+    };
+    loader.set_entry(
+        loaded.main_specifier.clone(),
+        loaded.main_source.clone(),
+        loaded.configuration.clone(),
+    );
+    evaluate_loaded_module(runtime, op_state, loaded, timeout, false, heap_limit_hit).await?;
+    let result_json = op_state
+        .take_language_intelligence_result_json()
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(
+                "clay.language.invalid_result: handler produced no result".to_string(),
+            )
+        })?;
+    language_intelligence_result_from_json(&result_json, registration, &request)
+}
+
+fn language_intelligence_request_json(
+    request: &crate::protocol::LanguageIntelligenceRequest,
+) -> String {
+    serde_json::json!({
+        "requestId": request.request_id,
+        "clientId": request.client_id,
+        "documentId": request.document_id,
+        "documentVersion": request.document_version,
+        "behaviorVersion": request.behavior_version,
+        "cursorByteOffset": request.cursor_byte_offset,
+        "feature": language_intelligence_feature_name(request.feature),
+        "providerGeneration": request.provider_generation,
+    })
+    .to_string()
+}
+
+fn language_intelligence_window_json(
+    window: &crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
+) -> String {
+    serde_json::json!({
+        "documentId": window.document_id,
+        "documentVersion": window.document_version,
+        "behaviorVersion": window.behavior_version,
+        "byteStart": window.byte_start,
+        "byteEnd": window.byte_end,
+        "text": window.text,
+        "activeMode": window.active_mode,
+    })
+    .to_string()
+}
+
+fn language_intelligence_feature_name(
+    feature: crate::protocol::LanguageIntelligenceFeature,
+) -> &'static str {
+    match feature {
+        crate::protocol::LanguageIntelligenceFeature::Hover => "hover",
+        crate::protocol::LanguageIntelligenceFeature::GoToDefinition => "definition",
+        crate::protocol::LanguageIntelligenceFeature::CodeAction => "codeAction",
+        crate::protocol::LanguageIntelligenceFeature::SignatureHelp => "signatureHelp",
+    }
+}
+
+fn language_intelligence_result_from_json(
+    result_json: &str,
+    registration: &crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+    request: &crate::protocol::LanguageIntelligenceRequest,
+) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
+    use crate::protocol::{
+        CodeActionResult, GoToDefinitionResult, HoverResult, LanguageIntelligencePayload,
+        LanguageIntelligenceResult, LanguageIntelligenceStatus, SignatureHelpResult,
+    };
+
+    let value: serde_json::Value = serde_json::from_str(result_json).map_err(|error| {
+        ClayRuntimeError::Runtime(format!("clay.language.invalid_result: {error}"))
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.language.invalid_result: result must be an object".to_string(),
+        )
+    })?;
+    let status = match object
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("ok")
+    {
+        "ok" | "Ok" => LanguageIntelligenceStatus::Ok,
+        "empty" | "Empty" => LanguageIntelligenceStatus::Empty,
+        "timeout" | "Timeout" => LanguageIntelligenceStatus::Timeout,
+        "providerError" | "ProviderError" | "error" => LanguageIntelligenceStatus::ProviderError,
+        other => {
+            return Err(ClayRuntimeError::Runtime(format!(
+                "clay.language.invalid_result: unsupported status `{other}`"
+            )));
+        }
+    };
+
+    let payload = match request.feature {
+        crate::protocol::LanguageIntelligenceFeature::Hover => {
+            let hover = object
+                .get("payload")
+                .and_then(|value| value.get("hover"))
+                .or_else(|| object.get("hover"))
+                .unwrap_or(&value);
+            let hover_object = hover.as_object().unwrap_or(object);
+            LanguageIntelligencePayload::Hover(HoverResult {
+                range: hover_object
+                    .get("range")
+                    .and_then(language_intelligence_range_from_value),
+                markdown: hover_object
+                    .get("markdown")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            })
+        }
+        crate::protocol::LanguageIntelligenceFeature::GoToDefinition => {
+            let definition = object
+                .get("payload")
+                .and_then(|value| {
+                    value
+                        .get("definition")
+                        .or_else(|| value.get("goToDefinition"))
+                })
+                .or_else(|| {
+                    object
+                        .get("definition")
+                        .or_else(|| object.get("goToDefinition"))
+                })
+                .unwrap_or(&value);
+            let locations = definition
+                .get("locations")
+                .or_else(|| object.get("locations"))
+                .and_then(serde_json::Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .map(language_intelligence_location_from_value)
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            LanguageIntelligencePayload::GoToDefinition(GoToDefinitionResult { locations })
+        }
+        crate::protocol::LanguageIntelligenceFeature::CodeAction => {
+            let actions_value = object
+                .get("payload")
+                .and_then(|value| value.get("codeAction").or_else(|| value.get("actions")))
+                .or_else(|| object.get("codeAction").or_else(|| object.get("actions")))
+                .unwrap_or(&value);
+            let actions = actions_value
+                .get("actions")
+                .or(Some(actions_value))
+                .and_then(serde_json::Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .map(|value| language_intelligence_code_action_from_value(value, request))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            LanguageIntelligencePayload::CodeAction(CodeActionResult { actions })
+        }
+        crate::protocol::LanguageIntelligenceFeature::SignatureHelp => {
+            let help = object
+                .get("payload")
+                .and_then(|value| value.get("signatureHelp"))
+                .or_else(|| object.get("signatureHelp"))
+                .unwrap_or(&value);
+            let help_object = help.as_object().unwrap_or(object);
+            let signatures = help_object
+                .get("signatures")
+                .and_then(serde_json::Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .map(language_intelligence_signature_from_value)
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            LanguageIntelligencePayload::SignatureHelp(SignatureHelpResult {
+                signatures,
+                active_signature: help_object
+                    .get("activeSignature")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|value| value as u16),
+                active_parameter: help_object
+                    .get("activeParameter")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|value| value as u16),
+            })
+        }
+    };
+
+    Ok(LanguageIntelligenceResult {
+        request_id: request.request_id,
+        client_id: request.client_id,
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        provider_generation: request.provider_generation,
+        feature: request.feature,
+        status,
+        payload,
+        provenance: crate::protocol::CompletionProvenance {
+            package_name: registration.package.manifest.name.clone(),
+            package_version: registration.package.manifest.version.clone(),
+            package_prefix: registration.package.manifest.clay.api_prefix.clone(),
+        },
+    })
+}
+
+fn language_intelligence_range_from_value(
+    value: &serde_json::Value,
+) -> Option<crate::protocol::TextByteRange> {
+    let object = value.as_object()?;
+    let byte_start = object
+        .get("byteStart")
+        .and_then(serde_json::Value::as_u64)?;
+    let byte_end = object.get("byteEnd").and_then(serde_json::Value::as_u64)?;
+    Some(crate::protocol::TextByteRange::new(byte_start, byte_end))
+}
+
+fn language_intelligence_location_from_value(
+    value: &serde_json::Value,
+) -> Result<crate::protocol::TextLocation, ClayRuntimeError> {
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.language.invalid_result: location must be an object".to_string(),
+        )
+    })?;
+    let range = object
+        .get("range")
+        .and_then(language_intelligence_range_from_value)
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(
+                "clay.language.invalid_result: location.range requires byteStart/byteEnd"
+                    .to_string(),
+            )
+        })?;
+    if let Some(document_id) = object.get("documentId").and_then(serde_json::Value::as_u64) {
+        return Ok(crate::protocol::TextLocation::OpenDocument { document_id, range });
+    }
+    let workspace_root_id = object
+        .get("workspaceRootId")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(
+                "clay.language.invalid_result: location requires documentId or workspaceRootId"
+                    .to_string(),
+            )
+        })?;
+    let relative_path = object
+        .get("relativePath")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            ClayRuntimeError::Runtime(
+                "clay.language.invalid_result: workspace location requires relativePath"
+                    .to_string(),
+            )
+        })?
+        .to_string();
+    Ok(crate::protocol::TextLocation::WorkspaceFile {
+        workspace_root_id,
+        relative_path,
+        range,
+    })
+}
+
+fn language_intelligence_code_action_from_value(
+    value: &serde_json::Value,
+    request: &crate::protocol::LanguageIntelligenceRequest,
+) -> Result<crate::protocol::CodeAction, ClayRuntimeError> {
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.language.invalid_result: code action must be an object".to_string(),
+        )
+    })?;
+    let range = object
+        .get("range")
+        .and_then(language_intelligence_range_from_value)
+        .unwrap_or_else(|| {
+            crate::protocol::TextByteRange::new(
+                request.cursor_byte_offset,
+                request.cursor_byte_offset,
+            )
+        });
+    let title = object
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let command_id = object
+        .get("commandId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let edit = object.get("edit").and_then(|edit_value| {
+        let edit_object = edit_value.as_object()?;
+        let edits = edit_object
+            .get("edits")
+            .and_then(serde_json::Value::as_array)?
+            .iter()
+            .filter_map(|entry| {
+                let entry_object = entry.as_object()?;
+                Some(crate::protocol::RangeEdit {
+                    range: entry_object
+                        .get("range")
+                        .and_then(language_intelligence_range_from_value)?,
+                    replacement: entry_object
+                        .get("replacement")
+                        .and_then(serde_json::Value::as_str)?
+                        .to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+        Some(crate::protocol::EditPreview {
+            document_id: edit_object
+                .get("documentId")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(request.document_id),
+            document_version: edit_object
+                .get("documentVersion")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(request.document_version),
+            edits,
+        })
+    });
+    Ok(crate::protocol::CodeAction {
+        range,
+        title,
+        command_id,
+        edit,
+    })
+}
+
+fn language_intelligence_signature_from_value(
+    value: &serde_json::Value,
+) -> Result<crate::protocol::SignatureInformation, ClayRuntimeError> {
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.language.invalid_result: signature must be an object".to_string(),
+        )
+    })?;
+    let parameters = object
+        .get("parameters")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|parameter| {
+                    let parameter_object = parameter.as_object()?;
+                    Some(crate::protocol::ParameterInformation {
+                        label: parameter_object
+                            .get("label")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        documentation: parameter_object
+                            .get("documentation")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(crate::protocol::SignatureInformation {
+        label: object
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        documentation: object
+            .get("documentation")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        parameters,
+    })
 }
 
 fn parse_notification_json(notification: &ParseEditNotification) -> String {
@@ -2493,6 +3125,175 @@ mod tests {
             evaluation.completion_providers[0].provenance.package_prefix,
             "words"
         );
+    }
+
+    #[tokio::test]
+    async fn language_intelligence_facade_registers_token_backed_provider_without_process_authority()
+     {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
+                const result = serverRegisterLanguageIntelligenceProvider({
+                  packageName: "@org/intel",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "intel",
+                  permissions: ["parse-document"],
+                  provider: {
+                    id: "intel.intelligence",
+                    modes: ["intel"],
+                    features: ["hover", "definition", "codeAction", "signatureHelp"],
+                    priority: 10,
+                    timeoutMs: 500
+                  },
+                  module: {
+                    provideLanguageIntelligence: async () => ({ status: "ok" })
+                  }
+                });
+                Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.providerId}:${result.runtimeBridge}:${result.languageServerRequired}:${typeof result.token}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            evaluation.op_records,
+            vec!["intel:intel.intelligence:true:false:string"]
+        );
+        assert_eq!(evaluation.language_intelligence_providers.len(), 1);
+        assert_eq!(
+            evaluation.language_intelligence_providers[0].id,
+            "intel.intelligence"
+        );
+        assert_eq!(evaluation.js_language_intelligence_providers.len(), 1);
+        assert_eq!(
+            evaluation.js_language_intelligence_providers[0].export_name,
+            "provideLanguageIntelligence"
+        );
+        assert!(
+            !evaluation.language_intelligence_providers[0]
+                .provenance
+                .package_prefix
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn language_intelligence_facade_rejects_executable_and_process_fields() {
+        let service = ClayJsRuntimeService::default();
+        for source in [
+            r#"
+            import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
+            serverRegisterLanguageIntelligenceProvider({
+              packageName: "@org/intel",
+              packagePrefix: "intel",
+              permissions: ["parse-document"],
+              id: "intel.intelligence",
+              features: ["hover"],
+              handler: () => {}
+            });
+            "#,
+            r#"
+            import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
+            serverRegisterLanguageIntelligenceProvider({
+              packageName: "@org/intel",
+              packagePrefix: "intel",
+              permissions: ["parse-document"],
+              id: "intel.intelligence",
+              features: ["hover"],
+              languageServer: true
+            });
+            "#,
+        ] {
+            let error = service
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("clay.language.invalid_provider"),
+                "unexpected language registration error: {error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn language_intelligence_js_bridge_publishes_validated_hover_result() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
+                serverRegisterLanguageIntelligenceProvider({
+                  packageName: "@org/intel",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "intel",
+                  permissions: ["parse-document"],
+                  provider: {
+                    id: "intel.intelligence",
+                    modes: ["intel"],
+                    features: ["hover"],
+                    priority: 10,
+                    timeoutMs: 500
+                  },
+                  module: {
+                    provideLanguageIntelligence: async (request, window) => ({
+                      status: "ok",
+                      markdown: `hover:${request.feature}:${window.text}`,
+                      range: { byteStart: 0, byteEnd: window.text.length }
+                    })
+                  }
+                });
+                "#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(evaluation.js_language_intelligence_providers.len(), 1);
+
+        let coordinator =
+            crate::server::language_intelligence::LanguageIntelligenceCoordinator::new();
+        service
+            .register_language_intelligence_providers(&coordinator, 1, &evaluation)
+            .unwrap();
+
+        let request = crate::protocol::LanguageIntelligenceRequest {
+            request_id: 7,
+            client_id: 1,
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            cursor_byte_offset: 0,
+            feature: crate::protocol::LanguageIntelligenceFeature::Hover,
+            provider_generation: 1,
+        };
+        let window = crate::server::language_intelligence::LanguageIntelligenceDocumentWindow {
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            byte_start: 0,
+            byte_end: 4,
+            text: "fn()".to_string(),
+            active_mode: "intel".to_string(),
+        };
+        let reply_rx = coordinator
+            .schedule(Some("intel.intelligence"), request.clone(), window)
+            .unwrap();
+        let result = reply_rx.await.expect("js hover result");
+        crate::server::language_intelligence::validate_result(&result).unwrap();
+        assert_eq!(
+            result.status,
+            crate::protocol::LanguageIntelligenceStatus::Ok
+        );
+        assert_eq!(result.request_id, 7);
+        assert_eq!(result.provenance.package_prefix, "intel");
+        match result.payload {
+            crate::protocol::LanguageIntelligencePayload::Hover(hover) => {
+                assert_eq!(hover.markdown, "hover:hover:fn()");
+                assert_eq!(hover.range, Some(crate::protocol::TextByteRange::new(0, 4)));
+            }
+            other => panic!("expected hover payload, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -4997,6 +5798,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn semantic_two_axis_publication_accepts_token_type_and_modifiers() {
+        use crate::protocol::{DecorationKind, Modifiers, TokenType};
+
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverPublishDecorations } from "clay:decorations";
+                const manifest = {
+                  name: "@org/semantic",
+                  version: "1.0.0",
+                  type: "module",
+                  exports: { ".": "./dist/index.js" },
+                  clay: {
+                    apiPrefix: "semanticpkg",
+                    entry: "./dist/index.js",
+                    permissions: ["render-decorations"],
+                    modes: ["semanticpkg"],
+                    docs: "./docs/index.md"
+                  }
+                };
+                const decorations = serverPublishDecorations({
+                  packageManifest: manifest,
+                  documentId: 7,
+                  documentVersion: 3,
+                  viewport: { byteStart: 0, byteEnd: 16 },
+                  spans: [{
+                    byteStart: 2,
+                    byteEnd: 10,
+                    kind: "semantic",
+                    tokenType: "Function",
+                    modifiers: ["Declaration", "Readonly"],
+                    priority: 20,
+                  }],
+                });
+                Deno.core.ops.op_clay_runtime_record(`${decorations.publishedSpanCount}`);
+                "#,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["1"]);
+        let set = result
+            .published_decoration_set
+            .expect("semantic set published");
+        assert_eq!(set.spans.len(), 1);
+        assert_eq!(set.spans[0].kind, DecorationKind::Semantic);
+        assert_eq!(set.spans[0].token_type, TokenType::Function);
+        assert!(set.spans[0].modifiers.contains(Modifiers::DECLARATION));
+        assert!(set.spans[0].modifiers.contains(Modifiers::READONLY));
+        assert!(set.spans[0].scope.is_none());
+        assert_eq!(set.spans[0].provenance.package_prefix, "semanticpkg");
+    }
+
+    #[tokio::test]
     async fn diagnostics_facade_publishes_validated_range_diagnostics() {
         let result = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
@@ -6093,6 +6948,136 @@ mod tests {
             &heap_limit_hit,
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn init_js_authorizes_exact_language_server_before_load_and_package_cannot_self_grant() {
+        let config_root = config_fixture("language-server-authority");
+        let package_root = config_root.join("package");
+        let workspace_root = config_root.join("workspace");
+        fs::create_dir_all(&workspace_root).unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let specifier = "local:language-server-authority";
+        let package_name = "@vendor/lsp-authority";
+        let contribution = "lsp-authority.server";
+        let load_source = format!(
+            r#"
+            import {{ authorizeLanguageServer }} from "clay:language-server";
+            export default async function load() {{
+              try {{
+                await authorizeLanguageServer({{
+                  package: {package_name:?},
+                  contribution: {contribution:?},
+                  workspaceRootIds: [1],
+                }});
+                throw new Error("loaded package unexpectedly self-authorized");
+              }} catch (error) {{
+                if (!String(error).includes("authorization_sealed")) throw error;
+                Deno.core.ops.op_clay_runtime_record("package grant sealed");
+              }}
+            }}
+            "#
+        );
+        write_loadable_package(&package_root, &load_source);
+
+        let mut package_json = loadable_package_fixture(package_name, "lsp-authority");
+        package_json["clay"]["capabilities"] = serde_json::json!(["language-server"]);
+        package_json["clay"]["contributions"]["languageServers"] = serde_json::json!([{
+            "id": contribution,
+            "executable": executable,
+            "args": ["--stdio"],
+            "inheritEnvironment": ["HOME"]
+        }]);
+
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let workspace_root_id = workspace.lock().await.add_root(&workspace_root).unwrap();
+        let op_state = Arc::new(crate::server::ops::ClayOpState::new_for_document(
+            Arc::clone(&workspace),
+            1,
+        ));
+        op_state.set_runtime_context(Arc::clone(&workspace), 1, true);
+        op_state
+            .package_service()
+            .lock()
+            .unwrap()
+            .install_from_value_at_root_with_spec(package_json, package_root, specifier)
+            .unwrap();
+
+        fs::write(
+            config_root.join("init.js"),
+            format!(
+                r#"
+                import {{ authorizeLanguageServer }} from "clay:language-server";
+                import {{ loadPackage }} from "clay:packages";
+                try {{
+                  await authorizeLanguageServer({{
+                    package: {package_name:?},
+                    contribution: {contribution:?},
+                    workspaceRootIds: [999999],
+                  }});
+                  throw new Error("unknown workspace root unexpectedly authorized");
+                }} catch (error) {{
+                  if (!String(error).includes("unknown_workspace_root")) throw error;
+                  Deno.core.ops.op_clay_runtime_record("unknown root rejected");
+                }}
+                const grant = await authorizeLanguageServer({{
+                  package: {package_name:?},
+                  contribution: {contribution:?},
+                  workspaceRootIds: [{workspace_root_id}],
+                }});
+                Deno.core.ops.op_clay_runtime_record(`granted:${{grant.contribution}}`);
+                await loadPackage({specifier:?});
+                "#
+            ),
+        )
+        .unwrap();
+
+        let loaded =
+            prepare_runtime_entry(RuntimeEntry::ConfigurationRoot(config_root), 1).unwrap();
+        let loader = Rc::new(ClayModuleLoader::new(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+            op_state.load_entry_allowlist(),
+        ));
+        let (mut runtime, heap_limit_hit) = create_js_runtime(
+            Arc::clone(&op_state),
+            Rc::clone(&loader),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+        );
+        loader.set_entry(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+        );
+        let evaluation = evaluate_loaded_module(
+            &mut runtime,
+            &op_state,
+            loaded,
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            true,
+            &heap_limit_hit,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            evaluation.op_records,
+            [
+                "unknown root rejected",
+                "granted:lsp-authority.server",
+                "package grant sealed"
+            ]
+        );
+        let service = op_state.package_service().lock().unwrap();
+        let grant = service
+            .language_server_grant(package_name, contribution)
+            .unwrap();
+        assert_eq!(grant.workspace_root_ids, [workspace_root_id]);
+        assert_eq!(
+            grant.canonical_executable,
+            std::fs::canonicalize(executable).unwrap()
+        );
     }
 
     #[tokio::test]

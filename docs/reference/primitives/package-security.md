@@ -101,6 +101,7 @@ Initial target capability vocabulary:
 | `render-decorations` | Publish bounded decoration ranges | decoration publication validation |
 | `render-folding` | Publish bounded folding ranges | folding/decorations publication validation |
 | `completion-provider` | Provide server-side completion results | provider registration and completion request boundary |
+| `language-server` | Approve one fixed external language-server contribution for known directory roots | configuration-only exact grant, package enable, and later session-operation boundaries |
 | `package-control` | Disable, replace, extend, or configure other packages through package graph APIs | package graph evaluation, conflict resolution, enable/disable/reload |
 | `package-import` | Import/use another enabled package API/load surface | module resolution and package dependency validation |
 | `filesystem` | Access user-approved filesystem scopes through Clay APIs | filesystem API boundary and scope validator |
@@ -131,6 +132,8 @@ Permission checks are install/enable/load/reload/registration/request/publicatio
 | `SemanticTypographyRole` | none beyond the enclosing mode/decoration/component primitive | Packages may select only validated `monospace`, `proportional`, or component-only `ui` roles. Users own concrete fallback stacks and sizes; concrete font fields and executable/render authority are rejected. |
 | `FoldingRange` | `render-folding` | Ranges must be valid for the target document version and bounded payload. |
 | `CompletionTriggerAndResult` | `completion-provider` | Phase 18.11 completion provider metadata is load/registration-time inert package data under `clay.contributions.completionProviders`: package-prefixed provider ID, priority, inert trigger characters, inert word-boundary characters, and bounded `timeoutMs`/`maxItems`. Trigger metadata is inert manifest data; typing a trigger edits locally first and then enqueues a typed `CompletionRequest`. Provider execution is server-side, cancellable `UiReactivePriority` work bounded by `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`, `COMPLETION_RESULT_MAX_ITEMS`, and per-field caps; display/acceptance reuses `TransientMenuSession` and commits a validated text replacement, never a command. Phase 18.11 is metadata-only: Clay rejects `handler`/`callback`/`complete`/`function`/`module` executable values, raw ops, native handles, client JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate IDs, reserved `clay.*` IDs, and oversize metadata. Providers may read only Clay-provided open-document content/windows; no filesystem/network/shell/AI/raw-op/native-UI/client-runtime authority is granted. |
+| `LanguageIntelligenceRequestAndResult` | `parse-document` | Phase 18.20 feature-tagged providers register through `clay.language.serverRegisterLanguageIntelligenceProvider` and return inert hover/definition/code-action/signature-help results. Semantic/diagnostic/completion outputs still require `render-decorations` / `completion-provider`. Canonical positions are UTF-8 byte offsets; LSP conversion stays package-side. See [Language Intelligence and LSP 3.17 Bridge Contract](language-intelligence.md). |
+| `LanguageServerContribution` | `language-server` | `clay.contributions.languageServers` contains only a package-prefixed ID, fixed executable, bounded literal argv, and explicit inherited-environment names. `authorizeLanguageServer` binds one validated contribution to current directory-root IDs before package execution; `loadPackage` seals authority mutation and bundled trust never auto-grants it. |
 | `CommandDeclaration` | `command-registration` | Registration does not grant command handler authority; handler permissions are declared separately. |
 | `CommandExecution` | command-specific permissions validated at execution | Server validates command ID, routing policy, package provenance, declared permissions, target context, argument budget, and session/action freshness before side effects; activation through SDUI, package UI, keybinding, or transient-menu intent must normalize to this one server-owned boundary. |
 | `SduiPanelStatusContribution` | none for inert UI | Actions embedded in SDUI must target declared commands with their own permissions. |
@@ -155,7 +158,31 @@ Validation rejects unknown roles and concrete or executable fields including `fo
 
 ## Range Diagnostics Authority Boundary
 
-[Range diagnostics](diagnostics.md) publish inert `DiagnosticSet` data under existing `render-decorations`. Explicit analyzer packages call `clay.diagnostics.serverPublishDiagnostics`; Tree-sitter highlighting does not publish recovery-node diagnostics. Publication grants no filesystem, network, shell, AI, WASM, workspace, language-server process, raw-op, client-JavaScript, CSS, draw-callback, or native-render authority. Metadata must be bounded/sanitized; empty source chunks clear only that source. Diagnostics cannot choose font roles or replace syntax/semantic decoration state. LSP process spawning remains deferred to Phase 18.20+.
+[Range diagnostics](diagnostics.md) publish inert `DiagnosticSet` data under existing `render-decorations`. Explicit analyzer packages call `clay.diagnostics.serverPublishDiagnostics`; Tree-sitter highlighting does not publish recovery-node diagnostics. Publication grants no filesystem, network, shell, AI, WASM, workspace, language-server process, raw-op, client-JavaScript, CSS, draw-callback, or native-render authority. Metadata must be bounded/sanitized; empty source chunks clear only that source. Diagnostics cannot choose font roles or replace syntax/semantic decoration state. The Phase 18.20 contribution/grant boundary is implemented and backed by a host-owned, bounded language-server session primitive.
+
+## Language-Server Authority Boundary
+
+Packages declare `language-server` through `clay.capabilities` and fixed entries under `clay.contributions.languageServers`. Descriptor validation accepts only `id`, `executable`, bounded literal `args`, and bounded `inheritEnvironment` names; IDs are package-prefixed and duplicate/dynamic/shell/cwd/environment-value fields fail closed. Requesting the capability without a descriptor, or declaring a descriptor without the capability, is invalid.
+
+Users authorize before loading package code:
+
+```js
+import { authorizeLanguageServer } from "clay:language-server";
+import { loadPackage } from "clay:packages";
+
+await authorizeLanguageServer({
+  package: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  workspaceRootIds: [1],
+});
+await loadPackage("@clay/lsp-rust");
+```
+
+The configuration-only op resolves/canonicalizes the installed contribution executable, validates every root as a current directory root, and records package source/version/API-prefix, descriptor fingerprint, canonical executable, roots, approver, and approval time. The first `loadPackage` call seals authority mutation for the runtime generation before `loadEntry` import, so loaded package code cannot self-authorize. Missing, unknown-root, mismatched-contribution, stale source/version/descriptor, or revoked grants fail closed. Runtime replacement reruns `init.js` with a fresh grant registry; bundled `NativeTrust` defaults exclude `language-server` unless that fresh generation already recorded an exact grant.
+
+The grant layer records authority only and starts no process. An authorized package opens a host-owned, bounded child session through `clay:language-server.startLanguageServerSession({ package, contribution, workspaceRootId })`, which returns an opaque session wrapper exposing only bounded UTF-8 `send`/`read`/`stop`. The host spawns the child directly via `tokio::process::Command` (never a shell string) using only the fixed validated descriptor executable/argv, `env_clear()` plus the declared inherited environment names, and the approved root's canonical path as cwd, with piped stdio and `kill_on_drop`. Session/read/write/stderr are hard-capped by `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`, `LANGUAGE_SERVER_MAX_SESSIONS`, `LANGUAGE_SERVER_STDERR_BUDGET_BYTES`, and a read timeout; diagnostics are sanitized. Every session operation rechecks the current grant identity (package/contribution/fingerprint); missing/stale grants, unknown roots, wrong cwd, timeout, and child exit fail closed with typed errors and cleanup. Package withdrawal, runtime-generation replacement (reload), and server shutdown reap owned sessions. LSP `Content-Length` framing and server initialization are deferred to Phase 18.21 package adapters layered over this opaque transport.
+
+The approved containment warning still applies to every live session: cwd/root identity and `kill_on_drop` are launch metadata, not an OS filesystem/network/process sandbox, and a same-user child can read other paths, use network, or spawn processes. See `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 
 ## Server-Side Validation Checklist
 

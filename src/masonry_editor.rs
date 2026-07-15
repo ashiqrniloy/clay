@@ -24,7 +24,8 @@ use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
-    DocumentVersion, FontRole, KeyCode, KeyModifiers, KeyStroke, RuntimeDiagnostic,
+    DocumentVersion, FontRole, KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId,
+    LanguageIntelligenceResult, RuntimeDiagnostic,
 };
 
 #[allow(
@@ -180,6 +181,12 @@ impl Default for EditorStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingDefinitionNavigation {
+    relative_path: String,
+    byte_start: u64,
+}
+
 #[derive(Debug)]
 pub struct EditorWidget {
     editor: EditorSurface,
@@ -187,6 +194,9 @@ pub struct EditorWidget {
     next_transaction_id: u64,
     next_completion_request_id: u64,
     active_completion_request_id: Option<CompletionRequestId>,
+    next_language_intelligence_request_id: u64,
+    active_language_intelligence_request_id: Option<LanguageIntelligenceRequestId>,
+    pending_definition_navigation: Option<PendingDefinitionNavigation>,
     last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
     status: EditorStatus,
     sdui: SduiNativeState,
@@ -208,6 +218,9 @@ impl Default for EditorWidget {
             next_transaction_id: 1,
             next_completion_request_id: 1,
             active_completion_request_id: None,
+            next_language_intelligence_request_id: 1,
+            active_language_intelligence_request_id: None,
+            pending_definition_navigation: None,
             last_decoration_viewport: None,
             status,
             sdui: SduiNativeState::empty(),
@@ -243,6 +256,9 @@ impl EditorWidget {
             next_transaction_id: 1,
             next_completion_request_id: 1,
             active_completion_request_id: None,
+            next_language_intelligence_request_id: 1,
+            active_language_intelligence_request_id: None,
+            pending_definition_navigation: None,
             last_decoration_viewport: None,
             status,
             sdui,
@@ -306,12 +322,16 @@ impl EditorWidget {
                 if let Some(queue) = self.edit_queue.as_mut() {
                     queue.update_opened_document_authority(&metadata.access, metadata.version);
                 }
-                self.set_status(EditorStatus::connected(
+                let jumped = self
+                    .take_pending_definition_navigation_for_path(&metadata.path)
+                    .map(|pending| self.editor.navigate_to_byte_offset(pending.byte_start))
+                    .unwrap_or(false);
+                let status_changed = self.set_status(EditorStatus::connected(
                     metadata.document_id,
                     metadata.version,
                     metadata.access,
                 ));
-                true
+                jumped || status_changed
             }
             ClientConnectionEvent::FileOperationFailed { code, message, .. } => {
                 let mut next_status = self.status.clone();
@@ -348,6 +368,18 @@ impl EditorWidget {
             ClientConnectionEvent::DecorationSet(set) => self.editor.apply_decoration_set(set),
             ClientConnectionEvent::DiagnosticSet(set) => self.editor.apply_diagnostic_set(set),
             ClientConnectionEvent::CompletionResult(result) => self.apply_completion_result(result),
+            ClientConnectionEvent::LanguageIntelligenceResult(result) => {
+                self.apply_language_intelligence_result(result)
+            }
+            ClientConnectionEvent::LanguageIntelligenceRejected { request_id, .. } => {
+                if self.active_language_intelligence_request_id == Some(request_id) {
+                    self.active_language_intelligence_request_id = None;
+                    self.sdui.clear_active_menu();
+                    true
+                } else {
+                    false
+                }
+            }
             ClientConnectionEvent::CompletionRejected { request_id, .. } => {
                 if self.active_completion_request_id == Some(request_id) {
                     self.active_completion_request_id = None;
@@ -485,6 +517,41 @@ impl EditorWidget {
         true
     }
 
+    fn apply_language_intelligence_result(&mut self, result: LanguageIntelligenceResult) -> bool {
+        if self.active_language_intelligence_request_id != Some(result.request_id) {
+            return false;
+        }
+        let document = self.editor.document_state();
+        if result.document_id != document.document_id
+            || result.document_version != document.document_version
+            || result.behavior_version != document.behavior_version
+        {
+            return false;
+        }
+        self.sdui
+            .set_active_menu(crate::shell::language_intelligence_result_to_menu_session(
+                &result,
+            ));
+        true
+    }
+
+    fn take_pending_definition_navigation_for_path(
+        &mut self,
+        path: &str,
+    ) -> Option<PendingDefinitionNavigation> {
+        let pending = self.pending_definition_navigation.as_ref()?;
+        let matches = path == pending.relative_path
+            || path.ends_with(&pending.relative_path)
+            || path
+                .replace('\\', "/")
+                .ends_with(&pending.relative_path.replace('\\', "/"));
+        if matches {
+            self.pending_definition_navigation.take()
+        } else {
+            None
+        }
+    }
+
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
         let outcome = self.editor.command_with_event(command);
         if let Some(event) = outcome.edit_event
@@ -496,6 +563,7 @@ impl EditorWidget {
         }
         if outcome.changed {
             self.active_completion_request_id = None;
+            self.active_language_intelligence_request_id = None;
             self.sdui.clear_active_menu();
             ctx.request_render();
             ctx.request_accessibility_update();
@@ -513,15 +581,30 @@ impl EditorWidget {
         if let Some(completion) = outcome.completion_request {
             self.enqueue_completion_request(completion);
             ctx.set_handled();
+        } else if let Some(language_intelligence) = outcome.language_intelligence_request {
+            self.enqueue_language_intelligence_request(language_intelligence);
+            ctx.set_handled();
         } else if changed {
             self.active_completion_request_id = None;
+            self.active_language_intelligence_request_id = None;
             self.sdui.clear_active_menu();
         }
         if let Some(command) = outcome.client_ui_command {
             ctx.submit_action::<EditorAction>(EditorAction::ClientUiCommand(command));
             ctx.set_handled();
         } else if let Some(intent) = outcome.server_intent {
-            if let Some(edit_queue) = &self.edit_queue {
+            if let Some(feature) =
+                crate::client::behavior::language_intelligence_feature_for_command(
+                    &intent.command_id,
+                )
+            {
+                if let Some(event) = self
+                    .editor
+                    .language_intelligence_request_for_feature(feature)
+                {
+                    self.enqueue_language_intelligence_request(event);
+                }
+            } else if let Some(edit_queue) = &self.edit_queue {
                 let document = self.editor.document_state();
                 let _ = edit_queue.enqueue_command_intent(
                     document.document_id,
@@ -561,6 +644,7 @@ impl EditorWidget {
                 self.sdui.menu_cancel();
                 self.sdui.clear_active_menu();
                 self.active_completion_request_id = None;
+                self.active_language_intelligence_request_id = None;
                 ctx.request_render();
                 ctx.set_handled();
                 true
@@ -587,19 +671,123 @@ impl EditorWidget {
                 .accept_completion_with_event(&completion, commit_character);
             self.finish_local_outcome(ctx, outcome);
             self.active_completion_request_id = None;
-        } else if let Some(intent) = self.sdui.menu_activate_selected()
-            && let Some(edit_queue) = &self.edit_queue
-        {
-            let document = self.editor.document_state();
-            let _ = edit_queue.enqueue_command_intent(
-                document.document_id,
-                document.behavior_version,
-                intent.command_id,
-            );
+        } else if let Some(local_action) = self.sdui.menu_selected_action() {
+            if self.handle_language_intelligence_menu_action(&local_action) {
+                let _ = self.sdui.menu_activate_selected();
+            } else if let Some(feature) =
+                crate::client::behavior::language_intelligence_feature_for_command(
+                    &local_action.command_id,
+                )
+            {
+                let _ = self.sdui.menu_activate_selected();
+                if let Some(event) = self
+                    .editor
+                    .language_intelligence_request_for_feature(feature)
+                {
+                    self.enqueue_language_intelligence_request(event);
+                }
+            } else if let Some(intent) = self.sdui.menu_activate_selected()
+                && let Some(edit_queue) = &self.edit_queue
+            {
+                if intent.command_id == "clay.workspace.openFile"
+                    && intent.arguments.iter().any(|arg| {
+                        arg.name == "languageIntelligenceNavigation"
+                            && matches!(arg.value, crate::protocol::SduiActionValue::Bool(true))
+                    })
+                {
+                    let relative_path =
+                        intent
+                            .arguments
+                            .iter()
+                            .find_map(|arg| match (&arg.name, &arg.value) {
+                                (name, crate::protocol::SduiActionValue::String(value))
+                                    if name == "relativePath" =>
+                                {
+                                    Some(value.clone())
+                                }
+                                _ => None,
+                            });
+                    let byte_start =
+                        intent
+                            .arguments
+                            .iter()
+                            .find_map(|arg| match (&arg.name, &arg.value) {
+                                (name, crate::protocol::SduiActionValue::U64(value))
+                                    if name == "byteStart" =>
+                                {
+                                    Some(*value)
+                                }
+                                _ => None,
+                            });
+                    if let (Some(relative_path), Some(byte_start)) = (relative_path, byte_start) {
+                        self.pending_definition_navigation = Some(PendingDefinitionNavigation {
+                            relative_path,
+                            byte_start,
+                        });
+                    }
+                }
+                let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
+            }
         }
         self.sdui.clear_active_menu();
+        self.active_language_intelligence_request_id = None;
         ctx.request_render();
         ctx.set_handled();
+    }
+
+    fn handle_language_intelligence_menu_action(
+        &mut self,
+        intent: &crate::shell::transient_menu::TransientMenuAction,
+    ) -> bool {
+        match intent.command_id.as_str() {
+            "clay.language.dismissResult" => true,
+            "clay.language.previewEdit" => {
+                let title = intent
+                    .arguments
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("edit preview");
+                let mut next_status = self.status.clone();
+                next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
+                    "clay.language.preview_only",
+                    format!("Code action edit preview is display-only in Phase 18.20: {title}"),
+                ));
+                let _ = self.set_status(next_status);
+                true
+            }
+            "clay.language.navigateDefinition" => {
+                let kind = intent
+                    .arguments
+                    .get("kind")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                if kind != "openDocument" {
+                    return true;
+                }
+                let Some(document_id) = intent
+                    .arguments
+                    .get("documentId")
+                    .and_then(|value| value.as_u64())
+                else {
+                    return true;
+                };
+                let Some(byte_start) = intent
+                    .arguments
+                    .get("byteStart")
+                    .and_then(|value| value.as_u64())
+                else {
+                    return true;
+                };
+                if self.editor.document_state().document_id != document_id {
+                    // Other open documents are not focus-switched in Phase 18.20;
+                    // external/unknown targets stay non-navigable from this path.
+                    return true;
+                }
+                let _ = self.editor.navigate_to_byte_offset(byte_start);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn finish_local_outcome(&mut self, ctx: &mut EventCtx<'_>, outcome: EditorCommandOutcome) {
@@ -626,6 +814,22 @@ impl EditorWidget {
         self.next_completion_request_id = self.next_completion_request_id.saturating_add(1).max(1);
         self.active_completion_request_id = Some(request_id);
         let _ = edit_queue.enqueue_completion_request(event, request_id);
+    }
+
+    fn enqueue_language_intelligence_request(
+        &mut self,
+        event: crate::editor::EditorLanguageIntelligenceRequestEvent,
+    ) {
+        let Some(edit_queue) = &self.edit_queue else {
+            return;
+        };
+        let request_id = self.next_language_intelligence_request_id;
+        self.next_language_intelligence_request_id = self
+            .next_language_intelligence_request_id
+            .saturating_add(1)
+            .max(1);
+        self.active_language_intelligence_request_id = Some(request_id);
+        let _ = edit_queue.enqueue_language_intelligence_request(event, request_id);
     }
 
     fn enqueue_decoration_viewport_request(&mut self) {
@@ -1026,8 +1230,8 @@ mod tests {
         BehaviorManifest, ClientMessage, CompletionItem, CompletionItemTextFormat,
         CompletionProvenance, CompletionReplacementRange, CompletionResultSet, CompletionStatus,
         DocumentAccess, DocumentMetadata, EditOperation, FontRole, KeyCode, KeyModifiers,
-        RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId,
-        SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+        LanguageIntelligenceResult, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection,
+        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
@@ -1182,6 +1386,158 @@ mod tests {
             ))
         );
         assert!(widget.sdui.active_menu().is_none());
+    }
+
+    fn language_intelligence_hover_result(request_id: u64) -> LanguageIntelligenceResult {
+        use crate::protocol::{
+            CompletionProvenance, HoverResult, LanguageIntelligenceFeature,
+            LanguageIntelligencePayload, LanguageIntelligenceStatus,
+        };
+        LanguageIntelligenceResult {
+            request_id,
+            client_id: 1,
+            document_id: 7,
+            document_version: 12,
+            behavior_version: 3,
+            provider_generation: 0,
+            feature: LanguageIntelligenceFeature::Hover,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::Hover(HoverResult {
+                range: None,
+                markdown: "**symbol** <em>docs</em>".to_string(),
+            }),
+            provenance: CompletionProvenance::builtin_core(),
+        }
+    }
+
+    #[test]
+    fn language_intelligence_result_installs_bottom_transient_menu_for_active_request() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.active_language_intelligence_request_id = Some(4);
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::LanguageIntelligenceResult(
+                language_intelligence_hover_result(4)
+            ))
+        );
+
+        let menu = widget
+            .sdui
+            .active_menu()
+            .expect("language intelligence menu installed");
+        assert_eq!(menu.prompt(), "Hover");
+        assert!(!menu.items()[0].label.contains("<"));
+    }
+
+    #[test]
+    fn stale_language_intelligence_result_is_ignored_after_newer_request() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.active_language_intelligence_request_id = Some(5);
+
+        assert!(
+            !widget.apply_connection_event(ClientConnectionEvent::LanguageIntelligenceResult(
+                language_intelligence_hover_result(4)
+            ))
+        );
+        assert!(widget.sdui.active_menu().is_none());
+    }
+
+    #[test]
+    fn definition_menu_navigation_jumps_current_document_and_rejects_foreign_document() {
+        use crate::protocol::{
+            CompletionProvenance, GoToDefinitionResult, LanguageIntelligenceFeature,
+            LanguageIntelligencePayload, LanguageIntelligenceStatus, TextByteRange, TextLocation,
+        };
+        use crate::shell::transient_menu::TransientMenuAction;
+
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "abcdefghij".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.set_caret_for_test(0);
+
+        let result = LanguageIntelligenceResult {
+            request_id: 8,
+            client_id: 1,
+            document_id: 7,
+            document_version: 12,
+            behavior_version: 3,
+            provider_generation: 0,
+            feature: LanguageIntelligenceFeature::GoToDefinition,
+            status: LanguageIntelligenceStatus::Ok,
+            payload: LanguageIntelligencePayload::GoToDefinition(GoToDefinitionResult {
+                locations: vec![TextLocation::OpenDocument {
+                    document_id: 7,
+                    range: TextByteRange {
+                        byte_start: 4,
+                        byte_end: 6,
+                    },
+                }],
+            }),
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        widget.active_language_intelligence_request_id = Some(8);
+        assert!(
+            widget
+                .apply_connection_event(ClientConnectionEvent::LanguageIntelligenceResult(result))
+        );
+
+        let action = widget
+            .sdui
+            .menu_selected_action()
+            .expect("definition action");
+        assert!(widget.handle_language_intelligence_menu_action(&action));
+        assert_eq!(widget.editor.caret_for_test(), 4);
+
+        // Foreign document targets are accepted as handled but do not move the caret.
+        let foreign = TransientMenuAction::new("clay.language.navigateDefinition").with_arguments(
+            serde_json::json!({
+                "kind": "openDocument",
+                "documentId": 99,
+                "byteStart": 1,
+                "byteEnd": 2,
+            }),
+        );
+        assert!(widget.handle_language_intelligence_menu_action(&foreign));
+        assert_eq!(widget.editor.caret_for_test(), 4);
+    }
+
+    #[test]
+    fn code_action_edit_preview_does_not_mutate_document_text() {
+        use crate::shell::transient_menu::TransientMenuAction;
+
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "hello".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        let before = widget.editor.document_state().document_version;
+        let action = TransientMenuAction::new("clay.language.previewEdit").with_arguments(
+            serde_json::json!({
+                "title": "Inline preview",
+                "previewOnly": true,
+            }),
+        );
+        assert!(widget.handle_language_intelligence_menu_action(&action));
+        assert_eq!(widget.editor.document_state().document_version, before);
+        assert!(widget.status.runtime_diagnostic.is_some());
     }
 
     #[test]

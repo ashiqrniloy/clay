@@ -3,6 +3,7 @@ pub mod clipboard;
 pub mod file_dialog;
 
 pub use behavior::ClientUiCommandRoute;
+pub use behavior::language_intelligence_feature_for_command;
 pub use clipboard::{
     ClipboardError, ClipboardSink, SystemClipboard, copy_text_to_system_clipboard,
 };
@@ -17,16 +18,19 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::editor::{EditorCompletionRequestEvent, EditorEditEvent};
+use crate::editor::{
+    EditorCompletionRequestEvent, EditorEditEvent, EditorLanguageIntelligenceRequestEvent,
+};
 use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
     ActiveTypography, BehaviorManifest, BehaviorVersion, ClientId, ClientMessage,
     CompletionRejection, CompletionRequest, CompletionRequestId, CompletionResultSet,
     DecorationSet, DiagnosticSet, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion,
-    EditOperation, EditRejection, FileErrorCode, PROTOCOL_VERSION, ProtocolErrorCode,
-    RuntimeDiagnostic, SduiActionIntent, SduiTree, SduiTreeUpdate, ServerMessage, TransactionId,
-    WorkspaceRootId,
+    EditOperation, EditRejection, FileErrorCode, LanguageIntelligenceRejection,
+    LanguageIntelligenceRequest, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
+    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
+    SduiTreeUpdate, ServerMessage, TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -334,6 +338,26 @@ impl ClientEditQueue {
         })
     }
 
+    pub(crate) fn enqueue_language_intelligence_request(
+        &self,
+        event: EditorLanguageIntelligenceRequestEvent,
+        request_id: LanguageIntelligenceRequestId,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender
+            .try_send(ClientMessage::LanguageIntelligenceRequest {
+                request: LanguageIntelligenceRequest {
+                    request_id,
+                    client_id: self.client_id,
+                    document_id: event.document_id,
+                    document_version: event.document_version,
+                    behavior_version: event.behavior_version,
+                    cursor_byte_offset: event.cursor_byte_offset,
+                    feature: event.feature,
+                    provider_generation: 0,
+                },
+            })
+    }
+
     pub fn enqueue_open_selected_file(
         &self,
         selected_path: PathBuf,
@@ -461,6 +485,11 @@ pub enum ClientConnectionEvent {
     CompletionRejected {
         request_id: CompletionRequestId,
         reason: CompletionRejection,
+    },
+    LanguageIntelligenceResult(LanguageIntelligenceResult),
+    LanguageIntelligenceRejected {
+        request_id: LanguageIntelligenceRequestId,
+        reason: LanguageIntelligenceRejection,
     },
     RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
@@ -876,6 +905,12 @@ async fn run_connection<S>(
                     Ok(ServerMessage::CompletionRejected { request_id, reason }) => {
                         let _ = events.send(ClientConnectionEvent::CompletionRejected { request_id, reason }).await;
                     }
+                    Ok(ServerMessage::LanguageIntelligenceResult { result }) => {
+                        let _ = events.send(ClientConnectionEvent::LanguageIntelligenceResult(result)).await;
+                    }
+                    Ok(ServerMessage::LanguageIntelligenceRejected { request_id, reason }) => {
+                        let _ = events.send(ClientConnectionEvent::LanguageIntelligenceRejected { request_id, reason }).await;
+                    }
                     Ok(ServerMessage::RuntimeDiagnostic(diagnostic)) => {
                         let _ = events.send(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)).await;
                     }
@@ -1175,6 +1210,44 @@ mod tests {
                     cursor_byte_offset: 9,
                     replacement_range: CompletionReplacementRange::new(7, 9),
                     trigger: CompletionTrigger::Manual,
+                    provider_generation: 0,
+                }
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn language_intelligence_request_is_enqueued_as_non_blocking_message() {
+        use crate::editor::EditorLanguageIntelligenceRequestEvent;
+        use crate::protocol::LanguageIntelligenceFeature;
+
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::Editable { lease_id: 1 });
+
+        queue
+            .enqueue_language_intelligence_request(
+                EditorLanguageIntelligenceRequestEvent {
+                    document_id: 4,
+                    document_version: 5,
+                    behavior_version: 6,
+                    cursor_byte_offset: 9,
+                    feature: LanguageIntelligenceFeature::Hover,
+                },
+                13,
+            )
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            ClientMessage::LanguageIntelligenceRequest {
+                request: crate::protocol::LanguageIntelligenceRequest {
+                    request_id: 13,
+                    client_id: 42,
+                    document_id: 4,
+                    document_version: 5,
+                    behavior_version: 6,
+                    cursor_byte_offset: 9,
+                    feature: LanguageIntelligenceFeature::Hover,
                     provider_generation: 0,
                 }
             }

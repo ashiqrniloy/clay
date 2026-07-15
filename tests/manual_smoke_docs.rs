@@ -641,3 +641,34 @@ fn phase18_11_manual_completion_smoke_has_runnable_contract() {
         );
     }
 }
+
+#[test]
+fn phase18_20_language_intelligence_smoke_marks_phase18_21_compatibility() {
+    let launch_doc = launch_smoke_doc();
+
+    for expected in [
+        "Phase 18.20 language intelligence / Phase 18.21 LSP bridge smoke markers",
+        "clay.language.hover",
+        "clay.language.goToDefinition",
+        "clay.language.codeActions",
+        "clay.language.signatureHelp",
+        "TransientMenuSession",
+        "clay.workspace.openFile",
+        "CommandExecution",
+        "authorizeLanguageServer",
+        "@clay/lsp-rust",
+        "@clay/lsp-typescript",
+        "@clay/lsp-javascript",
+        "@clay/lsp-markdown",
+        "rust-analyzer",
+        "typescript-language-server",
+        "marksman",
+        "tests/language_intelligence.rs",
+        "language_intelligence_provider_work_is_absent_from_editor_hot_paths",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Phase 18.20/18.21 language-intelligence smoke marker `{expected}`"
+        );
+    }
+}

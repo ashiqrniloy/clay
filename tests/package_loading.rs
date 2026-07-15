@@ -2258,3 +2258,175 @@ fn oversize_manifest_rule_set_is_rejected_at_payload_budget() {
     });
     assemble_package_record(&within).expect("manifest at budget is accepted");
 }
+
+fn language_server_package_fixture(name: &str, version: &str, prefix: &str) -> Value {
+    json!({
+        "name": name,
+        "version": version,
+        "clay": {
+            "apiPrefix": prefix,
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "capabilities": ["language-server"],
+            "modes": [],
+            "docs": "./docs/index.md",
+            "contributions": {
+                "languageServers": [{
+                    "id": format!("{prefix}.server"),
+                    "executable": "/bin/true",
+                    "args": ["--stdio"],
+                    "inheritEnvironment": ["HOME"]
+                }]
+            }
+        }
+    })
+}
+
+#[test]
+fn language_server_contribution_is_fixed_bounded_and_permissioned() {
+    let fixture = language_server_package_fixture("@vendor/lsp", "1.0.0", "vendor-lsp");
+    let record = assemble_package_record(&fixture).expect("fixed descriptor validates");
+    let descriptor = &record.contributions.language_servers[0];
+    assert_eq!(descriptor.id, "vendor-lsp.server");
+    assert_eq!(descriptor.args, ["--stdio"]);
+    assert_eq!(descriptor.inherit_environment, ["HOME"]);
+
+    let mut dynamic = fixture.clone();
+    dynamic["clay"]["contributions"]["languageServers"][0]["cwd"] = json!("/tmp");
+    let error = assemble_package_record(&dynamic).unwrap_err();
+    assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    let mut undeclared = fixture;
+    undeclared["clay"]["capabilities"] = json!([]);
+    let error = assemble_package_record(&undeclared).unwrap_err();
+    assert_eq!(
+        error.rule,
+        PackageRecordRule::UndeclaredPermissionForContribution
+    );
+}
+
+#[test]
+fn language_server_enable_requires_current_exact_grant_and_revocation_fails_closed() {
+    use clay::packages::{authorization::RuntimeProfile, permissions::PackagePermission};
+
+    let fixture = language_server_package_fixture("@vendor/lsp", "1.0.0", "vendor-lsp");
+    let mut service = PackageService::new("/tmp/clay-lsp-test", Box::new(FakeBackend::new()));
+    service
+        .install_from_value_at_root_with_spec(
+            fixture.clone(),
+            "/tmp/vendor-lsp".into(),
+            "local:/vendor-lsp",
+        )
+        .unwrap();
+    service
+        .authorize_package(
+            "@vendor/lsp",
+            vec![PackagePermission::LanguageServer],
+            RuntimeProfile::Restricted,
+            "test-user",
+        )
+        .unwrap();
+    assert!(matches!(
+        service.enable("@vendor/lsp"),
+        Err(PackageServiceError::MissingLanguageServerGrant { .. })
+    ));
+    assert!(matches!(
+        service.authorize_language_server(
+            "@vendor/lsp",
+            "vendor-lsp.missing",
+            "/bin/true".into(),
+            vec![1],
+            "test-user",
+        ),
+        Err(PackageServiceError::MissingLanguageServerGrant { .. })
+    ));
+
+    service
+        .authorize_language_server(
+            "@vendor/lsp",
+            "vendor-lsp.server",
+            std::fs::canonicalize("/bin/true").unwrap(),
+            vec![1],
+            "test-user",
+        )
+        .unwrap();
+    service
+        .enable("@vendor/lsp")
+        .expect("exact grant enables package");
+    service.disable("@vendor/lsp").unwrap();
+    assert_eq!(service.revoke_language_server_grants("@vendor/lsp"), 1);
+    assert!(matches!(
+        service.enable("@vendor/lsp"),
+        Err(PackageServiceError::MissingCapabilityGrant {
+            capability: PackagePermission::LanguageServer,
+            ..
+        })
+    ));
+
+    service
+        .authorize_language_server(
+            "@vendor/lsp",
+            "vendor-lsp.server",
+            std::fs::canonicalize("/bin/true").unwrap(),
+            vec![1],
+            "test-user",
+        )
+        .unwrap();
+    let updated = language_server_package_fixture("@vendor/lsp", "2.0.0", "vendor-lsp");
+    service
+        .install_from_value_at_root_with_spec(
+            updated,
+            "/tmp/vendor-lsp".into(),
+            "local:/vendor-lsp",
+        )
+        .unwrap();
+    assert!(matches!(
+        service.enable("@vendor/lsp"),
+        Err(PackageServiceError::MissingLanguageServerGrant { .. })
+    ));
+
+    service
+        .authorize_language_server(
+            "@vendor/lsp",
+            "vendor-lsp.server",
+            std::fs::canonicalize("/bin/true").unwrap(),
+            vec![1],
+            "test-user",
+        )
+        .unwrap();
+    let changed_source = language_server_package_fixture("@vendor/lsp", "2.0.0", "vendor-lsp");
+    service
+        .install_from_value_at_root_with_spec(
+            changed_source,
+            "/tmp/vendor-lsp".into(),
+            "github:vendor/lsp",
+        )
+        .unwrap();
+    assert!(matches!(
+        service.enable("@vendor/lsp"),
+        Err(PackageServiceError::MissingLanguageServerGrant { .. })
+    ));
+}
+
+#[test]
+fn bundled_defaults_never_auto_grant_language_server() {
+    use clay::packages::permissions::PackagePermission;
+
+    let fixture = language_server_package_fixture("@clay/lsp-test", "1.0.0", "lsp-test");
+    let mut service =
+        PackageService::new("/tmp/clay-lsp-bundled-test", Box::new(FakeBackend::new()));
+    service
+        .install_from_value_at_root(fixture, "/tmp/clay-lsp-test".into())
+        .unwrap();
+    service
+        .authorize_bundled_defaults("@clay/lsp-test", "clay-bundled-default")
+        .unwrap();
+
+    assert!(matches!(
+        service.enable("@clay/lsp-test"),
+        Err(PackageServiceError::MissingCapabilityGrant {
+            capability: PackagePermission::LanguageServer,
+            ..
+        })
+    ));
+}

@@ -9,6 +9,7 @@ pub(crate) mod typography;
 mod viewport;
 
 pub(crate) use surface::EditorCompletionRequestEvent;
+pub(crate) use surface::EditorLanguageIntelligenceRequestEvent;
 pub use surface::{EditorCommand, EditorCommandOutcome, EditorEditEvent, EditorSurface};
 
 pub fn is_printable_text(text: &str) -> bool {

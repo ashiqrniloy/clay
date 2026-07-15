@@ -316,6 +316,32 @@ pub struct DecorationSpan {
 }
 
 impl DecorationSpan {
+    /// Direct two-axis constructor for syntax/semantic publishers that already
+    /// own closed `TokenType` + `Modifiers` values (native grammars and future
+    /// LSP bridge packages). `scope` stays `None` so validation treats the span
+    /// as vocabulary-native rather than a free-form style-token escape.
+    pub fn from_vocabulary(
+        byte_start: u64,
+        byte_end: u64,
+        kind: DecorationKind,
+        token_type: TokenType,
+        modifiers: Modifiers,
+        priority: u16,
+        provenance: DecorationProvenance,
+    ) -> Self {
+        Self {
+            byte_start,
+            byte_end,
+            kind,
+            token_type,
+            modifiers,
+            scope: None,
+            font_role: None,
+            priority,
+            provenance,
+        }
+    }
+
     /// Compat constructor: classify a free-form `style_token` into the two-axis
     /// `(token_type, modifiers)` model and preserve the original string as the
     /// open-escape `scope`. Existing package style_token families render

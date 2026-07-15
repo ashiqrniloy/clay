@@ -7,6 +7,8 @@
 - `src/server/ops/syntax.rs`
 - `src/server/ops/typography.rs`
 - `src/server/ops/completion.rs`
+- `src/server/ops/language_intelligence.rs`
+- `src/server/ops/language_server.rs`
 - `src/server/syntax.rs`
 - `src/server/completion.rs`
 - `src/server/mod.rs`
@@ -52,6 +54,8 @@ Syntax grammar registration follows the same server-runtime boundary. `clay:synt
 Completion provider registration follows the same server-runtime boundary but is metadata-only in Phase 18.11. `clay:completion.serverRegisterCompletionProvider` validates package-shaped completion provider metadata through `op_clay_completion_register_completion_provider`, reusing `assemble_package_record` before storing `CompletionProviderMeta` snapshots in `ClayOpState` / `ClayRuntimeEvaluation`. The facade/op require `completion-provider`, package-owned provider IDs, duplicate rejection, inert trigger/word-boundary metadata, and bounded timeout/item caps. They reject `handler`, `callback`, `complete`, `function`, `module`, client JavaScript, native handles, raw ops, snippets, commands, URLs, shell/network/AI/WASM/native/package-manager authority, and any package provider execution token; `core.bufferWords` remains the executable provider until a future handler bridge is implemented.
 
 Parse-handler registration follows the same server-runtime boundary. `clay:parse.serverRegisterParseHandler` validates package metadata and budgets through `op_clay_parse_register_parse_handler`; executable `handler`/`callback`/`onParse`/`function` keys are rejected in the facade and op. The JS facade stores the package module export behind a server-issued token in the persistent runtime, and Rust registers that token with `ParseCoordinator` under the owning runtime generation ID. Hot reload replaces same package/mode handlers with the new generation and cancels old-generation parse tasks before swap. Rust later invokes the active token through `RuntimeCommand::Parse` with the smaller of the service timeout and the handler's registered `timeoutMs`. The handler returns inert update JSON, which Rust converts to `IncrementalParseUpdate` and lets `ParseCoordinator` validate generation/document freshness before publication.
+
+Phase 18.20 language intelligence follows the token-backed parse-handler pattern. `clay:language.serverRegisterLanguageIntelligenceProvider` stores resolver-validated module exports under `globalThis.__clayLanguageIntelligenceHandlers[token]`; `RuntimeCommand::LanguageIntelligence` invokes the handler on the persistent worker and converts returned JSON into validated analyzer-neutral results. Process authority stays separate: `clay:language-server.authorizeLanguageServer` is open only during configuration-root evaluation and seals before package load, while opaque session I/O routes to the dedicated language-server process thread so long reads do not block the Deno worker.
 
 Key binding registration follows the same server-runtime boundary. `clay:keybindings` ops parse and validate single key chords, scopes, and allowlisted command IDs, then compile registrations into a versioned `BehaviorManifest` through `ActiveBehaviorManifest::publish_replacement`. `clay:behavior` ops expose summaries and routes for the active runtime manifest. The client still receives and routes inert manifests; no JavaScript handler is installed for keypresses.
 
@@ -99,6 +103,8 @@ assert_eq!(error.diagnostic().code, "clay.runtime.timeout");
 - Typography configuration is one atomic candidate validated before mutation. It exposes fallback-stack names and logical sizes only, never installed-font discovery, font files/bytes/URLs, downloads, renderer data, or extra authority.
 - `clay:syntax.serverRegisterSyntaxGrammar` is a package-load-time public facade for first-party grammar packages only; ordinary user config should use `loadPackage("@clay/<language>")` and must not copy manifests or call raw syntax ops.
 - `clay:completion.serverRegisterCompletionProvider` is a package-load-time metadata facade. It records provider metadata only and rejects executable package completion handlers in Phase 18.11.
+- `clay:language.serverRegisterLanguageIntelligenceProvider` registers token-backed bounded providers under `parse-document`; provider results cannot self-assert provenance or process authority.
+- `clay:language-server` grant mutation is configuration-root-only and sealed before package execution; session methods expose no process or stdio handles.
 - Document/workspace runtime ops are startup/configuration/server-first work. They are not invoked from client paint, text-event handling, or ordinary local edit application.
 - Key binding registration compiles to inert behavior manifests. Client key routing uses installed manifests and never calls JavaScript synchronously.
 
@@ -128,6 +134,8 @@ assert_eq!(error.diagnostic().code, "clay.runtime.timeout");
 - [Behavior Runtime Registration](behavior-runtime-registration.md)
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)
 - [Syntax Grammar Registry](syntax-grammar-registry.md)
+- [Language Intelligence](language-intelligence.md)
+- [Language Server Process Service](language-server-process-service.md)
 - [Server IPC Skeleton](server-ipc-skeleton.md)
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
 - `plans/014-Phase13-Embedded-JavaScript-Runtime.md`

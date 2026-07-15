@@ -113,6 +113,14 @@ impl ClientBehaviorState {
                             trigger: CompletionTrigger::Manual,
                             routing_policy: rule.routing_policy.clone(),
                         })
+                    } else if let Some(feature) =
+                        language_intelligence_feature_for_command(&rule.command_id)
+                        && matches!(rule.routing_policy, RoutingPolicy::UiReactivePriority)
+                    {
+                        RoutedBehavior::LanguageIntelligence(LanguageIntelligenceTriggerRoute {
+                            feature,
+                            routing_policy: rule.routing_policy.clone(),
+                        })
                     } else {
                         RoutedBehavior::ServerIntent(ServerIntentRoute {
                             command_id: rule.command_id.clone(),
@@ -174,9 +182,30 @@ fn tab_text(manifest: &BehaviorManifest) -> String {
 pub(crate) enum RoutedBehavior {
     ClientEdit(ClientLocalEdit, Option<CompletionTriggerRoute>),
     Completion(CompletionTriggerRoute),
+    LanguageIntelligence(LanguageIntelligenceTriggerRoute),
     ServerIntent(ServerIntentRoute),
     ClientUiCommand(ClientUiCommandRoute),
     Unhandled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LanguageIntelligenceTriggerRoute {
+    pub(crate) feature: crate::protocol::LanguageIntelligenceFeature,
+    pub(crate) routing_policy: RoutingPolicy,
+}
+
+/// Maps built-in `clay.language.*` command IDs to language-intelligence features.
+pub fn language_intelligence_feature_for_command(
+    command_id: &str,
+) -> Option<crate::protocol::LanguageIntelligenceFeature> {
+    use crate::protocol::LanguageIntelligenceFeature;
+    match command_id {
+        "clay.language.hover" => Some(LanguageIntelligenceFeature::Hover),
+        "clay.language.goToDefinition" => Some(LanguageIntelligenceFeature::GoToDefinition),
+        "clay.language.codeActions" => Some(LanguageIntelligenceFeature::CodeAction),
+        "clay.language.signatureHelp" => Some(LanguageIntelligenceFeature::SignatureHelp),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -379,6 +408,48 @@ mod tests {
                 trigger: CompletionTrigger::Manual,
                 routing_policy: RoutingPolicy::UiReactivePriority,
             })
+        );
+    }
+
+    #[test]
+    fn client_routes_language_intelligence_commands_as_ui_reactive_triggers() {
+        use super::{LanguageIntelligenceTriggerRoute, language_intelligence_feature_for_command};
+        use crate::protocol::LanguageIntelligenceFeature;
+
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        // Commands are already discoverable via default_commands(); only bind a key.
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.language.goToDefinition".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("d".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::UiReactivePriority,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("d".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::LanguageIntelligence(LanguageIntelligenceTriggerRoute {
+                feature: LanguageIntelligenceFeature::GoToDefinition,
+                routing_policy: RoutingPolicy::UiReactivePriority,
+            })
+        );
+        assert_eq!(
+            language_intelligence_feature_for_command("clay.language.hover"),
+            Some(LanguageIntelligenceFeature::Hover)
         );
     }
 

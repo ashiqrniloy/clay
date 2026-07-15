@@ -7,6 +7,8 @@ mod diagnostics;
 mod documents;
 mod git;
 mod keybindings;
+mod language_intelligence;
+mod language_server;
 mod modes;
 mod packages;
 mod parse;
@@ -20,7 +22,10 @@ mod workspace;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use deno_core::{OpState, extension, op2};
 use deno_error::JsErrorBox;
@@ -62,6 +67,14 @@ use self::{
         op_clay_keybindings_bind_key, op_clay_keybindings_list_key_bindings,
         op_clay_keybindings_unbind_key,
     },
+    language_intelligence::{
+        op_clay_language_register_intelligence_provider, op_clay_language_store_intelligence_result,
+    },
+    language_server::{
+        op_clay_language_server_authorize, op_clay_language_server_read_message,
+        op_clay_language_server_send_message, op_clay_language_server_start_session,
+        op_clay_language_server_stop_session,
+    },
     modes::{
         op_clay_modes_activate_major_mode, op_clay_modes_classify_document,
         op_clay_modes_register_pattern,
@@ -96,6 +109,7 @@ pub(crate) use self::packages::PackageLoadEntryAllowlist;
 struct ClayRuntimeContext {
     workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
     runtime_document_id: crate::protocol::DocumentId,
+    configuration_evaluation: bool,
 }
 
 pub(crate) struct ClayOpState {
@@ -108,6 +122,7 @@ pub(crate) struct ClayOpState {
     parse_handlers: Mutex<Vec<crate::server::parse_coordinator::ParseHandlerMeta>>,
     js_parse_handlers: Mutex<Vec<crate::server::parse_coordinator::JsParseHandlerRegistration>>,
     last_parse_update_json: Mutex<Option<String>>,
+    last_language_intelligence_result_json: Mutex<Option<String>>,
     behavior: Mutex<ActiveBehaviorManifest>,
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
@@ -117,6 +132,13 @@ pub(crate) struct ClayOpState {
     completion_providers: Mutex<Vec<crate::server::completion::CompletionProviderMeta>>,
     disabled_completion_providers: Mutex<BTreeSet<String>>,
     completion_provider_generation: Mutex<crate::protocol::CompletionProviderGeneration>,
+    language_intelligence_providers:
+        Mutex<Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta>>,
+    js_language_intelligence_providers: Mutex<
+        Vec<crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration>,
+    >,
+    language_intelligence_provider_generation:
+        Mutex<crate::protocol::LanguageIntelligenceProviderGeneration>,
     /// Resolved active theme snapshot set by the `setTheme` Clay JS op during
     /// `init.js`. Carried out in [`crate::server::js_runtime::ClayRuntimeEvaluation`]
     /// and applied to the shared server slot at load/reload so the welcome
@@ -129,6 +151,8 @@ pub(crate) struct ClayOpState {
     // resolved from this service's installed/source registry. The resolver uses
     // the same validate/authorize/enable path as CLI and package UI code.
     package_service: Mutex<crate::packages::service::PackageService>,
+    language_server_authority_sealed: AtomicBool,
+    language_server_process: crate::server::language_server::LanguageServerProcessService,
     load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
 }
 
@@ -167,6 +191,7 @@ impl ClayOpState {
             parse_handlers: Mutex::new(Vec::new()),
             js_parse_handlers: Mutex::new(Vec::new()),
             last_parse_update_json: Mutex::new(None),
+            last_language_intelligence_result_json: Mutex::new(None),
             behavior: Mutex::new(ActiveBehaviorManifest::default()),
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
@@ -178,16 +203,23 @@ impl ClayOpState {
             completion_providers: Mutex::new(Vec::new()),
             disabled_completion_providers: Mutex::new(BTreeSet::new()),
             completion_provider_generation: Mutex::new(0),
+            language_intelligence_providers: Mutex::new(Vec::new()),
+            js_language_intelligence_providers: Mutex::new(Vec::new()),
+            language_intelligence_provider_generation: Mutex::new(0),
             active_theme: Mutex::new(None),
             active_typography: Mutex::new(None),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
+                configuration_evaluation: false,
             }),
             package_service: Mutex::new(crate::packages::service::PackageService::new(
                 PathBuf::new(),
                 Box::new(crate::packages::manager::FakeBackend::new()),
             )),
+            language_server_authority_sealed: AtomicBool::new(false),
+            language_server_process:
+                crate::server::language_server::LanguageServerProcessService::new(),
             load_entry_allowlist: Arc::new(PackageLoadEntryAllowlist::default()),
         }
     }
@@ -215,6 +247,7 @@ impl ClayOpState {
         &self,
         workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
         runtime_document_id: crate::protocol::DocumentId,
+        configuration_evaluation: bool,
     ) {
         *self
             .runtime_context
@@ -222,7 +255,31 @@ impl ClayOpState {
             .expect("Clay runtime op state mutex poisoned") = ClayRuntimeContext {
             workspace,
             runtime_document_id,
+            configuration_evaluation,
         };
+    }
+
+    pub(super) fn language_server_authorization_is_open(&self) -> bool {
+        self.runtime_context
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .configuration_evaluation
+            && !self
+                .language_server_authority_sealed
+                .load(Ordering::Acquire)
+    }
+
+    pub(super) fn seal_language_server_authority(&self) {
+        self.language_server_authority_sealed
+            .store(true, Ordering::Release);
+    }
+
+    /// Host-owned language-server process/session service. Cheap to construct
+    /// (the background runtime is spawned lazily on first session start).
+    pub(super) fn language_server_process(
+        &self,
+    ) -> crate::server::language_server::LanguageServerProcessService {
+        self.language_server_process.clone()
     }
 
     pub(crate) fn begin_evaluation(&self) {
@@ -232,6 +289,10 @@ impl ClayOpState {
             .clear();
         *self
             .last_parse_update_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
+        *self
+            .last_language_intelligence_result_json
             .lock()
             .expect("Clay runtime op state mutex poisoned") = None;
         *self
@@ -302,6 +363,13 @@ impl ClayOpState {
 
     pub(crate) fn take_parse_update_json(&self) -> Option<String> {
         self.last_parse_update_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .take()
+    }
+
+    pub(crate) fn take_language_intelligence_result_json(&self) -> Option<String> {
+        self.last_language_intelligence_result_json
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .take()
@@ -406,6 +474,13 @@ impl ClayOpState {
     pub(super) fn store_parse_update_json(&self, json: String) {
         *self
             .last_parse_update_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(json);
+    }
+
+    pub(super) fn store_language_intelligence_result_json(&self, json: String) {
+        *self
+            .last_language_intelligence_result_json
             .lock()
             .expect("Clay runtime op state mutex poisoned") = Some(json);
     }
@@ -747,6 +822,55 @@ impl ClayOpState {
         Ok(metas)
     }
 
+    pub(crate) fn language_intelligence_providers(
+        &self,
+    ) -> Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta> {
+        self.language_intelligence_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    pub(crate) fn js_language_intelligence_providers(
+        &self,
+    ) -> Vec<crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration> {
+        self.js_language_intelligence_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    pub(super) fn register_language_intelligence_provider_metadata(
+        &self,
+        mut meta: crate::server::language_intelligence::LanguageIntelligenceProviderMeta,
+    ) -> Result<crate::server::language_intelligence::LanguageIntelligenceProviderMeta, String>
+    {
+        let generation = *self
+            .language_intelligence_provider_generation
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        meta.generation = generation;
+        let mut providers = self
+            .language_intelligence_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        if providers.iter().any(|existing| existing.id == meta.id) {
+            return Err(format!("provider `{}` is already registered", meta.id));
+        }
+        providers.push(meta.clone());
+        Ok(meta)
+    }
+
+    pub(super) fn register_js_language_intelligence_provider(
+        &self,
+        registration: crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+    ) {
+        self.js_language_intelligence_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .push(registration);
+    }
+
     pub(super) fn register_syntax_grammar_package(
         &self,
         package: &crate::packages::record::PackageRecord,
@@ -937,6 +1061,11 @@ extension!(
         op_clay_packages_load_package,
         op_clay_packages_load_package_by_specifier,
         op_clay_packages_list_first_party_specifiers,
+        op_clay_language_server_authorize,
+        op_clay_language_server_start_session,
+        op_clay_language_server_send_message,
+        op_clay_language_server_read_message,
+        op_clay_language_server_stop_session,
         op_clay_modes_register_pattern,
         op_clay_modes_classify_document,
         op_clay_modes_activate_major_mode,
@@ -952,6 +1081,8 @@ extension!(
         op_clay_completion_register_completion_provider,
         op_clay_completion_providers_for_trigger,
         op_clay_completion_disable,
+        op_clay_language_register_intelligence_provider,
+        op_clay_language_store_intelligence_result,
         op_clay_runtime_unavailable,
     ],
 );

@@ -94,7 +94,7 @@ Phase 18.6 shipped the one-line loader: `loadPackage` is a runtime-backed `clay:
 
 `clay package add <spec>` delegates installation to the configured npm-compatible backend (`PnpmBackend`). Lifecycle scripts are suppressed by default via `--ignore-scripts` so remote package code cannot execute before Clay validates package metadata. The `--allow-scripts` CLI flag (or `CLAY_ALLOW_LIFECYCLE_SCRIPTS=1` environment variable) opts into lifecycle scripts and is documented as dangerous. The package store directory is created before invoking the backend. `FakeBackend` is used in tests and never spawns a process or executes scripts.
 
-Installed package-manager metadata does not automatically activate runtime behavior: `pnpm add`/package-store records can be inspected, but enable/load still requires Clay metadata validation and user-approved capabilities. Persistent shared enable/authorization state across runtime restarts remains deferred. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the superseding authority model. `serverLoadPackage` remains a lower-level validation helper used by fixtures and internally by `loadPackage`; it is not the documented end-user default.
+Installed package-manager metadata does not automatically activate runtime behavior: `pnpm add`/package-store records can be inspected, but enable/load still requires Clay metadata validation and user-approved capabilities. Phase 18.20's `language-server` capability adds an exact pre-load gate: `clay.contributions.languageServers` fixes contribution ID/executable/literal argv/inherited-environment names, and `await authorizeLanguageServer({ package, contribution, workspaceRootIds })` binds current package provenance, descriptor fingerprint, canonical executable, and known directory roots before `loadPackage`. First load seals grants before `loadEntry`; bundled defaults exclude `language-server`; stale/revoked/missing grants fail closed. This grant layer starts no process. Persistent shared enable/authorization state across runtime restarts remains deferred. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the superseding authority model. `serverLoadPackage` remains a lower-level validation helper used by fixtures and internally by `loadPackage`; it is not the documented end-user default.
 
 The supported customization path after the one-line load is unchanged. Optional package customization is expressed through documented Clay JS APIs such as `clay.configuration.setPackageOption` and `clay.ui.serverSetLayoutOverride`; hidden JSON/TOML/ad hoc layout, input, style, or theme keys remain rejected, and these APIs do not provide package enable/disable authority. These APIs evaluate at startup, package-load, configuration-change, or explicit setting-change time and install inert validated state for Masonry hot paths to read later.
 
@@ -108,7 +108,7 @@ await loadPackage("@clay/markdown");
 // Bundled and user-installed packages share the one-line path after install
 // and user authorization. init.js grants no capabilities of its own; every
 // powerful capability (filesystem/network/shell/AI/WASM/raw-ops/native-ui/
-// client-runtime/package-control) is a separate user-approved grant recorded
+// client-runtime/package-control/language-server) is a separate user-approved grant recorded
 // against the package identity/source/provenance.
 await loadPackage("@vendor/foo");
 await loadPackage("github:user/repo");

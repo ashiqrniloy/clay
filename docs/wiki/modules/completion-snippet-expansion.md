@@ -145,6 +145,10 @@ serverDisableCompletion({ provider: "core.bufferWords" })
             → stale-drop published results
 ```
 
+## Phase 18.20/18.21 handoff
+
+Language intelligence does not add a second completion model. LSP bridges map `CompletionItem.insertTextFormat` to existing `PlainText`/`Snippet`, preserve priority and exclusive-claim behavior, and honor `serverDisableCompletion`. The `language-server` permission does not bypass `completion-provider`; snippet expansion remains inert client-local Rust after a validated result reaches the menu.
+
 ## Invariants and Constraints
 
 - Snippet accept is client-local Rust only; no provider code runs on accept, no JS, no IPC.
@@ -190,5 +194,6 @@ cargo test --test primitives_docs phase18_19 --quiet
 - [Phase 18.19 Completion Extensions Primitive Review](phase18.19-completion-extensions-primitive-review.md)
 - [Phase 18.11 Completion Provider Framework Primitive Review](phase18.11-completion-provider-primitive-review.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md) — JS facade and op extension registration
+- [Language Intelligence](language-intelligence.md) — LSP completion maps back onto this primitive
 - [Completion Provider API Reference](../../reference/clay-js-api/completion/server-register-completion-provider.md)
 - [Disable Completion API Reference](../../reference/clay-js-api/completion/server-disable-completion.md)

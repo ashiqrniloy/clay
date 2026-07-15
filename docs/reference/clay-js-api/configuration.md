@@ -258,6 +258,48 @@ Dialog behavior in this phase uses fixed defaults, not hidden `init.js` keys: Wi
 
 Configuration remains server startup/load-time work. Pressing the configured key uses client-local manifest routing and then an explicit native UI command; ordinary keypress, paint, scroll, layout, text-event, edit acknowledgement, and Markdown decoration rendering paths do not execute configuration JavaScript. This configuration route does not grant arbitrary filesystem authority, package installation or enable/disable authority, shell, network, AI, WASM, raw Deno ops, workspace expansion, or client-side JavaScript authority.
 
+## Phase 18.20 language-server configuration review
+
+Phase 18.20 promotes exactly one configuration API: [`clay.language-server.authorizeLanguageServer`](language-server/authorize-language-server.md). This is a configuration-only grant API callable only from `~/.config/clay/init.js` during configuration root evaluation **before** the first `loadPackage` call seals authority.
+
+Default end-user configuration with a language-server bridge package:
+
+```js
+// ~/.config/clay/init.js
+import { authorizeLanguageServer } from "clay:language-server";
+import { loadPackage } from "clay:packages";
+
+await authorizeLanguageServer({
+  package: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  workspaceRootIds: [1],
+});
+
+await loadPackage("@clay/lsp-rust");
+```
+
+`authorizeLanguageServer` binds exact package provenance (name/version/source), contribution descriptor fingerprint, resolved canonical executable, declared inheritance environment names, and current directory workspace-root ids. The grant starts **no process** — process spawn happens later when `startLanguageServerSession` is called with a matching package, contribution, and an approved workspace root id.
+
+Grants are accepted only during configuration root evaluation (`init.js`). The first `loadPackage` call atomically seals authority mutation for the runtime generation. Loaded package code cannot self-grant even though it can import the same `clay:language-server` facade. Bundled `@clay/*` package auto-authorization explicitly excludes `language-server` unless an exact current grant already exists.
+
+| Behavior | API / surface | Notes |
+|---|---|---|
+| Language-server grant | [`clay.language-server.authorizeLanguageServer`](language-server/authorize-language-server.md) | Configuration-only; sealed before first `loadPackage` |
+| Session start/read/write/stop | [`clay.language-server.startLanguageServerSession`](language-server/start-language-server-session.md) | Runtime-backed; requires prior grant with matching contribution/root |
+| Package contribution metadata | `clay.contributions.languageServers` in `package.json` | Fixed at package install time; validated descriptor with id/executable/args/inheritEnvironment |
+| Workspace roots | [`clay.workspace.clientOpenFolderDialog`](workspace/client-open-folder-dialog.md) (client UI) + server state | Roots are workspace-state metadata, not `init.js` keys |
+
+Hidden/ad hoc configuration keys rejected by policy:
+
+- `languageServer.enable`, `languageServer.disable`, `enableLanguageServer`, `autoStartLanguageServer`
+- `languageServer.binary`, `languageServer.command`, `languageServer.cwd`, `languageServer.env`
+- `lsp.enable`, `lsp.disable`, `lsp.server`, `lsp.binary`, `lsp.autoStart`
+- Raw executable path strings, shell strings, ad hoc environment variable blobs, or unvalidated contribution identifiers outside the documented `authorizeLanguageServer` API
+
+Server-owned security/performance ceilings (`LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`, `LANGUAGE_SERVER_STDERR_BUDGET_BYTES`, `LANGUAGE_SERVER_MAX_SESSIONS`, `LANGUAGE_SERVER_READ_TIMEOUT_MS`) are compiled budgets in `src/perf/budgets.rs`, not `init.js` configuration knobs.
+
+Configuration evaluation remains startup or explicit reload work only. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, decoration rendering, and completion result construction do not execute configuration JavaScript, start language servers, or revalidate grants. This API grants no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-side JavaScript, or arbitrary process authority beyond the exact fixed validated contribution descriptor and approved roots.
+
 ## Phase 18.5 Markdown end-user loading configuration audit
 
 Phase 18.5 task 8 (plan `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`) closes the configuration audit for Markdown end-user loading. Every behavior-changing Markdown configuration surface from the replan is either a fully documented runtime-backed Clay JS API or an explicitly planned/unavailable API. No undocumented configuration keys are introduced.
