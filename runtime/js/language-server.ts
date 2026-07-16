@@ -40,15 +40,17 @@ export interface StartSessionOptions {
 
 /** Opaque wrapper around a host-owned language-server child session.
  *
- * The session exposes only bounded opaque UTF-8 message read/write/stop. No
- * process, stdio, or native handle crosses the boundary; spawn parameters come
- * from the fixed validated contribution and the approved workspace root. LSP
- * Content-Length framing and server initialization are deferred to Phase 18.21
- * package adapters layered on top of this opaque transport. */
+ * Exact byte methods preserve arbitrary chunk boundaries for package-owned
+ * framing. No process, stdio, or native handle crosses the boundary; spawn
+ * parameters come from the fixed contribution and approved workspace root. */
 export interface LanguageServerSession {
-  /** Send one bounded opaque UTF-8 message to the child stdin. */
+  /** Send exact bounded bytes to child stdin. */
+  sendBytes(bytes: Uint8Array): Promise<void>;
+  /** Read up to maxBytes as exact bytes within timeoutMs. */
+  readBytes(maxBytes: number, timeoutMs: number): Promise<Uint8Array>;
+  /** Compatibility text send; byte-framed adapters must use sendBytes. */
   send(message: string): Promise<void>;
-  /** Read up to maxBytes within timeoutMs from the child stdout. */
+  /** Compatibility UTF-8 read; byte-framed adapters must use readBytes. */
   read(maxBytes: number, timeoutMs: number): Promise<string>;
   /** Stop the child, reap it, and remove the session. */
   stop(): Promise<void>;
@@ -66,8 +68,29 @@ export async function startLanguageServerSession(
   const sessionId = JSON.parse(
     await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null)),
   ).sessionId as number;
+  const identity = JSON.stringify({
+    sessionId,
+    package: options.package,
+    contribution: options.contribution,
+  });
   return {
     sessionId,
+    sendBytes: (bytes) => {
+      if (!(bytes instanceof Uint8Array)) {
+        throw new Error("clay.language_server.invalid_bytes: bytes must be a Uint8Array");
+      }
+      return ops.op_clay_language_server_send_bytes(identity, bytes);
+    },
+    readBytes: (maxBytes, timeoutMs) =>
+      ops.op_clay_language_server_read_bytes(
+        JSON.stringify({
+          sessionId,
+          package: options.package,
+          contribution: options.contribution,
+          maxBytes,
+          timeoutMs,
+        }),
+      ),
     send: (message) =>
       ops.op_clay_language_server_send_message(
         JSON.stringify({

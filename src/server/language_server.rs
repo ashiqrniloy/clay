@@ -3,7 +3,7 @@
 //! A [`LanguageServerProcessService`] owns a bounded table of opaque child
 //! sessions behind a dedicated background runtime. Package JavaScript never
 //! receives a raw process or stdio handle: it exchanges validated, opaque,
-//! bounded UTF-8 byte messages over a typed session ID, and every operation
+//! bounded exact byte chunks over a typed session ID, and every operation
 //! rechecks the current exact grant recorded by `PackageService`.
 //!
 //! Spawn parameters come only from a fixed, validated
@@ -104,7 +104,7 @@ enum SessionCommand {
         descriptor_fingerprint: u64,
         max_bytes: usize,
         timeout_ms: u64,
-        reply: oneshot::Sender<Result<String, LanguageServerError>>,
+        reply: oneshot::Sender<Result<Vec<u8>, LanguageServerError>>,
     },
     Stop {
         session: LanguageServerSessionId,
@@ -219,8 +219,13 @@ impl LanguageServerProcessService {
         descriptor_fingerprint: u64,
         max_bytes: usize,
         timeout_ms: u64,
-    ) -> Result<String, LanguageServerError> {
-        let max_bytes = max_bytes.min(LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES);
+    ) -> Result<Vec<u8>, LanguageServerError> {
+        if max_bytes > LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES {
+            return Err(LanguageServerError::PayloadTooLarge {
+                len: max_bytes,
+                max: LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+            });
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         self.inner
             .command_tx
@@ -467,7 +472,7 @@ async fn handle_read(
     descriptor_fingerprint: u64,
     max_bytes: usize,
     timeout_ms: u64,
-) -> Result<String, LanguageServerError> {
+) -> Result<Vec<u8>, LanguageServerError> {
     let entry = sessions
         .get_mut(&session)
         .ok_or(LanguageServerError::UnknownSession)?;
@@ -478,7 +483,7 @@ async fn handle_read(
         Duration::from_millis(if timeout_ms == 0 {
             LANGUAGE_SERVER_READ_TIMEOUT_MS
         } else {
-            timeout_ms
+            timeout_ms.min(LANGUAGE_SERVER_READ_TIMEOUT_MS)
         }),
         entry.stdout.read(&mut buffer),
     )
@@ -489,8 +494,8 @@ async fn handle_read(
             Err(LanguageServerError::ChildExitedWith { detail })
         }
         Ok(Ok(count)) => {
-            let text = String::from_utf8_lossy(&buffer[..count]).into_owned();
-            Ok(text)
+            buffer.truncate(count);
+            Ok(buffer)
         }
         Ok(Err(error)) => Err(LanguageServerError::Io(error.to_string())),
         Err(_) => Err(LanguageServerError::Timeout),
@@ -696,7 +701,7 @@ mod tests {
             .await
             .expect("read bounded message");
         assert!(
-            reply.starts_with("echo:hello"),
+            reply.starts_with(b"echo:hello"),
             "unexpected reply: {reply:?}"
         );
 

@@ -52,6 +52,8 @@ The decoration transport carries package-produced inline editor decorations as b
 
 Phase 18.20 semantic intelligence reuses this path directly. `DecorationSpan::from_vocabulary` and `serverPublishDecorations({ kind: "semantic", tokenType, modifiers })` publish scope-less two-axis spans; legacy `styleToken` input remains compatible. `StyleRegistry` resolves both Syntax and Semantic through the same per-`TokenType` color table, while additive chunks retain syntax beneath semantic refinements. The `language-server` permission does not bypass `render-decorations`.
 
+Phase 18.21 LSP bridge packages publish semantic tokens through the document-analysis worker's output channel. The worker receives LSP `textDocument/semanticTokens` responses (full or delta), converts them to Clay vocabulary via `mapping.js`, and routes the resulting `DecorationSet` through `validate_decoration_publication`. Semantic token publication is background/viewport-bounded work; paint consumes only cached validated inert state.
+
 Phase 18.17 adds a parallel inert path for `ServerMessage::DiagnosticSet` / `ClientConnectionEvent::DiagnosticSet` / `EditorSurface::apply_diagnostic_set`. Source-keyed diagnostic chunks share the connection drain from `ParseCoordinator` updates, use `DIAGNOSTIC_CACHE_BUDGET_BYTES`, and remain independent from decoration chunk lifecycle. See [Phase 18.17 range diagnostics primitive review](phase18.17-range-diagnostics-primitive-review.md).
 
 ## Code Examples
@@ -87,6 +89,7 @@ let message = ServerMessage::DecorationSet(set);
 
 ## Related
 
+- [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Protocol Codec](protocol-codec.md)
 - [Rendering Primitives](rendering-primitives.md)
 - [Range Diagnostics](range-diagnostics.md)

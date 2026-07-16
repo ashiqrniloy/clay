@@ -1258,6 +1258,250 @@ Additional bridge rules:
 - Map LSP SemanticTokens, Diagnostic, Completion, Hover, Definition/DefinitionLink, CodeAction/Command/WorkspaceEdit, and SignatureHelp onto the Clay primitives documented in `language-intelligence.md`.
 - External/out-of-root URIs are denied. Treat the child as trusted subprocess authority, not a sandbox: cwd/root identity does not OS-confine filesystem, network, or process access.
 
+## Phase 18.21 authoring contract: LSP bridge packages
+
+Phase 18.21 ships the full bridge authoring contract for `@clay/lsp-*` packages. Bridges register a long-lived document-analysis worker that speaks LSP 3.17 to a child process and converts responses to Clay decorations, diagnostics, completions, and intelligence results.
+
+### Bridge package structure
+
+Every LSP bridge package follows this layout:
+
+```
+packages/lsp-rust/
+  package.json          # manifest with apiPrefix, capabilities, contributions, permissions
+  dist/
+    index.js            # exports packageManifest() with all constants
+    load.js             # calls serverRegisterDocumentAnalyzer during loadEntry
+    server.js           # creates the bridge factory + default handleDocumentAnalysis export
+    shared/             # generated copy of packages/lsp-shared/
+      framing.js
+      positions.js
+      mapping.js
+      client.js
+      utf8.js
+  docs/
+    index.md            # setup, authorization, behavior, security, troubleshooting
+```
+
+### Manifest requirements
+
+```json
+{
+  "clay": {
+    "apiPrefix": "lsp-rust",
+    "capabilities": ["language-server"],
+    "permissions": ["parse-document", "completion-provider", "render-decorations"],
+    "contributions": {
+      "languageServers": [{
+        "id": "lsp-rust.server",
+        "executable": "rustup",
+        "args": ["run", "stable", "rust-analyzer"],
+        "inheritEnvironment": []
+      }],
+      "completionProviders": [{
+        "id": "lsp-rust.completion",
+        "triggerCharacters": [":", ".", "'", "("],
+        "priority": 100,
+        "exclusive": false
+      }],
+      "languageIntelligenceProviders": [{
+        "id": "lsp-rust.intelligence",
+        "modes": ["rust"],
+        "features": ["hover", "definition", "codeAction", "signatureHelp"],
+        "priority": 100
+      }]
+    }
+  }
+}
+```
+
+Rules:
+
+- `language-server` in `capabilities` array (not `permissions`). It is a prohibited authority that cannot be requested by default.
+- `parse-document` and `language-server` permissions are both required for analyzer registration.
+- `completion-provider` and `render-decorations` are needed for publishing completions, decorations, and diagnostics.
+- Contribution IDs must use the package `apiPrefix` namespace (e.g. `lsp-rust.server`, `lsp-rust.completion`).
+- `executable` and `args` are fixed and validated at install time. No shell strings, no user-tunable paths.
+- `inheritEnvironment` lists explicit environment variable names inherited after `env_clear()`. An empty array gives the child an empty environment.
+
+### load.js: document analyzer registration
+
+```js
+// packages/lsp-rust/dist/load.js
+import { serverRegisterDocumentAnalyzer } from "clay:language";
+import "./server.js"; // ensure module resolution
+import { lspRustPackageManifest } from "./index.js";
+
+serverRegisterDocumentAnalyzer({
+  packageManifest: lspRustPackageManifest(),
+  analyzer: {
+    id: "lsp-rust.bridge",
+    contribution: "lsp-rust.server",
+    modes: ["rust"],
+    moduleSpecifier: "clay://packages/@clay/lsp-rust/dist/server.js",
+    exportName: "handleDocumentAnalysis",
+  },
+});
+```
+
+Rules:
+
+- Registration is **package-load-time only**. It is inert — no worker or process starts until a document opens.
+- An exact current `authorizeLanguageServer` grant must exist before registration. The load order for users is always: `authorizeLanguageServer` → `loadPackage` (base) → `loadPackage` (bridge).
+- `analyzer.id` must use the package `apiPrefix` namespace (e.g. `lsp-rust.bridge`).
+- `analyzer.contribution` must match a contribution declared in `clay.contributions.languageServers`.
+- Rejected authority fields: `handler`, `callback`, `function`, `executable`, `args`, `cwd`, `environment`, `process`, `rawOps`.
+
+### server.js: bridge factory
+
+```js
+// packages/lsp-rust/dist/server.js
+import { startLanguageServerSession } from "clay:language-server";
+import { serverPublishDecorations } from "clay:decorations";
+import { serverPublishDiagnostics } from "clay:diagnostics";
+import { LspClient } from "./shared/client.js";
+import { VersionedDocument } from "./shared/positions.js";
+import { semanticTokensToClay, diagnosticsToClay, completionToClay,
+         hoverToClay, definitionToClay, codeActionsToClay,
+         signatureHelpToClay } from "./shared/mapping.js";
+
+export function createBridge(config) {
+  let client = null;
+  const documents = new Map(); // documentId → { uri, version, text, versionedDoc }
+
+  async function ensureClient() {
+    if (client) return client;
+    const session = await startLanguageServerSession({
+      package: config.packageName,
+      contribution: config.contribution,
+      workspaceRootId: config.workspaceRootId,
+    });
+    client = new LspClient(session.sendBytes.bind(session),
+                           session.readBytes.bind(session));
+    await client.initialize(config.capabilities, config.workspaceRootUri);
+    return client;
+  }
+
+  async function handle(event) {
+    // Verify identity on every event.
+    if (event.package !== config.packageName ||
+        event.analyzerId !== config.analyzerId) return;
+
+    const cl = await ensureClient();
+    switch (event.kind) {
+      case "open":   await handleOpen(cl, event); break;
+      case "change": await handleChange(cl, event); break;
+      case "close":  await handleClose(cl, event); break;
+    }
+  }
+
+  return { handle };
+}
+
+// ... handleOpen, handleChange, handleClose, refreshSemantic,
+//     refreshDiagnostics, handleCompletion, handleIntelligence ...
+```
+
+Rules:
+
+- Use `session.sendBytes(bytes: Uint8Array)` and `session.readBytes(maxBytes, timeoutMs)` — not the text-based `send`/`read` compatibility wrappers. Lossless byte transport avoids UTF-8 corruption on split multibyte sequences.
+- Own all LSP framing (Content-Length), JSON-RPC envelope, capabilities, position encoding, URI conversion, and cancellation. Rust core stays LSP-wire neutral.
+- Map LSP responses through `packages/lsp-shared/mapping.js` bounded converters. Never pass raw LSP data into Clay publication channels.
+- Validate publication targets against the active document version before publishing decorations or diagnostics.
+- External/out-of-root URIs are denied at the bridge level.
+
+### Shared LSP adapter (packages/lsp-shared/)
+
+All four first-party bridge packages share a canonical LSP 3.17 adapter at `packages/lsp-shared/`:
+
+| Module | Purpose | Key limits |
+|---|---|---|
+| `framing.js` | Content-Length encode/decode, `FrameDecoder` | 1 MiB frame, 8 KiB header |
+| `positions.js` | `VersionedDocument` with UTF-8/16/32 byte-to-position | CRLF normalization, surrogate rejection |
+| `mapping.js` | LSP → Clay vocabulary converters | 128 tokens, 128 diagnostics, 256 completions, 64 definitions, 64 code actions, 16 signatures, 32 parameters, 4 KiB markdown, 8 KiB decoration payload, 8 KiB diagnostic payload, 16 KiB result payload |
+| `client.js` | `LspClient` lifecycle (initialize, sync, request, notification) | Server request allowlist, cancellation |
+| `utf8.js` | Pure-JS UTF-8 codec | No TextEncoder/TextDecoder dependency (Clay runtime lacks deno_web) |
+
+Copies are distributed to each package via `scripts/update-first-party-lsp-shared.mjs` and verified by `tests/lsp_bridge.rs`. Package code imports from `./shared/` — a deterministic copy of the canonical source, not a symlink or dynamic resolution.
+
+Never:
+- Reference `TextEncoder` or `TextDecoder` (not available in Clay's deno_core runtime).
+- Import shared modules across package boundaries at runtime.
+- Duplicate adapter logic; changes flow through the canonical source and the update script.
+
+### Worker lifecycle and budgets
+
+- **Spawn**: lazy, on first eligible document open matching the analyzer's modes.
+- **Stop**: after last monitored document closes. 2s graceful shutdown via `shutdown` event, then 5s kill.
+- **Global cap**: `DOCUMENT_ANALYSIS_MAX_WORKERS` (4). Additional eligible packages queue or fall back to base behavior.
+- **Per-worker**: max 32 documents, 8 MiB text, 64 MiB heap, 8 pending child requests.
+- **Input mailbox**: 64 deltas / 2 MiB with `coalesce_reset` deduplication.
+- **Output queue**: 64 events / 512 KiB. Saturation clears bridge outputs and retains Tree-sitter/base completion.
+- **Edit ack and local paint**: never wait on worker, JS, or subprocess.
+
+### Completion and intelligence routing
+
+- LSP completion providers register at **priority 100 non-exclusive**, merging with base keyword providers (priority 0).
+- Completion results exceeding `RESULT_PAYLOAD_BUDGET_BYTES` (16 KiB) should use halving-retry truncation: reduce the item list by half, re-encode, check budget, repeat.
+- Intelligence requests (hover, definition, code action, signature help) route through `LanguageIntelligenceCoordinator` with cancellable UI-reactive priority.
+- `document_changed` is called on every `EditAck` to abort stale in-flight work for both completion and intelligence coordinators.
+
+### Per-server capability differences
+
+| Capability | rust-analyzer | typescript-language-server | marksman |
+|---|---|---|---|
+| Text document sync | Incremental | Incremental | Full (change: 1) |
+| Position encoding | UTF-8 | UTF-16 | UTF-16 |
+| Semantic tokens | Full + delta | Full only | Full only (often empty data) |
+| Diagnostics | Pull (`textDocument/diagnostic`) | Push (`textDocument/publishDiagnostics`) | Push + `.marksman.toml` marker required |
+| Completion | Snippet format | Snippet format | textEdit format |
+| Signature help | Yes | Yes | Not advertised |
+| Code actions | Bare boolean true | resolveProvider: true | Mutating TOC only (filtered by bridge) |
+| Special notes | Uses `rustup run stable rust-analyzer` | Needs `workspace/configuration` handler; `$/typescriptVersion` notification | Needs `.marksman.toml` project marker for hover/definition/completion |
+
+Bridge packages must handle each server's actual behavior with graceful degradation:
+- Servers that return empty semantic token data → publish no semantic decorations.
+- Servers that return null hover/definition/completion → no Clay intelligence result.
+- Mutating code actions (items with `.edit` field) → filtered by `codeActionsToClay`.
+- Signature help when not advertised → return empty result.
+
+### Anti-patterns
+
+Never:
+- Reference `Content-Length`, `jsonrpc`, `textDocument/*`, or `$/cancelRequest` in Rust core.
+- Call `Deno.core.ops` directly from bridge code — use only `clay:*` facades.
+- Create per-open runtimes or per-document child processes.
+- Hardcode server paths, environment variables, or workspace root URIs in package code.
+- Synchronously expect diagnostics after `didOpen` — poll via document change triggers for pull-diagnostic servers.
+- Pass raw LSP positions, URIs, or JSON-RPC messages into Clay publication channels.
+- Bypass the shared `packages/lsp-shared/` adapter with custom framing or mapping.
+- Use `TextEncoder`/`TextDecoder` — Clay's deno_core runtime lacks the `deno_web` crate.
+- Publish decorations or diagnostics without validating against the active document version.
+- Block the event handler on long-running LSP requests during shutdown.
+
+### Test patterns
+
+Bridge packages use three test layers:
+
+1. **Fake session tests** (always run): import `FakeLspSession` from `tests/fixtures/lsp/fake-server/session.mjs`. Configure with a profile matching the target server capabilities. Test manifest matching, feature mapping, forged identity rejection, and absent capability behavior.
+
+```js
+import { FakeLspSession } from "../../tests/fixtures/lsp/fake-server/session.mjs";
+import { createBridge } from "../dist/server.js";
+
+const session = new FakeLspSession("rust");
+const bridge = createBridge({
+  packageName: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  startSession: () => session,
+  // ...
+});
+```
+
+2. **Real smoke tests** (`CLAY_LSP_REAL_SMOKE=1`): spawn the actual language server as a child process. Gated behind environment variable so ordinary `cargo test` stays green without host tools.
+
+3. **Rust integration tests**: verify package manifests, grant-before-load ordering, fixture-based loading, and adapter copy freshness via `tests/lsp_bridge.rs`.
+
 ## Phase 18.5 authoring contract: no-default-panel, optional preview, generic primitive consumption
 
 Phase 18.5 replanned Markdown end-user loading around the generic shell/package primitives promoted in Phases 18.1–18.4. The key authoring contract changes are:

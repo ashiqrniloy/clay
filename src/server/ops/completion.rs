@@ -10,7 +10,10 @@ use crate::{
         CompletionItem, CompletionItemTextFormat,
         completion::{CompletionProvenance, CompletionProviderGeneration},
     },
-    server::completion::{CompletionProviderMeta, CompletionTriggerMetadata, WordBoundaryRule},
+    server::completion::{
+        CompletionProviderMeta, CompletionTriggerMetadata, JsCompletionProviderRegistration,
+        WordBoundaryRule,
+    },
 };
 
 use super::{
@@ -19,6 +22,22 @@ use super::{
 };
 
 const COMPLETION_DISABLE_TARGET_MAX_CHARS: usize = 128;
+
+#[op2(fast)]
+pub(super) fn op_clay_completion_store_result(
+    state: &mut OpState,
+    #[string] result_json: String,
+) -> Result<(), JsErrorBox> {
+    if result_json.len() > crate::perf::budgets::COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES {
+        return Err(clay_error(
+            "clay.completion.invalid_result: result exceeds payload budget",
+        ));
+    }
+    state
+        .borrow::<Arc<ClayOpState>>()
+        .store_completion_result_json(result_json);
+    Ok(())
+}
 
 fn serialize_error(prefix: &'static str) -> impl Fn(serde_json::Error) -> JsErrorBox {
     move |error| clay_error(format!("{prefix}: failed to serialize result ({error})"))
@@ -98,6 +117,16 @@ pub(super) fn op_clay_completion_register_completion_provider(
         .as_object()
         .ok_or_else(|| clay_error("clay.completion.invalid_provider: options must be an object"))?;
     reject_prohibited_authority(options)?;
+    let runtime_bridge = options
+        .get("runtimeBridge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let export_name = options
+        .get("exportName")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .unwrap_or("provideCompletion")
+        .to_string();
 
     let package = package_value_from_options(options).and_then(|value| {
         assemble_package_record(&value).map_err(|error| {
@@ -114,10 +143,27 @@ pub(super) fn op_clay_completion_register_completion_provider(
     }
 
     let metas = completion_provider_metas(&package);
-    let registered = state
-        .borrow::<Arc<ClayOpState>>()
+    let clay = state.borrow::<Arc<ClayOpState>>();
+    let registered = clay
         .register_completion_provider_metadata(metas)
         .map_err(|message| clay_error(format!("clay.completion.registration_failed: {message}")))?;
+    let registrations = if runtime_bridge {
+        registered
+            .iter()
+            .enumerate()
+            .map(|(index, meta)| JsCompletionProviderRegistration {
+                package: package.clone(),
+                meta: meta.clone(),
+                token: format!("{}:{}:{}", package.manifest.clay.api_prefix, meta.id, index),
+                export_name: export_name.clone(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    for registration in &registrations {
+        clay.register_js_completion_provider(registration.clone());
+    }
 
     serde_json::to_string(&json!({
         "packageName": package.manifest.name,
@@ -125,7 +171,9 @@ pub(super) fn op_clay_completion_register_completion_provider(
         "packagePrefix": package.manifest.clay.api_prefix,
         "registeredProviderCount": registered.len(),
         "providers": registered.iter().map(|meta| meta.id.clone()).collect::<Vec<_>>(),
-        "runtimeBridge": false,
+        "tokens": registrations.iter().map(|registration| registration.token.clone()).collect::<Vec<_>>(),
+        "exportName": export_name,
+        "runtimeBridge": runtime_bridge,
     }))
     .map_err(|error| {
         clay_error(format!(
@@ -205,7 +253,7 @@ fn trigger_characters(options: &Map<String, Value>) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn completion_provider_metas(package: &PackageRecord) -> Vec<CompletionProviderMeta> {
+pub(crate) fn completion_provider_metas(package: &PackageRecord) -> Vec<CompletionProviderMeta> {
     package
         .contributions
         .completion_providers
@@ -291,7 +339,6 @@ fn reject_prohibited_authority(options: &Map<String, Value>) -> Result<(), JsErr
         "clientJavaScript",
         "nativeHandle",
         "rawOps",
-        "module",
     ] {
         if options.contains_key(key) {
             return Err(clay_error(format!(

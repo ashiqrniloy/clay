@@ -89,6 +89,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverDisableCompletion](reference/clay-js-api/completion/server-disable-completion.md) — `clay.completion.serverDisableCompletion`
 - [serverRegisterCompletionProvider](reference/clay-js-api/completion/server-register-completion-provider.md) — `clay.completion.serverRegisterCompletionProvider`
 - [serverRegisterLanguageIntelligenceProvider](reference/clay-js-api/language/server-register-language-intelligence-provider.md) — `clay.language.serverRegisterLanguageIntelligenceProvider`
+- [serverRegisterDocumentAnalyzer](reference/clay-js-api/language/server-register-document-analyzer.md) — `clay.language.serverRegisterDocumentAnalyzer`
 - [authorizeLanguageServer](reference/clay-js-api/language-server/authorize-language-server.md) — `clay.language-server.authorizeLanguageServer`
 - [startLanguageServerSession](reference/clay-js-api/language-server/start-language-server-session.md) — `clay.language-server.startLanguageServerSession`
 - [serverValidatePackageManifest](reference/clay-js-api/packages/server-validate-package-manifest.md) — `clay.packages.serverValidatePackageManifest`

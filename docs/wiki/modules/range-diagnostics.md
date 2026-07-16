@@ -52,7 +52,7 @@ Tree-sitter `ERROR`/`MISSING` recovery nodes are parser recovery details, especi
 
 ### Server/client chunk lifecycle
 
-`DiagnosticChunkCache` mirrors decoration chunk retention with near-viewport guard and LRU under `DIAGNOSTIC_CACHE_BUDGET_BYTES`. `EditorDiagnosticState` applies matching sets, composes multiple sources, ignores stale/mismatched IDs/versions, and clears on version advance / snapshot load before async reparse.
+`DiagnosticChunkCache` mirrors decoration chunk retention with near-viewport guard and LRU under `DIAGNOSTIC_CACHE_BUDGET_BYTES`. `EditorDiagnosticState` applies matching sets, stores source-keyed chunks, and rebuilds a composed span list when chunks change. Composition (`compose_diagnostic_spans`) suppresses Tree-sitter recovery spans (`source = "tree-sitter"`) that overlap current analyzer/LSP Error or Warning spans for the same document/version; non-overlapping Tree-sitter spans and analyzer Info remain additive. Paint reads the composed list so merge never runs on the paint hot path. Stale/mismatched IDs/versions are ignored, and version advance / snapshot load clears diagnostics before async reparse.
 
 ### Package publication
 
@@ -60,7 +60,9 @@ Tree-sitter `ERROR`/`MISSING` recovery nodes are parser recovery details, especi
 
 ### Language-intelligence/LSP reuse
 
-Phase 18.20 leaves this transport unchanged and records it as the diagnostic handoff for analyzers and Phase 18.21 LSP bridges. Bridges convert negotiated LSP positions to Clay UTF-8 byte ranges, preserve severity/code/message/source, and publish source replacement through `serverPublishDiagnostics`. `language-server` authority alone cannot publish diagnostics; `render-decorations`, provenance, version, viewport, and payload validation still apply.
+Phase 18.20 leaves this transport unchanged and records it as the diagnostic handoff for analyzers and Phase 18.21 LSP bridges. Bridges convert negotiated LSP positions to Clay UTF-8 byte ranges, preserve severity/code/message/source, and publish source replacement through the document-analysis worker's output channel, which routes through `validate_diagnostic_publication`. `language-server` authority alone cannot publish diagnostics; `render-decorations`, provenance, version, viewport, and payload validation still apply.
+
+Phase 18.21 also fixed a publication gap: `begin_evaluation` now clears both `published_decoration_set` and `published_diagnostic_set` (previously only `decoration_set` was cleared), so long-lived worker diagnostic outputs are not silently dropped between evaluations.
 
 ### Theme and paint
 
@@ -103,6 +105,7 @@ cargo test --test primitives_docs range_diagnostics
 ## Invariants and Constraints
 
 - Additive layer: Syntax, Semantic, Diagnostic, and Search compose; diagnostics cannot choose `DocumentFontRole`.
+- Analyzer/LSP Error and Warning spans suppress overlapping Tree-sitter recovery spans only; Info and non-overlap remain additive.
 - `RuntimeDiagnostic` stays status-only; `DiagnosticSet` stays inline/paint-only.
 - Empty source chunk clears only that source.
 - No language-name branches in server/client/editor diagnostic code.
@@ -112,7 +115,7 @@ cargo test --test primitives_docs range_diagnostics
 
 ## Tests
 
-- `tests/range_diagnostics.rs` — transport, client apply, multi-source clear, paint/layout invariants, facade authority denial.
+- `tests/range_diagnostics.rs` — transport, client apply, multi-source clear, overlap composition (Tree-sitter recovery suppression by analyzer Error/Warning, Info additive), paint/layout invariants, source-version replacement, facade authority denial.
 - `tests/syntax_grammar.rs` — native highlighting emits decorations but no analyzer diagnostics, including invalid first-party fixtures.
 - `tests/performance_protocol.rs` — non-blocking typing under slow parse.
 - `tests/editor_performance_invariants.rs` — no hot-path extraction, theme-owned paint colors.
@@ -121,6 +124,7 @@ cargo test --test primitives_docs range_diagnostics
 
 ## Related
 
+- [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Phase 18.17 Range Diagnostics Primitive Review](phase18.17-range-diagnostics-primitive-review.md)
 - [Parse Coordinator](parse-coordinator.md)
 - [Syntax Grammar Registry](syntax-grammar-registry.md)

@@ -7,6 +7,7 @@ pub(crate) mod control_center;
 pub mod decorations;
 pub mod diagnostics;
 pub(crate) mod document;
+pub(crate) mod document_analysis;
 #[allow(dead_code)]
 pub(crate) mod git;
 #[allow(dead_code)]
@@ -66,9 +67,10 @@ use crate::{
 };
 
 use self::{
-    behavior::ActiveBehaviorManifest, connection::handle_connection, document::DocumentState,
-    js_runtime::ClayJsRuntimeService, language_intelligence::LanguageIntelligenceCoordinator,
-    parse_coordinator::ParseCoordinator, sdui::StaticSduiState, workspace::WorkspaceState,
+    behavior::ActiveBehaviorManifest, connection::handle_connection_with_analysis,
+    document::DocumentState, js_runtime::ClayJsRuntimeService,
+    language_intelligence::LanguageIntelligenceCoordinator, parse_coordinator::ParseCoordinator,
+    sdui::StaticSduiState, workspace::WorkspaceState,
 };
 
 #[cfg(windows)]
@@ -248,6 +250,8 @@ pub struct IpcServer {
     runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
     #[allow(dead_code)]
     parse_coordinator: ParseCoordinator,
+    completion: crate::server::completion::CompletionCoordinator,
+    document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
     language_intelligence: LanguageIntelligenceCoordinator,
     runtime_generation: RuntimeGenerationStore,
     next_client_id: AtomicU64,
@@ -282,6 +286,9 @@ impl IpcServer {
             active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
+            completion: crate::server::completion::CompletionCoordinator::new(),
+            document_analysis:
+                crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
             language_intelligence: LanguageIntelligenceCoordinator::new(),
             runtime_generation: RuntimeGenerationStore::initial(),
             next_client_id: AtomicU64::new(1),
@@ -416,6 +423,9 @@ impl IpcServer {
                 }
                 self.parse_coordinator
                     .cancel_generation(previous_generation_id);
+                self.completion.cancel_generation(previous_generation_id);
+                self.document_analysis
+                    .cancel_generation(previous_generation_id);
                 self.language_intelligence
                     .cancel_generation(previous_generation_id);
                 self.runtime_generation
@@ -473,9 +483,10 @@ impl IpcServer {
             }
         };
 
+        let roots = self.workspace.lock().await.directory_roots();
         let mut refreshed = Vec::with_capacity(snapshots.len());
         for snapshot in snapshots {
-            let messages = connection::open_document_followup_messages(
+            let mut messages = connection::open_document_followup_messages(
                 &snapshot.metadata,
                 &snapshot.text,
                 &self.behavior,
@@ -485,6 +496,25 @@ impl IpcServer {
                 &self.parse_coordinator,
             )
             .await;
+            if let Some(root) = roots
+                .iter()
+                .find(|root| root.workspace_root_id == snapshot.metadata.workspace_root_id)
+            {
+                let manifest_id = self.behavior.lock().await.manifest().manifest_id.clone();
+                let active_mode = manifest_id.rsplit('.').next().unwrap_or(&manifest_id);
+                messages.extend(
+                    self.document_analysis
+                        .open_document(
+                            generation_id,
+                            &snapshot.metadata,
+                            active_mode,
+                            root.canonical_path.clone(),
+                            snapshot.text.clone(),
+                        )
+                        .into_iter()
+                        .map(ServerMessage::RuntimeDiagnostic),
+                );
+            }
             refreshed.push(ReloadedDocumentRefresh {
                 document_id: snapshot.metadata.document_id,
                 messages,
@@ -524,6 +554,36 @@ impl IpcServer {
                     "clay.parse.registration_failed",
                     format!("Runtime parse handler registration failed: {error:?}"),
                 ));
+        }
+
+        if let Err(error) =
+            service.register_completion_providers(&self.completion, generation_id, &evaluation)
+        {
+            self.runtime_diagnostics
+                .lock()
+                .await
+                .push(RuntimeDiagnostic::error(
+                    "clay.completion.registration_failed",
+                    format!("Runtime completion provider registration failed: {error:?}"),
+                ));
+        }
+
+        for registration in &evaluation.document_analyzers {
+            if let Err(error) = self.document_analysis.register(
+                generation_id,
+                service.clone(),
+                registration.clone(),
+                &self.completion,
+                &self.language_intelligence,
+            ) {
+                self.runtime_diagnostics
+                    .lock()
+                    .await
+                    .push(RuntimeDiagnostic::error(
+                        "clay.analysis.registration_failed",
+                        format!("Runtime document analyzer registration failed: {error}"),
+                    ));
+            }
         }
 
         if let Err(error) = service.register_language_intelligence_providers(
@@ -579,10 +639,12 @@ impl IpcServer {
         let runtime_diagnostics = Arc::clone(&self.runtime_diagnostics);
         let runtime_generation = self.runtime_generation.clone();
         let parse_coordinator = self.parse_coordinator.clone();
+        let completion = self.completion.clone();
+        let document_analysis = self.document_analysis.clone();
         let language_intelligence = self.language_intelligence.clone();
         let codec = self.codec;
         connections.spawn(async move {
-            if let Err(error) = handle_connection(
+            if let Err(error) = handle_connection_with_analysis(
                 stream,
                 client_id,
                 document,
@@ -593,6 +655,8 @@ impl IpcServer {
                 runtime_diagnostics,
                 runtime_generation,
                 parse_coordinator,
+                completion,
+                document_analysis,
                 language_intelligence,
                 codec,
             )
@@ -1105,8 +1169,10 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            js_completion_providers: vec![],
             language_intelligence_providers: vec![],
             js_language_intelligence_providers: vec![],
+            document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1145,8 +1211,10 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            js_completion_providers: vec![],
             language_intelligence_providers: vec![],
             js_language_intelligence_providers: vec![],
+            document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1187,8 +1255,10 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            js_completion_providers: vec![],
             language_intelligence_providers: vec![],
             js_language_intelligence_providers: vec![],
+            document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1228,8 +1298,10 @@ mod runtime_outputs_tests {
             syntax_grammars: vec![],
             syntax_engine_preferences: Default::default(),
             completion_providers: vec![],
+            js_completion_providers: vec![],
             language_intelligence_providers: vec![],
             js_language_intelligence_providers: vec![],
+            document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
         };
@@ -1595,6 +1667,9 @@ mod tests {
             active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
             parse_coordinator: ParseCoordinator::default(),
+            completion: crate::server::completion::CompletionCoordinator::new(),
+            document_analysis:
+                crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
             language_intelligence: LanguageIntelligenceCoordinator::new(),
             runtime_generation: RuntimeGenerationStore::initial(),
             next_client_id: AtomicU64::new(1),

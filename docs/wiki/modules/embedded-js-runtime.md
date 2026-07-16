@@ -9,6 +9,8 @@
 - `src/server/ops/completion.rs`
 - `src/server/ops/language_intelligence.rs`
 - `src/server/ops/language_server.rs`
+- `src/server/ops/document_analysis.rs`
+- `src/server/document_analysis.rs`
 - `src/server/syntax.rs`
 - `src/server/completion.rs`
 - `src/server/mod.rs`
@@ -56,6 +58,8 @@ Completion provider registration follows the same server-runtime boundary but is
 Parse-handler registration follows the same server-runtime boundary. `clay:parse.serverRegisterParseHandler` validates package metadata and budgets through `op_clay_parse_register_parse_handler`; executable `handler`/`callback`/`onParse`/`function` keys are rejected in the facade and op. The JS facade stores the package module export behind a server-issued token in the persistent runtime, and Rust registers that token with `ParseCoordinator` under the owning runtime generation ID. Hot reload replaces same package/mode handlers with the new generation and cancels old-generation parse tasks before swap. Rust later invokes the active token through `RuntimeCommand::Parse` with the smaller of the service timeout and the handler's registered `timeoutMs`. The handler returns inert update JSON, which Rust converts to `IncrementalParseUpdate` and lets `ParseCoordinator` validate generation/document freshness before publication.
 
 Phase 18.20 language intelligence follows the token-backed parse-handler pattern. `clay:language.serverRegisterLanguageIntelligenceProvider` stores resolver-validated module exports under `globalThis.__clayLanguageIntelligenceHandlers[token]`; `RuntimeCommand::LanguageIntelligence` invokes the handler on the persistent worker and converts returned JSON into validated analyzer-neutral results. Process authority stays separate: `clay:language-server.authorizeLanguageServer` is open only during configuration-root evaluation and seals before package load, while opaque session I/O routes to the dedicated language-server process thread so long reads do not block the Deno worker.
+
+Phase 18.21 adds a document-analysis worker lifecycle (`src/server/document_analysis.rs`) for long-lived package analysis. Document analyzers are spawned as dedicated `JsRuntime` instances sharing `ClayOpState` via `Arc<Mutex<PackageService>>`, so they have the same permission boundary as the main runtime. Analyzer registration (`serverRegisterDocumentAnalyzer`) validates that descriptor objects carry no authority fields (executable, args, cwd, environment, handler, callback, process), requires both `parse-document` and `language-server` permissions, and uses the package `apiPrefix` namespace. Lossless byte transport ops (`op_clay_language_server_send_bytes`/`read_bytes`) were added to the Clay op extension. A dynamic completion adapter (`register_completion_provider` with `runtimeBridge: true` and `exportName`) creates `JsCompletionProviderRegistration` entries stored in `ClayOpState` for production completion routing through the persistent runtime worker.
 
 Key binding registration follows the same server-runtime boundary. `clay:keybindings` ops parse and validate single key chords, scopes, and allowlisted command IDs, then compile registrations into a versioned `BehaviorManifest` through `ActiveBehaviorManifest::publish_replacement`. `clay:behavior` ops expose summaries and routes for the active runtime manifest. The client still receives and routes inert manifests; no JavaScript handler is installed for keypresses.
 
@@ -115,6 +119,7 @@ assert_eq!(error.diagnostic().code, "clay.runtime.timeout");
 - `src/server/js_runtime.rs`: evaluates controlled modules on a persistent worker-owned runtime, verifies global JS state survives between evaluations, imports `clay:*` facades, rejects unsafe/unknown imports and platform authorities, converts JavaScript/op failures into typed errors and sanitized diagnostics, publishes runtime-generated SDUI, validates the runtime SDUI smoke fixture, runtime-backs the configuration-needed document/workspace facade subset, rejects executable parse callbacks/missing parse permission, bridges JS parse handlers into `ParseCoordinator`, registers first-party syntax grammar metadata through `clay:syntax`, registers completion provider metadata through `clay:completion`, enforces registered parse-handler `timeoutMs`, supports generic open-time path classification, compiles key binding registrations into behavior manifests, rejects unauthorized workspace paths/unknown commands, asserts ordinary typing does not enter the runtime, terminates runaway modules with the configured timeout, terminates heap growth with `clay.runtime.heap_limit`, restarts on the next controlled evaluation after timeout/heap worker poisoning, and verifies short timeouts do not break fast evaluations.
 - `src/server/connection.rs`: `client_receives_js_generated_sdui_snapshot` verifies a runtime-generated tree stored in server SDUI state is emitted as the bootstrap `SduiSnapshot`; `server_sends_runtime_diagnostics_after_bootstrap` verifies stored diagnostics are published after bootstrap.
 - `src/server/js_runtime.rs`: typography transaction/rejection tests verify complete replacement and no raw authority fields; `src/server/mod.rs::typography_update_reaches_connected_clients_once` verifies a changed configuration emits one bounded live server update.
+- `src/server/document_analysis.rs`: 6 unit tests covering worker lifecycle, open/change/close/reset/completion/intelligence/shutdown flows, stale output rejection, grant revocation, oversize document rejection, mailbox coalescing, and root/generation cancellation.
 - Command: `cargo test js_runtime --quiet`
 - Command: `cargo test persistent_js_runtime_retains_global_state_between_evaluations --lib`
 - Command: `cargo test js_parse_handler_bridge_runs_registered_markdown_handler --lib`
@@ -130,6 +135,7 @@ assert_eq!(error.diagnostic().code, "clay.runtime.timeout");
 
 ## Related
 
+- [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Configuration Runtime](configuration-runtime.md)
 - [Behavior Runtime Registration](behavior-runtime-registration.md)
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)

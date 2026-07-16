@@ -13,7 +13,8 @@ use clay::{
         ServerMessage, codec::Codec,
     },
     server::diagnostics::{
-        DiagnosticValidationError, validate_diagnostic_publication, validate_diagnostic_set,
+        DiagnosticValidationError, TREE_SITTER_DIAGNOSTIC_SOURCE, compose_diagnostic_spans,
+        validate_diagnostic_publication, validate_diagnostic_set,
     },
 };
 use serde_json::json;
@@ -65,6 +66,25 @@ fn set(version: u64) -> DiagnosticSet {
         provenance: provenance(),
         spans: vec![span(4, 5)],
     }
+}
+
+fn analyzer_set(
+    version: u64,
+    source: &str,
+    start: u64,
+    end: u64,
+    severity: DiagnosticSeverity,
+    code: &str,
+) -> DiagnosticSet {
+    let mut set = set(version);
+    set.source = source.to_string();
+    set.spans[0].source = source.to_string();
+    set.spans[0].byte_start = start;
+    set.spans[0].byte_end = end;
+    set.spans[0].severity = severity;
+    set.spans[0].code = code.to_string();
+    set.spans[0].message = code.to_string();
+    set
 }
 
 #[test]
@@ -568,4 +588,132 @@ fn lsp_compatible_diagnostic_mapping_preserves_fields_and_source_replacement() {
         0,
         "empty source replacement must clear only the analyzer chunk"
     );
+}
+
+#[test]
+fn overlapping_tree_sitter_recovery_is_suppressed_by_lsp_error_and_warning_only() {
+    let package = package();
+    let tree_sitter = validate_diagnostic_publication(&package, 3, set(3)).unwrap();
+    let overlapping_error = validate_diagnostic_publication(
+        &package,
+        3,
+        analyzer_set(3, "rust-analyzer", 4, 5, DiagnosticSeverity::Error, "E0001"),
+    )
+    .unwrap();
+    let mut non_overlap = set(3);
+    non_overlap.spans[0].byte_start = 20;
+    non_overlap.spans[0].byte_end = 21;
+    let non_overlap = validate_diagnostic_publication(&package, 3, non_overlap).unwrap();
+    let info = validate_diagnostic_publication(
+        &package,
+        3,
+        analyzer_set(3, "lsp-markdown", 20, 21, DiagnosticSeverity::Info, "hint"),
+    )
+    .unwrap();
+
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "hello rust!!!!!!!!!!!!!!!!".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+
+    assert!(editor.apply_diagnostic_set(tree_sitter.clone()));
+    assert!(editor.apply_diagnostic_set(overlapping_error.clone()));
+    assert_eq!(editor.diagnostic_span_count(), 2);
+    let visible: Vec<_> = editor
+        .visible_diagnostic_spans(0, 64)
+        .map(|span| (span.source.as_str(), span.code.as_str()))
+        .collect();
+    assert_eq!(visible, vec![("rust-analyzer", "E0001")]);
+
+    let mut clear_lsp = overlapping_error;
+    clear_lsp.spans.clear();
+    assert!(editor.apply_diagnostic_set(clear_lsp));
+    assert!(editor.apply_diagnostic_set(non_overlap));
+    assert!(editor.apply_diagnostic_set(info));
+    let visible: Vec<_> = editor
+        .visible_diagnostic_spans(0, 64)
+        .map(|span| (span.source.as_str(), span.code.as_str()))
+        .collect();
+    assert!(
+        visible.contains(&(TREE_SITTER_DIAGNOSTIC_SOURCE, "syntax.error")),
+        "non-overlapping tree-sitter recovery remains: {visible:?}"
+    );
+    assert!(
+        visible.contains(&("lsp-markdown", "hint")),
+        "LSP info remains additive and does not suppress tree-sitter: {visible:?}"
+    );
+}
+
+#[test]
+fn lsp_source_version_replacement_and_empty_clear_are_package_scoped() {
+    let package = package();
+    let first = validate_diagnostic_publication(
+        &package,
+        3,
+        analyzer_set(3, "rust-analyzer", 4, 5, DiagnosticSeverity::Error, "E0001"),
+    )
+    .unwrap();
+    let mut second = analyzer_set(
+        3,
+        "rust-analyzer",
+        8,
+        9,
+        DiagnosticSeverity::Warning,
+        "W0001",
+    );
+    second.spans[0].message = "replaced".to_string();
+    let second = validate_diagnostic_publication(&package, 3, second).unwrap();
+    let peer = validate_diagnostic_publication(
+        &package,
+        3,
+        analyzer_set(3, "typescript", 12, 13, DiagnosticSeverity::Error, "ts2304"),
+    )
+    .unwrap();
+
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "hello rust code!!".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    assert!(editor.apply_diagnostic_set(first));
+    assert!(editor.apply_diagnostic_set(peer.clone()));
+    assert_eq!(editor.diagnostic_span_count(), 2);
+    assert!(editor.apply_diagnostic_set(second.clone()));
+    let visible: Vec<_> = editor
+        .visible_diagnostic_spans(0, 64)
+        .map(|span| (span.source.as_str(), span.code.as_str()))
+        .collect();
+    assert_eq!(
+        visible,
+        vec![("rust-analyzer", "W0001"), ("typescript", "ts2304")]
+    );
+
+    let mut clear_rust = second;
+    clear_rust.spans.clear();
+    assert!(editor.apply_diagnostic_set(clear_rust));
+    assert_eq!(editor.diagnostic_span_count(), 1);
+    assert_eq!(
+        editor
+            .visible_diagnostic_spans(0, 64)
+            .next()
+            .map(|span| span.source.as_str()),
+        Some("typescript")
+    );
+}
+
+#[test]
+fn compose_diagnostic_spans_is_exported_for_generic_reuse() {
+    let tree = span(4, 5);
+    let mut lsp = span(4, 5);
+    lsp.source = "rust-analyzer".to_string();
+    lsp.code = "E0001".to_string();
+    lsp.message = "cannot find value".to_string();
+    let composed = compose_diagnostic_spans([&tree, &lsp]);
+    assert_eq!(composed.len(), 1);
+    assert_eq!(composed[0].source, "rust-analyzer");
 }

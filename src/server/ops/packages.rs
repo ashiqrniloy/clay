@@ -96,6 +96,14 @@ impl PackageLoadEntryAllowlist {
             .map(|entry| entry.absolute_path.clone())
     }
 
+    pub(crate) fn is_package_module(&self, opaque_specifier: &str, package_name: &str) -> bool {
+        self.entries
+            .lock()
+            .expect("package loadEntry allowlist mutex poisoned")
+            .get(opaque_specifier)
+            .is_some_and(|entry| entry.package_name.as_deref() == Some(package_name))
+    }
+
     /// Resolve a relative import from a validated package module, confining the
     /// result to the referrer's validated package root. Records the new opaque
     /// specifier and returns it so `load` can read it. Returns `None` if the

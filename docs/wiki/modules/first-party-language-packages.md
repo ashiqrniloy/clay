@@ -74,6 +74,8 @@ Phase 18.14 expands the first-party `@clay/rust`, `@clay/typescript`, and `@clay
 - Render first-party syntax through compiled Tier 1 grammar descriptors, package queries, direct vocabulary styleMaps, and the generic background parse/decor transport.
 - Remain explicit opt-in via `loadPackage("@clay/*")`; do not auto-activate or shadow built-in `core.code`/`core.text` fallbacks.
 
+Phase 18.21 LSP bridge packages (`@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript`, `@clay/lsp-markdown`) are separate packages that enrich loaded base language packages with live LSP capabilities when a language-server grant is authorized. Base packages operate independently: removing a bridge `loadPackage` or revoking its grant preserves Tier 1 syntax, keyword/snippet completion, Markdown preview, and all behavior. Bridge packages do not replace base providers; they merge at priority 100 non-exclusive with `serverDisableCompletion` as override. See [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md) for the full bridge architecture.
+
 Non-responsibilities:
 - No LSP or language-server protocol integration.
 - No workspace-wide symbol indexes, AI completions, network-backed completions, or toolchain execution.
@@ -273,6 +275,7 @@ CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs
 
 ## Related
 
+- [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Phase 18.14 First-Party Rust, TypeScript, and JavaScript Language Package Expansion Primitive Review](phase18.14-language-package-expansion-primitive-review.md)
 - [Mode Registry](mode-registry.md)
 - [Command Registry](command-registry.md)

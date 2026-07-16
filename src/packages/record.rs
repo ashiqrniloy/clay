@@ -724,8 +724,15 @@ fn validate_api_dependency_permissions(
                 Some(PackagePermission::CompletionProvider)
             }
             "clay.completion.completionTriggerCharactersFromEditorRules" => None,
-            "clay.parse.serverRegisterParseHandler" => Some(PackagePermission::ParseDocument),
-            "clay.decorations.serverPublishDecorations" => {
+            "clay.parse.serverRegisterParseHandler"
+            | "clay.language.serverRegisterDocumentAnalyzer" => {
+                Some(PackagePermission::ParseDocument)
+            }
+            "clay.language-server.startLanguageServerSession" => {
+                Some(PackagePermission::LanguageServer)
+            }
+            "clay.decorations.serverPublishDecorations"
+            | "clay.diagnostics.serverPublishDiagnostics" => {
                 Some(PackagePermission::RenderDecorations)
             }
             "clay.syntax.serverRegisterSyntaxGrammar" => Some(PackagePermission::ParseDocument),

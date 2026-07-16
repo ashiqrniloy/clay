@@ -82,7 +82,7 @@ Spawn uses `tokio::process::Command` directly:
 - `kill_on_drop(true)` protects abnormal teardown;
 - no shell, interpolation, runtime argv/cwd/env override, inherited terminal, or generic process API exists.
 
-`send` accepts UTF-8 message data up to `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES` (256 KiB). `read` caps requested/output bytes to the same limit and applies `LANGUAGE_SERVER_READ_TIMEOUT_MS` (30 seconds). Stderr is asynchronously accumulated only up to `LANGUAGE_SERVER_STDERR_BUDGET_BYTES` (64 KiB), sanitized, and surfaced only on typed child failures. LSP `Content-Length` framing is intentionally not implemented here.
+Phase 18.21 replaces the text-only `send`/`read` with exact byte `sendBytes`/`readBytes`. `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES` is raised to 1 MiB (from 256 KiB) to accommodate LSP 3.17 response payloads. The `SessionCommand::Read` response type changed from `String` to `Vec<u8>` to avoid `String::from_utf8_lossy` corrupting multibyte `Content-Length` framing. Two new deno ops (`op_clay_language_server_send_bytes` with `#[buffer]` input, `op_clay_language_server_read_bytes` returning `#[buffer] Vec<u8>`) expose `sendBytes`/`readBytes` through the JS facade as `Uint8Array`. All Content-Length framing, JSON-RPC parsing, and LSP method routing remain in package-owned JavaScript. The original text `send`/`read` ops are preserved for existing callers but are deprecated for LSP use.
 
 ## Errors and Cleanup
 
@@ -96,7 +96,7 @@ Every operation rechecks the current grant using package name, contribution ID, 
 - **Owner:** `src/server/language_server.rs::LanguageServerProcessService`.
 - **Facade/ops:** `runtime/js/language-server.ts`; private authorize/start/send/read/stop ops in `src/server/ops/language_server.rs`.
 - **Permission:** deny-by-default `language-server`, plus exact pre-load `LanguageServerGrant` for contribution and roots.
-- **Budgets:** 16 sessions, 256 KiB message, 64 KiB stderr, 30-second read timeout.
+- **Budgets:** 16 sessions, 1 MiB message, 64 KiB stderr, 30-second read timeout.
 - **Hot-path policy:** async dedicated server thread; absent from Masonry/client edit/paint/layout paths.
 - **Reuse rule:** every Phase 18.21 LSP bridge uses this session service and keeps framing/server policy package-side; no per-language process launcher belongs in core.
 
@@ -112,21 +112,21 @@ Every operation rechecks the current grant using package name, contribution ID, 
 - No process/session work enters typing, paint, layout, scroll, or local text application.
 - LSP framing, initialization, synchronization, cancellation protocol, and position/URI conversion remain package-owned.
 
-## Phase 18.21 Publish Handoff
+## Phase 18.21 Handoff (Complete)
 
-Bridge packages can now:
+All four first-party LSP bridge packages use this service. Bridge packages:
 
-1. obtain explicit user grant before package load;
+1. obtain explicit user grant before package load (`authorizeLanguageServer`);
 2. lazily start one approved contribution/root session;
-3. implement bounded LSP framing and JSON-RPC over `send`/`read`;
-4. map responses through [Language Intelligence](language-intelligence.md), decoration, diagnostic, and completion primitives;
+3. implement bounded LSP framing and JSON-RPC over `sendBytes`/`readBytes` (exact `Uint8Array` transport);
+4. map responses through [Language Intelligence](language-intelligence.md), [Decoration Transport](decoration-transport.md), [Range Diagnostics](range-diagnostics.md), and [Completion Snippet Expansion](completion-snippet-expansion.md) primitives;
 5. stop sessions during bridge shutdown and rely on host cleanup for revocation/reload/failure.
 
 Bridge release notes must repeat trusted-subprocess containment language and must not claim workspace/filesystem/network sandboxing.
 
 ## Tests
 
-- `tests/language_server_authority.rs`: shell/external executable rejection, pre-spawn payload limit, bad cwd spawn error, timeout with stoppable session, sanitized child exit, duplicate contribution/root rejection, session cap, and package-withdrawal reaping.
+- `tests/language_server_authority.rs`: shell/external executable rejection, pre-spawn byte budget, bad cwd spawn error, timeout with stoppable session, sanitized child exit, duplicate contribution/root rejection, session cap, package-withdrawal reaping, lossless split-UTF-8 round-trip, fragmented LSP frame reassembly, oversize byte write/read rejection. 14 tests total.
 - `tests/package_loading.rs`: descriptor validation, no bundled auto-grant, exact grant enablement, and revocation failure.
 - `src/server/js_runtime.rs`: grant-before-load, unknown-root rejection, and loaded-package self-grant denial.
 - `tests/editor_performance_invariants.rs`: process service and `tokio::process::Command` absent from editor/client hot paths.
@@ -140,6 +140,7 @@ cargo test --test editor_performance_invariants
 
 ## Related
 
+- [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Language Intelligence](language-intelligence.md)
 - [Phase 18.20 Primitive Review](phase18.20-language-intelligence-primitive-review.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)

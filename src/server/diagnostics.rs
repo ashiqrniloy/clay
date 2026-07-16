@@ -9,6 +9,11 @@ use crate::{
     protocol::{DiagnosticChunkKey, DiagnosticSet, DocumentId, DocumentVersion},
 };
 
+/// Re-export the generic multi-source composition rule used by the editor paint
+/// cache. Analyzer/LSP Error and Warning spans suppress overlapping Tree-sitter
+/// recovery diagnostics only; composition is not language-specific.
+pub use crate::protocol::{TREE_SITTER_DIAGNOSTIC_SOURCE, compose_diagnostic_spans};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiagnosticValidationError {
     MissingPermission {
@@ -374,7 +379,7 @@ mod tests {
             document_version: 3,
             viewport_byte_start: viewport_start,
             viewport_byte_end: viewport_start + 8,
-            source: "tree-sitter".to_string(),
+            source: TREE_SITTER_DIAGNOSTIC_SOURCE.to_string(),
             provenance: provenance.clone(),
             spans: vec![DiagnosticSpan {
                 byte_start: viewport_start + 1,
@@ -382,7 +387,7 @@ mod tests {
                 severity: DiagnosticSeverity::Error,
                 code: "syntax.error".to_string(),
                 message: "syntax error".to_string(),
-                source: "tree-sitter".to_string(),
+                source: TREE_SITTER_DIAGNOSTIC_SOURCE.to_string(),
                 provenance,
             }],
         }
@@ -411,5 +416,35 @@ mod tests {
             .expect("far chunk inserts");
         assert_eq!(cache.chunk_count(), 1);
         assert!(cache.retained_bytes() <= DIAGNOSTIC_CACHE_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn composition_rule_is_source_generic_not_language_branched() {
+        let provenance = DecorationProvenance {
+            package_name: "@clay/lsp-rust".to_string(),
+            package_version: "0.1.0".to_string(),
+            package_prefix: "lsp-rust".to_string(),
+        };
+        let tree = DiagnosticSpan {
+            byte_start: 2,
+            byte_end: 6,
+            severity: DiagnosticSeverity::Error,
+            code: "syntax.error".to_string(),
+            message: "recovery".to_string(),
+            source: TREE_SITTER_DIAGNOSTIC_SOURCE.to_string(),
+            provenance: provenance.clone(),
+        };
+        let lsp = DiagnosticSpan {
+            byte_start: 3,
+            byte_end: 5,
+            severity: DiagnosticSeverity::Error,
+            code: "E0425".to_string(),
+            message: "cannot find value".to_string(),
+            source: "rust-analyzer".to_string(),
+            provenance,
+        };
+        let composed = compose_diagnostic_spans([&tree, &lsp]);
+        assert_eq!(composed.len(), 1);
+        assert_eq!(composed[0].source, "rust-analyzer");
     }
 }

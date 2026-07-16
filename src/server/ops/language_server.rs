@@ -1,6 +1,6 @@
 use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::Arc};
 
-use deno_core::{OpState, op2};
+use deno_core::{JsBuffer, OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Value, json};
 
@@ -320,20 +320,47 @@ pub(super) async fn op_clay_language_server_send_message(
     #[string] request_json: String,
 ) -> Result<String, JsErrorBox> {
     let (session_id, package, contribution, message) = parse_session_message(&request_json)?;
+    send_session_bytes(
+        state,
+        session_id,
+        package,
+        contribution,
+        message.into_bytes(),
+    )
+    .await?;
+    Ok("{}".to_string())
+}
+
+#[op2]
+pub(super) async fn op_clay_language_server_send_bytes(
+    state: Rc<RefCell<OpState>>,
+    #[string] request_json: String,
+    #[buffer] bytes: JsBuffer,
+) -> Result<(), JsErrorBox> {
+    let (session_id, package, contribution) = parse_session_bytes(&request_json)?;
+    if bytes.len() > crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES {
+        return Err(JsErrorBox::generic(format!(
+            "clay.language_server.invalid_bytes: payload exceeds {} bytes",
+            crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES
+        )));
+    }
+    send_session_bytes(state, session_id, package, contribution, bytes.to_vec()).await
+}
+
+async fn send_session_bytes(
+    state: Rc<RefCell<OpState>>,
+    session_id: crate::server::language_server::LanguageServerSessionId,
+    package: String,
+    contribution: String,
+    bytes: Vec<u8>,
+) -> Result<(), JsErrorBox> {
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
     let fingerprint = require_current_fingerprint(&clay_state, &package, &contribution)?;
-    let service = clay_state.language_server_process();
-    service
-        .write(
-            session_id,
-            package,
-            contribution,
-            fingerprint,
-            message.into_bytes(),
-        )
+    clay_state
+        .language_server_process()
+        .write(session_id, package, contribution, fingerprint, bytes)
         .await
-        .map_err(map_session_error)?;
-    Ok("{}".to_string())
+        .map_err(map_session_error)
 }
 
 #[op2]
@@ -342,51 +369,44 @@ pub(super) async fn op_clay_language_server_read_message(
     state: Rc<RefCell<OpState>>,
     #[string] request_json: String,
 ) -> Result<String, JsErrorBox> {
-    let request: Value = serde_json::from_str(&request_json).map_err(|error| {
+    let bytes = read_session_bytes(state, parse_session_read(&request_json)?).await?;
+    let message = String::from_utf8(bytes).map_err(|_| {
+        JsErrorBox::generic(
+            "clay.language_server.invalid_utf8: stdout chunk is not valid UTF-8; use readBytes for framed protocols",
+        )
+    })?;
+    serde_json::to_string(&json!({ "message": message })).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.invalid_read: input must be valid JSON ({error})"
+            "clay.language_server.read_failed: failed to serialize result ({error})"
         ))
-    })?;
-    let object = request.as_object().ok_or_else(|| {
-        JsErrorBox::generic("clay.language_server.invalid_read: options must be an object")
-    })?;
-    if object.len() != 5
-        || !object.contains_key("sessionId")
-        || !object.contains_key("package")
-        || !object.contains_key("contribution")
-        || !object.contains_key("maxBytes")
-        || !object.contains_key("timeoutMs")
-    {
-        return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_read: options require only sessionId, package, contribution, maxBytes, and timeoutMs",
-        ));
-    }
-    let session_id = require_session_id(object.get("sessionId"))?;
-    let package = required_string(object.get("package"), "package")?.to_string();
-    let contribution = required_string(object.get("contribution"), "contribution")?.to_string();
-    let max_bytes = object
-        .get("maxBytes")
-        .and_then(Value::as_u64)
-        .filter(|value| *value > 0)
-        .ok_or_else(|| {
-            JsErrorBox::generic(
-                "clay.language_server.invalid_read: maxBytes must be a positive integer",
-            )
-        })? as usize;
-    let timeout_ms = object
-        .get("timeoutMs")
-        .and_then(Value::as_u64)
-        .filter(|value| *value > 0)
-        .ok_or_else(|| {
-            JsErrorBox::generic(
-                "clay.language_server.invalid_read: timeoutMs must be a positive integer",
-            )
-        })?;
+    })
+}
 
+#[op2]
+#[buffer]
+pub(super) async fn op_clay_language_server_read_bytes(
+    state: Rc<RefCell<OpState>>,
+    #[string] request_json: String,
+) -> Result<Vec<u8>, JsErrorBox> {
+    read_session_bytes(state, parse_session_read(&request_json)?).await
+}
+
+type SessionReadRequest = (
+    crate::server::language_server::LanguageServerSessionId,
+    String,
+    String,
+    usize,
+    u64,
+);
+
+async fn read_session_bytes(
+    state: Rc<RefCell<OpState>>,
+    (session_id, package, contribution, max_bytes, timeout_ms): SessionReadRequest,
+) -> Result<Vec<u8>, JsErrorBox> {
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
     let fingerprint = require_current_fingerprint(&clay_state, &package, &contribution)?;
-    let service = clay_state.language_server_process();
-    let message = service
+    clay_state
+        .language_server_process()
         .read(
             session_id,
             package,
@@ -396,12 +416,7 @@ pub(super) async fn op_clay_language_server_read_message(
             timeout_ms,
         )
         .await
-        .map_err(map_session_error)?;
-    serde_json::to_string(&json!({ "message": message })).map_err(|error| {
-        JsErrorBox::generic(format!(
-            "clay.language_server.read_failed: failed to serialize result ({error})"
-        ))
-    })
+        .map_err(map_session_error)
 }
 
 #[op2]
@@ -441,27 +456,13 @@ fn parse_session_message(
     ),
     JsErrorBox,
 > {
-    let request: Value = serde_json::from_str(json_text).map_err(|error| {
-        JsErrorBox::generic(format!(
-            "clay.language_server.invalid_message: input must be valid JSON ({error})"
-        ))
-    })?;
-    let object = request.as_object().ok_or_else(|| {
-        JsErrorBox::generic("clay.language_server.invalid_message: options must be an object")
-    })?;
-    if object.len() != 4
-        || !object.contains_key("sessionId")
-        || !object.contains_key("package")
-        || !object.contains_key("contribution")
-        || !object.contains_key("message")
-    {
+    let object = parse_session_request(json_text, "invalid_message")?;
+    if object.len() != 4 || !object.contains_key("message") {
         return Err(JsErrorBox::generic(
             "clay.language_server.invalid_message: options require only sessionId, package, contribution, and message",
         ));
     }
-    let session_id = require_session_id(object.get("sessionId"))?;
-    let package = required_string(object.get("package"), "package")?.to_string();
-    let contribution = required_string(object.get("contribution"), "contribution")?.to_string();
+    let (session_id, package, contribution) = parse_session_identity(&object)?;
     let message = object
         .get("message")
         .and_then(Value::as_str)
@@ -475,6 +476,103 @@ fn parse_session_message(
         )));
     }
     Ok((session_id, package, contribution, message.to_string()))
+}
+
+fn parse_session_bytes(
+    json_text: &str,
+) -> Result<
+    (
+        crate::server::language_server::LanguageServerSessionId,
+        String,
+        String,
+    ),
+    JsErrorBox,
+> {
+    let object = parse_session_request(json_text, "invalid_bytes")?;
+    if object.len() != 3 {
+        return Err(JsErrorBox::generic(
+            "clay.language_server.invalid_bytes: options require only sessionId, package, and contribution",
+        ));
+    }
+    parse_session_identity(&object)
+}
+
+fn parse_session_read(json_text: &str) -> Result<SessionReadRequest, JsErrorBox> {
+    let object = parse_session_request(json_text, "invalid_read")?;
+    if object.len() != 5 || !object.contains_key("maxBytes") || !object.contains_key("timeoutMs") {
+        return Err(JsErrorBox::generic(
+            "clay.language_server.invalid_read: options require only sessionId, package, contribution, maxBytes, and timeoutMs",
+        ));
+    }
+    let (session_id, package, contribution) = parse_session_identity(&object)?;
+    let max_bytes = object
+        .get("maxBytes")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            JsErrorBox::generic(
+                "clay.language_server.invalid_read: maxBytes must be a positive bounded integer",
+            )
+        })?;
+    if max_bytes > crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES {
+        return Err(JsErrorBox::generic(format!(
+            "clay.language_server.invalid_read: maxBytes exceeds {} bytes",
+            crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES
+        )));
+    }
+    let timeout_ms = object
+        .get("timeoutMs")
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            JsErrorBox::generic(
+                "clay.language_server.invalid_read: timeoutMs must be a positive integer",
+            )
+        })?;
+    Ok((session_id, package, contribution, max_bytes, timeout_ms))
+}
+
+fn parse_session_request(
+    json_text: &str,
+    error_code: &str,
+) -> Result<serde_json::Map<String, Value>, JsErrorBox> {
+    let request: Value = serde_json::from_str(json_text).map_err(|error| {
+        JsErrorBox::generic(format!(
+            "clay.language_server.{error_code}: input must be valid JSON ({error})"
+        ))
+    })?;
+    match request {
+        Value::Object(object) => Ok(object),
+        _ => Err(JsErrorBox::generic(format!(
+            "clay.language_server.{error_code}: options must be an object"
+        ))),
+    }
+}
+
+fn parse_session_identity(
+    object: &serde_json::Map<String, Value>,
+) -> Result<
+    (
+        crate::server::language_server::LanguageServerSessionId,
+        String,
+        String,
+    ),
+    JsErrorBox,
+> {
+    if !object.contains_key("sessionId")
+        || !object.contains_key("package")
+        || !object.contains_key("contribution")
+    {
+        return Err(JsErrorBox::generic(
+            "clay.language_server.invalid_session: sessionId, package, and contribution are required",
+        ));
+    }
+    Ok((
+        require_session_id(object.get("sessionId"))?,
+        required_string(object.get("package"), "package")?.to_string(),
+        required_string(object.get("contribution"), "contribution")?.to_string(),
+    ))
 }
 
 fn require_session_id(

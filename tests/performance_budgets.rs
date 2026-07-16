@@ -63,6 +63,9 @@ fn performance_docs_list_all_supported_benchmark_commands() {
         "node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8",
         "node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json",
         "cargo test --test performance_protocol",
+        "cargo test --test lsp_bridge",
+        "cargo test --test language_server_authority",
+        "cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp",
     ] {
         assert!(
             doc.contains(command),

@@ -197,12 +197,67 @@ fn language_server_process_work_is_absent_from_editor_hot_paths() {
         "op_clay_language_server_start_session",
         "op_clay_language_server_send_message",
         "op_clay_language_server_read_message",
+        "op_clay_language_server_send_bytes",
+        "op_clay_language_server_read_bytes",
         "tokio::process::Command",
         "std::process::Command",
     ] {
         assert!(
             !combined.contains(forbidden),
             "editor key/text/paint/client path must not run language-server process/session work: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn document_analysis_capacity_constants_match_approved_phase18_21_contract() {
+    use clay::perf::budgets::{
+        DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, DOCUMENT_ANALYSIS_MAX_WORKERS,
+        DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES, LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+    };
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_WORKERS, 4);
+    assert_eq!(DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES, 64 * 1024 * 1024);
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, 256 * 1024);
+    assert_eq!(LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES, 1024 * 1024);
+
+    let analysis =
+        fs::read_to_string("src/server/document_analysis.rs").expect("analysis readable");
+    assert!(analysis.contains("DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES"));
+    assert!(analysis.contains("DOCUMENT_ANALYSIS_INPUT_MAX_EVENTS"));
+    assert!(analysis.contains("DOCUMENT_ANALYSIS_OUTPUT_MAX_BYTES"));
+    assert!(
+        analysis.contains("coalesce_reset") || analysis.contains("Coalesce"),
+        "mailbox must coalesce/reset rather than unbounded-queue every edit"
+    );
+}
+
+#[test]
+fn document_analysis_runs_after_ack_and_outside_editor_hot_paths() {
+    let connection = fs::read_to_string("src/server/connection.rs").expect("connection readable");
+    let edit_branch = connection
+        .split("ClientMessage::Edit {")
+        .nth(1)
+        .and_then(|source| source.split("ClientMessage::EditorIntent {").next())
+        .expect("edit branch present");
+    assert!(
+        edit_branch.find("write_server_message(&mut stream, &response)")
+            < edit_branch.find("document_analysis.change_document")
+    );
+
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let widget = fs::read_to_string("src/masonry_editor.rs").expect("widget readable");
+    let client = fs::read_to_string("src/client/mod.rs").expect("client readable");
+    let combined = format!("{surface}\n{widget}\n{client}");
+    for forbidden in [
+        "DocumentAnalysisCoordinator",
+        "invoke_document_analyzer",
+        "serverRegisterDocumentAnalyzer",
+        "op_clay_language_register_document_analyzer",
+        "DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES",
+    ] {
+        assert!(
+            !combined.contains(forbidden),
+            "editor hot path contains {forbidden}"
         );
     }
 }

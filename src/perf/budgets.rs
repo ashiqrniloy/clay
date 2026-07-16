@@ -1,18 +1,36 @@
-// Phase 18.20 language-server process/session budgets. A language-server
-// session is an authorized, host-owned child process speaking an opaque
-// bounded byte stream (UTF-8 JSON-RPC for LSP adapters in Phase 18.21). These
-// are server-owned security/performance ceilings, not user configuration:
-// every read/write/stderr/process-count is hard-capped before it can allocate
-// or linger, and diagnostics are sanitized. These bytes never enter the IPC
-// codec frame budget; they cross only the host<->child stdio boundary.
-/// Maximum bytes for one language-server stdin write / stdout read.
-pub const LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES: usize = 256 * 1024;
+// Language-server process/session budgets. A session is an authorized,
+// host-owned child process speaking an opaque bounded byte stream. These are
+// server-owned security/performance ceilings, not user configuration: every
+// read/write/stderr/process-count is hard-capped before it can allocate or
+// linger, and diagnostics are sanitized. These bytes never enter the IPC codec
+// frame budget; they cross only the host<->child stdio boundary.
+/// Maximum exact bytes for one language-server stdin write / stdout read.
+///
+/// Phase 18.21 raises the former 256 KiB text-message ceiling to the approved
+/// 1 MiB serialized-frame ceiling. Package adapters still own framing.
+pub const LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES: usize = 1024 * 1024;
 /// Maximum accumulated child stderr retained for sanitized diagnostics.
 pub const LANGUAGE_SERVER_STDERR_BUDGET_BYTES: usize = 64 * 1024;
 /// Maximum concurrent language-server sessions per runtime generation.
 pub const LANGUAGE_SERVER_MAX_SESSIONS: usize = 16;
 /// Default wall-clock timeout for a single language-server stdout read.
 pub const LANGUAGE_SERVER_READ_TIMEOUT_MS: u64 = 30_000;
+
+// Approved Phase 18.21 analyzer-neutral package-worker limits.
+pub const DOCUMENT_ANALYSIS_MAX_WORKERS: usize = 4;
+pub const DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES: usize = 64 * 1024 * 1024;
+pub const DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER: usize = 32;
+pub const DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES: usize = 256 * 1024;
+pub const DOCUMENT_ANALYSIS_MAX_TEXT_BYTES_PER_WORKER: usize = 8 * 1024 * 1024;
+pub const DOCUMENT_ANALYSIS_MAX_DELTA_BYTES: usize = 64 * 1024;
+pub const DOCUMENT_ANALYSIS_INPUT_MAX_EVENTS: usize = 64;
+pub const DOCUMENT_ANALYSIS_INPUT_MAX_BYTES: usize = 2 * 1024 * 1024;
+pub const DOCUMENT_ANALYSIS_OUTPUT_MAX_EVENTS: usize = 64;
+pub const DOCUMENT_ANALYSIS_OUTPUT_MAX_BYTES: usize = 512 * 1024;
+pub const DOCUMENT_ANALYSIS_MAX_PENDING_REQUESTS: usize = 8;
+pub const DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS: u64 = 5_000;
+pub const DOCUMENT_ANALYSIS_GRACEFUL_SHUTDOWN_MS: u64 = 2_000;
+pub const DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS: u64 = 5_000;
 
 pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
 // Edit acknowledgement payload budget.  Advisory: rkyv union-layout sizing means

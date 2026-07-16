@@ -28,6 +28,7 @@ use crate::protocol::{
 };
 
 use super::{
+    completion::CompletionProviderError,
     configuration::{ConfigurationError, ConfigurationRuntime},
     ops::{ClayOpState, PackageLoadEntryAllowlist, init_runtime_extension},
     workspace::WorkspaceState,
@@ -309,8 +310,8 @@ export async function authorizeLanguageServer(options) {
 export async function serverStartSession(options) {
   return parse(await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null))).sessionId;
 }
-/** Open a bounded language-server session. The wrapper exposes opaque
- * read/write/stop only; no process or stdio handle is exposed. */
+/** Open a bounded language-server session. Exact byte methods preserve
+ * arbitrary child chunk boundaries; no process or stdio handle is exposed. */
 export class LanguageServerSession {
   #sessionId;
   #pkg;
@@ -320,6 +321,21 @@ export class LanguageServerSession {
     this.#pkg = pkg;
     this.#contribution = contribution;
   }
+  async sendBytes(bytes) {
+    if (!(bytes instanceof Uint8Array)) {
+      throw new Error("clay.language_server.invalid_bytes: bytes must be a Uint8Array");
+    }
+    return await ops.op_clay_language_server_send_bytes(JSON.stringify({
+      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
+    }), bytes);
+  }
+  async readBytes(maxBytes, timeoutMs) {
+    return await ops.op_clay_language_server_read_bytes(JSON.stringify({
+      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
+      maxBytes, timeoutMs,
+    }));
+  }
+  /** Compatibility text path. Byte-framed adapters use sendBytes/readBytes. */
   async send(message) {
     if (typeof message !== "string") {
       throw new Error("clay.language_server.invalid_message: message must be a string");
@@ -494,12 +510,24 @@ const CLAY_FACADE_COMPLETION: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
 export function serverRegisterCompletionProvider(options) {
-  for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps", "module"]) {
+  for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
     if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
       throw new Error(`clay.completion.invalid_provider: executable or raw authority field ${key} is not accepted by the public registration contract`);
     }
   }
-  return parse(ops.op_clay_completion_register_completion_provider(JSON.stringify(options ?? null)));
+  const { module, exportName = "provideCompletion", ...opOptions } = options ?? {};
+  const registration = parse(ops.op_clay_completion_register_completion_provider(JSON.stringify({ ...opOptions, exportName, runtimeBridge: module !== undefined })));
+  if (module !== undefined) {
+    const handler = module?.[exportName];
+    if (typeof handler !== "function") {
+      throw new Error(`clay.completion.invalid_provider: module export ${exportName} must be a function`);
+    }
+    globalThis.__clayCompletionHandlers ??= Object.create(null);
+    for (const token of registration.tokens ?? []) {
+      globalThis.__clayCompletionHandlers[token] = handler;
+    }
+  }
+  return registration;
 }
 export function serverDisableCompletion(options) {
   for (const key of Object.keys(options ?? {})) {
@@ -538,6 +566,9 @@ export function completionTriggerCharactersFromEditorRules(editorRules) {
 const CLAY_FACADE_LANGUAGE: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
+export function serverRegisterDocumentAnalyzer(options) {
+  return parse(ops.op_clay_language_register_document_analyzer(JSON.stringify(options ?? null)));
+}
 export function serverRegisterLanguageIntelligenceProvider(options) {
   for (const key of ["handler", "callback", "function", "clientJavaScript", "nativeHandle", "rawOps", "executable", "process", "languageServer"]) {
     if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
@@ -643,6 +674,37 @@ impl ClayJsRuntimeService {
     #[cfg(test)]
     pub(crate) fn with_timeout_and_heap_limit(timeout: Duration, heap_limit_bytes: usize) -> Self {
         Self::new_with_heap_limit(timeout, heap_limit_bytes)
+    }
+
+    pub(crate) fn new_document_analysis_worker(
+        &self,
+        runtime_document_id: crate::protocol::DocumentId,
+    ) -> Self {
+        let parent = self.worker();
+        let workspace = parent.op_state.workspace();
+        let op_state = Arc::new(ClayOpState::new_analysis_worker(
+            &parent.op_state,
+            Arc::clone(&workspace),
+            runtime_document_id,
+        ));
+        Self {
+            evaluations: Arc::new(AtomicU64::new(0)),
+            timeout: Duration::from_millis(
+                crate::perf::budgets::DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS,
+            ),
+            heap_limit_bytes: crate::perf::budgets::DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES,
+            poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
+            native_syntax_handlers: Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
+            worker: Arc::new(std::sync::Mutex::new(start_runtime_worker_with_state(
+                Duration::from_millis(crate::perf::budgets::DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS),
+                crate::perf::budgets::DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES,
+                workspace,
+                op_state,
+            ))),
+        }
     }
 
     /// Evaluates a controlled server-owned ES module on the persistent runtime worker.
@@ -804,6 +866,37 @@ impl ClayJsRuntimeService {
             ) {
                 Ok(meta) => registered.push(meta),
                 Err(crate::server::parse_coordinator::ParseCoordinatorError::HandlerAlreadyRegistered { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(registered)
+    }
+
+    pub(crate) fn register_completion_providers(
+        &self,
+        coordinator: &crate::server::completion::CompletionCoordinator,
+        generation_id: u64,
+        evaluation: &ClayRuntimeEvaluation,
+    ) -> Result<
+        Vec<crate::server::completion::CompletionProviderMeta>,
+        crate::server::completion::CompletionProviderRegistryError,
+    > {
+        let mut registered = Vec::new();
+        for registration in &evaluation.js_completion_providers {
+            let mut registration = registration.clone();
+            registration.meta.generation = generation_id;
+            let meta = registration.meta.clone();
+            let package = registration.package.clone();
+            match coordinator.register_package(
+                &package,
+                meta.clone(),
+                JsCompletionProvider {
+                    runtime: self.clone(),
+                    registration,
+                },
+            ) {
+                Ok(()) => registered.push(meta),
+                Err(crate::server::completion::CompletionProviderRegistryError::ProviderAlreadyRegistered { .. }) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -999,6 +1092,135 @@ impl ClayJsRuntimeService {
         result
     }
 
+    async fn invoke_completion_provider(
+        &self,
+        registration: crate::server::completion::JsCompletionProviderRegistration,
+        request: crate::protocol::CompletionRequest,
+        window: crate::server::completion::CompletionDocumentWindow,
+    ) -> Result<crate::protocol::CompletionResultSet, ClayRuntimeError> {
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(ClayRuntimeError::Runtime(
+                "persistent JavaScript runtime worker stopped".to_string(),
+            ));
+        }
+        let (response, receiver) = oneshot::channel();
+        self.worker()
+            .sender
+            .send(RuntimeCommand::Completion {
+                registration,
+                request,
+                window,
+                response,
+            })
+            .map_err(|_| {
+                ClayRuntimeError::Runtime(
+                    "persistent JavaScript runtime worker stopped".to_string(),
+                )
+            })?;
+        let result = receiver.await.map_err(|_| {
+            ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
+        })?;
+        if matches!(
+            result,
+            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
+        ) {
+            self.poisoned.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+
+    pub(crate) fn document_analysis_authorized(
+        &self,
+        registration: &crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+        workspace_root_id: crate::protocol::WorkspaceRootId,
+    ) -> bool {
+        use crate::packages::{
+            authorization::language_server_descriptor_fingerprint, permissions::PackagePermission,
+        };
+
+        if !registration
+            .package
+            .manifest
+            .clay
+            .permissions
+            .contains(&PackagePermission::ParseDocument)
+            || !registration
+                .package
+                .manifest
+                .clay
+                .permissions
+                .contains(&PackagePermission::LanguageServer)
+        {
+            return false;
+        }
+        let Some(descriptor) = registration
+            .package
+            .contributions
+            .language_servers
+            .iter()
+            .find(|descriptor| descriptor.id == registration.contribution)
+        else {
+            return false;
+        };
+        let worker = self.worker();
+        let service = worker
+            .op_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        let enabled = service.enabled_records().any(|record| {
+            record.manifest.name == registration.package.manifest.name
+                && record.manifest.version == registration.package.manifest.version
+                && record.manifest.clay.api_prefix == registration.package.manifest.clay.api_prefix
+        });
+        enabled
+            && service
+                .language_server_grant(
+                    &registration.package.manifest.name,
+                    &registration.contribution,
+                )
+                .is_some_and(|grant| {
+                    grant.descriptor_fingerprint
+                        == language_server_descriptor_fingerprint(descriptor)
+                        && grant.workspace_root_ids.contains(&workspace_root_id)
+                })
+    }
+
+    pub(crate) async fn invoke_document_analyzer(
+        &self,
+        registration: crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+        event: crate::server::document_analysis::DocumentAnalysisEvent,
+    ) -> Result<DocumentAnalysisInvocation, ClayRuntimeError> {
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(ClayRuntimeError::Runtime(
+                "document analysis worker stopped".to_string(),
+            ));
+        }
+        let (response, receiver) = oneshot::channel();
+        let invocation_id = self.evaluations.fetch_add(1, Ordering::Relaxed);
+        self.worker()
+            .sender
+            .send(RuntimeCommand::DocumentAnalysis {
+                registration,
+                event,
+                invocation_id,
+                response,
+            })
+            .map_err(|_| {
+                ClayRuntimeError::Runtime("document analysis worker stopped".to_string())
+            })?;
+        let result = receiver.await.map_err(|_| {
+            ClayRuntimeError::Runtime("document analysis worker stopped".to_string())
+        })?;
+        if matches!(
+            result,
+            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
+        ) {
+            self.poisoned.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+
     async fn invoke_language_intelligence_provider(
         &self,
         registration: crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
@@ -1057,6 +1279,11 @@ impl ClayJsRuntimeService {
     pub(crate) fn evaluation_count(&self) -> u64 {
         self.evaluations.load(Ordering::Relaxed)
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_op_state(&self) -> Arc<ClayOpState> {
+        Arc::clone(&self.worker().op_state)
+    }
 }
 
 struct JsParseHandler {
@@ -1077,6 +1304,32 @@ impl crate::server::parse_coordinator::ParseHandler for JsParseHandler {
                 .await
                 .map_err(|error| {
                     crate::server::parse_coordinator::ParseCoordinatorError::HandlerFailed(
+                        error.to_string(),
+                    )
+                })
+        })
+    }
+}
+
+struct JsCompletionProvider {
+    runtime: ClayJsRuntimeService,
+    registration: crate::server::completion::JsCompletionProviderRegistration,
+}
+
+impl crate::server::completion::CompletionProvider for JsCompletionProvider {
+    fn complete(
+        &self,
+        request: crate::protocol::CompletionRequest,
+        window: crate::server::completion::CompletionDocumentWindow,
+    ) -> crate::server::completion::CompletionProviderFuture {
+        let runtime = self.runtime.clone();
+        let registration = self.registration.clone();
+        Box::pin(async move {
+            runtime
+                .invoke_completion_provider(registration, request, window)
+                .await
+                .map_err(|error| {
+                    crate::server::completion::CompletionProviderError::ProviderFailed(
                         error.to_string(),
                     )
                 })
@@ -1127,10 +1380,14 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) syntax_engine_preferences:
         std::collections::BTreeMap<String, crate::server::syntax::SyntaxEngineTier>,
     pub(crate) completion_providers: Vec<crate::server::completion::CompletionProviderMeta>,
+    pub(crate) js_completion_providers:
+        Vec<crate::server::completion::JsCompletionProviderRegistration>,
     pub(crate) language_intelligence_providers:
         Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta>,
     pub(crate) js_language_intelligence_providers:
         Vec<crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration>,
+    pub(crate) document_analyzers:
+        Vec<crate::server::document_analysis::JsDocumentAnalyzerRegistration>,
     /// Resolved active theme snapshot from `setTheme` (`clay:theme` facade). `None`
     /// when `init.js` did not select a theme (Clay default applies). Applied to
     /// the shared server slot at load/reload so the welcome handshake ships it.
@@ -1139,6 +1396,13 @@ pub(crate) struct ClayRuntimeEvaluation {
     /// configured one. The server assigns its authoritative revision only after
     /// the evaluation succeeds.
     pub(crate) active_typography: Option<crate::protocol::ActiveTypography>,
+}
+
+#[derive(Debug)]
+pub(crate) struct DocumentAnalysisInvocation {
+    pub(crate) decorations: Option<crate::protocol::DecorationSet>,
+    pub(crate) diagnostics: Option<crate::protocol::DiagnosticSet>,
+    pub(crate) response: crate::server::document_analysis::DocumentAnalysisResponse,
 }
 
 #[derive(Debug)]
@@ -1279,6 +1543,7 @@ enum RuntimeEntry {
 
 struct RuntimeWorker {
     sender: mpsc::Sender<RuntimeCommand>,
+    op_state: Arc<ClayOpState>,
     join: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
@@ -1321,6 +1586,18 @@ enum RuntimeCommand {
         notification: ParseEditNotification,
         response: oneshot::Sender<Result<IncrementalParseUpdate, ClayRuntimeError>>,
     },
+    Completion {
+        registration: crate::server::completion::JsCompletionProviderRegistration,
+        request: crate::protocol::CompletionRequest,
+        window: crate::server::completion::CompletionDocumentWindow,
+        response: oneshot::Sender<Result<crate::protocol::CompletionResultSet, ClayRuntimeError>>,
+    },
+    DocumentAnalysis {
+        registration: crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+        event: crate::server::document_analysis::DocumentAnalysisEvent,
+        invocation_id: u64,
+        response: oneshot::Sender<Result<DocumentAnalysisInvocation, ClayRuntimeError>>,
+    },
     LanguageIntelligence {
         registration:
             crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
@@ -1333,13 +1610,37 @@ enum RuntimeCommand {
 }
 
 fn start_runtime_worker(timeout: Duration, heap_limit_bytes: usize) -> Arc<RuntimeWorker> {
+    let default_workspace = Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()));
+    let op_state = Arc::new(ClayOpState::new_for_document(
+        Arc::clone(&default_workspace),
+        1,
+    ));
+    start_runtime_worker_with_state(timeout, heap_limit_bytes, default_workspace, op_state)
+}
+
+fn start_runtime_worker_with_state(
+    timeout: Duration,
+    heap_limit_bytes: usize,
+    default_workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
+    op_state: Arc<ClayOpState>,
+) -> Arc<RuntimeWorker> {
     let (sender, receiver) = mpsc::channel();
+    let worker_state = Arc::clone(&op_state);
     let join = std::thread::Builder::new()
         .name("clay-js-runtime".to_string())
-        .spawn(move || run_runtime_worker(receiver, timeout, heap_limit_bytes))
+        .spawn(move || {
+            run_runtime_worker(
+                receiver,
+                timeout,
+                heap_limit_bytes,
+                default_workspace,
+                worker_state,
+            )
+        })
         .expect("failed to spawn persistent JS runtime worker");
     Arc::new(RuntimeWorker {
         sender,
+        op_state,
         join: std::sync::Mutex::new(Some(join)),
     })
 }
@@ -1348,12 +1649,9 @@ fn run_runtime_worker(
     receiver: mpsc::Receiver<RuntimeCommand>,
     timeout: Duration,
     heap_limit_bytes: usize,
+    default_workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
+    op_state: Arc<ClayOpState>,
 ) {
-    let default_workspace = Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()));
-    let op_state = Arc::new(ClayOpState::new_for_document(
-        Arc::clone(&default_workspace),
-        1,
-    ));
     let main_specifier = ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER)
         .expect("controlled runtime specifier must parse");
     let loader = Rc::new(ClayModuleLoader::new(
@@ -1431,6 +1729,66 @@ fn run_runtime_worker(
                     &registration,
                     notification,
                     timeout.min(Duration::from_millis(registration.timeout_ms)),
+                    &heap_limit_hit,
+                ));
+                let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
+                let heap_limited = matches!(result, Err(ClayRuntimeError::HeapLimit));
+                let _ = response.send(result);
+                if timed_out || heap_limited {
+                    break;
+                }
+            }
+            RuntimeCommand::Completion {
+                registration,
+                request,
+                window,
+                response,
+            } => {
+                op_state.begin_evaluation();
+                heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
+                let result = tokio_runtime.block_on(evaluate_js_completion_provider(
+                    &mut runtime,
+                    &op_state,
+                    &loader,
+                    &registration,
+                    request,
+                    window,
+                    timeout.min(Duration::from_millis(registration.meta.timeout_ms)),
+                    &heap_limit_hit,
+                ));
+                let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
+                let heap_limited = matches!(result, Err(ClayRuntimeError::HeapLimit));
+                let _ = response.send(result);
+                if timed_out || heap_limited {
+                    break;
+                }
+            }
+            RuntimeCommand::DocumentAnalysis {
+                registration,
+                event,
+                invocation_id,
+                response,
+            } => {
+                op_state.begin_evaluation();
+                heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
+                let analysis_timeout = if matches!(
+                    &event,
+                    crate::server::document_analysis::DocumentAnalysisEvent::Shutdown
+                ) {
+                    Duration::from_millis(
+                        crate::perf::budgets::DOCUMENT_ANALYSIS_GRACEFUL_SHUTDOWN_MS,
+                    )
+                } else {
+                    timeout
+                };
+                let result = tokio_runtime.block_on(evaluate_js_document_analyzer(
+                    &mut runtime,
+                    &op_state,
+                    &loader,
+                    &registration,
+                    event,
+                    invocation_id,
+                    analysis_timeout,
                     &heap_limit_hit,
                 ));
                 let timed_out = matches!(result, Err(ClayRuntimeError::Timeout));
@@ -1583,8 +1941,10 @@ async fn evaluate_loaded_module(
             syntax_grammars: op_state.syntax_grammars(),
             syntax_engine_preferences: op_state.syntax_engine_preferences(),
             completion_providers: op_state.completion_providers(),
+            js_completion_providers: op_state.js_completion_providers(),
             language_intelligence_providers: op_state.language_intelligence_providers(),
             js_language_intelligence_providers: op_state.js_language_intelligence_providers(),
+            document_analyzers: op_state.document_analyzers(),
             active_theme: op_state.active_theme(),
             active_typography: op_state.active_typography(),
         })
@@ -1648,6 +2008,377 @@ Deno.core.ops.op_clay_parse_store_update(JSON.stringify(update ?? null));
     parse_update_json(&update_json, registration, notification)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "document analyzer invocation keeps runtime, registration, event, timeout, and heap containment explicit"
+)]
+async fn evaluate_js_document_analyzer(
+    runtime: &mut JsRuntime,
+    op_state: &Arc<ClayOpState>,
+    loader: &Rc<ClayModuleLoader>,
+    registration: &crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+    event: crate::server::document_analysis::DocumentAnalysisEvent,
+    invocation_id: u64,
+    timeout: Duration,
+    heap_limit_hit: &std::sync::atomic::AtomicBool,
+) -> Result<DocumentAnalysisInvocation, ClayRuntimeError> {
+    let module_specifier = serde_json::to_string(&registration.module_specifier)
+        .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+    let export_name = serde_json::to_string(&registration.export_name)
+        .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+    let event_json = document_analysis_event_json(registration, &event);
+    let source = format!(
+        r#"
+import * as analyzerModule from {module_specifier};
+const handler = analyzerModule[{export_name}];
+if (typeof handler !== "function") {{
+  throw new Error("clay.analysis.handler_missing: registered analyzer export is unavailable");
+}}
+const result = await handler({event_json});
+Deno.core.ops.op_clay_runtime_record(JSON.stringify(result ?? null));
+"#,
+    );
+    let loaded = LoadedRuntimeEntry {
+        main_specifier: ModuleSpecifier::parse(&format!(
+            "clay://runtime/document-analysis-{}-{invocation_id}.js",
+            registration.id.replace([':', '/'], "-")
+        ))
+        .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
+        main_source: Some(source),
+        configuration: None,
+    };
+    loader.set_entry(
+        loaded.main_specifier.clone(),
+        loaded.main_source.clone(),
+        loaded.configuration.clone(),
+    );
+    let evaluation =
+        evaluate_loaded_module(runtime, op_state, loaded, timeout, false, heap_limit_hit).await?;
+    let response_json = evaluation
+        .op_records
+        .last()
+        .map(String::as_str)
+        .unwrap_or("null");
+    let response = match &event {
+        crate::server::document_analysis::DocumentAnalysisEvent::Completion { request, .. } => {
+            crate::server::document_analysis::DocumentAnalysisResponse::Completion(
+                completion_result_from_json(response_json, &registration.package, request)
+                    .map_err(|error| CompletionProviderError::ProviderFailed(error.to_string())),
+            )
+        }
+        crate::server::document_analysis::DocumentAnalysisEvent::LanguageIntelligence {
+            request,
+            ..
+        } => crate::server::document_analysis::DocumentAnalysisResponse::LanguageIntelligence(
+            language_intelligence_result_from_json(
+                response_json,
+                &registration.package,
+                request,
+            )
+            .map_err(|error| {
+                crate::server::language_intelligence::LanguageIntelligenceProviderError::ProviderFailed(
+                    error.to_string(),
+                )
+            }),
+        ),
+        _ => crate::server::document_analysis::DocumentAnalysisResponse::None,
+    };
+    Ok(DocumentAnalysisInvocation {
+        decorations: evaluation.published_decoration_set,
+        diagnostics: evaluation.published_diagnostic_set,
+        response,
+    })
+}
+
+fn document_analysis_event_json(
+    registration: &crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+    event: &crate::server::document_analysis::DocumentAnalysisEvent,
+) -> String {
+    use crate::server::document_analysis::DocumentAnalysisEvent;
+    let identity = serde_json::json!({
+        "package": registration.package.manifest.name,
+        "packageVersion": registration.package.manifest.version,
+        "packagePrefix": registration.package.manifest.clay.api_prefix,
+        "analyzerId": registration.id,
+        "contribution": registration.contribution,
+    });
+    let value = match event {
+        DocumentAnalysisEvent::Open {
+            document_id,
+            document_version,
+            runtime_generation,
+            active_mode,
+            workspace_root_id,
+            canonical_root_path,
+            relative_path,
+            text,
+        } => serde_json::json!({
+            "kind": "open",
+            "identity": identity,
+            "documentId": document_id,
+            "documentVersion": document_version,
+            "runtimeGeneration": runtime_generation,
+            "activeMode": active_mode,
+            "workspaceRootId": workspace_root_id,
+            "canonicalRootPath": canonical_root_path,
+            "relativePath": relative_path,
+            "text": text,
+        }),
+        DocumentAnalysisEvent::Change {
+            document_id,
+            base_version,
+            document_version,
+            byte_start,
+            byte_end,
+            inserted_text,
+        } => serde_json::json!({
+            "kind": "change",
+            "identity": identity,
+            "documentId": document_id,
+            "baseVersion": base_version,
+            "documentVersion": document_version,
+            "byteStart": byte_start,
+            "byteEnd": byte_end,
+            "insertedText": inserted_text,
+        }),
+        DocumentAnalysisEvent::Reset {
+            document_id,
+            document_version,
+            text,
+        } => serde_json::json!({
+            "kind": "reset",
+            "identity": identity,
+            "documentId": document_id,
+            "documentVersion": document_version,
+            "text": text,
+        }),
+        DocumentAnalysisEvent::Close {
+            document_id,
+            document_version,
+        } => serde_json::json!({
+            "kind": "close",
+            "identity": identity,
+            "documentId": document_id,
+            "documentVersion": document_version,
+        }),
+        DocumentAnalysisEvent::Completion { request, window } => serde_json::json!({
+            "kind": "completion",
+            "identity": identity,
+            "request": serde_json::from_str::<serde_json::Value>(&completion_request_json(request)).unwrap_or(serde_json::Value::Null),
+            "window": serde_json::from_str::<serde_json::Value>(&completion_window_json(window)).unwrap_or(serde_json::Value::Null),
+        }),
+        DocumentAnalysisEvent::LanguageIntelligence { request, window } => serde_json::json!({
+            "kind": "languageIntelligence",
+            "identity": identity,
+            "request": serde_json::from_str::<serde_json::Value>(&language_intelligence_request_json(request)).unwrap_or(serde_json::Value::Null),
+            "window": serde_json::from_str::<serde_json::Value>(&language_intelligence_window_json(window)).unwrap_or(serde_json::Value::Null),
+        }),
+        DocumentAnalysisEvent::Shutdown => serde_json::json!({
+            "kind": "shutdown",
+            "identity": identity,
+        }),
+    };
+    value.to_string()
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "completion JS bridge needs runtime, registration, request, window, timeout, and heap state together"
+)]
+async fn evaluate_js_completion_provider(
+    runtime: &mut JsRuntime,
+    op_state: &Arc<ClayOpState>,
+    loader: &Rc<ClayModuleLoader>,
+    registration: &crate::server::completion::JsCompletionProviderRegistration,
+    request: crate::protocol::CompletionRequest,
+    window: crate::server::completion::CompletionDocumentWindow,
+    timeout: Duration,
+    heap_limit_hit: &std::sync::atomic::AtomicBool,
+) -> Result<crate::protocol::CompletionResultSet, ClayRuntimeError> {
+    let source = format!(
+        r#"
+const registry = globalThis.__clayCompletionHandlers ?? Object.create(null);
+const handler = registry[{token:?}];
+if (typeof handler !== "function") {{
+  throw new Error("clay.completion.handler_missing: registered completion handler is unavailable");
+}}
+const result = await handler({request}, {window});
+Deno.core.ops.op_clay_completion_store_result(JSON.stringify(result ?? null));
+"#,
+        token = registration.token,
+        request = completion_request_json(&request),
+        window = completion_window_json(&window),
+    );
+    let loaded = LoadedRuntimeEntry {
+        main_specifier: ModuleSpecifier::parse(&format!(
+            "clay://runtime/completion-{}-{}.js",
+            registration.token.replace(':', "-"),
+            request.request_id,
+        ))
+        .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
+        main_source: Some(source),
+        configuration: None,
+    };
+    loader.set_entry(
+        loaded.main_specifier.clone(),
+        loaded.main_source.clone(),
+        loaded.configuration.clone(),
+    );
+    evaluate_loaded_module(runtime, op_state, loaded, timeout, false, heap_limit_hit).await?;
+    let result_json = op_state.take_completion_result_json().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.completion.invalid_result: handler produced no result".to_string(),
+        )
+    })?;
+    completion_result_from_json(&result_json, &registration.package, &request)
+}
+
+fn completion_request_json(request: &crate::protocol::CompletionRequest) -> String {
+    let trigger = match &request.trigger {
+        crate::protocol::CompletionTrigger::Manual => serde_json::json!({ "kind": "manual" }),
+        crate::protocol::CompletionTrigger::Character(character) => {
+            serde_json::json!({ "kind": "character", "character": character })
+        }
+    };
+    serde_json::json!({
+        "requestId": request.request_id,
+        "clientId": request.client_id,
+        "documentId": request.document_id,
+        "documentVersion": request.document_version,
+        "behaviorVersion": request.behavior_version,
+        "cursorByteOffset": request.cursor_byte_offset,
+        "replacementRange": {
+            "byteStart": request.replacement_range.byte_start,
+            "byteEnd": request.replacement_range.byte_end,
+        },
+        "trigger": trigger,
+        "providerGeneration": request.provider_generation,
+    })
+    .to_string()
+}
+
+fn completion_window_json(window: &crate::server::completion::CompletionDocumentWindow) -> String {
+    serde_json::json!({
+        "documentId": window.document_id,
+        "documentVersion": window.document_version,
+        "behaviorVersion": window.behavior_version,
+        "packagePrefix": window.package_prefix,
+        "byteStart": window.byte_start,
+        "byteEnd": window.byte_end,
+        "text": window.text,
+    })
+    .to_string()
+}
+
+fn completion_result_from_json(
+    result_json: &str,
+    package: &crate::packages::record::PackageRecord,
+    request: &crate::protocol::CompletionRequest,
+) -> Result<crate::protocol::CompletionResultSet, ClayRuntimeError> {
+    use crate::protocol::{
+        CompletionItem, CompletionItemTextFormat, CompletionProvenance, CompletionResultSet,
+        CompletionStatus,
+    };
+
+    let value: serde_json::Value = serde_json::from_str(result_json).map_err(|error| {
+        ClayRuntimeError::Runtime(format!("clay.completion.invalid_result: {error}"))
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        ClayRuntimeError::Runtime(
+            "clay.completion.invalid_result: result must be an object".to_string(),
+        )
+    })?;
+    let status = match object
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("ok")
+    {
+        "ok" | "Ok" => CompletionStatus::Ok,
+        "empty" | "Empty" => CompletionStatus::Empty,
+        "timeout" | "Timeout" => CompletionStatus::Timeout,
+        "providerError" | "ProviderError" | "error" => CompletionStatus::ProviderError,
+        other => {
+            return Err(ClayRuntimeError::Runtime(format!(
+                "clay.completion.invalid_result: unsupported status `{other}`"
+            )));
+        }
+    };
+    let provenance = CompletionProvenance {
+        package_name: package.manifest.name.clone(),
+        package_version: package.manifest.version.clone(),
+        package_prefix: package.manifest.clay.api_prefix.clone(),
+    };
+    let items = object
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let item = item.as_object().ok_or_else(|| {
+                        ClayRuntimeError::Runtime(
+                            "clay.completion.invalid_result: item must be an object".to_string(),
+                        )
+                    })?;
+                    let label = item
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            ClayRuntimeError::Runtime(
+                                "clay.completion.invalid_result: item label is required"
+                                    .to_string(),
+                            )
+                        })?
+                        .to_string();
+                    Ok(CompletionItem {
+                        insert_text: item
+                            .get("insertText")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(&label)
+                            .to_string(),
+                        label,
+                        detail: item
+                            .get("detail")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        commit_characters: item
+                            .get("commitCharacters")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        text_format: match item
+                            .get("textFormat")
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            Some("snippet" | "Snippet") => CompletionItemTextFormat::Snippet,
+                            _ => CompletionItemTextFormat::PlainText,
+                        },
+                        provenance: provenance.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, ClayRuntimeError>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(CompletionResultSet {
+        request_id: request.request_id,
+        client_id: request.client_id,
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        provider_generation: request.provider_generation,
+        replacement_range: request.replacement_range,
+        status: if items.is_empty() && status == CompletionStatus::Ok {
+            CompletionStatus::Empty
+        } else {
+            status
+        },
+        items,
+        provenance,
+    })
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "language-intelligence JS bridge mirrors the parse-handler worker path and needs request+window inputs together"
@@ -1680,8 +2411,9 @@ Deno.core.ops.op_clay_language_store_intelligence_result(JSON.stringify(result ?
     );
     let loaded = LoadedRuntimeEntry {
         main_specifier: ModuleSpecifier::parse(&format!(
-            "clay://runtime/language-intelligence-{}.js",
-            registration.token.replace(':', "-")
+            "clay://runtime/language-intelligence-{}-{}.js",
+            registration.token.replace(':', "-"),
+            request.request_id,
         ))
         .map_err(|error| ClayRuntimeError::InvalidMainSpecifier(error.to_string()))?,
         main_source: Some(source),
@@ -1700,7 +2432,7 @@ Deno.core.ops.op_clay_language_store_intelligence_result(JSON.stringify(result ?
                 "clay.language.invalid_result: handler produced no result".to_string(),
             )
         })?;
-    language_intelligence_result_from_json(&result_json, registration, &request)
+    language_intelligence_result_from_json(&result_json, &registration.package, &request)
 }
 
 fn language_intelligence_request_json(
@@ -1747,7 +2479,7 @@ fn language_intelligence_feature_name(
 
 fn language_intelligence_result_from_json(
     result_json: &str,
-    registration: &crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
+    package: &crate::packages::record::PackageRecord,
     request: &crate::protocol::LanguageIntelligenceRequest,
 ) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
     use crate::protocol::{
@@ -1889,9 +2621,9 @@ fn language_intelligence_result_from_json(
         status,
         payload,
         provenance: crate::protocol::CompletionProvenance {
-            package_name: registration.package.manifest.name.clone(),
-            package_version: registration.package.manifest.version.clone(),
-            package_prefix: registration.package.manifest.clay.api_prefix.clone(),
+            package_name: package.manifest.name.clone(),
+            package_version: package.manifest.version.clone(),
+            package_prefix: package.manifest.clay.api_prefix.clone(),
         },
     })
 }
@@ -3128,6 +3860,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_facade_invokes_token_backed_dynamic_provider() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({
+                  packageName: "@vendor/dynamic",
+                  packageVersion: "0.1.0",
+                  packagePrefix: "dynamic",
+                  permissions: ["completion-provider"],
+                  providerId: "dynamic.provider",
+                  triggerCharacters: ["."],
+                  timeoutMs: 500,
+                  maxItems: 8,
+                  module: {
+                    provideCompletion: async (_request, window) => ({
+                      status: "ok",
+                      items: [{ label: "dynamic", insertText: "dynamic", detail: window.text }]
+                    })
+                  }
+                });
+                "#,
+            )
+            .await
+            .unwrap();
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        service
+            .register_completion_providers(&coordinator, 4, &evaluation)
+            .unwrap();
+        let request = crate::protocol::CompletionRequest {
+            request_id: 91,
+            client_id: 2,
+            document_id: 7,
+            document_version: 3,
+            behavior_version: 5,
+            cursor_byte_offset: 2,
+            replacement_range: crate::protocol::CompletionReplacementRange {
+                byte_start: 2,
+                byte_end: 2,
+            },
+            trigger: crate::protocol::CompletionTrigger::Manual,
+            provider_generation: 4,
+        };
+        coordinator
+            .schedule_completion(
+                "dynamic.provider",
+                request,
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "dynamic".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "fn".to_string(),
+                },
+            )
+            .unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.items[0].detail, "fn");
+    }
+
+    #[tokio::test]
     async fn language_intelligence_facade_registers_token_backed_provider_without_process_authority()
      {
         let service = ClayJsRuntimeService::default();
@@ -3177,6 +3977,47 @@ mod tests {
                 .package_prefix
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn document_analyzer_registration_rejects_unowned_module_and_runtime_process_fields() {
+        let service = ClayJsRuntimeService::default();
+        for analyzer in [
+            r#"{ id: "analysis.worker", contribution: "analysis.server", moduleSpecifier: "file:///tmp/escape.js" }"#,
+            r#"{ id: "analysis.worker", contribution: "analysis.server", moduleSpecifier: "clay://packages/other/worker.js", executable: "/bin/true" }"#,
+        ] {
+            let source = format!(
+                r#"
+                import {{ serverRegisterDocumentAnalyzer }} from "clay:language";
+                serverRegisterDocumentAnalyzer({{
+                  packageManifest: {{
+                    name: "@vendor/analysis",
+                    version: "1.0.0",
+                    type: "module",
+                    exports: {{ ".": "./dist/index.js" }},
+                    clay: {{
+                      apiPrefix: "analysis",
+                      entry: "./dist/index.js",
+                      loadEntry: "./dist/load.js",
+                      permissions: ["parse-document"],
+                      capabilities: ["language-server"],
+                      modes: [],
+                      docs: "./docs.md",
+                      contributions: {{
+                        languageServers: [{{ id: "analysis.server", executable: "/bin/true", args: [] }}]
+                      }}
+                    }}
+                  }},
+                  analyzer: {analyzer}
+                }});
+                "#
+            );
+            let error = service
+                .evaluate_controlled_module(source)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("clay.language.invalid_analyzer"));
+        }
     }
 
     #[tokio::test]
@@ -3555,6 +4396,362 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn lsp_rust_package_loads_after_exact_grant_without_starting_child() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        if crate::packages::authorization::resolve_language_server_executable("rustup").is_none() {
+            return;
+        }
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/configuration/lsp-rust");
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp/rust");
+        let mut workspace = WorkspaceState::new();
+        let registered = workspace.add_root(&workspace_root).unwrap();
+        assert_eq!(registered, 1);
+
+        let runtime = ClayJsRuntimeService::default();
+        let evaluation = runtime
+            .load_configuration_from_root_with_workspace(root, Arc::new(Mutex::new(workspace)))
+            .await
+            .unwrap();
+
+        assert_eq!(evaluation.document_analyzers.len(), 1);
+        let analyzer = &evaluation.document_analyzers[0];
+        assert_eq!(analyzer.package.manifest.name, "@clay/lsp-rust");
+        assert_eq!(analyzer.id, "lsp-rust.bridge");
+        assert_eq!(analyzer.contribution, "lsp-rust.server");
+        assert_eq!(analyzer.modes, ["rust"]);
+        assert_eq!(
+            evaluation.op_records,
+            ["@clay/lsp-rust:1"],
+            "load must register metadata only; analyzer starts lazily on document open"
+        );
+
+        let invocation = runtime
+            .evaluate_controlled_module(
+                r#"
+                import { createRustAnalyzerBridge } from "clay://packages/@clay/lsp-rust/dist/server.js";
+                import { FrameDecoder, encodeFrame } from "clay://packages/@clay/lsp-rust/dist/shared/framing.js";
+                const decoder = new FrameDecoder();
+                const reads = [];
+                const methods = [];
+                const session = {
+                  async sendBytes(bytes) {
+                    for (const message of decoder.push(bytes)) {
+                      methods.push(message.method);
+                      if (message.method === "initialize") reads.push(encodeFrame({
+                        jsonrpc: "2.0",
+                        id: message.id,
+                        result: { capabilities: { textDocumentSync: { openClose: true, change: 2 } } },
+                      }));
+                    }
+                  },
+                  async readBytes() { return reads.shift() ?? new Uint8Array(); },
+                  async stop() {},
+                };
+                const bridge = createRustAnalyzerBridge({
+                  startSession: async () => session,
+                  publishDecorations() {},
+                  publishDiagnostics() {},
+                  packageManifest: {},
+                });
+                await bridge.handle({
+                  kind: "open",
+                  identity: { package: "@clay/lsp-rust", contribution: "lsp-rust.server" },
+                  documentId: 7,
+                  documentVersion: 1,
+                  workspaceRootId: 1,
+                  canonicalRootPath: "/tmp",
+                  relativePath: "main.rs",
+                  text: "fn main() {}\n",
+                });
+                Deno.core.ops.op_clay_runtime_record(methods.join(","));
+                "#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            invocation.op_records,
+            ["initialize,initialized,textDocument/didOpen"]
+        );
+    }
+
+    #[tokio::test]
+    async fn lsp_typescript_and_javascript_packages_load_after_exact_grants_without_starting_children()
+     {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        if crate::packages::authorization::resolve_language_server_executable(
+            "typescript-language-server",
+        )
+        .is_none()
+        {
+            return;
+        }
+
+        let mut typescript_runtime = None;
+        for (config_dir, workspace_dir, package_name, analyzer_id, contribution, mode) in [
+            (
+                "tests/fixtures/configuration/lsp-typescript",
+                "tests/fixtures/lsp/typescript",
+                "@clay/lsp-typescript",
+                "lsp-typescript.bridge",
+                "lsp-typescript.server",
+                "typescript",
+            ),
+            (
+                "tests/fixtures/configuration/lsp-javascript",
+                "tests/fixtures/lsp/javascript",
+                "@clay/lsp-javascript",
+                "lsp-javascript.bridge",
+                "lsp-javascript.server",
+                "javascript",
+            ),
+        ] {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(config_dir);
+            let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join(workspace_dir);
+            let mut workspace = WorkspaceState::new();
+            let registered = workspace.add_root(&workspace_root).unwrap();
+            assert_eq!(registered, 1);
+
+            let runtime = ClayJsRuntimeService::default();
+            let evaluation = runtime
+                .load_configuration_from_root_with_workspace(root, Arc::new(Mutex::new(workspace)))
+                .await
+                .unwrap();
+
+            assert_eq!(evaluation.document_analyzers.len(), 1);
+            let analyzer = &evaluation.document_analyzers[0];
+            assert_eq!(analyzer.package.manifest.name, package_name);
+            assert_eq!(analyzer.id, analyzer_id);
+            assert_eq!(analyzer.contribution, contribution);
+            assert_eq!(analyzer.modes, [mode]);
+            assert_eq!(
+                evaluation.op_records,
+                [format!("{package_name}:1")],
+                "load must register metadata only; analyzer starts lazily on document open"
+            );
+            if package_name == "@clay/lsp-typescript" {
+                typescript_runtime = Some(runtime);
+            }
+        }
+
+        let runtime = typescript_runtime.expect("typescript bridge runtime loaded");
+        let invocation = runtime
+            .evaluate_controlled_module(
+                r#"
+                import { createTypescriptBridge } from "clay://packages/@clay/lsp-typescript/dist/server.js";
+                import { FrameDecoder, encodeFrame } from "clay://packages/@clay/lsp-typescript/dist/shared/framing.js";
+                const decoder = new FrameDecoder();
+                const reads = [];
+                const methods = [];
+                const session = {
+                  async sendBytes(bytes) {
+                    for (const message of decoder.push(bytes)) {
+                      methods.push(message.method);
+                      if (message.method === "initialize") reads.push(encodeFrame({
+                        jsonrpc: "2.0",
+                        id: message.id,
+                        result: { capabilities: { textDocumentSync: { openClose: true, change: 2 } } },
+                      }));
+                    }
+                  },
+                  async readBytes() { return reads.shift() ?? new Uint8Array(); },
+                  async stop() {},
+                };
+                const bridge = createTypescriptBridge({
+                  startSession: async () => session,
+                  publishDecorations() {},
+                  publishDiagnostics() {},
+                  packageManifest: {},
+                });
+                await bridge.handle({
+                  kind: "open",
+                  identity: { package: "@clay/lsp-typescript", contribution: "lsp-typescript.server" },
+                  documentId: 7,
+                  documentVersion: 1,
+                  workspaceRootId: 1,
+                  canonicalRootPath: "/tmp",
+                  relativePath: "main.ts",
+                  text: "export const value = 1;\n",
+                });
+                Deno.core.ops.op_clay_runtime_record(methods.join(","));
+                "#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            invocation.op_records,
+            ["initialize,initialized,textDocument/didOpen"]
+        );
+    }
+
+    #[tokio::test]
+    async fn lsp_markdown_package_loads_after_exact_grant_without_starting_child() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        if crate::packages::authorization::resolve_language_server_executable("marksman").is_none()
+        {
+            return;
+        }
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/configuration/lsp-markdown");
+        let workspace_root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp/markdown");
+        let mut workspace = WorkspaceState::new();
+        let registered = workspace.add_root(&workspace_root).unwrap();
+        assert_eq!(registered, 1);
+
+        let runtime = ClayJsRuntimeService::default();
+        let evaluation = runtime
+            .load_configuration_from_root_with_workspace(root, Arc::new(Mutex::new(workspace)))
+            .await
+            .unwrap();
+
+        assert_eq!(evaluation.document_analyzers.len(), 1);
+        let analyzer = &evaluation.document_analyzers[0];
+        assert_eq!(analyzer.package.manifest.name, "@clay/lsp-markdown");
+        assert_eq!(analyzer.id, "lsp-markdown.bridge");
+        assert_eq!(analyzer.contribution, "lsp-markdown.server");
+        assert_eq!(analyzer.modes, ["markdown"]);
+        assert_eq!(
+            evaluation.op_records,
+            ["@clay/lsp-markdown:1"],
+            "load must register metadata only; analyzer starts lazily on document open"
+        );
+
+        let invocation = runtime
+            .evaluate_controlled_module(
+                r##"
+                import { createMarksmanBridge } from "clay://packages/@clay/lsp-markdown/dist/server.js";
+                import { FrameDecoder, encodeFrame } from "clay://packages/@clay/lsp-markdown/dist/shared/framing.js";
+                const decoder = new FrameDecoder();
+                const reads = [];
+                const methods = [];
+                const session = {
+                  async sendBytes(bytes) {
+                    for (const message of decoder.push(bytes)) {
+                      methods.push(message.method);
+                      if (message.method === "initialize") reads.push(encodeFrame({
+                        jsonrpc: "2.0",
+                        id: message.id,
+                        result: { capabilities: { textDocumentSync: { openClose: true, change: 1 } } },
+                      }));
+                    }
+                  },
+                  async readBytes() { return reads.shift() ?? new Uint8Array(); },
+                  async stop() {},
+                };
+                const bridge = createMarksmanBridge({
+                  startSession: async () => session,
+                  publishDecorations() {},
+                  publishDiagnostics() {},
+                  packageManifest: {},
+                });
+                await bridge.handle({
+                  kind: "open",
+                  identity: { package: "@clay/lsp-markdown", contribution: "lsp-markdown.server" },
+                  documentId: 7,
+                  documentVersion: 1,
+                  workspaceRootId: 1,
+                  canonicalRootPath: "/tmp",
+                  relativePath: "README.md",
+                  text: "# Title\n",
+                });
+                Deno.core.ops.op_clay_runtime_record(methods.join(","));
+                "##,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            invocation.op_records,
+            ["initialize,initialized,textDocument/didOpen"]
+        );
+    }
+
+    #[tokio::test]
+    async fn lsp_language_packages_fixture_grants_before_load_without_starting_children() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let required = ["rustup", "typescript-language-server", "marksman"];
+        if required.iter().any(|executable| {
+            crate::packages::authorization::resolve_language_server_executable(executable).is_none()
+        }) {
+            return;
+        }
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/configuration/lsp-language-packages");
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp/rust");
+        let mut workspace = WorkspaceState::new();
+        assert_eq!(workspace.add_root(&workspace_root).unwrap(), 1);
+
+        let evaluation = ClayJsRuntimeService::default()
+            .load_configuration_from_root_with_workspace(root, Arc::new(Mutex::new(workspace)))
+            .await
+            .unwrap();
+
+        let analyzer_names: Vec<_> = evaluation
+            .document_analyzers
+            .iter()
+            .map(|analyzer| analyzer.package.manifest.name.as_str())
+            .collect();
+        assert_eq!(
+            analyzer_names,
+            [
+                "@clay/lsp-rust",
+                "@clay/lsp-typescript",
+                "@clay/lsp-javascript",
+                "@clay/lsp-markdown",
+            ]
+        );
+        assert!(
+            evaluation.op_records.is_empty(),
+            "representative fixture must register only; it must not start language-server children: {:?}",
+            evaluation.op_records
+        );
+
+        let completion_ids: Vec<_> = evaluation
+            .completion_providers
+            .iter()
+            .map(|provider| provider.id.as_str())
+            .collect();
+        for required_id in [
+            "rust.keywords",
+            "typescript.keywords",
+            "javascript.keywords",
+            "markdown.keywords",
+        ] {
+            assert!(
+                completion_ids.contains(&required_id),
+                "fixture must register base provider {required_id}; got {completion_ids:?}"
+            );
+        }
+        assert!(
+            completion_ids.iter().all(|id| !id.starts_with("lsp-")),
+            "LSP completion providers register lazily through analyzers; load must not eagerly start them: {completion_ids:?}"
+        );
+
+        for package in [
+            "lsp-rust",
+            "lsp-typescript",
+            "lsp-javascript",
+            "lsp-markdown",
+        ] {
+            let manifest: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(format!(
+                    "{}/packages/{package}/package.json",
+                    env!("CARGO_MANIFEST_DIR")
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let provider = &manifest["clay"]["contributions"]["completionProviders"][0];
+            assert_eq!(provider["priority"].as_i64(), Some(100));
+            assert!(
+                provider.get("exclusive").is_none()
+                    || provider["exclusive"] == serde_json::Value::Bool(false)
+            );
+        }
     }
 
     #[tokio::test]
@@ -7078,6 +8275,114 @@ mod tests {
             grant.canonical_executable,
             std::fs::canonicalize(executable).unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn language_server_facade_round_trips_exact_uint8array_bytes() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let config_root = config_fixture("language-server-bytes");
+        let package_root = config_root.join("package");
+        let workspace_root = config_root.join("workspace");
+        fs::create_dir_all(&workspace_root).unwrap();
+        write_loadable_package(&package_root, "export default function load() {}\n");
+
+        let executable = config_root.join("fake-byte-echo");
+        let mut file = fs::File::create(&executable).unwrap();
+        file.write_all(b"#!/bin/sh\nexec /bin/cat\n").unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let package_name = "@vendor/lsp-bytes";
+        let contribution = "lspbytes.server";
+        let mut package_json = loadable_package_fixture(package_name, "lspbytes");
+        package_json["clay"]["capabilities"] = serde_json::json!(["language-server"]);
+        package_json["clay"]["contributions"]["languageServers"] = serde_json::json!([{
+            "id": contribution,
+            "executable": executable,
+            "args": [],
+            "inheritEnvironment": []
+        }]);
+
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let workspace_root_id = workspace.lock().await.add_root(&workspace_root).unwrap();
+        let op_state = Arc::new(crate::server::ops::ClayOpState::new_for_document(
+            Arc::clone(&workspace),
+            1,
+        ));
+        op_state.set_runtime_context(Arc::clone(&workspace), 1, true);
+        op_state
+            .package_service()
+            .lock()
+            .unwrap()
+            .install_from_value_at_root_with_spec(
+                package_json,
+                package_root,
+                "local:language-server-bytes",
+            )
+            .unwrap();
+
+        fs::write(
+            config_root.join("init.js"),
+            format!(
+                r#"
+                import {{ authorizeLanguageServer, startLanguageServerSession }} from "clay:language-server";
+                await authorizeLanguageServer({{
+                  package: {package_name:?},
+                  contribution: {contribution:?},
+                  workspaceRootIds: [{workspace_root_id}],
+                }});
+                const session = await startLanguageServerSession({{
+                  package: {package_name:?},
+                  contribution: {contribution:?},
+                  workspaceRootId: {workspace_root_id},
+                }});
+                const sent = new Uint8Array([0, 240, 159, 166, 128, 255]);
+                await session.sendBytes(sent);
+                const received = [];
+                while (received.length < sent.length) {{
+                  received.push(...await session.readBytes(sent.length - received.length, 2000));
+                }}
+                Deno.core.ops.op_clay_runtime_record(`bytes:${{received.join(",")}}`);
+                await session.stop();
+                "#
+            ),
+        )
+        .unwrap();
+
+        let loaded =
+            prepare_runtime_entry(RuntimeEntry::ConfigurationRoot(config_root), 1).unwrap();
+        let loader = Rc::new(ClayModuleLoader::new(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+            op_state.load_entry_allowlist(),
+        ));
+        let (mut runtime, heap_limit_hit) = create_js_runtime(
+            Arc::clone(&op_state),
+            Rc::clone(&loader),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+        );
+        loader.set_entry(
+            loaded.main_specifier.clone(),
+            loaded.main_source.clone(),
+            loaded.configuration.clone(),
+        );
+        let evaluation = evaluate_loaded_module(
+            &mut runtime,
+            &op_state,
+            loaded,
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            true,
+            &heap_limit_hit,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(evaluation.op_records, ["bytes:0,240,159,166,128,255"]);
     }
 
     #[tokio::test]

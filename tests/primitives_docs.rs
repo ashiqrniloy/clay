@@ -1350,6 +1350,13 @@ fn phase18_20_language_intelligence_primitive_review() -> String {
     .expect("read Phase 18.20 language intelligence primitive review")
 }
 
+fn phase18_21_lsp_bridge_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase18.21-lsp-bridge-primitive-review.md",
+    ))
+    .expect("read Phase 18.21 LSP bridge primitive review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -2537,7 +2544,7 @@ fn language_intelligence_implementation_wikis_are_indexed_and_complete() {
         "UiReactivePriority",
         "parse-document",
         "EditPreview",
-        "Phase 18.21 Publish Handoff",
+        "Phase 18.21 Handoff (Complete)",
         "tests/language_intelligence.rs",
         "language-server-process-service.md",
     ] {
@@ -2560,7 +2567,7 @@ fn language_intelligence_implementation_wikis_are_indexed_and_complete() {
         "kill_on_drop",
         "trusted same-user subprocess authority",
         "not an operating-system sandbox",
-        "Phase 18.21 Publish Handoff",
+        "Phase 18.21 Handoff (Complete)",
         "tests/language_server_authority.rs",
         "language-intelligence.md",
     ] {
@@ -3195,6 +3202,150 @@ fn phase18_20_language_intelligence_primitive_review_is_linked_and_complete() {
         assert!(
             review.contains(required),
             "Phase 18.20 primitive review must preserve boundary {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_21_lsp_bridge_primitive_review_is_linked_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let primitive_architecture = fs::read_to_string(repository_path(
+        "docs/wiki/modules/primitive-architecture.md",
+    ))
+    .expect("read primitive architecture wiki");
+    let review = phase18_21_lsp_bridge_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/phase18.21-lsp-bridge-primitive-review.md"),
+        "wiki index must link the Phase 18.21 primitive review"
+    );
+    assert!(
+        primitive_architecture.contains("phase18.21-lsp-bridge-primitive-review.md"),
+        "primitive architecture wiki must link the Phase 18.21 primitive review"
+    );
+
+    for required in [
+        "Existing Primitive Inventory",
+        "`LanguageServerSession` and exact grants",
+        "Persistent runtime and module allowlist",
+        "Parse windows and document analysis",
+        "Document open/edit/reload flow",
+        "Semantic decorations",
+        "Range diagnostics",
+        "Completion",
+        "Language-intelligence providers",
+        "Workspace roots and navigation",
+        "Commands and code actions",
+        "Package loading, provenance, and revocation",
+        "`@clay/rust`",
+        "`@clay/typescript`",
+        "`@clay/javascript`",
+        "`@clay/markdown`",
+        "String::from_utf8_lossy",
+        "no open/change/close event kind",
+        "static-only",
+        "one evaluation result slot",
+        "What Existing Primitives Already Achieve",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.21 primitive review must inventory {required}"
+        );
+    }
+
+    for required in [
+        "Locked Generic Gaps",
+        "Lossless bounded session bytes",
+        "Bounded document-analysis worker lifecycle",
+        "Dynamic package completion adapter",
+        "Long-lived validated worker outputs",
+        "task 3 approval",
+        "server-canonical open/edit/reload/close",
+        "existing validators, caches, stale checks, protocol, and native UI",
+        "No other Rust primitive is justified by this review",
+        "Oversize documents must never enter partial child state",
+        "base mode/syntax/completion",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.21 primitive review must lock generic gap/rule {required}"
+        );
+    }
+
+    for required in [
+        "Budgets and Hot-Path Policy",
+        "256 KiB / 64 KiB / 16 / 30 s",
+        "128 MiB / 5 s",
+        "local edit application, caret/selection, paint, layout, scroll",
+        "Security Boundary",
+        "`language-server` does not bypass `parse-document`",
+        "trusted subprocess authority",
+        "Rejected Implementation Shapes",
+        "LSP types, method strings, JSON-RPC IDs, `Content-Length`",
+        "Per-language Rust branches",
+        "Four independent protocol adapters",
+        "A second semantic renderer, diagnostic cache, completion coordinator",
+        "Lossy string framing",
+        "An endless child-read loop inside configuration evaluation",
+        "Unbounded worker/event/output queues",
+        "Automatic language-server install",
+        "sandbox claims",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 18.21 primitive review must preserve boundary {required}"
+        );
+    }
+}
+
+#[test]
+fn phase18_21_first_party_lsp_bridge_packages_wiki_page_is_indexed_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let bridge_page = fs::read_to_string(repository_path(
+        "docs/wiki/modules/first-party-lsp-bridge-packages.md",
+    ))
+    .expect("read bridge packages wiki");
+
+    assert!(
+        wiki_index.contains("modules/first-party-lsp-bridge-packages.md"),
+        "wiki index must link the first-party LSP bridge packages page"
+    );
+
+    for required in [
+        "packages/lsp-shared/framing.js",
+        "packages/lsp-shared/positions.js",
+        "packages/lsp-shared/mapping.js",
+        "packages/lsp-shared/client.js",
+        "packages/lsp-shared/utf8.js",
+        "packages/lsp-shared/typescript-language-server.js",
+        "src/server/document_analysis.rs",
+        "src/server/ops/document_analysis.rs",
+        "src/server/language_server.rs",
+        "@clay/lsp-rust",
+        "@clay/lsp-typescript",
+        "@clay/lsp-javascript",
+        "@clay/lsp-markdown",
+        "rustup run stable rust-analyzer",
+        "typescript-language-server --stdio",
+        "marksman server",
+        "halving-retry truncation",
+        "lossless `sendBytes`/`readBytes`",
+        "cancel_root",
+        "cancel_generation",
+        "revoke_language_server_grants",
+        "Security Boundary",
+        "Loading and Fallback",
+        "grant-before-load",
+        "Document-Analysis Worker",
+        "Four Package Policies",
+        "Shared LSP 3.17 Adapter",
+        "Primitive Coverage",
+    ] {
+        assert!(
+            bridge_page.contains(required),
+            "first-party-lsp-bridge-packages wiki must contain {required}"
         );
     }
 }

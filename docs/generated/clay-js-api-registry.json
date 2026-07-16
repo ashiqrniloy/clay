@@ -1655,6 +1655,70 @@
       "async": true
     },
     {
+      "id": "clay.language.serverRegisterDocumentAnalyzer",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/language/server-register-document-analyzer.md",
+      "js_module": "clay:language",
+      "js_export": "serverRegisterDocumentAnalyzer",
+      "js_facade": "runtime/js/language.ts::serverRegisterDocumentAnalyzer",
+      "backing_rust": "src/server/document_analysis.rs::DocumentAnalysisCoordinator; src/server/ops/document_analysis.rs",
+      "deno_op": "op_clay_language_register_document_analyzer",
+      "deno_op_path": "src/server/ops/document_analysis.rs::op_clay_language_register_document_analyzer",
+      "name": "serverRegisterDocumentAnalyzer",
+      "user_facing_name": "Register Document Analyzer",
+      "summary": "Register a long-lived document-analysis worker for a package language-server contribution. Requires exact grant, parse-document, and language-server permissions.",
+      "owner": "server",
+      "phase": "Phase 18.21",
+      "visibility": "public",
+      "permissions": ["parse-document", "language-server"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "packageManifest",
+          "type": "object",
+          "default": "required",
+          "description": "Full package manifest used for provenance validation."
+        },
+        {
+          "name": "analyzer.id",
+          "type": "string",
+          "default": "required",
+          "description": "Package-prefixed analyzer ID under the package apiPrefix namespace."
+        },
+        {
+          "name": "analyzer.contribution",
+          "type": "string",
+          "default": "required",
+          "description": "Contribution id from the package's clay.contributions.languageServers array; must match an existing exact LanguageServer grant."
+        },
+        {
+          "name": "analyzer.modes",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Language modes the analyzer monitors; empty matches all modes."
+        },
+        {
+          "name": "analyzer.moduleSpecifier",
+          "type": "string",
+          "default": "required",
+          "description": "clay://packages/ module specifier owned by the registering package."
+        },
+        {
+          "name": "analyzer.exportName",
+          "type": "string",
+          "default": "handleDocumentAnalysis",
+          "description": "Named export on the module providing the analyzer function."
+        }
+      ],
+      "security": "deny-by-default; requires both parse-document and language-server permissions with an exact current grant; rejects handler/callback/function/executable/args/cwd/environment/process/rawOps; moduleSpecifier must be a loaded package-owned module; workers share the same permission boundary as the main runtime with language_server_authority_sealed; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or raw-op authority.",
+      "agent_guidance": "Use only from package load.js with serverRegisterDocumentAnalyzer. Never expose hidden executable/argv/env/config keys; the bridge contract owns all LSP framing, sync, capabilities, and URI conversion.",
+      "lookup_tags": ["configuration", "language", "document-analysis", "lsp-bridge", "phase18.21", "runtime-backed", "deny-by-default"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.language.serverRegisterLanguageIntelligenceProvider",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/language/server-register-language-intelligence-provider.md",

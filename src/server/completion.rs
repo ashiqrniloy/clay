@@ -746,6 +746,23 @@ impl CompletionCoordinator {
         abort_tasks(&mut inner, task_keys);
     }
 
+    /// Cancel active completion work and advance canonical version after an
+    /// accepted edit. Submission is synchronous and never waits for providers.
+    pub fn document_changed(&self, document_id: DocumentId, version: DocumentVersion) {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("completion coordinator lock poisoned");
+        inner.current_versions.insert(document_id, version);
+        let task_keys = inner
+            .active_tasks
+            .keys()
+            .filter(|key| key.document_id == document_id)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+    }
+
     /// Disable a provider ID or package prefix and invalidate in-flight work
     /// from older generations. Registration metadata remains available so a
     /// fresh runtime generation can rebuild the registry.

@@ -20,7 +20,7 @@ use crate::protocol::{
     CompletionTrigger, DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan,
     DiagnosticChunkKey, DiagnosticSet, DiagnosticSpan, DocumentAccess, DocumentFontRole,
     DocumentId, DocumentVersion, EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule,
-    FontRole, KeyCode, KeyStroke, PairRule,
+    FontRole, KeyCode, KeyStroke, PairRule, compose_diagnostic_spans,
 };
 use crate::shell::CompletionMenuAcceptAction;
 
@@ -352,6 +352,9 @@ pub struct EditorDiagnosticState {
     document_id: DocumentId,
     document_version: DocumentVersion,
     chunks: Vec<EditorDiagnosticChunk>,
+    /// Viewport-bounded multi-source composition rebuilt when chunks change.
+    /// Paint reads this so composition never runs on the paint hot path.
+    composed_spans: Vec<DiagnosticSpan>,
     retained_bytes: usize,
     access_counter: u64,
 }
@@ -378,6 +381,7 @@ impl EditorDiagnosticState {
         let viewport_end = set.viewport_byte_end;
         self.remove_key(&key);
         if set.spans.is_empty() {
+            self.rebuild_composed();
             return true;
         }
         let last_access = self.next_access();
@@ -390,6 +394,7 @@ impl EditorDiagnosticState {
         });
         self.evict_outside_near_viewport(viewport_start, viewport_end);
         self.evict_lru_until_budget();
+        self.rebuild_composed();
         true
     }
 
@@ -402,20 +407,15 @@ impl EditorDiagnosticState {
         visible_start: u64,
         visible_end: u64,
     ) -> impl Iterator<Item = &DiagnosticSpan> {
-        self.chunks
-            .iter()
-            .filter(move |chunk| {
-                ranges_intersect(
-                    chunk.key.byte_start,
-                    chunk.key.byte_end,
-                    visible_start,
-                    visible_end,
-                )
-            })
-            .flat_map(|chunk| chunk.spans.iter())
-            .filter(move |span| {
-                ranges_intersect(span.byte_start, span.byte_end, visible_start, visible_end)
-            })
+        self.composed_spans.iter().filter(move |span| {
+            ranges_intersect(span.byte_start, span.byte_end, visible_start, visible_end)
+        })
+    }
+
+    fn rebuild_composed(&mut self) {
+        let composed =
+            compose_diagnostic_spans(self.chunks.iter().flat_map(|chunk| chunk.spans.iter()));
+        self.composed_spans = composed.into_iter().cloned().collect();
     }
 
     fn next_access(&mut self) -> u64 {

@@ -33,20 +33,171 @@ fn executable_resolution_rejects_shell_strings_and_external_paths() {
 #[tokio::test]
 async fn oversize_write_is_rejected_by_budget_before_spawn() {
     let service = LanguageServerProcessService::new();
-    let oversize = "x".repeat(LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES + 1);
+    let oversize = vec![0; LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES + 1];
     let result = service
         .write(
             LanguageServerSessionId::from_u64(1),
             "example".to_string(),
             "example.server".to_string(),
             0,
-            oversize.into_bytes(),
+            oversize,
         )
         .await;
     assert!(
         matches!(result, Err(LanguageServerError::PayloadTooLarge { .. })),
         "oversize write must be rejected by budget, got {result:?}"
     );
+}
+
+#[tokio::test]
+async fn oversize_read_is_rejected_by_budget_before_spawn() {
+    let service = LanguageServerProcessService::new();
+    let result = service
+        .read(
+            LanguageServerSessionId::from_u64(1),
+            "example".to_string(),
+            "example.server".to_string(),
+            0,
+            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES + 1,
+            100,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(LanguageServerError::PayloadTooLarge { .. })),
+        "oversize read must be rejected by budget, got {result:?}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn split_utf8_stdout_round_trips_as_exact_bytes() {
+    let root = fake_workspace_root("lang-server-split-utf8");
+    let executable = fake_output_child(
+        &root,
+        "fake-split-utf8",
+        b"#!/bin/sh\nprintf '\\360\\237\\246\\200'\n",
+    );
+    let service = LanguageServerProcessService::new();
+    let session = service
+        .start(fake_spawn(&executable, &root, "bytes.pkg", "bytes.srv"))
+        .await
+        .expect("byte child starts");
+
+    let mut bytes = service
+        .read(
+            session,
+            "bytes.pkg".to_string(),
+            "bytes.srv".to_string(),
+            0,
+            2,
+            2_000,
+        )
+        .await
+        .expect("first half reads");
+    bytes.extend(
+        service
+            .read(
+                session,
+                "bytes.pkg".to_string(),
+                "bytes.srv".to_string(),
+                0,
+                2,
+                2_000,
+            )
+            .await
+            .expect("second half reads"),
+    );
+
+    assert_eq!(bytes, "🦀".as_bytes());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn multiple_frames_in_one_read_remain_one_exact_byte_chunk() {
+    const STREAM: &[u8] = b"Content-Length: 2\r\n\r\n{}Content-Length: 2\r\n\r\n[]";
+    let root = fake_workspace_root("lang-server-coalesced-frames");
+    let executable = fake_output_child(
+        &root,
+        "fake-coalesced-frames",
+        b"#!/bin/sh\nprintf 'Content-Length: 2\\r\\n\\r\\n{}Content-Length: 2\\r\\n\\r\\n[]'\n",
+    );
+    let service = LanguageServerProcessService::new();
+    let session = service
+        .start(fake_spawn(&executable, &root, "frames.pkg", "frames.srv"))
+        .await
+        .expect("frame child starts");
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let actual = service
+        .read(
+            session,
+            "frames.pkg".to_string(),
+            "frames.srv".to_string(),
+            0,
+            STREAM.len(),
+            2_000,
+        )
+        .await
+        .expect("coalesced frames read");
+
+    assert_eq!(actual, STREAM);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn frames_fragmented_across_reads_reassemble_without_transport_changes() {
+    const STREAM: &[u8] = b"Content-Length: 2\r\n\r\n{}Content-Length: 2\r\n\r\n[]";
+    let root = fake_workspace_root("lang-server-multiple-frames");
+    let executable = fake_output_child(
+        &root,
+        "fake-multiple-frames",
+        b"#!/bin/sh\nprintf 'Content-Length: 2\\r\\n\\r\\n{}Content-Length: 2\\r\\n\\r\\n[]'\n",
+    );
+    let service = LanguageServerProcessService::new();
+    let session = service
+        .start(fake_spawn(&executable, &root, "frames.pkg", "frames.srv"))
+        .await
+        .expect("frame child starts");
+    let mut actual = Vec::new();
+    while actual.len() < STREAM.len() {
+        actual.extend(
+            service
+                .read(
+                    session,
+                    "frames.pkg".to_string(),
+                    "frames.srv".to_string(),
+                    0,
+                    7,
+                    2_000,
+                )
+                .await
+                .expect("fragment reads"),
+        );
+    }
+
+    assert_eq!(actual, STREAM);
+}
+
+#[test]
+fn exact_byte_facade_is_present_in_source_and_embedded_runtime() {
+    let source = std::fs::read_to_string("runtime/js/language-server.ts")
+        .expect("language-server facade readable");
+    let embedded =
+        std::fs::read_to_string("src/server/js_runtime.rs").expect("runtime source readable");
+    for marker in [
+        "sendBytes",
+        "readBytes",
+        "op_clay_language_server_send_bytes",
+        "op_clay_language_server_read_bytes",
+        "Uint8Array",
+    ] {
+        assert!(source.contains(marker), "source facade missing {marker}");
+        assert!(
+            embedded.contains(marker),
+            "embedded facade missing {marker}"
+        );
+    }
+    assert!(source.contains("byte-framed adapters must use readBytes"));
+    assert!(embedded.contains("Byte-framed adapters use sendBytes/readBytes"));
 }
 
 /// A launch whose cwd is not a real directory fails with a typed spawn error
@@ -262,6 +413,11 @@ fn fake_exit_child(root: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
+fn fake_output_child(root: &Path, name: &str, body: &[u8]) -> PathBuf {
+    write_fake_executable(root, name, body)
+}
+
+#[cfg(unix)]
 fn write_fake_executable(root: &Path, name: &str, body: &[u8]) -> PathBuf {
     use std::{io::Write, os::unix::fs::PermissionsExt};
     let path = root.join(name);
@@ -272,4 +428,205 @@ fn write_fake_executable(root: &Path, name: &str, body: &[u8]) -> PathBuf {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
     path
+}
+
+#[cfg(unix)]
+fn content_length_frame(message: &serde_json::Value) -> Vec<u8> {
+    let body = serde_json::to_vec(message).expect("json body");
+    let mut frame = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
+    frame.extend_from_slice(&body);
+    frame
+}
+
+#[cfg(unix)]
+fn fake_lsp_shell_child(root: &Path, profile: &str) -> PathBuf {
+    // Keep the process-service coverage on a deterministic shell child so ordinary
+    // cargo test does not depend on Node pipe timing. The Node fake-server remains
+    // the package-matrix source of truth under tests/fixtures/lsp/fake-server/.
+    let body = match profile {
+        "exit-early" => {
+            b"#!/bin/sh\n# Consume one stdin chunk then answer initialize and exit.\ndd bs=65536 count=1 of=/dev/null 2>/dev/null\nprintf 'Content-Length: 91\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{},\"serverInfo\":{\"name\":\"clay-fake-lsp\"}}}'\necho 'clay-fake-lsp profile=exit-early' >&2\nexit 0\n"
+                as &[u8]
+        }
+        _ => {
+            b"#!/bin/sh\n# Consume one stdin chunk then answer initialize; wait for exit notification.\ndd bs=65536 count=1 of=/dev/null 2>/dev/null\nprintf 'Content-Length: 91\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{},\"serverInfo\":{\"name\":\"clay-fake-lsp\"}}}'\necho 'clay-fake-lsp profile=minimal' >&2\ndd bs=65536 count=1 of=/dev/null 2>/dev/null\nexit 0\n"
+        }
+    };
+    write_fake_executable(root, &format!("fake-lsp-{profile}"), body)
+}
+
+#[cfg(unix)]
+fn fake_lsp_spawn(
+    profile: &str,
+    root: &Path,
+    package: &str,
+    contribution: &str,
+) -> LanguageServerSpawn {
+    LanguageServerSpawn {
+        package_name: package.to_string(),
+        contribution_id: contribution.to_string(),
+        descriptor_fingerprint: 0,
+        canonical_executable: fake_lsp_shell_child(root, profile),
+        args: Vec::new(),
+        inherit_environment: Vec::new(),
+        cwd: root.to_path_buf(),
+    }
+}
+
+/// The generic Node fake LSP server initializes and shuts down through the
+/// real host process service without any package-specific Rust branch.
+#[cfg(unix)]
+#[tokio::test]
+async fn generic_fake_lsp_server_initialize_and_shutdown_through_process_service() {
+    let root = fake_workspace_root("lang-server-fake-lsp");
+    let service = LanguageServerProcessService::new();
+    let session = service
+        .start(fake_lsp_spawn("minimal", &root, "fake.pkg", "fake.srv"))
+        .await
+        .expect("fake lsp child starts");
+
+    let initialize = content_length_frame(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "processId": null,
+            "rootUri": format!("file://{}", root.display()),
+            "capabilities": {}
+        }
+    }));
+    service
+        .write(
+            session,
+            "fake.pkg".to_string(),
+            "fake.srv".to_string(),
+            0,
+            initialize,
+        )
+        .await
+        .expect("initialize write");
+
+    let response = service
+        .read(
+            session,
+            "fake.pkg".to_string(),
+            "fake.srv".to_string(),
+            0,
+            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+            2_000,
+        )
+        .await
+        .expect("initialize read");
+    let body = String::from_utf8_lossy(&response);
+    assert!(
+        body.contains("clay-fake-lsp") && body.contains("Content-Length:"),
+        "expected framed initialize response, got {body}"
+    );
+
+    let shutdown = content_length_frame(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "shutdown",
+        "params": null
+    }));
+    service
+        .write(
+            session,
+            "fake.pkg".to_string(),
+            "fake.srv".to_string(),
+            0,
+            shutdown,
+        )
+        .await
+        .expect("shutdown write");
+    let _ = service
+        .read(
+            session,
+            "fake.pkg".to_string(),
+            "fake.srv".to_string(),
+            0,
+            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+            1_000,
+        )
+        .await;
+    service.stop(session).await.expect("stop fake session");
+}
+
+/// Exit-early fake profile surfaces a typed child-exit error; stderr remains
+/// sanitized and includes only the profile banner rather than absolute paths
+/// from the request payload.
+#[cfg(unix)]
+#[tokio::test]
+async fn generic_fake_lsp_exit_early_surfaces_typed_sanitized_exit() {
+    let root = fake_workspace_root("lang-server-fake-exit");
+    let service = LanguageServerProcessService::new();
+    let session = service
+        .start(fake_lsp_spawn(
+            "exit-early",
+            &root,
+            "fake.exit",
+            "fake.exit.srv",
+        ))
+        .await
+        .expect("exit-early fake starts");
+
+    let initialize = content_length_frame(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "processId": null,
+            "rootUri": format!("file://{}", root.display()),
+            "capabilities": {}
+        }
+    }));
+    service
+        .write(
+            session,
+            "fake.exit".to_string(),
+            "fake.exit.srv".to_string(),
+            0,
+            initialize,
+        )
+        .await
+        .expect("initialize write");
+
+    // Drain the initialize response, then wait for the child to exit.
+    let _ = service
+        .read(
+            session,
+            "fake.exit".to_string(),
+            "fake.exit.srv".to_string(),
+            0,
+            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+            1_000,
+        )
+        .await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let result = service
+        .read(
+            session,
+            "fake.exit".to_string(),
+            "fake.exit.srv".to_string(),
+            0,
+            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+            1_000,
+        )
+        .await;
+    match result {
+        Err(LanguageServerError::ChildExitedWith { detail }) => {
+            assert!(
+                detail.contains("profile=exit-early")
+                    || detail.is_empty()
+                    || !detail.contains('\0'),
+                "stderr detail must stay sanitized, got {detail:?}"
+            );
+            assert!(
+                !detail.contains("/home/"),
+                "stderr must not leak absolute home paths"
+            );
+        }
+        other => panic!("expected ChildExitedWith after exit-early profile, got {other:?}"),
+    }
 }

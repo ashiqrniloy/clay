@@ -10,10 +10,17 @@ use clay::{
             BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
             COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
             DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
-            DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
+            DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, DOCUMENT_ANALYSIS_INPUT_MAX_BYTES,
+            DOCUMENT_ANALYSIS_INPUT_MAX_EVENTS, DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES,
+            DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER, DOCUMENT_ANALYSIS_MAX_PENDING_REQUESTS,
+            DOCUMENT_ANALYSIS_MAX_TEXT_BYTES_PER_WORKER, DOCUMENT_ANALYSIS_MAX_WORKERS,
+            DOCUMENT_ANALYSIS_OUTPUT_MAX_BYTES, DOCUMENT_ANALYSIS_OUTPUT_MAX_EVENTS,
+            DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
             INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
-            LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-            SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
+            LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, LANGUAGE_SERVER_MAX_SESSIONS,
+            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES, LANGUAGE_SERVER_STDERR_BUDGET_BYTES,
+            SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            SYNTAX_CACHE_BUDGET_BYTES,
         },
         metrics::{PerfConfig, install_global_recorder},
     },
@@ -809,4 +816,49 @@ fn oversized_and_invalid_frames_still_rejected_with_metrics_enabled() {
         codec.decode_server_message(&oversize_declared),
         Err(CodecError::FrameTooLarge { len: 64, max: 32 })
     ));
+}
+
+#[test]
+fn phase18_21_language_server_and_document_analysis_budgets_are_locked() {
+    assert_eq!(LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES, 1024 * 1024);
+    assert_eq!(LANGUAGE_SERVER_STDERR_BUDGET_BYTES, 64 * 1024);
+    assert_eq!(LANGUAGE_SERVER_MAX_SESSIONS, 16);
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_WORKERS, 4);
+    assert_eq!(DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES, 64 * 1024 * 1024);
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER, 32);
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, 256 * 1024);
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_TEXT_BYTES_PER_WORKER, 8 * 1024 * 1024);
+    assert_eq!(DOCUMENT_ANALYSIS_INPUT_MAX_EVENTS, 64);
+    assert_eq!(DOCUMENT_ANALYSIS_INPUT_MAX_BYTES, 2 * 1024 * 1024);
+    assert_eq!(DOCUMENT_ANALYSIS_OUTPUT_MAX_EVENTS, 64);
+    assert_eq!(DOCUMENT_ANALYSIS_OUTPUT_MAX_BYTES, 512 * 1024);
+    assert_eq!(DOCUMENT_ANALYSIS_MAX_PENDING_REQUESTS, 8);
+    assert_eq!(DECORATION_PAYLOAD_BUDGET_BYTES, 8 * 1024);
+    assert_eq!(DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, 8 * 1024);
+    assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
+    assert_eq!(LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
+}
+
+#[test]
+fn fake_server_bridge_matrix_stays_within_deterministic_latency_budget() {
+    let started = Instant::now();
+    let output = std::process::Command::new("node")
+        .args([
+            "--test",
+            "tests/fixtures/lsp/fake-server/fake-server.test.mjs",
+            "tests/fixtures/lsp/fake-server/matrix.test.mjs",
+        ])
+        .output()
+        .expect("node fake-server matrix");
+    assert!(
+        output.status.success(),
+        "fake-server matrix failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "fake-server open/init/request/shutdown matrix must stay under 5s; observed {elapsed:?}"
+    );
 }

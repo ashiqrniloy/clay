@@ -145,9 +145,13 @@ serverDisableCompletion({ provider: "core.bufferWords" })
             → stale-drop published results
 ```
 
-## Phase 18.20/18.21 handoff
+## Phase 18.20/18.21 Handoff (Complete)
 
 Language intelligence does not add a second completion model. LSP bridges map `CompletionItem.insertTextFormat` to existing `PlainText`/`Snippet`, preserve priority and exclusive-claim behavior, and honor `serverDisableCompletion`. The `language-server` permission does not bypass `completion-provider`; snippet expansion remains inert client-local Rust after a validated result reaches the menu.
+
+Phase 18.21 adds a dynamic completion adapter through the document-analysis worker. LSP bridge packages register with `runtimeBridge: true` and `priority: 100`, `exclusive: false`. `CompletionRequest` in `connection.rs` attempts dynamic provider resolution through the `CompletionCoordinator` first (matching package prefix, trigger characters, and analysis provider IDs), then falls back to `static_package_completion_result` on no match or failure. The dynamic adapter uses the bounded worker mailbox for scheduling and a oneshot channel for result delivery with timeout. `EditAck` calls `document_changed` on the coordinator to abort stale in-flight completion work.
+
+LSP completion results can exceed `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` (16 KiB). Bridge packages implement a halving-retry truncation strategy: reduce the item list by half, re-encode, check budget, repeat until the result fits. This preserves as many completions as possible while staying within budget.
 
 ## Invariants and Constraints
 
@@ -172,7 +176,7 @@ Language intelligence does not add a second completion model. LSP bridges map `C
 - `src/editor/snippet.rs`: 10 unit tests covering bare tabstops, braced tabstops, placeholders with defaults, choices, final tabstop ordering, unterminated brace error, unsupported variable error, malformed input error, expanded-text-too-long rejection, too-many-tabstops rejection
 - `src/protocol/completion.rs`: `CompletionItemTextFormat` rkyv round-trip, `CompletionItem::new` defaults to `PlainText`
 - `src/editor/surface.rs`: snippet accept selects first placeholder, Tab/Shift-Tab navigation, Escape exits, active-placeholder editing shifts later ranges, manual completion routing
-- `tests/completion_provider.rs`: first-party snippet providers end-to-end, exclusive claim selection, disable filtering and generation bump, stale-drop on disable
+- `tests/completion_provider.rs`: first-party snippet providers end-to-end, exclusive claim selection, disable filtering and generation bump, stale-drop on disable, LSP priority 100 non-exclusive merge, `serverDisableCompletion` override, and dynamic provider routing through document-analysis coordinator.
 - `tests/editor_performance_invariants.rs`: snippet accept hot-path guard (no Deno.core, op_clay_, enqueue_, std::fs, TcpStream, reqwest, ureq)
 - `tests/package_primitive_gate.rs`: structured item validation (valid, mixed-format rejection, invalid textFormat, oversized insertText)
 - `tests/primitives_docs.rs`: Phase 18.19 primitive review linked and complete
@@ -189,6 +193,7 @@ cargo test --test primitives_docs phase18_19 --quiet
 
 ## Related
 
+- [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Transient Menu Session](transient-menu-session.md) — completion accept path and `CompletionMenuAcceptAction`
 - [First-Party Language Packages](first-party-language-packages.md) — `rust.snippets` / `typescript.snippets` providers
 - [Phase 18.19 Completion Extensions Primitive Review](phase18.19-completion-extensions-primitive-review.md)

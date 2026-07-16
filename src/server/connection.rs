@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
@@ -46,12 +46,10 @@ use super::{
 };
 use crate::shell::file_browser::FileBrowserState;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "connection handler receives server-owned state explicitly instead of hiding authority in a context bag"
-)]
-pub(crate) async fn handle_connection<S>(
-    mut stream: S,
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+async fn handle_connection<S>(
+    stream: S,
     client_id: u64,
     document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
@@ -67,9 +65,54 @@ pub(crate) async fn handle_connection<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    handle_connection_with_analysis(
+        stream,
+        client_id,
+        document,
+        behavior,
+        workspace,
+        sdui,
+        active_theme,
+        runtime_diagnostics,
+        runtime_generation,
+        parse_coordinator,
+        crate::server::completion::CompletionCoordinator::new(),
+        crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
+        language_intelligence,
+        codec,
+    )
+    .await
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "connection handler receives server-owned state explicitly instead of hiding authority in a context bag"
+)]
+pub(crate) async fn handle_connection_with_analysis<S>(
+    mut stream: S,
+    client_id: u64,
+    document: Arc<Mutex<DocumentState>>,
+    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+    workspace: Arc<Mutex<WorkspaceState>>,
+    sdui: Arc<Mutex<StaticSduiState>>,
+    active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
+    runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_generation: RuntimeGenerationStore,
+    parse_coordinator: ParseCoordinator,
+    completion: crate::server::completion::CompletionCoordinator,
+    document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+    language_intelligence: LanguageIntelligenceCoordinator,
+    codec: Codec,
+) -> Result<(), CodecError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut typography_updates = runtime_generation.subscribe_typography();
+    let (completion_tx, mut completion_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
     let (language_intelligence_tx, mut language_intelligence_rx) =
         tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+    let mut analysis_documents = HashMap::new();
     let first_message = codec.read_client_message(&mut stream).await?;
     let mut file_open_capabilities = match first_message {
         ClientMessage::Hello {
@@ -178,6 +221,23 @@ where
                 }
                 continue;
             }
+            output = document_analysis.next_output() => {
+                if let Some(output) = output {
+                    let message = match output {
+                        crate::server::document_analysis::DocumentAnalysisOutput::Decorations(set) => ServerMessage::DecorationSet(set),
+                        crate::server::document_analysis::DocumentAnalysisOutput::Diagnostics(set) => ServerMessage::DiagnosticSet(set),
+                        crate::server::document_analysis::DocumentAnalysisOutput::Diagnostic(diagnostic) => ServerMessage::RuntimeDiagnostic(diagnostic),
+                    };
+                    codec.write_server_message(&mut stream, &message).await?;
+                }
+                continue;
+            }
+            message = completion_rx.recv() => {
+                if let Some(message) = message {
+                    codec.write_server_message(&mut stream, &message).await?;
+                }
+                continue;
+            }
             message = language_intelligence_rx.recv() => {
                 if let Some(message) = message {
                     codec.write_server_message(&mut stream, &message).await?;
@@ -195,10 +255,12 @@ where
                         | std::io::ErrorKind::BrokenPipe
                 ) =>
             {
+                close_analysis_documents(&document_analysis, &analysis_documents);
                 release_client_access(client_id, &document, &workspace).await;
                 return Ok(());
             }
             Err(error) => {
+                close_analysis_documents(&document_analysis, &analysis_documents);
                 release_client_access(client_id, &document, &workspace).await;
                 return Err(error);
             }
@@ -225,6 +287,7 @@ where
 
                 let target_document =
                     document_for_message(document_id, &document, &workspace).await;
+                let analysis_delta = document_analysis_delta(&operation);
                 let response = {
                     let mut document = target_document.lock().await;
                     document.apply_edit(
@@ -237,6 +300,26 @@ where
                     )
                 };
                 codec.write_server_message(&mut stream, &response).await?;
+                if let ServerMessage::EditAck {
+                    confirmed_version, ..
+                } = response
+                {
+                    completion.document_changed(document_id, confirmed_version);
+                    language_intelligence.document_changed(document_id, confirmed_version);
+                    analysis_documents.insert(document_id, confirmed_version);
+                    let (byte_start, byte_end, inserted_text) = analysis_delta;
+                    if document_analysis.change_document(
+                        document_id,
+                        base_version,
+                        confirmed_version,
+                        byte_start,
+                        byte_end,
+                        inserted_text,
+                    ) {
+                        let text = target_document.lock().await.text();
+                        document_analysis.reset_document(document_id, confirmed_version, text);
+                    }
+                }
             }
             ClientMessage::EditorIntent {
                 document_id,
@@ -266,6 +349,7 @@ where
                 };
                 let target_document =
                     document_for_message(document_id, &document, &workspace).await;
+                let analysis_delta = document_analysis_delta(&operation);
                 let response = {
                     let mut document = target_document.lock().await;
                     document.apply_edit(
@@ -278,6 +362,26 @@ where
                     )
                 };
                 codec.write_server_message(&mut stream, &response).await?;
+                if let ServerMessage::EditAck {
+                    confirmed_version, ..
+                } = response
+                {
+                    completion.document_changed(document_id, confirmed_version);
+                    language_intelligence.document_changed(document_id, confirmed_version);
+                    analysis_documents.insert(document_id, confirmed_version);
+                    let (byte_start, byte_end, inserted_text) = analysis_delta;
+                    if document_analysis.change_document(
+                        document_id,
+                        base_version,
+                        confirmed_version,
+                        byte_start,
+                        byte_end,
+                        inserted_text,
+                    ) {
+                        let text = target_document.lock().await.text();
+                        document_analysis.reset_document(document_id, confirmed_version, text);
+                    }
+                }
             }
             ClientMessage::RequestResync {
                 document_id,
@@ -365,6 +469,19 @@ where
                     {
                         codec.write_server_message(&mut stream, &message).await?;
                     }
+                    for message in start_document_analysis(
+                        &document_analysis,
+                        &workspace,
+                        &behavior,
+                        runtime.id,
+                        metadata,
+                        text,
+                    )
+                    .await
+                    {
+                        codec.write_server_message(&mut stream, &message).await?;
+                    }
+                    analysis_documents.insert(metadata.document_id, metadata.version);
                 }
             }
             ClientMessage::OpenSelectedFile {
@@ -411,6 +528,19 @@ where
                     for message in messages {
                         codec.write_server_message(&mut stream, &message).await?;
                     }
+                    for message in start_document_analysis(
+                        &document_analysis,
+                        &workspace,
+                        &behavior,
+                        runtime.id,
+                        metadata,
+                        text,
+                    )
+                    .await
+                    {
+                        codec.write_server_message(&mut stream, &message).await?;
+                    }
+                    analysis_documents.insert(metadata.document_id, metadata.version);
                 }
                 codec.write_server_message(&mut stream, &replenish).await?;
             }
@@ -466,6 +596,12 @@ where
                 let response =
                     reload_document_response(&workspace, document_id, client_id, force).await;
                 codec.write_server_message(&mut stream, &response).await?;
+                if let ServerMessage::DocumentReloaded { metadata, text } = response {
+                    completion.document_changed(document_id, metadata.version);
+                    language_intelligence.document_changed(document_id, metadata.version);
+                    document_analysis.reset_document(document_id, metadata.version, text);
+                    analysis_documents.insert(document_id, metadata.version);
+                }
             }
             ClientMessage::GetDocumentStatus {
                 client_id,
@@ -516,6 +652,19 @@ where
                         {
                             codec.write_server_message(&mut stream, &message).await?;
                         }
+                        for message in start_document_analysis(
+                            &document_analysis,
+                            &workspace,
+                            &behavior,
+                            runtime.id,
+                            metadata,
+                            text,
+                        )
+                        .await
+                        {
+                            codec.write_server_message(&mut stream, &message).await?;
+                        }
+                        analysis_documents.insert(metadata.document_id, metadata.version);
                     }
                 }
             }
@@ -555,10 +704,8 @@ where
                     codec.write_server_message(&mut stream, &response).await?;
                 }
             }
-            ClientMessage::CompletionRequest { request } => {
-                // Static package items are already validated and provenance-
-                // tagged at configuration load. Resolve them from the Rust
-                // snapshot only; no package JavaScript runs on this request.
+            ClientMessage::CompletionRequest { mut request } => {
+                request.client_id = client_id;
                 if let Err(rejection) = request.validate() {
                     codec
                         .write_server_message(
@@ -572,13 +719,16 @@ where
                     continue;
                 }
                 let manifest_id = behavior.lock().await.manifest().manifest_id.clone();
-                let document_text = document.lock().await.text();
+                let package_prefix = manifest_id.split('.').next().unwrap_or("");
+                let target_document =
+                    document_for_message(request.document_id, &document, &workspace).await;
+                let document_text = target_document.lock().await.text();
                 let providers = runtime_generation
                     .current()
                     .await
                     .service
                     .completion_providers();
-                let result = static_package_completion_result(
+                let fallback = static_package_completion_result(
                     &request,
                     &manifest_id,
                     &document_text,
@@ -596,8 +746,56 @@ where
                     items: Vec::new(),
                     provenance: CompletionProvenance::builtin_core(),
                 });
+                let analysis_provider_ids =
+                    document_analysis.active_completion_provider_ids(request.document_id);
+                let dynamic_provider = completion.providers().into_iter().find(|provider| {
+                    (provider.provenance.package_prefix == package_prefix
+                        || analysis_provider_ids.contains(&provider.id))
+                        && match &request.trigger {
+                            CompletionTrigger::Manual => true,
+                            CompletionTrigger::Character(character) => provider
+                                .trigger_metadata
+                                .trigger_characters
+                                .iter()
+                                .any(|trigger| trigger == character),
+                        }
+                });
+                if let Some(provider) = dynamic_provider {
+                    request.provider_generation = provider.generation;
+                    let window = completion_document_window(
+                        &request,
+                        &document_text,
+                        &provider.provenance.package_prefix,
+                    );
+                    if completion
+                        .schedule_completion(&provider.id, request.clone(), window)
+                        .is_ok()
+                    {
+                        let coordinator = completion.clone();
+                        let tx = completion_tx.clone();
+                        tokio::spawn(async move {
+                            let message = match tokio::time::timeout(
+                                std::time::Duration::from_millis(
+                                    provider.timeout_ms.saturating_add(50),
+                                ),
+                                coordinator.next_result(),
+                            )
+                            .await
+                            {
+                                Ok(Some(result)) => ServerMessage::CompletionResult { result },
+                                _ => ServerMessage::CompletionResult { result: fallback },
+                            };
+                            let _ = tx.send(message);
+                        });
+                        continue;
+                    }
+                }
+
                 codec
-                    .write_server_message(&mut stream, &ServerMessage::CompletionResult { result })
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::CompletionResult { result: fallback },
+                    )
                     .await?;
             }
             ClientMessage::LanguageIntelligenceRequest { mut request } => {
@@ -619,7 +817,9 @@ where
                     continue;
                 }
 
-                let document_text = document.lock().await.text();
+                let target_document =
+                    document_for_message(request.document_id, &document, &workspace).await;
+                let document_text = target_document.lock().await.text();
                 let window = language_intelligence_document_window_for_behavior(
                     &request,
                     &document_text,
@@ -937,6 +1137,60 @@ async fn document_for_message(
         .unwrap_or_else(|| Arc::clone(default_document))
 }
 
+fn document_analysis_delta(operation: &crate::protocol::EditOperation) -> (u64, u64, String) {
+    match operation {
+        crate::protocol::EditOperation::Insert { byte_offset, text } => {
+            (*byte_offset, *byte_offset, text.clone())
+        }
+        crate::protocol::EditOperation::Delete { start, end } => (*start, *end, String::new()),
+        crate::protocol::EditOperation::Replace { start, end, text } => {
+            (*start, *end, text.clone())
+        }
+    }
+}
+
+async fn start_document_analysis(
+    coordinator: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    generation: u64,
+    metadata: &DocumentMetadata,
+    text: &str,
+) -> Vec<ServerMessage> {
+    let canonical_root = workspace
+        .lock()
+        .await
+        .directory_roots()
+        .into_iter()
+        .find(|root| root.workspace_root_id == metadata.workspace_root_id)
+        .map(|root| root.canonical_path);
+    let Some(canonical_root) = canonical_root else {
+        return Vec::new();
+    };
+    let manifest_id = behavior.lock().await.manifest().manifest_id.clone();
+    let active_mode = manifest_id.rsplit('.').next().unwrap_or(&manifest_id);
+    coordinator
+        .open_document(
+            generation,
+            metadata,
+            active_mode,
+            canonical_root,
+            text.to_string(),
+        )
+        .into_iter()
+        .map(ServerMessage::RuntimeDiagnostic)
+        .collect()
+}
+
+fn close_analysis_documents(
+    coordinator: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    documents: &HashMap<DocumentId, crate::protocol::DocumentVersion>,
+) {
+    for (&document_id, &version) in documents {
+        coordinator.close_document(document_id, version);
+    }
+}
+
 async fn release_client_access(
     client_id: ClientId,
     default_document: &Arc<Mutex<DocumentState>>,
@@ -1183,12 +1437,43 @@ fn empty_language_intelligence_payload(
     }
 }
 
+fn completion_document_window(
+    request: &CompletionRequest,
+    text: &str,
+    package_prefix: &str,
+) -> crate::server::completion::CompletionDocumentWindow {
+    const WINDOW_BYTES: usize = 64 * 1024;
+    let cursor = (request.cursor_byte_offset as usize).min(text.len());
+    let mut start = cursor.saturating_sub(WINDOW_BYTES / 2);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (start + WINDOW_BYTES).min(text.len());
+    while end > start && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    crate::server::completion::CompletionDocumentWindow {
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        package_prefix: package_prefix.to_string(),
+        byte_start: start as u64,
+        byte_end: end as u64,
+        text: text[start..end].to_string(),
+    }
+}
+
 fn language_intelligence_document_window_for_behavior(
     request: &crate::protocol::LanguageIntelligenceRequest,
     text: &str,
     behavior: &ActiveBehaviorManifest,
 ) -> LanguageIntelligenceDocumentWindow {
-    language_intelligence_document_window(request, text, &behavior.manifest().manifest_id)
+    let manifest_id = &behavior.manifest().manifest_id;
+    language_intelligence_document_window(
+        request,
+        text,
+        manifest_id.rsplit('.').next().unwrap_or(manifest_id),
+    )
 }
 
 fn language_intelligence_document_window(
@@ -1658,7 +1943,7 @@ mod tests {
         let window =
             language_intelligence_document_window_for_behavior(&request, "fn main() {}", &behavior);
 
-        assert_eq!(window.active_mode, "rust.rust");
+        assert_eq!(window.active_mode, "rust");
     }
 
     #[test]

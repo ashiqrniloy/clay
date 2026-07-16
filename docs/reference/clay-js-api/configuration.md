@@ -300,6 +300,133 @@ Server-owned security/performance ceilings (`LANGUAGE_SERVER_MESSAGE_BUDGET_BYTE
 
 Configuration evaluation remains startup or explicit reload work only. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, decoration rendering, and completion result construction do not execute configuration JavaScript, start language servers, or revalidate grants. This API grants no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-side JavaScript, or arbitrary process authority beyond the exact fixed validated contribution descriptor and approved roots.
 
+## Phase 18.21 LSP bridge package configuration review
+
+Phase 18.21 ships four first-party LSP bridge packages (`@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript`, `@clay/lsp-markdown`) and promotes **no new user-facing `clay:configuration` API**. Every user-visible configuration surface reuses existing Phase 18.20 APIs.
+
+### Default end-user configuration
+
+Configure all four LSP bridge packages:
+
+```js
+// ~/.config/clay/init.js
+import { authorizeLanguageServer } from "clay:language-server";
+import { loadPackage } from "clay:packages";
+
+// Grant each bridge before any loadPackage seals authority.
+await authorizeLanguageServer({
+  package: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  workspaceRootIds: [1],
+});
+await authorizeLanguageServer({
+  package: "@clay/lsp-typescript",
+  contribution: "lsp-typescript.server",
+  workspaceRootIds: [1],
+});
+await authorizeLanguageServer({
+  package: "@clay/lsp-javascript",
+  contribution: "lsp-javascript.server",
+  workspaceRootIds: [1],
+});
+await authorizeLanguageServer({
+  package: "@clay/lsp-markdown",
+  contribution: "lsp-markdown.server",
+  workspaceRootIds: [1],
+});
+
+// Load base grammar packages before their LSP bridges.
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");
+await loadPackage("@clay/markdown");
+
+// Then load the LSP bridge packages.
+await loadPackage("@clay/lsp-rust");
+await loadPackage("@clay/lsp-typescript");
+await loadPackage("@clay/lsp-javascript");
+await loadPackage("@clay/lsp-markdown");
+```
+
+Single-bridge minimal setup (Rust only):
+
+```js
+import { authorizeLanguageServer } from "clay:language-server";
+import { loadPackage } from "clay:packages";
+
+await authorizeLanguageServer({
+  package: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  workspaceRootIds: [1],
+});
+await loadPackage("@clay/rust");
+await loadPackage("@clay/lsp-rust");
+```
+
+### Configuration surfaces
+
+| Behavior | API / surface | Notes |
+|---|---|---|
+| Language-server grant | [`clay.language-server.authorizeLanguageServer`](language-server/authorize-language-server.md) | Configuration-only; sealed before first `loadPackage` |
+| Package loading | [`clay.packages.loadPackage`](packages/load-package.md) | One call per package; base before bridge |
+| Completion provider disable | [`clay.completion.serverDisableCompletion`](completion/server-disable-completion.md) | Disable per-bridge or per-package-prefix; LSP completion defaults to priority 100 non-exclusive |
+| Document analyzer registration | [`clay.language.serverRegisterDocumentAnalyzer`](language/server-register-document-analyzer.md) | Package-load-time only; called from bridge `dist/load.js`, not init.js directly |
+| Language intelligence registration | [`clay.language.serverRegisterLanguageIntelligenceProvider`](language/server-register-language-intelligence-provider.md) | Package-load-time; no separate per-server config needed |
+
+### Rejected hidden configuration keys
+
+No hidden JSON/TOML/ad hoc keys are valid for LSP bridge configuration. Rejected examples include:
+
+- `lsp.enable`, `lsp.disable`, `lsp.autoStart`, `enableLsp`, `enableRustAnalyzer`, `enableTypescriptServer`, `enableMarksman`
+- `lsp.rust.binary`, `lsp.typescript.path`, `lsp.markdown.config`, `lsp.binary`, `lsp.command`, `lsp.args`, `lsp.env`
+- `rustAnalyzer.path`, `typescriptServer.path`, `typescript.tsserverPath`, `marksman.config`
+- Per-server environment variable keys (`TSSERVER_PATH`, `RUST_ANALYZER_PATH`, `MARKSMAN_PATH`)
+- Hidden workspace-root configuration blobs, per-language LSP on/off toggles, automatic package-load flags
+
+Executable paths, arguments, environment inheritance, and working directories are fixed in each package's `clay.contributions.languageServers` manifest descriptor — validated at install time, revalidated on every session operation, and never user-tunable from `init.js`.
+
+### Compiled budgets (not configurable)
+
+All LSP bridge security/performance ceilings are compiled into the server binary and are intentionally not exposed as `clay:configuration` APIs:
+
+| Budget | Constant | Value |
+|---|---|---|
+| Message budget | `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES` | 1 MiB |
+| Stderr budget | `LANGUAGE_SERVER_STDERR_BUDGET_BYTES` | 64 KiB |
+| Max sessions | `LANGUAGE_SERVER_MAX_SESSIONS` | 16 |
+| Read timeout | `LANGUAGE_SERVER_READ_TIMEOUT_MS` | 3 000 ms |
+| Max workers | `DOCUMENT_ANALYSIS_MAX_WORKERS` | 4 |
+| Worker heap | `DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES` | 64 MiB |
+| Max docs/worker | `DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER` | 32 |
+| Max text/worker | `DOCUMENT_ANALYSIS_MAX_TEXT_BYTES_PER_WORKER` | 8 MiB |
+| Max doc bytes | `DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES` | 256 KiB |
+| Input mailbox | `DOCUMENT_ANALYSIS_INPUT_MAX_DELTAS` / `DOCUMENT_ANALYSIS_INPUT_MAX_BYTES` | 64 / 2 MiB |
+| Output queue | `DOCUMENT_ANALYSIS_OUTPUT_MAX_EVENTS` / `DOCUMENT_ANALYSIS_OUTPUT_MAX_BYTES` | 64 / 512 KiB |
+| Decoration payload | `DECORATION_PAYLOAD_BUDGET_BYTES` | 8 KiB |
+| Diagnostic payload | `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES` | 8 KiB |
+| Result payload | `RESULT_PAYLOAD_BUDGET_BYTES` | 16 KiB |
+
+These are security boundaries defined in `src/perf/budgets.rs` and enforced by the server before delivery. Raising them from `init.js` would undermine the very boundary they enforce.
+
+### Diagnostic composition and completion precedence
+
+LSP diagnostics use source-keyed replacement: each LSP bridge publishes diagnostics for its own source, and applying a new set replaces only the previous set from that same (package, source, document, version) key. Current LSP error/warning spans suppress overlapping Tree-sitter recovery diagnostics; non-overlapping Tree-sitter diagnostics and all Info-level LSP diagnostics remain additive. Composition runs once per `EditorDiagnosticState.apply_set`, never on the paint hot path.
+
+LSP completion providers register at priority 100 non-exclusive, merging with the base keyword completion provider (priority 0). Use [`clay.completion.serverDisableCompletion`](completion/server-disable-completion.md) to suppress a bridge's completion provider while keeping its diagnostics and intelligence:
+
+```js
+import { serverDisableCompletion } from "clay:completion";
+
+// Suppress only the TypeScript bridge completion, keep diagnostics + intelligence.
+serverDisableCompletion({ packagePrefix: "lsp-typescript" });
+```
+
+### Security
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, decoration rendering, and completion result construction do not execute configuration JavaScript, start language servers, spawn child processes, or revalidate grants.
+
+This configuration path grants no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-side JavaScript, or arbitrary process authority. The only process authority is the exact fixed validated contribution descriptor and approved roots granted through `authorizeLanguageServer`. LSP framing, sync, capabilities, position encoding, URI conversion, and cancellation remain package-owned JS — Rust core stays LSP-wire neutral with zero `Content-Length`, `jsonrpc`, `textDocument/*`, or `$/cancelRequest` markers.
+
 ## Phase 18.5 Markdown end-user loading configuration audit
 
 Phase 18.5 task 8 (plan `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`) closes the configuration audit for Markdown end-user loading. Every behavior-changing Markdown configuration surface from the replan is either a fully documented runtime-backed Clay JS API or an explicitly planned/unavailable API. No undocumented configuration keys are introduced.

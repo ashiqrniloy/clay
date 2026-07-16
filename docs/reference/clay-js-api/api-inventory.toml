@@ -2212,6 +2212,29 @@ current_rust_owner = "src/server/ops/language_intelligence.rs::op_clay_language_
 registry_public = true
 
 [[api]]
+id = "clay.language.serverRegisterDocumentAnalyzer"
+category = "document-analysis"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:language"
+js_export = "serverRegisterDocumentAnalyzer"
+user_facing_name = "Register Document Analyzer"
+authority = "document-analysis-worker-registration"
+runtime_path = "package-load-op-to-coordinator-registry"
+hot_path_policy = "Registration is package-load time only. Worker spawn is lazy (first eligible open), output publication is validated against active document version, and worker stops after last close. Edit acknowledgement and local paint never wait on worker, JS, or subprocess."
+facade_path = "runtime/js/language.ts::serverRegisterDocumentAnalyzer"
+backing_rust = "src/server/document_analysis.rs::DocumentAnalysisCoordinator; src/server/ops/document_analysis.rs"
+deno_op = "op_clay_language_register_document_analyzer"
+deno_op_path = "src/server/ops/document_analysis.rs::op_clay_language_register_document_analyzer"
+documentation_path = "docs/reference/clay-js-api/language/server-register-document-analyzer.md"
+key_bindings = []
+custom_properties = ["packageManifest:object=required", "analyzer.id:string=required", "analyzer.contribution:string=required", "analyzer.modes:string[]=optional", "analyzer.moduleSpecifier:string=required", "analyzer.exportName:string=handleDocumentAnalysis"]
+permissions = ["parse-document", "language-server"]
+security_notes = "Requires parse-document and language-server permissions with exact current grant; rejects handler/callback/function/executable/args/cwd/environment/process/rawOps; moduleSpecifier must be loaded package-owned module; workers share sealed permission boundary; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or raw-op authority; Rust core remains LSP-wire neutral."
+current_rust_owner = "src/server/ops/document_analysis.rs::op_clay_language_register_document_analyzer; src/server/document_analysis.rs"
+registry_public = true
+
+[[api]]
 id = "clay.language-server.authorizeLanguageServer"
 category = "language-server"
 visibility = "public"

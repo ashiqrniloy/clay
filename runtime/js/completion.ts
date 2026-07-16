@@ -1,9 +1,9 @@
 // Clay completion provider primitive facade.
 //
-// Completion APIs register inert package provider metadata at load/reload time.
-// Provider execution stays server-side UI-reactive/cancellable and this facade
-// does not expose raw ops, callbacks, client JS, filesystem, network, shell, AI,
-// WASM, native-widget, or package-manager authority.
+// Completion APIs register inert metadata and optional imported module exports
+// at load/reload time. Provider execution stays server-side, cancellable, and
+// bounded; no raw ops, callback arguments, client JS, filesystem, network,
+// shell, AI, WASM, native-widget, or package-manager authority is exposed.
 
 const ops = globalThis.Deno?.core?.ops;
 
@@ -52,16 +52,35 @@ export type ServerRegisterCompletionProviderOptions = {
   clientJavaScript?: never;
   nativeHandle?: never;
   rawOps?: never;
-  module?: never;
+  module?: Record<string, unknown>;
+  exportName?: string;
 };
 
 export function serverRegisterCompletionProvider(options: ServerRegisterCompletionProviderOptions): unknown {
-  for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps", "module"]) {
+  for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
     if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
       throw new Error(`clay.completion.invalid_provider: executable or raw authority field ${key} is not accepted by the public registration contract`);
     }
   }
-  return parseResult(requireOps()["op_clay_completion_register_completion_provider"](JSON.stringify(options ?? null)));
+  const { module, exportName = "provideCompletion", ...opOptions } = options ?? {};
+  const registration = parseResult(
+    requireOps()["op_clay_completion_register_completion_provider"](
+      JSON.stringify({ ...opOptions, exportName, runtimeBridge: module !== undefined }),
+    ),
+  ) as { tokens?: string[] };
+  if (module !== undefined) {
+    const handler = module[exportName];
+    if (typeof handler !== "function") {
+      throw new Error(`clay.completion.invalid_provider: module export ${exportName} must be a function`);
+    }
+    (globalThis as typeof globalThis & { __clayCompletionHandlers?: Record<string, unknown> })
+      .__clayCompletionHandlers ??= Object.create(null);
+    for (const token of registration.tokens ?? []) {
+      (globalThis as typeof globalThis & { __clayCompletionHandlers: Record<string, unknown> })
+        .__clayCompletionHandlers[token] = handler;
+    }
+  }
+  return registration;
 }
 
 export type ServerDisableCompletionOptions =

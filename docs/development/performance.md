@@ -326,6 +326,39 @@ cargo run -- smoke-gui --config-fixture markdown-mode
 
 The smoke fixture validates package activation, command/action provenance, parse/decorations status, inert `Markdown Preview` SDUI, and plain document fallback behavior without reading arbitrary user paths, opening network listeners, granting shell authority, exposing document contents, or executing client-side JavaScript.
 
+## Phase 18.21 LSP bridge / document-analysis budgets
+
+Phase 18.21 keeps Rust core LSP-wire neutral. Deterministic hard guards cover session/worker ceilings and payload budgets; real language-server wall-clock timings stay environment-gated and advisory.
+
+### Deterministic hard guards
+
+| Focus area | Budget | Enforcement |
+| --- | --- | --- |
+| Language-server stdin/stdout chunk | <= 1048576 bytes (`LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`) | `cargo test --test language_server_authority` / `performance_protocol` |
+| Language-server stderr retain | <= 65536 bytes (`LANGUAGE_SERVER_STDERR_BUDGET_BYTES`) | `cargo test --test language_server_authority` |
+| Concurrent language-server sessions | <= 16 (`LANGUAGE_SERVER_MAX_SESSIONS`) | `cargo test --test language_server_authority` |
+| Document-analysis workers | <= 4 (`DOCUMENT_ANALYSIS_MAX_WORKERS`) | `cargo test --test editor_performance_invariants` / `performance_protocol` |
+| Document-analysis worker heap | <= 67108864 bytes (`DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES`) | `cargo test --test performance_protocol` |
+| Documents per analysis worker | <= 32 | `cargo test --test performance_protocol` |
+| Synced document text | <= 262144 bytes (`DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES`) | document-analysis unit tests + performance locks |
+| Analysis input mailbox | <= 64 events / 2097152 bytes | document-analysis unit tests |
+| Analysis output queue | <= 64 events / 524288 bytes | document-analysis unit tests |
+| Pending child requests | <= 8 | shared LSP client + performance locks |
+| Decoration / diagnostics / completion / intelligence payloads | <= 8192 / 8192 / 16384 / 16384 bytes | `cargo test --test performance_protocol` |
+| Fake-server bridge matrix latency | < 5 s wall clock for open/init/request/shutdown across four packages | `cargo test --test performance_protocol fake_server_bridge_matrix` |
+
+### Advisory measurements
+
+- Keep using `cargo bench --bench first_party_language_baselines` for Tree-sitter open/incremental/scroll baselines before and after enabling bridge packages (`--save-baseline pre-lsp` / `--baseline-lenient pre-lsp`).
+
+```text
+cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp
+cargo bench --bench first_party_language_baselines -- --baseline-lenient pre-lsp
+```
+
+- Real rust-analyzer / typescript-language-server / marksman open/init/request latency is measured only under `CLAY_LSP_REAL_SMOKE=1` via `cargo test --test lsp_real_servers -- --nocapture`. Do not promote those timings to Criterion CI gates.
+- Edit acknowledgement and local paint must never wait on worker/JS/subprocess work; see `tests/editor_performance_invariants.rs`.
+
 ## Validation
 
 Run the fixture tests after changing generator logic:
@@ -345,6 +378,15 @@ Run protocol/queue performance guards after changing client edit queue, server a
 
 ```text
 cargo test --test performance_protocol
+```
+
+Run Phase 18.21 fake-server and budget locks after changing LSP bridge or document-analysis limits:
+
+```text
+cargo test --test lsp_bridge
+cargo test --test language_server_authority
+cargo test --test performance_protocol phase18_21
+cargo test --test editor_performance_invariants document_analysis
 ```
 
 Run the benchmark compile check after changing benchmark scaffolding or the measured non-interactive paths:

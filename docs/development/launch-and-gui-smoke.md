@@ -445,9 +445,42 @@ Manual Phase 18.20 smoke (fake analyzer / no language-server required):
 5. For code actions, command-backed items reuse `CommandExecution`; direct edit previews display only and must not mutate text in Phase 18.20.
 6. Edit or move the caret before a late result arrives. Stale results must not install a menu.
 
-Phase 18.21 compatibility markers (not executable until bridge packages land): `authorizeLanguageServer`, `@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript`, `@clay/lsp-markdown`, `rust-analyzer`, `typescript-language-server`, `marksman`, LSP 3.17 position-encoding conversion at the package boundary, and no Clay-core `lsp-types`/JSON-RPC dependency.
+Phase 18.21 compatibility markers: `authorizeLanguageServer`, `@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript`, `@clay/lsp-markdown`, `rust-analyzer`, `typescript-language-server`, `marksman`, LSP 3.17 position-encoding conversion at the package boundary, and no Clay-core `lsp-types`/JSON-RPC dependency.
 
-Automated coverage (no manual execution needed): `tests/language_intelligence.rs` covers protocol validation, provider registry/coordinator cancellation/timeouts, discoverable command mapping, and inert preview/navigation contracts. Editor/client unit tests cover non-blocking request enqueue, bottom transient UI projection, stale-result drop, current-document definition jump, and edit-preview non-mutation. `tests/editor_performance_invariants.rs::language_intelligence_provider_work_is_absent_from_editor_hot_paths` keeps provider/process work off editor hot paths.
+Manual Phase 18.21 bridge smoke (host tools required):
+
+1. Install the host language servers you want to exercise (`rust-analyzer` via `rustup`, `typescript-language-server` + compatible `typescript@5.9.x`, and/or `marksman`).
+2. Prefer the representative grant-before-load fixture:
+   `cargo run -- smoke-gui --config-fixture lsp-language-packages`
+   Or copy the same authorize-then-`loadPackage` shape into `~/.config/clay/init.js`. Empty `init.js` must load no bridge and start no child.
+3. Open a matching workspace file. Local typing/paint must stay responsive; semantic/diagnostic refinement arrives asynchronously.
+4. Confirm overlapping Tree-sitter recovery noise yields to LSP error/warning squiggles while unrelated diagnostics remain, and that LSP completion merges at priority 100 unless you call `serverDisableCompletion`.
+5. Remove one bridge `loadPackage` line or revoke its grant and relaunch: base language package behavior must remain; that bridge's semantic/diagnostic/completion outputs must not linger as authority.
+6. Repeat once without the matching `@clay/lsp-*` package loaded to confirm baseline Tree-sitter/base completion still works alone.
+
+Automated fake/real coverage:
+
+```bash
+# Deterministic (no host language servers required)
+cargo test --test lsp_bridge
+cargo test --test language_server_authority
+cargo test --test performance_protocol phase18_21
+cargo test --test editor_performance_invariants document_analysis
+node --test tests/fixtures/lsp/fake-server/fake-server.test.mjs tests/fixtures/lsp/fake-server/matrix.test.mjs
+
+# Opt-in real servers (skip with explicit reason when a binary is missing)
+CLAY_LSP_REAL_SMOKE=1 cargo test --test lsp_real_servers -- --nocapture
+CLAY_LSP_REAL_SMOKE=1 cargo test --test lsp_bridge -- --nocapture
+
+# Advisory baselines remain Tree-sitter/first-party language benches; LSP child
+# timings stay environment-gated rather than Criterion CI gates.
+cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp
+cargo bench --bench first_party_language_baselines -- --baseline-lenient pre-lsp
+```
+
+The generic fake LSP fixture lives at `tests/fixtures/lsp/fake-server/` (profiles + in-process session + spawnable stdio child). Language sample workspaces remain under `tests/fixtures/lsp/{rust,typescript,javascript,markdown}/` and are indexed by `tests/fixtures/lsp/workspaces/README.md`.
+
+Automated coverage (no manual execution needed): `tests/language_intelligence.rs` covers protocol validation, provider registry/coordinator cancellation/timeouts, discoverable command mapping, and inert preview/navigation contracts. Editor/client unit tests cover non-blocking request enqueue, bottom transient UI projection, stale-result drop, current-document definition jump, and edit-preview non-mutation. `tests/editor_performance_invariants.rs::language_intelligence_provider_work_is_absent_from_editor_hot_paths` keeps provider/process work off editor hot paths. `tests/lsp_bridge.rs` owns shared adapter freshness, package manifests, and the fake-server matrix. `tests/lsp_real_servers.rs` owns environment-gated real smoke. `tests/language_server_authority.rs` covers lossless bytes, session cap/revoke, and generic fake-server initialize/exit through the host process service.
 
 ### Foreground server plus clients
 

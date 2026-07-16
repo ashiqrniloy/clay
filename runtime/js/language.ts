@@ -1,10 +1,10 @@
 // Clay language-intelligence provider primitive facade.
 //
-// Registration is configuration/package-load time only. Providers receive
-// bounded Clay-provided open-document data under `parse-document`. No
-// callbacks, raw ops, client JS, filesystem, network, shell, or language-server
-// process authority cross this facade. Process use separately requires
-// `clay:language-server` authorization.
+// Registration is configuration/package-load time only. Short providers receive
+// bounded windows; approved document analyzers receive bounded canonical events
+// through package-owned module specifiers. No callback arguments, raw ops,
+// client JS, filesystem, network, shell, or implicit process authority cross
+// this facade. Process use separately requires `clay:language-server` grant.
 
 const ops = globalThis.Deno?.core?.ops;
 
@@ -71,6 +71,27 @@ export type ServerRegisterLanguageIntelligenceProviderOptions = {
   process?: never;
   languageServer?: never;
 };
+
+export type ServerRegisterDocumentAnalyzerOptions = {
+  packageManifest: unknown;
+  analyzer: {
+    id: string;
+    contribution: string;
+    modes?: string[];
+    moduleSpecifier: string;
+    exportName?: string;
+  };
+};
+
+export function serverRegisterDocumentAnalyzer(
+  options: ServerRegisterDocumentAnalyzerOptions,
+): unknown {
+  return parseResult(
+    requireOps()["op_clay_language_register_document_analyzer"](
+      JSON.stringify(options ?? null),
+    ),
+  );
+}
 
 export function serverRegisterLanguageIntelligenceProvider(
   options: ServerRegisterLanguageIntelligenceProviderOptions,

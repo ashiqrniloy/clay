@@ -25,9 +25,9 @@ use clay::{
         completion::{CompletionProviderGeneration, CompletionRequest},
     },
     server::completion::{
-        BufferWordCompletionProvider, CompletionCoordinator, CompletionDocumentWindow,
-        CompletionProviderError, CompletionProviderMeta, CompletionProviderRegistryError,
-        CompletionTriggerMetadata, WordBoundaryRule,
+        BufferWordCompletionProvider, CompletionCoordinator, CompletionCoordinatorError,
+        CompletionDocumentWindow, CompletionProviderError, CompletionProviderMeta,
+        CompletionProviderRegistryError, CompletionTriggerMetadata, WordBoundaryRule,
     },
 };
 use serde_json::json;
@@ -1140,4 +1140,117 @@ async fn lsp_compatible_completion_mapping_preserves_snippet_priority_exclusive_
         err,
         CompletionProviderRegistryError::MissingPermission { .. }
     ));
+}
+
+#[tokio::test]
+async fn lsp_priority_100_non_exclusive_merges_with_base_and_honors_disable() {
+    // Phase 18.21 default: LSP bridges publish priority 100 without exclusive
+    // claim so base keyword/snippet providers remain merged. Explicit
+    // serverDisableCompletion (coordinator disable target) is the override.
+    let coordinator = CompletionCoordinator::new();
+    let base_package = completion_package("@clay/rust", "rust");
+    let lsp_package = completion_package("@clay/lsp-rust", "lsp-rust");
+
+    let mut base = package_provider_meta("rust.keywords", "rust", 0, 1);
+    base.trigger_metadata.trigger_characters = vec![".".to_string()];
+    base.items = vec![CompletionItem::new("fn", "fn", base.provenance.clone())];
+
+    let mut lsp = package_provider_meta("lsp-rust.completion", "lsp-rust", 100, 1);
+    lsp.exclusive = false;
+    lsp.trigger_metadata.trigger_characters = vec![".".to_string()];
+    lsp.items = vec![CompletionItem::new(
+        "from_lsp",
+        "from_lsp",
+        lsp.provenance.clone(),
+    )];
+
+    coordinator
+        .register_package(&base_package, base, immediate_provider())
+        .unwrap();
+    coordinator
+        .register_package(&lsp_package, lsp, immediate_provider())
+        .unwrap();
+
+    let ordered: Vec<_> = coordinator
+        .providers()
+        .into_iter()
+        .map(|meta| (meta.id, meta.priority, meta.exclusive))
+        .collect();
+    assert_eq!(
+        ordered,
+        vec![
+            ("lsp-rust.completion".to_string(), 100, false),
+            ("rust.keywords".to_string(), 0, false)
+        ]
+    );
+
+    let request = {
+        let mut request = request(1, 900);
+        request.trigger = CompletionTrigger::Character(".".to_string());
+        request.cursor_byte_offset = 1;
+        request.replacement_range = CompletionReplacementRange::new(0, 1);
+        request
+    };
+    let window = CompletionDocumentWindow {
+        document_id: request.document_id,
+        document_version: request.document_version,
+        behavior_version: request.behavior_version,
+        package_prefix: "lsp-rust".to_string(),
+        byte_start: 0,
+        byte_end: 2,
+        text: "x.".to_string(),
+    };
+    coordinator
+        .schedule_completion("lsp-rust.completion", request.clone(), window.clone())
+        .unwrap();
+
+    coordinator.disable_completion("lsp-rust.completion", 2);
+    assert!(
+        matches!(
+            coordinator.schedule_completion("lsp-rust.completion", request, window),
+            Err(CompletionCoordinatorError::ProviderNotRegistered { .. })
+        ),
+        "serverDisableCompletion must suppress the LSP provider while base remains registered"
+    );
+    assert!(
+        coordinator
+            .providers()
+            .iter()
+            .any(|meta| meta.id == "rust.keywords"),
+        "base provider must remain after LSP disable"
+    );
+}
+
+#[test]
+fn first_party_lsp_bridge_completion_providers_are_priority_100_non_exclusive() {
+    for package_name in [
+        "lsp-rust",
+        "lsp-typescript",
+        "lsp-javascript",
+        "lsp-markdown",
+    ] {
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(format!("packages/{package_name}/package.json")).unwrap(),
+        )
+        .unwrap();
+        let providers = manifest["clay"]["contributions"]["completionProviders"]
+            .as_array()
+            .expect("bridge declares completion providers");
+        assert!(
+            !providers.is_empty(),
+            "{package_name} must declare at least one completion provider"
+        );
+        for provider in providers {
+            assert_eq!(
+                provider["priority"].as_i64(),
+                Some(100),
+                "{package_name} completion priority must be 100"
+            );
+            assert!(
+                provider.get("exclusive").is_none()
+                    || provider["exclusive"] == serde_json::Value::Bool(false),
+                "{package_name} completion must remain non-exclusive by default"
+            );
+        }
+    }
 }

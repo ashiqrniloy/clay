@@ -4,6 +4,7 @@ mod completion;
 mod configuration;
 mod decorations;
 mod diagnostics;
+mod document_analysis;
 mod documents;
 mod git;
 mod keybindings;
@@ -49,7 +50,7 @@ use self::{
     },
     completion::{
         op_clay_completion_disable, op_clay_completion_providers_for_trigger,
-        op_clay_completion_register_completion_provider,
+        op_clay_completion_register_completion_provider, op_clay_completion_store_result,
     },
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,
@@ -57,6 +58,7 @@ use self::{
     },
     decorations::op_clay_decorations_publish_decorations,
     diagnostics::op_clay_diagnostics_publish_diagnostics,
+    document_analysis::op_clay_language_register_document_analyzer,
     documents::{
         op_clay_documents_get_document_status, op_clay_documents_list_documents,
         op_clay_documents_open_document, op_clay_documents_reload_document,
@@ -71,7 +73,8 @@ use self::{
         op_clay_language_register_intelligence_provider, op_clay_language_store_intelligence_result,
     },
     language_server::{
-        op_clay_language_server_authorize, op_clay_language_server_read_message,
+        op_clay_language_server_authorize, op_clay_language_server_read_bytes,
+        op_clay_language_server_read_message, op_clay_language_server_send_bytes,
         op_clay_language_server_send_message, op_clay_language_server_start_session,
         op_clay_language_server_stop_session,
     },
@@ -130,6 +133,9 @@ pub(crate) struct ClayOpState {
     git_status_cache: crate::server::git::GitStatusCache,
     syntax_grammars: Mutex<crate::server::syntax::SyntaxGrammarRegistry>,
     completion_providers: Mutex<Vec<crate::server::completion::CompletionProviderMeta>>,
+    js_completion_providers:
+        Mutex<Vec<crate::server::completion::JsCompletionProviderRegistration>>,
+    last_completion_result_json: Mutex<Option<String>>,
     disabled_completion_providers: Mutex<BTreeSet<String>>,
     completion_provider_generation: Mutex<crate::protocol::CompletionProviderGeneration>,
     language_intelligence_providers:
@@ -139,6 +145,8 @@ pub(crate) struct ClayOpState {
     >,
     language_intelligence_provider_generation:
         Mutex<crate::protocol::LanguageIntelligenceProviderGeneration>,
+    document_analyzers:
+        Mutex<Vec<crate::server::document_analysis::JsDocumentAnalyzerRegistration>>,
     /// Resolved active theme snapshot set by the `setTheme` Clay JS op during
     /// `init.js`. Carried out in [`crate::server::js_runtime::ClayRuntimeEvaluation`]
     /// and applied to the shared server slot at load/reload so the welcome
@@ -150,7 +158,7 @@ pub(crate) struct ClayOpState {
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
     // resolved from this service's installed/source registry. The resolver uses
     // the same validate/authorize/enable path as CLI and package UI code.
-    package_service: Mutex<crate::packages::service::PackageService>,
+    package_service: Arc<Mutex<crate::packages::service::PackageService>>,
     language_server_authority_sealed: AtomicBool,
     language_server_process: crate::server::language_server::LanguageServerProcessService,
     load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
@@ -201,11 +209,14 @@ impl ClayOpState {
                 crate::server::syntax::SyntaxGrammarRegistry::with_first_party_native(),
             ),
             completion_providers: Mutex::new(Vec::new()),
+            js_completion_providers: Mutex::new(Vec::new()),
+            last_completion_result_json: Mutex::new(None),
             disabled_completion_providers: Mutex::new(BTreeSet::new()),
             completion_provider_generation: Mutex::new(0),
             language_intelligence_providers: Mutex::new(Vec::new()),
             js_language_intelligence_providers: Mutex::new(Vec::new()),
             language_intelligence_provider_generation: Mutex::new(0),
+            document_analyzers: Mutex::new(Vec::new()),
             active_theme: Mutex::new(None),
             active_typography: Mutex::new(None),
             runtime_context: Mutex::new(ClayRuntimeContext {
@@ -213,10 +224,10 @@ impl ClayOpState {
                 runtime_document_id,
                 configuration_evaluation: false,
             }),
-            package_service: Mutex::new(crate::packages::service::PackageService::new(
+            package_service: Arc::new(Mutex::new(crate::packages::service::PackageService::new(
                 PathBuf::new(),
                 Box::new(crate::packages::manager::FakeBackend::new()),
-            )),
+            ))),
             language_server_authority_sealed: AtomicBool::new(false),
             language_server_process:
                 crate::server::language_server::LanguageServerProcessService::new(),
@@ -296,6 +307,10 @@ impl ClayOpState {
             .lock()
             .expect("Clay runtime op state mutex poisoned") = None;
         *self
+            .last_completion_result_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
+        *self
             .published_sdui_tree
             .lock()
             .expect("Clay runtime op state mutex poisoned") = None;
@@ -303,12 +318,28 @@ impl ClayOpState {
             .published_decoration_set
             .lock()
             .expect("Clay runtime op state mutex poisoned") = None;
+        *self
+            .published_diagnostic_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
     }
 
     /// Handle to the shared `PackageService` used by the resolver op for
     /// validation/authorization/enable/conflict checks.
     pub(super) fn package_service(&self) -> &Mutex<crate::packages::service::PackageService> {
-        &self.package_service
+        self.package_service.as_ref()
+    }
+
+    pub(crate) fn new_analysis_worker(
+        parent: &Self,
+        workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
+        runtime_document_id: crate::protocol::DocumentId,
+    ) -> Self {
+        let mut state = Self::new_for_document(workspace, runtime_document_id);
+        state.package_service = Arc::clone(&parent.package_service);
+        state.load_entry_allowlist = Arc::clone(&parent.load_entry_allowlist);
+        state.language_server_authority_sealed = AtomicBool::new(true);
+        state
     }
 
     /// Handle to the validated package `loadEntry` allowlist shared with
@@ -370,6 +401,13 @@ impl ClayOpState {
 
     pub(crate) fn take_language_intelligence_result_json(&self) -> Option<String> {
         self.last_language_intelligence_result_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .take()
+    }
+
+    pub(crate) fn take_completion_result_json(&self) -> Option<String> {
+        self.last_completion_result_json
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .take()
@@ -481,6 +519,13 @@ impl ClayOpState {
     pub(super) fn store_language_intelligence_result_json(&self, json: String) {
         *self
             .last_language_intelligence_result_json
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(json);
+    }
+
+    pub(super) fn store_completion_result_json(&self, json: String) {
+        *self
+            .last_completion_result_json
             .lock()
             .expect("Clay runtime op state mutex poisoned") = Some(json);
     }
@@ -743,6 +788,15 @@ impl ClayOpState {
             .collect()
     }
 
+    pub(crate) fn js_completion_providers(
+        &self,
+    ) -> Vec<crate::server::completion::JsCompletionProviderRegistration> {
+        self.js_completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
     pub(crate) fn completion_providers_for_trigger(
         &self,
         trigger: &str,
@@ -822,6 +876,16 @@ impl ClayOpState {
         Ok(metas)
     }
 
+    pub(super) fn register_js_completion_provider(
+        &self,
+        registration: crate::server::completion::JsCompletionProviderRegistration,
+    ) {
+        self.js_completion_providers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .push(registration);
+    }
+
     pub(crate) fn language_intelligence_providers(
         &self,
     ) -> Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta> {
@@ -829,6 +893,36 @@ impl ClayOpState {
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .clone()
+    }
+
+    pub(crate) fn document_analyzers(
+        &self,
+    ) -> Vec<crate::server::document_analysis::JsDocumentAnalyzerRegistration> {
+        self.document_analyzers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    pub(super) fn register_document_analyzer(
+        &self,
+        registration: crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+    ) -> Result<(), String> {
+        let mut analyzers = self
+            .document_analyzers
+            .lock()
+            .expect("Clay runtime op state mutex poisoned");
+        if analyzers.iter().any(|analyzer| {
+            analyzer.package.manifest.name == registration.package.manifest.name
+                && analyzer.id == registration.id
+        }) {
+            return Err(format!(
+                "analyzer `{}` is already registered",
+                registration.id
+            ));
+        }
+        analyzers.push(registration);
+        Ok(())
     }
 
     pub(crate) fn js_language_intelligence_providers(
@@ -1065,6 +1159,8 @@ extension!(
         op_clay_language_server_start_session,
         op_clay_language_server_send_message,
         op_clay_language_server_read_message,
+        op_clay_language_server_send_bytes,
+        op_clay_language_server_read_bytes,
         op_clay_language_server_stop_session,
         op_clay_modes_register_pattern,
         op_clay_modes_classify_document,
@@ -1080,8 +1176,10 @@ extension!(
         op_clay_syntax_set_engine_preference,
         op_clay_completion_register_completion_provider,
         op_clay_completion_providers_for_trigger,
+        op_clay_completion_store_result,
         op_clay_completion_disable,
         op_clay_language_register_intelligence_provider,
+        op_clay_language_register_document_analyzer,
         op_clay_language_store_intelligence_result,
         op_clay_runtime_unavailable,
     ],

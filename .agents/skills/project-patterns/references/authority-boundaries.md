@@ -49,6 +49,17 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Keep process work asynchronous and outside typing, paint, layout, scroll, and local text-application paths.
 - Decision log source: `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 
+## Long-Lived Package Document Analysis
+
+- Bind each worker to exact package provenance, contribution grant, canonical workspace root, and runtime generation; use resolver-recorded package modules rather than callback values or arbitrary module URLs.
+- Full canonical open/reset text and accepted unsaved deltas require both `parse-document` and the exact `language-server` grant. Expose only server-stamped identity/version, canonical root path, validated root-relative path, UTF-8 text, and accepted byte-range deltas—not client intent, rope/filesystem handles, environment values, or unrelated documents.
+- Keep local edit acknowledgment and paint wait-free. Submit analysis state only after canonical acceptance through bounded non-blocking mailboxes; pressure coalesces to one latest reset rather than blocking or growing without bound.
+- Core owns generic event ordering, worker/session lifecycle, limits, provenance, cancellation, stale rejection, validated publication, and cleanup. Package code owns protocol framing/state, capability negotiation, synchronization mapping, positions, URIs, and server policy.
+- Above document/worker/queue/frame ceilings, never create partial child state: clear package outputs, emit one sanitized status, and retain mode, Tier 1 syntax, base completion, commands, and previews.
+- Disable/revoke/remove/update/root removal/last close/runtime replacement/failure/shutdown cancels work, clears cached outputs, and terminates worker and child within bounded graceful/kill deadlines. Do not add automatic restart loops.
+- Worker module/op confinement does not sandbox the approved same-user child; retain trusted-subprocess disclosure.
+- Decision log source: `decision-logs/2026-07-15-1750-lsp-document-sync-and-package-worker-authority.md`.
+
 ## Planning Guidance
 
 - Do not describe the server as a stateless behavior service.

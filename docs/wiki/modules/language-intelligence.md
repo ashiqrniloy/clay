@@ -82,7 +82,9 @@ The coordinator owns one in-flight task key per client/document/feature. A newer
 
 `EditorWidget` tracks the active request ID and rejects mismatched results. Text edits, Escape, and menu activation clear the active request. Menu action arguments survive SDUI conversion, so workspace-root/path/offset metadata remains available without hidden widget callbacks.
 
-### Semantic, diagnostic, and completion reuse
+### Document-analysis worker integration (Phase 18.21)
+
+LSP bridge packages register document analyzers through `serverRegisterDocumentAnalyzer`. The `DocumentAnalysisCoordinator` routes `LanguageIntelligenceEvent` kinds to registered bridge handlers, which convert the LSP response through `mapping.js` and return validated result JSON. The coordinator's `request_language_intelligence` method mirrors the existing `schedule` path: it acquires a request slot, pushes through the bounded worker mailbox, awaits the oneshot reply, validates provenance, and returns. Stale document versions, cancelled generations, and revoked grants fail with sanitized errors.
 
 LSP-compatible outputs map onto existing primitives:
 
@@ -131,9 +133,9 @@ See the authoritative API page for complete options and errors.
 - Code-action edits are inert previews only.
 - No provider, JavaScript, process, or IPC wait occurs before local text paint.
 
-## Phase 18.21 Publish Handoff
+## Phase 18.21 Handoff (Complete)
 
-`@clay/lsp-*` packages should layer LSP framing and conversion over this primitive and [Language Server Process Service](language-server-process-service.md). Required handoff:
+`@clay/lsp-*` packages layer LSP framing and conversion over this primitive and [Language Server Process Service](language-server-process-service.md). The document-analysis coordinator (`src/server/document_analysis.rs`) provides the bounded worker lifecycle that LSP bridges use to maintain synchronized full-document state and drain asynchronous child notifications. The handoff is complete:
 
 1. Negotiate position encoding and convert against the exact Clay document version.
 2. Normalize locations to open documents or approved workspace-root-relative paths.
@@ -144,7 +146,8 @@ See the authoritative API page for complete options and errors.
 
 ## Tests
 
-- `tests/language_intelligence.rs`: protocol round trips, validation, provider ordering, cancellation, timeout, provenance, semantic composition, and authority separation.
+- `tests/language_intelligence.rs`: protocol round trips, validation, provider ordering, cancellation, timeout, provenance, semantic composition, authority separation, and document-analysis worker intelligence routing.
+- `src/server/document_analysis.rs`: worker lifecycle intelligence integration (`request_language_intelligence` through bounded mailbox).
 - `src/server/js_runtime.rs`: JS facade registration/rejection and token-backed provider invocation.
 - `src/client/mod.rs`, `src/client/behavior.rs`, `src/masonry_editor.rs`, `src/shell/transient_menu.rs`: nonblocking request routing, stale result rejection, menu projection, navigation, and preview non-mutation.
 - `tests/editor_performance_invariants.rs`: no provider/process/JS work in editor hot paths.

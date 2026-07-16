@@ -755,6 +755,21 @@ impl LanguageIntelligenceCoordinator {
         abort_tasks(&mut inner, task_keys);
     }
 
+    pub fn document_changed(&self, document_id: DocumentId, version: DocumentVersion) {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("language intelligence coordinator lock poisoned");
+        inner.current_versions.insert(document_id, version);
+        let task_keys = inner
+            .active_tasks
+            .keys()
+            .filter(|key| key.document_id == document_id)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+    }
+
     pub fn disable_provider(
         &self,
         target: impl Into<String>,
@@ -846,7 +861,7 @@ impl LanguageIntelligenceCoordinator {
     pub fn schedule(
         &self,
         provider_id: Option<&str>,
-        request: LanguageIntelligenceRequest,
+        mut request: LanguageIntelligenceRequest,
         window: LanguageIntelligenceDocumentWindow,
     ) -> Result<oneshot::Receiver<LanguageIntelligenceResult>, LanguageIntelligenceCoordinatorError>
     {
@@ -878,6 +893,8 @@ impl LanguageIntelligenceCoordinator {
                     .select_provider(request.feature, &window.active_mode)
                     .ok_or(LanguageIntelligenceCoordinatorError::NoProviderForFeature)?,
             };
+
+            request.provider_generation = meta.generation;
 
             // Abort superseded in-flight work for the same client/document/feature.
             let superseded_keys: Vec<_> = inner
