@@ -1723,10 +1723,13 @@ mod tests {
         };
         let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
         let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
-        assert!(matches!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::FileOpenCapabilityIssued { .. }
-        ));
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::RuntimeDiagnostic(_) => {}
+                message => panic!("expected file-open capability, got {message:?}"),
+            }
+        }
 
         codec
             .write_client_message(

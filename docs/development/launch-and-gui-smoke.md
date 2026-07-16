@@ -412,16 +412,17 @@ Manual completion smoke:
    ```
 
 2. Launch Clay with `cargo run` or `cargo run -- smoke-gui` and open or create an editable document containing repeated words (for example `fn hello hello_world helper`).
-3. Type a prefix such as `hel` and press the configured `Ctrl+Space` manual completion binding. A bottom transient completion menu should appear with unique matching buffer words (for example `hello`, `hello_world`, `helper`), the selected item highlighted, and provider provenance/detail text.
-4. Use `ArrowUp`/`ArrowDown` to move the selection locally. Confirm the menu re-renders without server round trips.
-5. Press `Enter` or `Tab` to accept the selected completion. Clay should commit a validated text replacement in the active document only (replacing the current word prefix range with the selected `insertText`) and dismiss the menu. Confirm no command, raw op, or provider code runs on accept.
-6. Type a completion item's commit character (if the result item advertises `commitCharacters`) while the menu is open. Clay should accept the completion with that character and insert the commit character through the local edit path only.
-7. Press `Escape` while the menu is open. Clay should dismiss the menu without mutating text and clear the active completion request.
-8. Type an autocomplete trigger character declared by the active behavior manifest (for example `.`). Local text should mutate first, then a completion request is enqueued asynchronously; typing must remain responsive even if the server result arrives later.
-9. Continue typing while a slow completion result is pending. Local edits must remain non-blocking; if a newer edit/cursor movement/mode change supersedes the request, the stale result is dropped and the menu is not installed.
-10. Disable/reload a package provider (or remove its `loadPackage` line and relaunch). The package provider's results should disappear, but the built-in `core.bufferWords` provider should still produce completions.
+3. Type a prefix such as `hel`. In a completion-enabled mode, a bottom transient completion menu should appear while the word is being typed, with unique matching buffer words (for example `hello`, `hello_world`, `helper`), the selected item highlighted, and provider provenance/detail text.
+4. Press the configured `Ctrl+Space` binding to request or refresh completion manually at any caret position.
+5. Use `ArrowUp`/`ArrowDown` to move the selection locally. Confirm the menu re-renders without server round trips.
+6. Press `Enter` or `Tab` to accept the selected completion. Clay should commit a validated text replacement in the active document only (replacing the current word prefix range with the selected `insertText`) and dismiss the menu. Confirm no command, raw op, or provider code runs on accept.
+7. Type a completion item's commit character (if the result item advertises `commitCharacters`) while the menu is open. Clay should accept the completion with that character and insert the commit character through the local edit path only.
+8. Press `Escape` while the menu is open. Clay should dismiss the menu without mutating text and clear the active completion request.
+9. Type an autocomplete trigger character declared by the active behavior manifest (for example `.`). Local text should mutate first, then a completion request is enqueued asynchronously; typing must remain responsive even if the server result arrives later.
+10. Continue typing while a slow completion result is pending. Local edits must remain non-blocking; if a newer edit/cursor movement/mode change supersedes the request, the stale result is dropped and the menu is not installed.
+11. Disable/reload a package provider (or remove its `loadPackage` line and relaunch). The package provider's results should disappear, but the built-in `core.bufferWords` provider should still produce completions.
 
-Performance and security contract: trigger classification is local manifest lookup; typing a trigger edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Ordinary typing, local text mutation, paint, layout, scroll, pointer, and text-event paths must not execute configuration/provider JavaScript, wait on IPC, run provider code, or recompute provider metadata. Completion grants no filesystem, network, shell, AI mutation, extension loading, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-JS, or provider execution authority; result items are inert text-replacement data only.
+Performance and security contract: trigger classification is local manifest lookup; typing an identifier or declared trigger character edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Ordinary typing, local text mutation, paint, layout, scroll, pointer, and text-event paths must not execute configuration/provider JavaScript, wait on IPC, run provider code, or recompute provider metadata. Completion grants no filesystem, network, shell, AI mutation, extension loading, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-JS, or provider execution authority; result items are inert text-replacement data only.
 
 Automated coverage (no manual execution needed): `tests/completion_provider.rs` covers buffer-word unique sorted prefix matches, empty-match status, result payload caps, bounded-window rejection, package cancellation preserving the built-in provider, registry budget validation, request validation, superseded request abort, generation replacement, priority ordering, non-blocking scheduling, unregistered provider rejection, stale document-version/provider-generation result rejection, duplicate provider-ID conflict diagnostics, disabled package provider fallback, and oversized result rejection. `tests/editor_performance_invariants.rs::completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only` statically guards that completion hot paths use inert state and non-blocking enqueue only. `tests/performance_protocol.rs::representative_completion_result_payload_stays_bounded` checks the completion result payload budget. `tests/package_primitive_gate.rs` covers completion-provider contribution permission/conflict/oversize-metadata rejection. `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`, and `tests/rust_visibility_api_mapping.rs` cover the public `clay:completion` facade, registry/docs entry, and internal-status mapping. `tests/package_loading_docs.rs` and `tests/primitives_docs.rs` cover the package authoring contract and primitive review documentation.
 
@@ -438,7 +439,7 @@ Phase 18.20 discoverable commands (empty default key bindings):
 
 Manual Phase 18.20 smoke (fake analyzer / no language-server required):
 
-1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Ctrl+K Ctrl+I", "clay.language.hover", { scope: "editor" })`.
+1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "clay.language.hover", { scope: "editor" })`. Runtime keybindings currently accept one key stroke; multi-stroke chords and function keys remain unsupported.
 2. Launch Clay and place the caret in an editable document.
 3. Invoke the binding. A bottom `TransientMenuSession` should show bounded plain-text hover/signature content or a selectable definitions/code-actions list. Raw HTML must not render as native markup.
 4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `clay.workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.
@@ -450,9 +451,22 @@ Phase 18.21 compatibility markers: `authorizeLanguageServer`, `@clay/lsp-rust`, 
 Manual Phase 18.21 bridge smoke (host tools required):
 
 1. Install the host language servers you want to exercise (`rust-analyzer` via `rustup`, `typescript-language-server` + compatible `typescript@5.9.x`, and/or `marksman`).
-2. Prefer the representative grant-before-load fixture:
-   `cargo run -- smoke-gui --config-fixture lsp-language-packages`
-   Or copy the same authorize-then-`loadPackage` shape into `~/.config/clay/init.js`. Empty `init.js` must load no bridge and start no child.
+2. For bare `cargo run`, create the directory root before authorization in `~/.config/clay/init.js`; `workspaceRootIds` must identify roots that already exist when configuration evaluates:
+   ```js
+   import { serverAddWorkspaceRoot } from "clay:workspace";
+   import { authorizeLanguageServer } from "clay:language-server";
+   import { loadPackage } from "clay:packages";
+
+   const root = await serverAddWorkspaceRoot("/absolute/path/to/project");
+   await authorizeLanguageServer({
+     package: "@clay/lsp-rust",
+     contribution: "lsp-rust.server",
+     workspaceRootIds: [root],
+   });
+   await loadPackage("@clay/rust");
+   await loadPackage("@clay/lsp-rust");
+   ```
+   Repeat the object-form authorization and base/bridge loads for other languages. Positional `authorizeLanguageServer(package, contribution, options)` calls are invalid. Empty `init.js` must load no bridge and start no child.
 3. Open a matching workspace file. Local typing/paint must stay responsive; semantic/diagnostic refinement arrives asynchronously.
 4. Confirm overlapping Tree-sitter recovery noise yields to LSP error/warning squiggles while unrelated diagnostics remain, and that LSP completion merges at priority 100 unless you call `serverDisableCompletion`.
 5. Remove one bridge `loadPackage` line or revoke its grant and relaunch: base language package behavior must remain; that bridge's semantic/diagnostic/completion outputs must not linger as authority.

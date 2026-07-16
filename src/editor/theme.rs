@@ -180,7 +180,7 @@ impl StyleRegistry {
                 Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // CodeBlock
                 Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // CodeSpan
                 Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Link
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Paragraph
+                Color::from_rgb8(0xf4, 0xf1, 0xff),        // Paragraph
             ],
             attr_defaults: [0u16; 35],
         }
@@ -543,8 +543,8 @@ mod tests {
         assert!(!spec.underline);
         assert!(!spec.strike);
         assert_eq!(
-            spec.color, r.semantic,
-            "markup.strong/emphasis share semantic color"
+            spec.color, r.base.text,
+            "paragraph and inline emphasis preserve the normal document text color"
         );
     }
 

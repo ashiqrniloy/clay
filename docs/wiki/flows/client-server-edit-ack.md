@@ -68,6 +68,8 @@ cargo run -- smoke-gui
 cargo run -- smoke-gui --config-fixture runtime-sdui
 ```
 
+When a workspace file opens or a resync arrives, `ClientEditQueue::update_opened_document_authority` resets the existing shared `ClientSyncState` in place. The connection task and GUI queue therefore continue observing the same `Arc<Mutex<ClientSyncState>>`; replacing the `Arc` would orphan acknowledgement/rejection updates and leave later edits on stale optimistic versions. Same-document resync replaces server-authoritative text but preserves the caret at its previous byte offset, clamped to the new UTF-8 document boundary.
+
 ## Invariants and Constraints
 
 - No Masonry input or paint handler performs socket reads/writes, drains IPC channels, or waits for an acknowledgement.

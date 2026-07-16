@@ -68,8 +68,9 @@ pub enum CompletionTrigger {
     /// (`EditorBehaviorRules.autocomplete_triggers`). The carried string is the
     /// inert manifest trigger character; it is never executed.
     Character(String),
-    /// A manual request issued by the bound `completion.trigger` command
-    /// (Ctrl+Space). Manual requests never mutate document text.
+    /// An invoked request, either from ordinary identifier typing or the bound
+    /// `completion.trigger` command (Ctrl+Space). The request itself never
+    /// mutates document text.
     Manual,
 }
 

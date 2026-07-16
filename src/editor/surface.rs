@@ -275,6 +275,52 @@ impl EditorDecorationState {
         (self.span_count() > 0).then_some(self.document_version)
     }
 
+    fn apply_edit(&mut self, operation: &EditOperation) -> bool {
+        let Some((start, end, inserted_len)) = edit_extent(operation) else {
+            return false;
+        };
+        let removed_len = end.saturating_sub(start);
+        let mut changed = false;
+        for chunk in &mut self.chunks {
+            chunk.spans.retain_mut(|span| {
+                if span.byte_end <= start {
+                    return true;
+                }
+                if span.byte_start >= end {
+                    let Some(byte_start) = span
+                        .byte_start
+                        .checked_sub(removed_len)
+                        .and_then(|offset| offset.checked_add(inserted_len))
+                    else {
+                        changed = true;
+                        return false;
+                    };
+                    let Some(byte_end) = span
+                        .byte_end
+                        .checked_sub(removed_len)
+                        .and_then(|offset| offset.checked_add(inserted_len))
+                    else {
+                        changed = true;
+                        return false;
+                    };
+                    changed |= byte_start != span.byte_start || byte_end != span.byte_end;
+                    span.byte_start = byte_start;
+                    span.byte_end = byte_end;
+                    return true;
+                }
+                changed = true;
+                false
+            });
+        }
+        changed
+    }
+
+    fn confirm_version(&mut self, document_id: DocumentId, version: DocumentVersion) {
+        if self.document_id == document_id {
+            self.document_version = version;
+        }
+    }
+
     fn visible_spans(
         &self,
         visible_start: u64,
@@ -638,6 +684,18 @@ fn is_completion_word_character(character: char) -> bool {
     character == '_' || character.is_alphanumeric()
 }
 
+fn edit_extent(operation: &EditOperation) -> Option<(u64, u64, u64)> {
+    match operation {
+        EditOperation::Insert { byte_offset, text } => {
+            Some((*byte_offset, *byte_offset, text.len().try_into().ok()?))
+        }
+        EditOperation::Delete { start, end } => Some((*start, *end, 0)),
+        EditOperation::Replace { start, end, text } => {
+            Some((*start, *end, text.len().try_into().ok()?))
+        }
+    }
+}
+
 fn shift_snippet_offset(offset: usize, removed_len: usize, inserted_len: usize) -> Option<usize> {
     if inserted_len >= removed_len {
         offset.checked_add(inserted_len - removed_len)
@@ -709,6 +767,20 @@ impl EditorSurface {
         self.last_visual_max_scroll_y = 0.0;
         self.follow_visual_end = false;
         self.pin_caret_visible = false;
+    }
+
+    pub fn load_resync_snapshot(
+        &mut self,
+        document_id: DocumentId,
+        version: DocumentVersion,
+        text: String,
+        access: DocumentAccess,
+    ) {
+        let caret = (self.document.document_id == document_id).then_some(self.cursor.caret());
+        self.load_snapshot(document_id, version, text, access);
+        if let Some(caret) = caret {
+            self.navigate_to_byte_offset(caret as u64);
+        }
     }
 
     pub fn install_behavior_manifest(&mut self, manifest: BehaviorManifest) {
@@ -847,6 +919,20 @@ impl EditorSurface {
 
         match router.route_key(key) {
             RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text), completion_trigger) => {
+                let implicit_completion = completion_trigger.or_else(|| {
+                    (self
+                        .document
+                        .behavior_manifest
+                        .as_ref()
+                        .is_some_and(|manifest| {
+                            !manifest.editor_rules.autocomplete_triggers.is_empty()
+                        })
+                        && text.chars().all(is_completion_word_character))
+                    .then_some(CompletionTriggerRoute {
+                        trigger: CompletionTrigger::Manual,
+                        routing_policy: crate::protocol::RoutingPolicy::UiReactivePriority,
+                    })
+                });
                 let outcome = if let Some(pair) = self.pair_rule_for_inserted_text(&text).cloned() {
                     self.insert_pair_with_event(&pair)
                 } else if let Some(electric) = self.electric_rule_for_inserted_text(&text).cloned()
@@ -857,7 +943,7 @@ impl EditorSurface {
                 };
                 let completion_request = outcome
                     .changed
-                    .then_some(completion_trigger)
+                    .then_some(implicit_completion)
                     .flatten()
                     .and_then(|route| self.completion_request_event(route));
                 EditorKeyOutcome::client(outcome).with_completion(completion_request)
@@ -893,9 +979,8 @@ impl EditorSurface {
         }
 
         self.document.document_version = version;
-        self.decorations = EditorDecorationState::default();
+        self.decorations.confirm_version(document_id, version);
         self.diagnostics = EditorDiagnosticState::default();
-        self.bump_layout_style_revision();
         true
     }
 
@@ -2050,6 +2135,9 @@ impl EditorSurface {
     ) -> EditorCommandOutcome {
         if result.changed {
             self.update_snippet_session_after_edit(&operation);
+            if self.decorations.apply_edit(&operation) {
+                self.bump_layout_style_revision();
+            }
         }
         self.cursor.set_caret(self.buffer.clamp_byte_offset(caret));
         self.selection = None;
@@ -2254,7 +2342,7 @@ mod tests {
     use crate::protocol::{
         ActiveTypography, BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration,
         CompletionItemTextFormat, CompletionTrigger, DecorationKind, DecorationProvenance,
-        DecorationSet, DecorationSpan, DocumentAccess, DocumentFontRole, EditOperation,
+        DecorationSet, DecorationSpan, DocumentAccess, DocumentFontRole, EditOperation, FontRole,
         KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, KeyStroke, Modifiers,
         RoutingPolicy, TabMode, TokenType,
     };
@@ -2341,6 +2429,40 @@ mod tests {
         assert_eq!(runs[0].font_role, crate::protocol::FontRole::Proportional);
         assert_eq!(runs[1].range, 5..9);
         assert_eq!(runs[1].font_role, crate::protocol::FontRole::Monospace);
+    }
+
+    #[test]
+    fn local_edit_keeps_unaffected_decorations_stable_through_ack() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "text code".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        assert!(editor.apply_decoration_set(DecorationSet {
+            document_id: 1,
+            document_version: 1,
+            viewport_byte_start: 0,
+            viewport_byte_end: 9,
+            spans: vec![span(
+                5,
+                9,
+                DecorationKind::Syntax,
+                Some(DocumentFontRole::Monospace),
+                70,
+                Modifiers::NONE,
+            )],
+        }));
+
+        assert!(editor.insert_text_with_event("!").changed);
+        assert!(editor.note_confirmed_version(1, 2));
+
+        let runs = normalized_runs(&editor);
+        assert_eq!(editor.decoration_state_version(), Some(2));
+        assert_eq!(runs.last().unwrap().range, 6..10);
+        assert_eq!(runs.last().unwrap().font_role, FontRole::Monospace);
     }
 
     #[test]
@@ -2729,6 +2851,29 @@ mod tests {
             outcome.command_outcome.edit_event.unwrap().behavior_version,
             3
         );
+    }
+
+    #[test]
+    fn editor_requests_completion_while_typing_a_word() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            12,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+
+        let outcome =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("p".to_string())));
+        let completion = outcome
+            .completion_request
+            .expect("word typing requests completion");
+
+        assert_eq!(completion.cursor_byte_offset, 1);
+        assert_eq!(completion.replacement_range.byte_start, 0);
+        assert_eq!(completion.replacement_range.byte_end, 1);
+        assert_eq!(completion.trigger, CompletionTrigger::Manual);
     }
 
     #[test]
@@ -4038,6 +4183,16 @@ mod tests {
             registry
                 .style_for(DecorationKind::Semantic, h1, Modifiers::NONE)
                 .color
+        );
+        assert_eq!(
+            registry
+                .style_for(
+                    DecorationKind::Syntax,
+                    TokenType::Paragraph,
+                    Modifiers::NONE
+                )
+                .color,
+            registry.base.text
         );
     }
 

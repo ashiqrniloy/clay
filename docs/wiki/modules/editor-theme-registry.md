@@ -66,7 +66,7 @@ Existing producers that still have a free-form `styleToken` use `DecorationSpan:
 - `BaseUiColors`: editor shell/panel/text/status/chrome colors.
 - `StyleRegistry`: default layer colors, per-token syntax color table, and per-token text-attribute defaults.
 
-The registry stores syntax colors in a `[Color; 35]` table indexed by `TokenType::index()`. The Clay default table reproduces the old family mapping (`Keyword`, `String`, `Comment`, `Operator`, prose semantic, default syntax), while active themes can override every token independently. This matters for prose themes such as Gruvbox Material: `Heading1` and `Heading2` can be different colors instead of collapsing into one generic semantic color.
+The registry stores syntax colors in a `[Color; 35]` table indexed by `TokenType::index()`. The Clay default table reproduces the old family mapping (`Keyword`, `String`, `Comment`, `Operator`, prose semantic, default syntax), while active themes can override every token independently. `Paragraph` deliberately resolves to `base.text`, so Markdown's broad `(paragraph) @text` capture preserves normal editor text color instead of tinting every prose line green; headings, links, code, lists, and other constructs remain decorated. Active prose themes can still override every token independently.
 
 `StyleRegistry::style_for(kind, token_type, modifiers)` is the paint-time lookup. `DecorationKind::Diagnostic`, `SearchMatch`, and `Semantic` use layer colors. `DecorationKind::Syntax` reads the per-token table. Text attributes are ORed from theme defaults and span modifiers. `StyleSpec::attributes()` exposes only those four inert booleans to the role-aware layout path; `StyleRegistry` still owns no font family, size, or font-role decision.
 

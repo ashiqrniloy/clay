@@ -151,6 +151,8 @@ Language intelligence does not add a second completion model. LSP bridges map `C
 
 Phase 18.21 adds a dynamic completion adapter through the document-analysis worker. LSP bridge packages register with `runtimeBridge: true` and `priority: 100`, `exclusive: false`. `CompletionRequest` in `connection.rs` attempts dynamic provider resolution through the `CompletionCoordinator` first (matching package prefix, trigger characters, and analysis provider IDs), then falls back to `static_package_completion_result` on no match or failure. The dynamic adapter uses the bounded worker mailbox for scheduling and a oneshot channel for result delivery with timeout. `EditAck` calls `document_changed` on the coordinator to abort stale in-flight completion work.
 
+Completion-enabled behavior manifests now request completion after ordinary identifier characters as well as declared punctuation triggers. Identifier requests use invoked/manual provider semantics, so static and LSP providers may answer while a word is being typed; punctuation retains its declared `Character` trigger. `ClientEditQueue::enqueue_completion_request` stamps the request with the queue's optimistic document version after the preceding local edit. This is required because the server acknowledges the edit before returning completion results; using the surface's previous confirmed version made every typing-triggered result stale at the client. Valid results are projected onto the existing modeless `TransientMenuSession` and painted as the Clay-owned bottom overlay. Arrow keys select, Enter/Tab accepts, and Escape dismisses; no caret-anchored native popup is used.
+
 LSP completion results can exceed `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` (16 KiB). Bridge packages implement a halving-retry truncation strategy: reduce the item list by half, re-encode, check budget, repeat until the result fits. This preserves as many completions as possible while staying within budget.
 
 ## Invariants and Constraints
@@ -175,7 +177,8 @@ LSP completion results can exceed `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` (16 K
 
 - `src/editor/snippet.rs`: 10 unit tests covering bare tabstops, braced tabstops, placeholders with defaults, choices, final tabstop ordering, unterminated brace error, unsupported variable error, malformed input error, expanded-text-too-long rejection, too-many-tabstops rejection
 - `src/protocol/completion.rs`: `CompletionItemTextFormat` rkyv round-trip, `CompletionItem::new` defaults to `PlainText`
-- `src/editor/surface.rs`: snippet accept selects first placeholder, Tab/Shift-Tab navigation, Escape exits, active-placeholder editing shifts later ranges, manual completion routing
+- `src/editor/surface.rs`: snippet accept selects first placeholder, Tab/Shift-Tab navigation, Escape exits, active-placeholder editing shifts later ranges, manual completion routing, and identifier typing requests
+- `src/client/mod.rs`: completion requests after local edits use the optimistic document version so returned menus survive the preceding `EditAck`.
 - `tests/completion_provider.rs`: first-party snippet providers end-to-end, exclusive claim selection, disable filtering and generation bump, stale-drop on disable, LSP priority 100 non-exclusive merge, `serverDisableCompletion` override, and dynamic provider routing through document-analysis coordinator.
 - `tests/editor_performance_invariants.rs`: snippet accept hot-path guard (no Deno.core, op_clay_, enqueue_, std::fs, TcpStream, reqwest, ureq)
 - `tests/package_primitive_gate.rs`: structured item validation (valid, mixed-format rejection, invalid textFormat, oversized insertText)

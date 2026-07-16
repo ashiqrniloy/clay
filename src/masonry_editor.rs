@@ -299,12 +299,15 @@ impl EditorWidget {
                 version_changed || status_changed
             }
             ClientConnectionEvent::ResyncSnapshot(snapshot) => {
-                self.editor.load_snapshot(
+                self.editor.load_resync_snapshot(
                     snapshot.document_id,
                     snapshot.version,
                     snapshot.text,
                     snapshot.access.clone(),
                 );
+                if let Some(queue) = self.edit_queue.as_mut() {
+                    queue.update_opened_document_authority(&snapshot.access, snapshot.version);
+                }
                 self.set_status(EditorStatus::connected(
                     snapshot.document_id,
                     snapshot.version,
@@ -1847,6 +1850,41 @@ mod tests {
         assert_eq!(
             widget.editor.document_state().access,
             DocumentAccess::ReadOnly
+        );
+    }
+
+    #[test]
+    fn same_document_resync_preserves_caret_and_updates_edit_authority() {
+        let (queue, _receiver) = ClientEditQueue::bounded(2);
+        let queue = queue
+            .with_authority(11, &DocumentAccess::Editable { lease_id: 1 })
+            .with_confirmed_version(3);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 1 },
+            3,
+        ))
+        .with_edit_queue(queue);
+        widget.editor.set_caret_for_test(7);
+
+        widget.apply_connection_event(ClientConnectionEvent::ResyncSnapshot(
+            ClientResyncSnapshot {
+                document_id: 7,
+                version: 9,
+                text: "server text updated".to_string(),
+                access: DocumentAccess::Editable { lease_id: 4 },
+                lease_id: Some(4),
+            },
+        ));
+
+        assert_eq!(widget.editor.caret_for_test(), 7);
+        assert_eq!(
+            widget
+                .edit_queue
+                .as_ref()
+                .expect("edit queue")
+                .sync_snapshot()
+                .confirmed_version,
+            9
         );
     }
 

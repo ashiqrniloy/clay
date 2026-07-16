@@ -158,6 +158,7 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
         "arrowdown" | "down" => KeyCode::ArrowDown,
         "arrowleft" | "left" => KeyCode::ArrowLeft,
         "arrowright" | "right" => KeyCode::ArrowRight,
+        "space" => KeyCode::Character(" ".to_string()),
         _ if key_part.chars().count() == 1 => KeyCode::Character(key_part.to_ascii_lowercase()),
         _ => {
             return Err(JsErrorBox::generic(format!(
@@ -201,6 +202,10 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "clay.workspace.openFuzzyFile"
             | "clay.workspace.toggleFileBrowser"
             | "clay.editor.clientCopySelection"
+            | "clay.language.hover"
+            | "clay.language.goToDefinition"
+            | "clay.language.codeActions"
+            | "clay.language.signatureHelp"
             | "clay.documents.serverSaveDocument"
             | "clay.documents.serverReloadDocument"
             | "clay.documents.serverGetDocumentStatus"
@@ -212,7 +217,9 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
 fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPolicy, JsErrorBox> {
     if matches!(command_id, "text.insert_newline" | "text.insert_tab") {
         Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
-    } else if command_id == "completion.trigger" {
+    } else if command_id == "completion.trigger"
+        || crate::client::behavior::language_intelligence_feature_for_command(command_id).is_some()
+    {
         Ok(crate::protocol::RoutingPolicy::UiReactivePriority)
     } else if matches!(
         command_id,
@@ -284,4 +291,40 @@ fn manifest_error(
     code: &'static str,
 ) -> impl Fn(crate::behavior::manifest::ManifestValidationError) -> JsErrorBox {
     move |error| JsErrorBox::generic(format!("{code}: invalid behavior manifest ({error:?})"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{command_routing_policy, is_runtime_bindable_command};
+    use crate::protocol::RoutingPolicy;
+
+    #[test]
+    fn documented_space_chord_parses_for_manual_completion() {
+        assert_eq!(
+            super::parse_key_chord("Ctrl+Space").unwrap(),
+            crate::protocol::KeyStroke {
+                key: crate::protocol::KeyCode::Character(" ".to_string()),
+                modifiers: crate::protocol::KeyModifiers {
+                    control: true,
+                    ..crate::protocol::KeyModifiers::NONE
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn language_intelligence_commands_are_runtime_bindable_ui_reactive_routes() {
+        for command in [
+            "clay.language.hover",
+            "clay.language.goToDefinition",
+            "clay.language.codeActions",
+            "clay.language.signatureHelp",
+        ] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::UiReactivePriority
+            );
+        }
+    }
 }

@@ -7,7 +7,7 @@ use crate::{
         permissions::PackagePermission,
     },
     perf::budgets::COMMAND_ARGUMENT_BUDGET_BYTES,
-    protocol::{DocumentId, RoutingPolicy, WorkspaceRootId},
+    protocol::{ClientId, DocumentId, RoutingPolicy, WorkspaceRootId},
     server::{
         git::{GitCachedStatus, GitStatusCache},
         workspace::{WorkspaceError, WorkspaceState},
@@ -234,6 +234,7 @@ impl CommandExecutor {
         &self,
         registry: &CommandRegistry,
         workspace: &mut WorkspaceState,
+        client_id: ClientId,
         request: CommandExecutionRequest,
     ) -> Result<CommandExecutionResult, CommandExecutionDiagnostic> {
         let builtin = builtin_server_command(&request.command_id);
@@ -258,7 +259,13 @@ impl CommandExecutor {
 
         let status = match request.command_id.as_str() {
             "clay.workspace.openFile" | "clay.workspace.openFuzzyFile" => {
-                execute_open(workspace, &request.arguments, &request.command_id).await?
+                execute_open(
+                    workspace,
+                    client_id,
+                    &request.arguments,
+                    &request.command_id,
+                )
+                .await?
             }
             "clay.workspace.openDirectory" => {
                 let (root_id, relative_path) =
@@ -282,7 +289,7 @@ impl CommandExecutor {
             "clay.workspace.revealInTree" => {
                 let document_id = reveal_document_id(&request.arguments, &request.command_id)?;
                 workspace
-                    .document_metadata(document_id, 1)
+                    .document_metadata(document_id, client_id)
                     .await
                     .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Revealed)
@@ -396,6 +403,7 @@ pub(crate) fn is_git_command(command_id: &str) -> bool {
 /// selected-file single-file grant flow.
 async fn execute_open(
     workspace: &mut WorkspaceState,
+    client_id: ClientId,
     arguments: &Value,
     command_id: &str,
 ) -> Result<CommandExecutionStatus, CommandExecutionDiagnostic> {
@@ -403,12 +411,12 @@ async fn execute_open(
 
     let lease = if let Some((root_id, relative_path)) = args.in_root_path() {
         workspace
-            .open_existing_file(root_id, relative_path, 1)
+            .open_existing_file(root_id, relative_path, client_id)
             .await
             .map_err(|error| workspace_diagnostic(command_id, error))?
     } else if let Some(absolute_path) = args.absolute_path() {
         workspace
-            .open_selected_file(absolute_path, 1)
+            .open_selected_file(absolute_path, client_id)
             .await
             .map_err(|error| workspace_diagnostic(command_id, error))?
     } else {
@@ -419,7 +427,7 @@ async fn execute_open(
         ));
     };
 
-    let snapshot = lease.snapshot(1).await;
+    let snapshot = lease.snapshot(client_id).await;
     Ok(CommandExecutionStatus::Workspace(
         WorkspaceActionResult::Opened(snapshot),
     ))
@@ -1038,6 +1046,7 @@ mod tests {
                 .execute_workspace(
                     &CommandRegistry::new(),
                     &mut workspace,
+                    41,
                     open_request(root_id, "lib.rs"),
                 )
                 .await
@@ -1050,6 +1059,10 @@ mod tests {
                 panic!("expected Opened workspace result, got {:?}", result.status);
             };
             assert_eq!(snapshot.metadata.path, "lib.rs");
+            assert_eq!(
+                snapshot.metadata.access,
+                crate::protocol::DocumentAccess::Editable { lease_id: 1 }
+            );
             assert_eq!(snapshot.text, "fn main() {}");
 
             let _ = fs::remove_dir_all(root);
@@ -1073,7 +1086,7 @@ mod tests {
             };
 
             let result = CommandExecutor::new()
-                .execute_workspace(&CommandRegistry::new(), &mut workspace, request)
+                .execute_workspace(&CommandRegistry::new(), &mut workspace, 1, request)
                 .await
                 .expect("open command should create selected-file grant");
 
@@ -1104,6 +1117,7 @@ mod tests {
                 .execute_workspace(
                     &CommandRegistry::new(),
                     &mut workspace,
+                    1,
                     CommandExecutionRequest {
                         command_id: "clay.workspace.revealInTree".to_string(),
                         arguments: json!({ "documentId": opened.document_id }),
@@ -1131,6 +1145,7 @@ mod tests {
                 .execute_workspace(
                     &CommandRegistry::new(),
                     &mut workspace,
+                    1,
                     CommandExecutionRequest {
                         command_id: "clay.workspace.toggleFileBrowser".to_string(),
                         arguments: Value::Null,
@@ -1156,6 +1171,7 @@ mod tests {
                 .execute_workspace(
                     &CommandRegistry::new(),
                     &mut workspace,
+                    1,
                     CommandExecutionRequest {
                         command_id: "clay.workspace.openFile".to_string(),
                         arguments: Value::Null,
@@ -1177,6 +1193,7 @@ mod tests {
                 .execute_workspace(
                     &CommandRegistry::new(),
                     &mut workspace,
+                    1,
                     CommandExecutionRequest {
                         command_id: "clay.workspace.saveFile".to_string(),
                         arguments: Value::Null,

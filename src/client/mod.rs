@@ -323,12 +323,18 @@ impl ClientEditQueue {
         event: EditorCompletionRequestEvent,
         request_id: CompletionRequestId,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        let document_version = event.document_version.max(
+            self.sync_state
+                .lock()
+                .expect("client sync state poisoned")
+                .optimistic_version,
+        );
         self.sender.try_send(ClientMessage::CompletionRequest {
             request: CompletionRequest {
                 request_id,
                 client_id: self.client_id,
                 document_id: event.document_id,
-                document_version: event.document_version,
+                document_version,
                 behavior_version: event.behavior_version,
                 cursor_byte_offset: event.cursor_byte_offset,
                 replacement_range: event.replacement_range,
@@ -430,7 +436,8 @@ impl ClientEditQueue {
         confirmed_version: DocumentVersion,
     ) {
         self.lease_id = access.lease_id();
-        self.sync_state = Arc::new(Mutex::new(ClientSyncState::new(confirmed_version)));
+        *self.sync_state.lock().expect("client sync state poisoned") =
+            ClientSyncState::new(confirmed_version);
     }
 }
 
@@ -1217,6 +1224,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_after_local_edit_uses_optimistic_document_version() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(2);
+        let queue = queue
+            .with_authority(42, &DocumentAccess::Editable { lease_id: 1 })
+            .with_confirmed_version(5);
+
+        queue
+            .enqueue_edit_event(
+                EditorEditEvent {
+                    document_id: 4,
+                    base_version: 5,
+                    behavior_version: 6,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "p".to_string(),
+                    },
+                },
+                10,
+            )
+            .unwrap();
+        queue
+            .enqueue_completion_request(
+                EditorCompletionRequestEvent {
+                    document_id: 4,
+                    document_version: 5,
+                    behavior_version: 6,
+                    cursor_byte_offset: 1,
+                    replacement_range: CompletionReplacementRange::new(0, 1),
+                    trigger: CompletionTrigger::Manual,
+                },
+                11,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            receiver.recv().await,
+            Some(ClientMessage::Edit { .. })
+        ));
+        let Some(ClientMessage::CompletionRequest { request }) = receiver.recv().await else {
+            panic!("expected completion request after edit");
+        };
+        assert_eq!(request.document_version, 6);
+    }
+
+    #[tokio::test]
     async fn language_intelligence_request_is_enqueued_as_non_blocking_message() {
         use crate::editor::EditorLanguageIntelligenceRequestEvent;
         use crate::protocol::LanguageIntelligenceFeature;
@@ -1275,6 +1327,17 @@ mod tests {
         assert!(result.is_err());
         assert!(receiver.try_recv().is_err());
         assert!(queue.sync_snapshot().pending.is_empty());
+    }
+
+    #[test]
+    fn opened_document_reset_keeps_connection_and_editor_sync_state_shared() {
+        let (mut editor_queue, _receiver) = ClientEditQueue::bounded(1);
+        let connection_queue = editor_queue.clone();
+
+        editor_queue.update_opened_document_authority(&DocumentAccess::Editable { lease_id: 8 }, 5);
+
+        assert_eq!(connection_queue.sync_snapshot().confirmed_version, 5);
+        assert_eq!(connection_queue.sync_snapshot().optimistic_version, 5);
     }
 
     #[tokio::test]

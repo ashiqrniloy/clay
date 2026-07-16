@@ -269,7 +269,7 @@ fn decoration_chunk_updates_stay_under_payload_budget() {
 }
 
 #[test]
-fn stale_decoration_chunks_are_ignored_after_edit() {
+fn edit_ack_retains_current_chunks_and_rejects_older_publications() {
     let package = decoration_package();
     let set = validate_decoration_publication(&package, 3, valid_set(3)).unwrap();
     let mut editor = EditorSurface::default();
@@ -283,7 +283,8 @@ fn stale_decoration_chunks_are_ignored_after_edit() {
     assert!(editor.apply_decoration_set(set.clone()));
     assert_eq!(editor.decoration_span_count(), 1);
     assert!(editor.note_confirmed_version(7, 4));
-    assert_eq!(editor.decoration_span_count(), 0);
+    assert_eq!(editor.decoration_span_count(), 1);
+    assert_eq!(editor.decoration_state_version(), Some(4));
     assert!(!editor.apply_decoration_set(set));
 }
 

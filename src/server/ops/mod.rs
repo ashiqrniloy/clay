@@ -678,7 +678,7 @@ impl ClayOpState {
             let workspace = self.workspace();
             let mut workspace = workspace.lock().await;
             return executor
-                .execute_workspace(&registry, &mut workspace, request)
+                .execute_workspace(&registry, &mut workspace, 1, request)
                 .await;
         }
         // Package commands and other built-in commands go through the standard

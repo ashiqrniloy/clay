@@ -628,6 +628,7 @@ mod tests {
             .execute_workspace(
                 &CommandRegistry::new(),
                 &mut workspace,
+                1,
                 CommandExecutionRequest {
                     command_id: action.command_id.clone(),
                     arguments,

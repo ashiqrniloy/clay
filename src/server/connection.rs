@@ -319,6 +319,24 @@ where
                         let text = target_document.lock().await.text();
                         document_analysis.reset_document(document_id, confirmed_version, text);
                     }
+                    if let Err(diagnostic) = refresh_native_syntax_after_edit(
+                        &workspace,
+                        &behavior,
+                        &runtime_generation,
+                        &parse_coordinator,
+                        client_id,
+                        document_id,
+                        byte_start,
+                    )
+                    .await
+                    {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::RuntimeDiagnostic(diagnostic),
+                            )
+                            .await?;
+                    }
                 }
             }
             ClientMessage::EditorIntent {
@@ -380,6 +398,24 @@ where
                     ) {
                         let text = target_document.lock().await.text();
                         document_analysis.reset_document(document_id, confirmed_version, text);
+                    }
+                    if let Err(diagnostic) = refresh_native_syntax_after_edit(
+                        &workspace,
+                        &behavior,
+                        &runtime_generation,
+                        &parse_coordinator,
+                        client_id,
+                        document_id,
+                        byte_start,
+                    )
+                    .await
+                    {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::RuntimeDiagnostic(diagnostic),
+                            )
+                            .await?;
                     }
                 }
             }
@@ -615,10 +651,13 @@ where
                 codec.write_server_message(&mut stream, &response).await?;
             }
             ClientMessage::SduiAction {
-                client_id,
+                client_id: request_client_id,
                 ui_version: _,
                 intent,
             } => {
+                if request_client_id != client_id {
+                    continue;
+                }
                 let validation_response = {
                     let state = sdui.lock().await;
                     sdui_action_response(&state, &intent)
@@ -632,7 +671,7 @@ where
                     Arc::clone(&workspace),
                     &document,
                     &sdui,
-                    Some(client_id),
+                    client_id,
                 )
                 .await;
                 if let Some(response) = response {
@@ -669,11 +708,14 @@ where
                 }
             }
             ClientMessage::CommandIntent {
-                client_id: _,
+                client_id: request_client_id,
                 document_id,
                 behavior_version,
                 command_id,
             } => {
+                if request_client_id != client_id {
+                    continue;
+                }
                 if behavior.lock().await.version() != behavior_version {
                     codec
                         .write_server_message(
@@ -697,7 +739,7 @@ where
                     Arc::clone(&workspace),
                     &document,
                     &sdui,
-                    None,
+                    client_id,
                 )
                 .await;
                 if let Some(response) = response {
@@ -920,7 +962,7 @@ async fn execute_command_intent(
     workspace: Arc<Mutex<WorkspaceState>>,
     document: &Arc<Mutex<DocumentState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
-    client_id: Option<ClientId>,
+    client_id: ClientId,
 ) -> Option<ServerMessage> {
     let executor = CommandExecutor::new();
     let registry = CommandRegistry::new();
@@ -929,7 +971,7 @@ async fn execute_command_intent(
         let result = {
             let mut workspace_guard = workspace.lock().await;
             executor
-                .execute_workspace(&registry, &mut workspace_guard, request)
+                .execute_workspace(&registry, &mut workspace_guard, client_id, request)
                 .await
         };
         match result {
@@ -964,7 +1006,7 @@ async fn workspace_command_result_message(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document: &Arc<Mutex<DocumentState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
-    client_id: Option<ClientId>,
+    client_id: ClientId,
 ) -> Option<ServerMessage> {
     use crate::server::command_execution::{CommandExecutionStatus, WorkspaceActionResult};
     match result.status {
@@ -977,20 +1019,17 @@ async fn workspace_command_result_message(
         CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
             root_id,
             relative_path,
-        }) => {
-            let client_id = client_id?;
-            Some(
-                file_browser_snapshot_message(
-                    workspace,
-                    document,
-                    sdui,
-                    client_id,
-                    root_id,
-                    relative_path,
-                )
-                .await,
+        }) => Some(
+            file_browser_snapshot_message(
+                workspace,
+                document,
+                sdui,
+                client_id,
+                root_id,
+                relative_path,
             )
-        }
+            .await,
+        ),
         _ => None,
     }
 }
@@ -1760,6 +1799,54 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
     Some(activation)
 }
 
+async fn refresh_native_syntax_after_edit(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    parse_coordinator: &ParseCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    edit_start: u64,
+) -> Result<(), RuntimeDiagnostic> {
+    let (metadata, document) = {
+        let workspace = workspace.lock().await;
+        let Ok(metadata) = workspace.document_metadata(document_id, client_id).await else {
+            return Ok(());
+        };
+        let Some(document) = workspace.document_handle(document_id) else {
+            return Ok(());
+        };
+        (metadata, document)
+    };
+    let text = document.lock().await.text();
+    if text.is_empty() {
+        return Ok(());
+    }
+    let runtime = runtime_generation.current().await;
+    let Some((meta, policy)) = runtime
+        .service
+        .registered_native_syntax_handler(runtime.id, &metadata.path)
+    else {
+        return Ok(());
+    };
+    let half_window = policy.max_window_bytes / 2;
+    let start = edit_start.saturating_sub(half_window);
+    let end = start
+        .saturating_add(policy.max_window_bytes)
+        .min(text.len() as u64);
+    schedule_parse_window(
+        parse_coordinator,
+        &metadata,
+        &text,
+        behavior.lock().await.version(),
+        &meta.package_prefix,
+        &meta.mode_id,
+        policy,
+        ParseByteRange::new(start, end),
+    )?;
+    Ok(())
+}
+
 async fn schedule_open_parse(
     parse_coordinator: &ParseCoordinator,
     metadata: &DocumentMetadata,
@@ -2143,19 +2230,12 @@ await loadPackage("@clay/markdown");"#,
         let document = document_state();
         let sdui = sdui_state();
         assert_eq!(
-            execute_command_intent(sdui_request, workspace_state(), &document, &sdui, Some(1))
-                .await,
+            execute_command_intent(sdui_request, workspace_state(), &document, &sdui, 1).await,
             None
         );
         assert_eq!(
-            execute_command_intent(
-                keybinding_request,
-                workspace_state(),
-                &document,
-                &sdui,
-                None
-            )
-            .await,
+            execute_command_intent(keybinding_request, workspace_state(), &document, &sdui, 1)
+                .await,
             None
         );
     }
@@ -2172,7 +2252,7 @@ await loadPackage("@clay/markdown");"#,
             workspace_state(),
             &document_state(),
             &sdui_state(),
-            Some(1),
+            1,
         )
         .await
         .expect("unknown package UI action returns protocol error");
@@ -2216,7 +2296,7 @@ await loadPackage("@clay/markdown");"#,
             workspace,
             &document,
             &sdui,
-            Some(42),
+            42,
         )
         .await
         .expect("directory navigation sends a snapshot");
@@ -3111,6 +3191,19 @@ await loadPackage("@clay/markdown");"#,
             }
         }
 
+        loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::DecorationSet(set)
+                    if set.document_id == 1 && set.document_version == 2 =>
+                {
+                    assert!(!set.spans.is_empty());
+                    break;
+                }
+                ServerMessage::DiagnosticSet(_) | ServerMessage::RuntimeDiagnostic(_) => {}
+                other => panic!("expected refreshed syntax decorations, got {other:?}"),
+            }
+        }
+
         codec
             .write_client_message(
                 &mut client,
@@ -3225,42 +3318,72 @@ await loadPackage("@clay/markdown");"#,
             .await
             .unwrap();
 
-        match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::DocumentOpened { metadata, text } => {
-                assert_eq!(metadata.document_id, 2);
-                assert_eq!(metadata.workspace_root_id, root_id);
-                assert_eq!(metadata.path, "note.md");
-                assert_eq!(text, "# Browser note\n\n- item\n");
-            }
-            message => panic!("expected file-browser DocumentOpened, got {message:?}"),
-        }
-        match codec.read_server_message(&mut client).await.unwrap() {
+        let (opened_version, opened_lease_id) =
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::DocumentOpened { metadata, text } => {
+                    assert_eq!(metadata.document_id, 2);
+                    assert_eq!(metadata.workspace_root_id, root_id);
+                    assert_eq!(metadata.path, "note.md");
+                    assert_eq!(text, "# Browser note\n\n- item\n");
+                    let DocumentAccess::Editable { lease_id } = metadata.access else {
+                        panic!("file-browser opener must receive editable access");
+                    };
+                    (metadata.version, lease_id)
+                }
+                message => panic!("expected file-browser DocumentOpened, got {message:?}"),
+            };
+        let behavior_version = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::BehaviorManifest(manifest) => {
                 assert_eq!(manifest.manifest_id, "markdown.markdown");
                 assert!(matches!(
                     manifest.scope,
                     BehaviorScope::Document { document_id: 2 }
                 ));
+                manifest.behavior_version
             }
             message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
-        }
-        // Open follow-up returns after scheduling parse. Background
-        // DecorationSet/DiagnosticSet may arrive later; they must not have
-        // blocked DocumentOpened or the behavior manifest.
-        match timeout(
-            Duration::from_millis(250),
-            codec.read_server_message(&mut client),
-        )
-        .await
-        {
-            Err(_) => {}
-            Ok(Ok(
+        };
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Edit {
+                    document_id: 2,
+                    client_id: 99,
+                    lease_id: Some(opened_lease_id),
+                    base_version: opened_version,
+                    behavior_version,
+                    transaction_id: 7,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "!".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        loop {
+            match timeout(
+                Duration::from_secs(1),
+                codec.read_server_message(&mut client),
+            )
+            .await
+            .expect("opened-file edit acknowledgement timed out")
+            .unwrap()
+            {
+                ServerMessage::EditAck {
+                    document_id: 2,
+                    confirmed_version,
+                    transaction_id: 7,
+                } => {
+                    assert_eq!(confirmed_version, opened_version + 1);
+                    break;
+                }
                 ServerMessage::DecorationSet(_)
                 | ServerMessage::DiagnosticSet(_)
-                | ServerMessage::RuntimeDiagnostic(_),
-            )) => {}
-            Ok(Ok(other)) => panic!("unexpected open follow-up message: {other:?}"),
-            Ok(Err(error)) => panic!("unexpected codec error after open: {error}"),
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                message => panic!("expected opened-file EditAck, got {message:?}"),
+            }
         }
 
         drop(client);
