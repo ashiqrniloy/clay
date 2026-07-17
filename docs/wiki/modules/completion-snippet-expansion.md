@@ -203,5 +203,6 @@ cargo test --test primitives_docs phase18_19 --quiet
 - [Phase 18.11 Completion Provider Framework Primitive Review](phase18.11-completion-provider-primitive-review.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md) — JS facade and op extension registration
 - [Language Intelligence](language-intelligence.md) — LSP completion maps back onto this primitive
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `cancel_older_generations` removes stale provider registrations and aborts in-flight completion work after generation swap.
 - [Completion Provider API Reference](../../reference/clay-js-api/completion/server-register-completion-provider.md)
 - [Disable Completion API Reference](../../reference/clay-js-api/completion/server-disable-completion.md)

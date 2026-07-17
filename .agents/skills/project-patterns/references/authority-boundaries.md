@@ -32,6 +32,15 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Lease transfer/release is explicit.
 - Phase 3 may not enforce leases fully, but protocol and plan language should preserve the final model.
 
+## Daily Editing Ownership (Phase 20)
+
+- Undo/redo is a per-document client history of inverse insert/delete/replace operations applied as ordinary optimistic `Edit`s under the editable lease. The server stays undo-unaware.
+- Clipboard cut/copy/paste is client OS-mediated through `ClipboardSink`; paste reads and cut/copy write only on explicit user commands. No server clipboard proxy.
+- IME preedit is client paint-only until `Commit`, which becomes one ordinary edit. Cancel unfinished composition on focus loss, document switch, and before undo/redo.
+- Multi-document: server remains open-registry/lease/dirty authority; the client retains a bounded session map keyed by server `DocumentId` (shadow/caret/viewport/pending/history/status chrome).
+- Package/configuration/AI authority over clipboard, filesystem, shell, network, and raw ops is **not finalized** by Phase 20 daily-editing semantics and requires a later explicit decision. Until then, Phase 20 ships Clay-owned user commands on existing selected-file/workspace-root paths and does not invent those surfaces.
+- Decision log source: `decision-logs/2026-07-17-1841-phase20-daily-editing-semantics.md`.
+
 ## Built-in `core.*` Modes and Bounded Probing (Phase 18.9)
 
 - Clay owns always-on built-in major modes `core.text` (universal fallback) and `core.code` (code-like extensions and any shebang), registered at server startup via `register_builtin_mode` with no `init.js` line and no `loadPackage` step. They grant no package authority.

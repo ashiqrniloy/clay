@@ -377,6 +377,7 @@ mod tests {
             .map(|item| item.id.as_str())
             .collect();
         assert!(ids.contains(&"clay.controlCenter.open"));
+        assert!(ids.contains(&"clay.runtime.reloadConfiguration"));
         assert!(ids.contains(&"workspace.refresh"));
     }
 

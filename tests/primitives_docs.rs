@@ -6733,3 +6733,258 @@ fn phase18_8_command_execution_implementation_wiki_covers_final_implementation()
         );
     }
 }
+
+#[test]
+fn phase19_hot_reload_behavior_update_primitive_review() {
+    let plan_for = |number: u32| {
+        let prefix = format!("{number:03}-");
+        let matches = fs::read_dir(repository_path("plans"))
+            .expect("read plans directory")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "expected one plan with prefix {prefix}");
+        fs::read_to_string(matches[0].path()).expect("read numbered plan")
+    };
+
+    assert!(
+        !plan_for(33).contains("- [ ]"),
+        "Plan 033 must remain the completed hot-reload baseline"
+    );
+    for number in 36..=53 {
+        if number == 45 {
+            continue;
+        }
+        assert!(
+            !plan_for(number).contains("- [ ]"),
+            "active prerequisite Plan {number:03} must be complete"
+        );
+    }
+    assert!(
+        plan_for(47).contains("supersedes Plan 045"),
+        "completed Plan 047 must explicitly supersede inactive Plan 045"
+    );
+
+    let roadmap = fs::read_to_string(repository_path("roadmap.md")).expect("read roadmap");
+    assert!(roadmap.contains("Depends on **Phase 18.7**'s persistent server-side JS runtime"));
+    assert!(roadmap.contains("Do not start Phase 19 until Phase 18.14 is complete"));
+
+    let review = fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase19-hot-reload-behavior-update-primitive-review.md",
+    ))
+    .expect("read Phase 19 hot reload and behavior update primitive review");
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    assert!(
+        wiki_index.contains("modules/phase19-hot-reload-behavior-update-primitive-review.md"),
+        "wiki index must link the current Phase 19 primitive review"
+    );
+
+    for required in [
+        "Plans 036-053 are complete **or explicitly superseded**",
+        "Plan 033 is complete",
+        "Existing Primitive Inventory",
+        "Runtime generation",
+        "Configuration/package loading",
+        "Modes",
+        "Commands",
+        "Behavior",
+        "Syntax and parsing",
+        "Completion",
+        "Language intelligence",
+        "Document analysis/LSP",
+        "SDUI",
+        "Package UI",
+        "Theme and typography",
+        "Decorations and diagnostics",
+        "Protocol and client install",
+        "Workspace/document authority",
+        "Current Reload Ordering and Atomicity Gaps",
+        "mutates live state before `RuntimeGenerationStore::swap`",
+        "not fanned out",
+        "No message proves that all installed parts belong to the same runtime generation",
+        "Existing Budgets and Hot-Path Policy",
+        "`JS_RUNTIME_EVALUATION_TIMEOUT_MS = 5000`",
+        "`JS_RUNTIME_HEAP_LIMIT_BYTES = 128 MiB`",
+        "`DEFAULT_MAX_FRAME_SIZE = 1 MiB`",
+        "Ordinary local text application, caret/selection, key routing, paint, layout, scroll, pointer handling, and edit acknowledgement",
+        "Security and Authority Boundary",
+        "Module loading remains deny-by-default",
+        "Package source provenance and user/admin capability grants",
+        "Executable callback fields",
+        "trusted same-user subprocess authority",
+        "Selected-file tokens",
+        "Generic Gaps Required Before Implementation",
+        "Staged generation candidate",
+        "Live fan-out",
+        "Atomic client install",
+        "Stale-version policy",
+        "Package-UI protocol projection",
+        "No gap justifies `if rust`, `if markdown`",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 19 primitive review must contain `{required}`"
+        );
+    }
+
+    let command_registry =
+        fs::read_to_string(repository_path("docs/wiki/modules/command-registry.md"))
+            .expect("read command registry wiki");
+    let lock_flow = fs::read_to_string(repository_path(
+        "docs/wiki/flows/document-leases-and-region-locks.md",
+    ))
+    .expect("read lock flow wiki");
+    let hot_reload = fs::read_to_string(repository_path(
+        "docs/wiki/modules/persistent-runtime-hot-reload.md",
+    ))
+    .expect("read hot reload wiki");
+    for required in [
+        "clay.runtime.reloadConfiguration",
+        "Reload Configuration and Packages",
+        "ServerFirstWithLock { lock_scope: Behavior }",
+        "CommandExecutionRule::ReloadInProgress",
+        "ScopedLockTarget::Behavior",
+        "Package-side `serverExecuteCommand` rejects this ID",
+    ] {
+        assert!(
+            command_registry.contains(required),
+            "command registry wiki must document Phase 19 reload primitive: {required}"
+        );
+    }
+    for required in [
+        "ScopedLockManager",
+        "ScopedLockTarget",
+        "`ScopedLockGuard` releases on drop",
+        "behavior locks do not block ordinary document edits",
+        "workspace locks conflict with every scope",
+    ] {
+        assert!(
+            lock_flow.contains(required),
+            "lock flow wiki must document scoped lock primitive: {required}"
+        );
+    }
+    for required in [
+        "execute_reload_command",
+        "ReloadInProgress",
+        "candidate evaluation remains outside the behavior lock",
+        "drops the behavior lock before document refresh",
+        "not exported through Clay JS facades",
+        "cancel_older_runtime_generations",
+        "withdraw_package_contributions",
+        "shutdown_all",
+        "cancel_older_generations",
+        "RuntimeStateSnapshot",
+        "ActiveRuntimeStateFanout",
+        "capacity-16",
+        "latest complete snapshot",
+        "RuntimeGenerationInstalled",
+    ] {
+        assert!(
+            hot_reload.contains(required),
+            "hot reload wiki must document command/lock/cleanup/fan-out flow: {required}"
+        );
+    }
+}
+
+#[test]
+fn phase20_daily_editing_product_hardening_primitive_review() {
+    let plan_for = |number: u32| {
+        let prefix = format!("{number:03}-");
+        let matches = fs::read_dir(repository_path("plans"))
+            .expect("read plans directory")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "expected one plan with prefix {prefix}");
+        fs::read_to_string(matches[0].path()).expect("read numbered plan")
+    };
+
+    assert!(
+        !plan_for(54).contains("- [ ]"),
+        "Plan 054 must be complete before Phase 20 implementation"
+    );
+    assert!(
+        !plan_for(46).contains("- [ ]"),
+        "Plan 046 / Phase 18.15 theme registry must remain complete"
+    );
+
+    let roadmap = fs::read_to_string(repository_path("roadmap.md")).expect("read roadmap");
+    assert!(
+        roadmap.contains(
+            "Phase 20's \"theme system\" daily-editing item is pulled forward into Phase 18.15"
+        ),
+        "roadmap must record Phase 20 theme supersession into Phase 18.15"
+    );
+    assert!(
+        roadmap.contains("## Phase 20: Daily Editing Product Hardening"),
+        "roadmap must retain the Phase 20 section"
+    );
+
+    let review = fs::read_to_string(repository_path(
+        "docs/wiki/modules/phase20-daily-editing-product-hardening-primitive-review.md",
+    ))
+    .expect("read Phase 20 daily editing product hardening primitive review");
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    assert!(
+        wiki_index.contains("modules/phase20-daily-editing-product-hardening-primitive-review.md"),
+        "wiki index must link the Phase 20 primitive review"
+    );
+
+    for required in [
+        "Plan 054",
+        "no unchecked tasks",
+        "Phase 18.15",
+        "theme system",
+        "pulled forward into Phase 18.15",
+        "Existing Primitive Inventory",
+        "Clipboard",
+        "ClipboardSink",
+        "set_text",
+        "Undo/redo",
+        "No History/undo/redo stack",
+        "IME/composition",
+        "Ime::Commit",
+        "Ime::{Enabled,Preedit,Disabled}",
+        "Theme system",
+        "Accessibility",
+        "Native file dialogs",
+        "Unsupported",
+        "Multi-document",
+        "opening_second_file_browser_file_replaces_editor_snapshot",
+        "Selected-file save/conflict",
+        "save_document",
+        "Pending-edit/error recovery",
+        "Pixel / GPU snapshots",
+        "TestHarness",
+        "assert_render_snapshot",
+        "SduiObservableSnapshot",
+        "Client-Local vs Server-First Ownership",
+        "never during paint/layout/scroll/ordinary key insertion",
+        "Security and Authority Boundary",
+        "user-mediated and client-owned",
+        "selected-file/workspace-root authorized",
+        "Theme Supersession Note",
+        "satisfied by Phase 18.15",
+        "theme_label",
+        "status_chrome_meets_contrast",
+        "Generic Gaps Required Before Implementation",
+        "Clipboard cut/paste",
+        "Undo/redo history",
+        "IME preedit overlay",
+        "Multi-document client session",
+        "Dirty/save/conflict UX",
+        "Linux/macOS file-open dialogs",
+        "Accessibility polish",
+        "Pixel snapshot revisit",
+        "No gap justifies `if markdown`, `if rust`",
+        "Rejected Implementation Shapes",
+        "Rebuild the theme system in Phase 20",
+    ] {
+        assert!(
+            review.contains(required),
+            "Phase 20 primitive review must contain `{required}`"
+        );
+    }
+}

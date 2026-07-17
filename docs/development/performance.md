@@ -359,6 +359,36 @@ cargo bench --bench first_party_language_baselines -- --baseline-lenient pre-lsp
 - Real rust-analyzer / typescript-language-server / marksman open/init/request latency is measured only under `CLAY_LSP_REAL_SMOKE=1` via `cargo test --test lsp_real_servers -- --nocapture`. Do not promote those timings to Criterion CI gates.
 - Edit acknowledgement and local paint must never wait on worker/JS/subprocess work; see `tests/editor_performance_invariants.rs`.
 
+## Phase 19 hot-reload runtime-state budgets
+
+Phase 19 keeps reload evaluation/commit off the ordinary edit and paint paths. Complete runtime-generation snapshots reuse the existing 1 MiB IPC frame ceiling; the 768 KiB payload / 16 ms install figures are review thresholds for a future diff upgrade, not soft pass/fail gates.
+
+### Deterministic hard guards
+
+| Focus area | Budget | Enforcement |
+| --- | --- | --- |
+| Runtime-state broadcast capacity | 16 (`RUNTIME_STATE_BROADCAST_CAPACITY`) | `cargo test --test performance_protocol phase19_runtime_state_snapshot_and_grace_budgets_are_locked` |
+| Snapshot document / diagnostic caps | 64 / 32 | same + `RuntimeStateSnapshot::validate` |
+| Snapshot hard frame ceiling | <= 1 MiB (`DEFAULT_MAX_FRAME_SIZE`) | prepare encode-check + `tests/runtime_update_protocol.rs` |
+| Diff-upgrade review payload | 768 KiB p95 (`RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES`) | budget lock + representative encode test |
+| Diff-upgrade review install | 16 ms p95 (`RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS`) | budget lock; advisory until measured |
+| Previous-behavior grace | 2000 ms / 256 transactions | `cargo test --lib behavior::tests` / grace integration tests |
+| Reload work outside editor hot paths | no candidate validate/install/reload symbols in paint/text-event bodies | `runtime_generation_install_stays_outside_paint_and_text_event_hot_paths` |
+| Edits during blocked candidate | EditAck continues while reload waits on test barrier | `typing_and_edit_ack_continue_while_candidate_runtime_is_blocked_on_test_barrier` |
+
+### Focused verification
+
+```text
+cargo test --test persistent_runtime_hot_reload
+cargo test --test runtime_update_protocol
+cargo test --test performance_protocol phase19_runtime_state
+cargo test --test editor_performance_invariants runtime_generation_install
+cargo test --lib typing_and_edit_ack_continue_while_candidate
+cargo test --lib failed_reload_broadcasts_diagnostic_but_no_generation_snapshot
+cargo test --lib successful_reload_is_observed_as_one_generation_by_all_clients
+cargo test --lib reload_preserves_authority_denials_and_cleans_old_lsp_worker
+```
+
 ## Validation
 
 Run the fixture tests after changing generator logic:

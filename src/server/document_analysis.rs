@@ -708,13 +708,6 @@ impl DocumentAnalysisCoordinator {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "package-disable hook is called when public package withdrawal lands later in Phase 18.21"
-        )
-    )]
     pub(crate) fn cancel_package(&self, package_name: &str) {
         let keys = {
             let inner = self
@@ -754,7 +747,21 @@ impl DocumentAnalysisCoordinator {
         self.cancel_workers(keys);
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "exact-generation cancel remains for tests; production uses cancel_older_generations"
+        )
+    )]
     pub(crate) fn cancel_generation(&self, generation: u64) {
+        self.cancel_older_generations(generation.saturating_add(1));
+    }
+
+    /// After a successful runtime-generation commit, shut down every worker and
+    /// registration older than `active_generation`, then drain already-queued
+    /// outputs so late old-generation decorations/diagnostics cannot publish.
+    pub(crate) fn cancel_older_generations(&self, active_generation: u64) {
         let keys = {
             let inner = self
                 .inner
@@ -763,7 +770,7 @@ impl DocumentAnalysisCoordinator {
             inner
                 .workers
                 .keys()
-                .filter(|key| key.generation <= generation)
+                .filter(|key| key.generation < active_generation)
                 .cloned()
                 .collect::<Vec<_>>()
         };
@@ -772,7 +779,59 @@ impl DocumentAnalysisCoordinator {
             .lock()
             .expect("analysis coordinator lock poisoned")
             .registrations
-            .retain(|registration| registration.generation > generation);
+            .retain(|registration| registration.generation >= active_generation);
+        self.drain_pending_outputs();
+    }
+
+    /// Drop already-queued analysis outputs without waiting.
+    pub(crate) fn drain_pending_outputs(&self) {
+        if let Ok(mut outputs) = self.outputs_rx.try_lock() {
+            while outputs.try_recv().is_ok() {}
+        }
+    }
+
+    /// Snapshot of analyzer registration generations retained after cleanup.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "generation introspection is used by reload cleanup tests"
+        )
+    )]
+    pub(crate) fn registered_generations(&self) -> Vec<u64> {
+        let mut generations = self
+            .inner
+            .lock()
+            .expect("analysis coordinator lock poisoned")
+            .registrations
+            .iter()
+            .map(|registration| registration.generation)
+            .collect::<Vec<_>>();
+        generations.sort_unstable();
+        generations.dedup();
+        generations
+    }
+
+    /// Snapshot of live worker generations retained after cleanup.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "generation introspection is used by reload cleanup tests"
+        )
+    )]
+    pub(crate) fn worker_generations(&self) -> Vec<u64> {
+        let mut generations = self
+            .inner
+            .lock()
+            .expect("analysis coordinator lock poisoned")
+            .workers
+            .keys()
+            .map(|key| key.generation)
+            .collect::<Vec<_>>();
+        generations.sort_unstable();
+        generations.dedup();
+        generations
     }
 
     fn cancel_workers(&self, keys: Vec<WorkerKey>) {
@@ -1144,7 +1203,7 @@ fn register_completion_providers(
             generation,
         };
         coordinator
-            .register_package(
+            .register_package_for_generation(
                 &registration.package,
                 meta,
                 AnalysisCompletionProvider {
@@ -1182,7 +1241,7 @@ fn register_language_intelligence_providers(
             generation,
         };
         coordinator
-            .register_package(
+            .register_package_for_generation(
                 &registration.package,
                 meta,
                 AnalysisLanguageIntelligenceProvider {

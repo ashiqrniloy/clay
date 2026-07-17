@@ -97,5 +97,6 @@ let message = ServerMessage::DecorationSet(set);
 - [Range Diagnostics](range-diagnostics.md)
 - [Language Intelligence](language-intelligence.md)
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `DocumentRuntimeRenderState` reset flags clear stale generation decoration caches during atomic client install.
 - `docs/reference/primitives/rendering-strategy.md`
 - `docs/reference/primitives/package-security.md`

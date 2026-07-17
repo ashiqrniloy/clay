@@ -9,15 +9,13 @@
 
 ## Hot Reload
 
-Hot reload flow:
-
-1. Server detects or receives reload request.
-2. Affected behavior scope may become temporarily locked/read-only.
-3. Server re-evaluates JavaScript.
-4. Server builds a new behavior manifest version.
-5. Server sends manifest diff/snapshot to clients.
-6. Clients atomically install it.
-7. Editing resumes under the new behavior version.
+- Prepare and validate a fresh runtime-generation candidate while the current generation remains active; do not mutate live state during evaluation.
+- Serialize reload attempts, but acquire `LockScope::Behavior` only for the final compare-and-swap commit. Ordinary typing and background parsing must not wait for JavaScript evaluation.
+- Commit all generation-owned server contributions once, then broadcast one bounded complete snapshot per affected connection. Clients validate and atomically install the whole snapshot before acknowledging its runtime generation.
+- The commit is the rollback boundary: pre-commit failure preserves the old generation; post-commit fan-out/cleanup failure recovers from latest state and must not restore revoked authority.
+- Revoke old executable authority logically at commit and terminate old workers/sessions afterward under their existing bounded cleanup rules.
+- Use the explicit built-in `clay.runtime.reloadConfiguration` command through normal command execution, with no default keybinding. Add no watcher, reload-specific IPC, or diff protocol until measured need justifies it.
+- Decision log source: `decision-logs/2026-07-16-1825-phase19-hot-reload-transaction-and-stale-edit-semantics.md`.
 
 ## AI Mutation
 

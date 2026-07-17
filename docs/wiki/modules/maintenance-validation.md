@@ -29,6 +29,7 @@ Clay now treats all-target Clippy as a runnable repository gate. Linux is the re
 - Security tests, package/runtime authority checks, and diagnostics stay in Linux `cargo test --all-targets`.
 - Windows checks are run only on Windows-targeted tasks or when a Windows MSVC toolchain is available; a Linux host missing MSVC C headers/SDK is not a failure of ordinary work.
 - Persistent-runtime hot reload is exercised headlessly through `IpcServer::trigger_developer_hot_reload`; the trigger calls the shared reload primitive and does not run during ordinary client event processing.
+- Phase 19 end-to-end coverage also includes duplex barrier/edit, failed-reload no-snapshot, multi-client one-generation install, and LSP cleanup/authority denial tests in `server::runtime_generation_tests`.
 
 ## Verification
 
@@ -38,11 +39,17 @@ cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 cargo test --test persistent_runtime_hot_reload
+cargo test --test runtime_update_protocol
+cargo test --test performance_protocol phase19_runtime_state
+cargo test --lib typing_and_edit_ack_continue_while_candidate
+cargo test --lib failed_reload_broadcasts_diagnostic_but_no_generation_snapshot
+cargo test --lib successful_reload_is_observed_as_one_generation_by_all_clients
+cargo test --lib reload_preserves_authority_denials_and_cleans_old_lsp_worker
 ```
 
 Windows-targeted work additionally uses `docs/development/windows.md` on a native MSVC setup. Do not require `cargo check --target x86_64-pc-windows-msvc --all-targets` from a Linux host unless the host has the Windows SDK/MSVC C headers needed by native C dependencies.
 
-Current cleanup verification: Clippy passed with no issues; all-target tests passed 786 tests across 22 suites. Phase 19 hot reload verification includes `tests/persistent_runtime_hot_reload.rs` for success, rollback, sanitized diagnostics, and authority denial after reload, plus `tests/performance_protocol.rs` for edit/protocol hot-path budgets.
+Current cleanup verification: Clippy passed with no issues under `-D warnings`. Phase 19 hot reload verification includes `tests/persistent_runtime_hot_reload.rs` for success/rollback/sanitized diagnostics/authority denial, `tests/runtime_update_protocol.rs` for snapshot payload bounds, `tests/performance_protocol.rs` for Phase 19 budget locks, and the duplex barrier/multi-client/LSP cleanup suite in `server::runtime_generation_tests`.
 
 ## Related
 

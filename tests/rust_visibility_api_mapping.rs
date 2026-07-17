@@ -161,6 +161,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/decorations.rs::validate_decoration_publication",
         "src/server/decorations.rs::validate_decoration_set",
         "src/server/parse_coordinator.rs::ParseCoordinator::cancel_generation",
+        "src/server/parse_coordinator.rs::ParseCoordinator::cancel_older_generations",
         "src/server/parse_coordinator.rs::ParseCoordinator::cancel_package",
         "src/server/parse_coordinator.rs::ParseCoordinator::new",
         "src/server/parse_coordinator.rs::ParseCoordinator::next_diagnostic",
@@ -247,6 +248,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/completion.rs::CompletionCoordinator",
         "src/server/completion.rs::CompletionCoordinator::bump_generation",
         "src/server/completion.rs::CompletionCoordinator::cancel_generation",
+        "src/server/completion.rs::CompletionCoordinator::cancel_older_generations",
         "src/server/completion.rs::CompletionCoordinator::cancel_package",
         "src/server/completion.rs::CompletionCoordinator::disable_completion",
         "src/server/completion.rs::CompletionCoordinator::document_changed",
@@ -298,6 +300,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator",
         "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator::bump_generation",
         "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator::cancel_generation",
+        "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator::cancel_older_generations",
         "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator::cancel_package",
         "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator::disable_provider",
         "src/server/language_intelligence.rs::LanguageIntelligenceCoordinator::document_changed",
@@ -338,6 +341,8 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/language_server.rs::LanguageServerProcessService::new",
         "src/server/language_server.rs::LanguageServerProcessService::read",
         "src/server/language_server.rs::LanguageServerProcessService::revoke_for_package",
+        "src/server/language_server.rs::LanguageServerProcessService::session_count",
+        "src/server/language_server.rs::LanguageServerProcessService::shutdown_all",
         "src/server/language_server.rs::LanguageServerProcessService::start",
         "src/server/language_server.rs::LanguageServerProcessService::stop",
         "src/server/language_server.rs::LanguageServerProcessService::write",
@@ -1206,4 +1211,84 @@ fn range_diagnostics_public_rust_surfaces_have_js_api_or_are_crate_private() {
             && !inventory_text.contains("backing_rust = \"src/editor/layout.rs::paint_squiggle\""),
         "removed Tree-sitter extraction and squiggle paint helpers must not become Clay JS backing surfaces"
     );
+}
+
+#[test]
+fn phase19_reload_helpers_are_internal_or_have_complete_clay_js_api_mapping() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let server = std::fs::read_to_string(format!("{root}/src/server/mod.rs")).expect("read server");
+    let command_exec = std::fs::read_to_string(format!("{root}/src/server/command_execution.rs"))
+        .expect("read command_execution");
+    let connection = std::fs::read_to_string(format!("{root}/src/server/connection.rs"))
+        .expect("read connection");
+    let inventory_text = inventory_rust_mapping_text();
+
+    // Trigger and outcome structs must remain doc-hidden
+    assert!(
+        server.contains("doc(hidden)]") && server.contains("pub struct ReloadedDocumentRefresh"),
+        "ReloadedDocumentRefresh must be doc-hidden and public"
+    );
+    assert!(
+        server.contains("doc(hidden)]") && server.contains("pub struct RuntimeReloadOutcome"),
+        "RuntimeReloadOutcome must be doc-hidden and public"
+    );
+    assert!(
+        server.contains("doc(hidden)]")
+            && server.contains("pub async fn trigger_developer_hot_reload"),
+        "trigger_developer_hot_reload must be doc-hidden and public"
+    );
+    // reload_runtime_generation and execute_reload_command must be pub(crate)
+    assert!(
+        server.contains("pub(crate) async fn reload_runtime_generation"),
+        "reload_runtime_generation must be pub(crate)"
+    );
+    assert!(
+        server.contains("pub(crate) async fn execute_reload_command"),
+        "execute_reload_command must be pub(crate)"
+    );
+
+    // Core lifecycle helpers must be pub(crate) or private (not public)
+    assert!(server.contains("pub(crate) async fn reload_runtime_generation"));
+    assert!(server.contains("pub(crate) async fn execute_reload_command"));
+    assert!(server.contains("async fn commit_runtime_generation"));
+    assert!(server.contains("async fn prepare_runtime_generation_candidate"));
+    assert!(server.contains("pub(crate) async fn apply_runtime_outputs"));
+    assert!(server.contains("pub(crate) async fn apply_runtime_outputs_without_sdui"));
+
+    // No public reload surfaces should leak from the server
+    assert!(!server.contains("pub async fn reload_runtime_generation"));
+    assert!(!server.contains("pub async fn execute_reload_command"));
+    assert!(!server.contains("pub async fn commit_runtime_generation"));
+
+    // Command ID and helpers in command_execution must be pub(crate)
+    assert!(
+        command_exec.contains("pub(crate) const RELOAD_CONFIGURATION_COMMAND_ID")
+            || command_exec.contains("pub(crate) fn is_reload_command"),
+        "reload command metadata must be pub(crate)"
+    );
+
+    // Connection handler must route reload through reload_server
+    assert!(connection.contains("reload_server"));
+    assert!(!connection.contains("pub async fn submit_reload"));
+
+    // Inventory must not register reload lifecycle types as public Clay JS API
+    for excluded in [
+        "RuntimeReloadOutcome",
+        "ReloadedDocumentRefresh",
+        "trigger_developer_hot_reload",
+        "reload_runtime_generation",
+        "prepare_runtime_generation_candidate",
+        "commit_runtime_generation",
+    ] {
+        assert!(
+            !inventory_text.contains(&format!("IpcServer::{excluded}")),
+            "internal reload type {excluded} must not appear in inventory backing-rust mapping"
+        );
+    }
+
+    // REVOKED: no public reload configuration from init.js
+    let runtime_js =
+        std::fs::read_to_string(format!("{root}/runtime/js/commands.ts")).expect("read commands");
+    assert!(!runtime_js.contains("reloadConfiguration"));
+    assert!(!runtime_js.contains("ReloadInProgress"));
 }

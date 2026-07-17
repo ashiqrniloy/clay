@@ -314,7 +314,7 @@ The fixture at `tests/fixtures/configuration/file-browser-workflow/init.js` is e
 
 ```js
 import { bindKey } from "clay:keybindings";
-import { clientCopySelection } from "clay:editor";
+import { clientCopySelection, clientCutSelection, clientPasteClipboard } from "clay:editor";
 import { loadPackage } from "clay:packages";
 import { clientOpenFolderDialog } from "clay:workspace";
 
@@ -326,6 +326,8 @@ bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
+bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
+bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
 ```
 
 #### Product `cargo run` configuration path
@@ -349,29 +351,33 @@ This is the regression-checked product path on Linux/GNOME. The shifted-characte
 - The editor shows a slim vertical scrollbar thumb for long files, scrolls through them without snapping back to the caret after each wheel event, and stays non-overlapping with the file browser.
 - Rust/TypeScript/JavaScript/Markdown files show visible syntax highlighting as distinct token-family background tints (keyword, string, comment, punctuation, markup).
 - Selecting text and pressing `Ctrl+C` (or `Ctrl+Shift+C`) copies only the selected UTF-8 text to the OS clipboard; a collapsed selection is a no-op.
+- Copy selection is write-only for the current native editor selection; cut (`Ctrl+X` / `Ctrl+Shift+X`) and paste (`Ctrl+V` / `Ctrl+Shift+V`) are separate explicit user commands.
 
-Typing, paint, layout, pointer, and scroll stay client-local/non-blocking throughout; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling. Security and authority are unchanged from the fixture path: selected-folder grants are server-validated, file opens are root-relative or selected-file validated, and clipboard copy is write-only.
+Typing, paint, layout, pointer, and scroll stay client-local/non-blocking throughout; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling. Security and authority are unchanged from the fixture path: selected-folder grants are server-validated, file opens are root-relative or selected-file validated, and clipboard copy is write-only. Cut and paste are additional explicit user-mediated client commands.
 
 Manual Linux verification:
 
 1. Run `cargo run -- smoke-gui --config-fixture file-browser-workflow` from the repository root.
 2. Confirm the GUI connects and the Clay-owned Workspace file browser is visible or can be shown with `Ctrl+B`. The file browser is SDUI composed by Clay, not a package widget.
-3. Press `Ctrl+Shift+O` and choose a regular folder in the native folder picker. On Linux this uses xdg-desktop-portal with `directory=true`; cancellation is a non-error no-op.
-4. Confirm Clay adds only the selected folder as a server-validated workspace root and refreshes the Workspace browser. The selected-folder path is protected by the same selected-path capability family as selected-file opens.
-5. Click directory rows such as `workspace/` or `src/` and confirm the browser navigates with `clay.workspace.openDirectory`, shows a `../` parent row for non-root directories, and stays inside the selected workspace root.
-6. Open `tests/fixtures/configuration/file-browser-workflow/workspace/main.rs`, `main.ts`, and `main.js` (or equivalent files under the selected folder). The file opens through the generic open-document path, activates the Rust/TypeScript/JavaScript language package when matched, and decorations/status/completions may arrive asynchronously. Confirm visible syntax highlighting appears as distinct token-family background tints.
-7. Select text in an opened file and press the native copy shortcut (`Ctrl+C` on Linux/Windows, `Cmd+C` on macOS) or the configured `Ctrl+Shift+C` route. Confirm only the selected UTF-8 text is copied to the OS clipboard; a collapsed selection is a no-op.
-8. Type a small edit and scroll. File-browser and editor scroll directions must match wheel/trackpad intent, long files must scroll without snapping back to the caret, and ordinary typing, paint, layout, pointer, and scroll must remain client-local/non-blocking; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling.
+3. Press `Ctrl+O` (or the configured open-file binding) and choose a Markdown file in the native file picker. On Linux this uses xdg-desktop-portal `OpenFile` with Markdown/all-files filters; cancellation is a non-error no-op. Confirm the selected file opens through the existing selected-file grant path without expanding sibling-directory authority.
+4. Press `Ctrl+Shift+O` and choose a regular folder in the native folder picker. On Linux this uses xdg-desktop-portal with `directory=true`; cancellation is a non-error no-op.
+5. Confirm Clay adds only the selected folder as a server-validated workspace root and refreshes the Workspace browser. The selected-folder path is protected by the same selected-path capability family as selected-file opens.
+6. Click directory rows such as `workspace/` or `src/` and confirm the browser navigates with `clay.workspace.openDirectory`, shows a `../` parent row for non-root directories, and stays inside the selected workspace root.
+7. Open `tests/fixtures/configuration/file-browser-workflow/workspace/main.rs`, `main.ts`, and `main.js` (or equivalent files under the selected folder). The file opens through the generic open-document path, activates the Rust/TypeScript/JavaScript language package when matched, and decorations/status/completions may arrive asynchronously. Confirm visible syntax highlighting appears as distinct token-family background tints.
+8. Select text in an opened file and press the native copy shortcut (`Ctrl+C` on Linux/Windows, `Cmd+C` on macOS) or the configured `Ctrl+Shift+C` route. Confirm only the selected UTF-8 text is copied to the OS clipboard; a collapsed selection is a no-op. Then verify cut (`Ctrl+X`) deletes after copying and paste (`Ctrl+V`) inserts or replaces as an ordinary local edit. Where an input method is available (for example ibus/fcitx on Linux), confirm IME preedit paints as an underlined overlay without changing saved document text until commit, and that Escape/focus loss cancels unfinished composition.
+9. Type a small edit and scroll. File-browser and editor scroll directions must match wheel/trackpad intent, long files must scroll without snapping back to the caret, and ordinary typing, paint, layout, pointer, and scroll must remain client-local/non-blocking; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling.
 
-Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, read the clipboard, paste/cut, or write arbitrary clipboard text. Copy selection is write-only and limited to the current native editor selection.
+Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, or invent package clipboard-contents APIs. Copy selection is write-only and limited to the current native editor selection; cut/paste are separate Clay-owned user-mediated client commands.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/file-browser bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, and `copy_selection_failure_reports_runtime_diagnostic` cover clipboard copy behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/file-browser bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
 
 ### Phase 19 Windows Markdown open-dialog smoke contract
 
+The Phase 19 Windows Markdown open-dialog smoke still documents the Windows native dialog backend matrix for Windows 11 validation.
+
 Phase 19 starts from this baseline:
 
-- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `clay.documents.clientOpenFileDialog` client UI command, the Windows native dialog backend that filters for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
+- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `clay.documents.clientOpenFileDialog` client UI command, native file-open backends on Windows (Shell COM), Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) that filter for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
 - Save exists for Phase 9 workspace documents, but saving a file picked through the Phase 19 dialog is not part of this manual smoke contract.
 
 The in-scope manual Windows 11 smoke scenario is edit-only:
@@ -395,7 +401,7 @@ Out of scope for the Phase 19 Windows Markdown open-dialog smoke only: saving th
 
 Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
 
-On non-Windows platforms during the Phase 19 Windows Markdown file-dialog smoke, `clay.documents.clientOpenFileDialog` should report an unsupported diagnostic/status without panics. Linux native folder selection is validated by the separate `clay.workspace.clientOpenFolderDialog` workflow smoke.
+The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix. On Linux and macOS, `clay.documents.clientOpenFileDialog` opens the native file picker (xdg-desktop-portal / `NSOpenPanel`) and still routes through selected-file capability grants; unsupported platforms report a diagnostic/status without panics. Linux native folder selection remains validated by the `clay.workspace.clientOpenFolderDialog` workflow smoke; macOS folder selection uses the same `NSOpenPanel` backend in directory mode.
 
 ### Phase 18.11 completion provider smoke
 

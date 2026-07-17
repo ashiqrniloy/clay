@@ -44,7 +44,7 @@ Most of the workflow already maps to generic Clay primitives. The remaining gaps
 
 - `clay.documents.clientOpenFileDialog` is a bindable `ClientUiCommand` route. The native client owns the modal prompt; the server owns validation and the selected-file grant.
 - `FileOpenCapabilityPool` issues single-use tokens for selected-file opens, and `ClientMessage::OpenSelectedFile` is rejected without a valid token.
-- The current backend is Windows Markdown-file-only; non-Windows returns `Unsupported`. This proves the command routing boundary but not selected-folder support.
+- Historical note: the Phase 19 Windows Markdown-file-only backend initially returned `Unsupported` on non-Windows; Phase 20 added Linux portal and macOS `NSOpenPanel` file-open backends while keeping selected-path grant consumption unchanged.
 
 ### Language activation and package behavior
 

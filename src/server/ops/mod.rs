@@ -293,6 +293,17 @@ impl ClayOpState {
         self.language_server_process.clone()
     }
 
+    /// Terminate every language-server session owned by this runtime generation.
+    pub(crate) async fn shutdown_language_server_sessions(&self) -> usize {
+        self.language_server_process.shutdown_all().await
+    }
+
+    /// Live language-server session count for generation-cleanup diagnostics.
+    #[cfg(test)]
+    pub(crate) async fn language_server_session_count(&self) -> usize {
+        self.language_server_process.session_count().await
+    }
+
     pub(crate) fn begin_evaluation(&self) {
         self.runtime_records
             .lock()
@@ -644,6 +655,16 @@ impl ClayOpState {
         crate::server::command_execution::CommandExecutionResult,
         crate::server::command_execution::CommandExecutionDiagnostic,
     > {
+        if crate::server::command_execution::is_reload_command(&request.command_id) {
+            return Err(
+                crate::server::command_execution::CommandExecutionDiagnostic {
+                    command_id: request.command_id,
+                    rule:
+                        crate::server::command_execution::CommandExecutionRule::UnauthorizedTarget,
+                    message: "runtime reload requires a user command intent".to_string(),
+                },
+            );
+        }
         let executor = crate::server::command_execution::CommandExecutor::new();
         // Phase 18.9 mode-discovery commands resolve their payload by reading
         // installed `ModeRegistry` state (read-only; no filesystem scan, package

@@ -16,6 +16,8 @@ The package is explicit opt-in and is not auto-loaded. Without this line, `.js`/
 
 Optional customization is exposed through documented Clay/package JS APIs. For example, after `loadPackage("@clay/javascript")` a user can bind `javascript.toggleLineComment` to a key or toggle a package option; the default load line itself never needs to inline the package manifest.
 
+Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/javascript")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. JavaScript mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `loadEntry`; failed reloads keep the prior JavaScript generation active. No JavaScript-specific reload callback or copied manifest is required.
+
 ## Contract
 
 - `package.json` name: `@clay/javascript`

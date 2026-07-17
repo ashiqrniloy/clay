@@ -14,6 +14,10 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "clientSetCursorStyle",
             "clientSetViewport",
             "clientCopySelection",
+            "clientCutSelection",
+            "clientPasteClipboard",
+            "clientUndo",
+            "clientRedo",
         ],
     ),
     (

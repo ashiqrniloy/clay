@@ -19,6 +19,10 @@ use clay::{
             INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
             LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, LANGUAGE_SERVER_MAX_SESSIONS,
             LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES, LANGUAGE_SERVER_STDERR_BUDGET_BYTES,
+            PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS, PREVIOUS_BEHAVIOR_GRACE_MS,
+            RUNTIME_STATE_BROADCAST_CAPACITY, RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS,
+            RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES,
+            RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS, RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS,
             SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
             SYNTAX_CACHE_BUDGET_BYTES,
         },
@@ -33,7 +37,7 @@ use clay::{
         LanguageIntelligenceResult, LanguageIntelligenceStatus, ParseByteRange,
         ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowRequest, ParseWindowSnapshot,
         ServerMessage, SyntaxMemoryBudget,
-        codec::{Codec, CodecError},
+        codec::{Codec, CodecError, DEFAULT_MAX_FRAME_SIZE},
     },
     server::{
         parse_coordinator::{ParseCoordinator, ParseScheduleRequest},
@@ -837,6 +841,21 @@ fn phase18_21_language_server_and_document_analysis_budgets_are_locked() {
     assert_eq!(DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, 8 * 1024);
     assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
     assert_eq!(LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
+}
+
+#[test]
+fn phase19_runtime_state_snapshot_and_grace_budgets_are_locked() {
+    assert_eq!(RUNTIME_STATE_BROADCAST_CAPACITY, 16);
+    assert_eq!(RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS, 64);
+    assert_eq!(RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS, 32);
+    assert_eq!(RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES, 768 * 1024);
+    assert_eq!(RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS, 16);
+    assert_eq!(PREVIOUS_BEHAVIOR_GRACE_MS, 2_000);
+    assert_eq!(PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS, 256);
+    assert_eq!(DEFAULT_MAX_FRAME_SIZE, 1024 * 1024);
+    const {
+        assert!(RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES < DEFAULT_MAX_FRAME_SIZE);
+    }
 }
 
 #[test]

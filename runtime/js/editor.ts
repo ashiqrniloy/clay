@@ -7,6 +7,10 @@
 
 export type DocumentId = string;
 export type ClientCopySelectionCommandId = "clay.editor.clientCopySelection";
+export type ClientCutSelectionCommandId = "clay.editor.clientCutSelection";
+export type ClientPasteClipboardCommandId = "clay.editor.clientPasteClipboard";
+export type ClientUndoCommandId = "clay.editor.clientUndo";
+export type ClientRedoCommandId = "clay.editor.clientRedo";
 
 export interface EditResult {
   accepted: boolean;
@@ -134,4 +138,20 @@ export function clientSetViewport(options: ClientSetViewportOptions): { document
 
 export function clientCopySelection(): ClientCopySelectionCommandId {
   return "clay.editor.clientCopySelection";
+}
+
+export function clientCutSelection(): ClientCutSelectionCommandId {
+  return "clay.editor.clientCutSelection";
+}
+
+export function clientPasteClipboard(): ClientPasteClipboardCommandId {
+  return "clay.editor.clientPasteClipboard";
+}
+
+export function clientUndo(): ClientUndoCommandId {
+  return "clay.editor.clientUndo";
+}
+
+export function clientRedo(): ClientRedoCommandId {
+  return "clay.editor.clientRedo";
 }

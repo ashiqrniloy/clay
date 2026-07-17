@@ -4,6 +4,7 @@ pub mod decorations;
 pub mod diagnostics;
 pub mod language_intelligence;
 pub mod parse;
+pub mod runtime;
 pub mod sdui;
 
 pub use completion::*;
@@ -11,6 +12,7 @@ pub use decorations::*;
 pub use diagnostics::*;
 pub use language_intelligence::*;
 pub use parse::*;
+pub use runtime::*;
 pub use sdui::*;
 
 /// Current wire protocol version for the local Clay IPC boundary.
@@ -18,7 +20,7 @@ pub use sdui::*;
 /// Version 2 added `DecorationViewportRequest`; version 3 adds grouped native
 /// decoration chunks and removes grammar-recovery diagnostics. Older server
 /// processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -701,6 +703,14 @@ pub enum ClientMessage {
     LanguageIntelligenceRequest {
         request: LanguageIntelligenceRequest,
     },
+    /// Phase 19 acknowledgement that the client validated and atomically
+    /// installed `RuntimeStateSnapshot` for the named runtime generation.
+    /// Controls stale-edit grace eligibility only; the server never waits on
+    /// this message during commit.
+    RuntimeGenerationInstalled {
+        client_id: ClientId,
+        runtime_generation_id: RuntimeGenerationId,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -997,6 +1007,12 @@ pub enum ServerMessage {
     /// User-owned typography snapshot. It is independently revisioned because
     /// family/size changes affect shaping and geometry, unlike theme colors.
     ActiveTypography(ActiveTypography),
+    /// Phase 19 complete runtime-generation snapshot for atomic client install.
+    /// Sent after a successful generation commit (and on lag recovery) instead
+    /// of independent Behavior/Theme/Typography/SDUI messages for live reload.
+    /// Boxed because the complete snapshot is substantially larger than other
+    /// server-message variants.
+    RuntimeStateSnapshot(Box<RuntimeStateSnapshot>),
     Error {
         code: ProtocolErrorCode,
         message: String,

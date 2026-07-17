@@ -674,7 +674,7 @@ fn phase19_hot_reload_primitive_review_is_linked_and_pins_generic_gaps() {
 
     for phrase in [
         "RuntimeGenerationStore",
-        "atomic reload swap",
+        "serialized candidate commit",
         "package cache invalidation",
         "parse-handler generation replacement",
         "open-document refresh",
@@ -763,6 +763,73 @@ fn phase19_package_author_docs_cover_reload_runtime_lifecycle() {
             "package author/runtime docs must cover Phase 19 reload phrase `{phrase}`"
         );
     }
+}
+
+#[test]
+fn package_author_docs_cover_generation_local_state_and_rollback() {
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let package_loading = read("docs/reference/primitives/package-loading.md");
+    let wiki = read("docs/wiki/modules/package-loading.md");
+    let facade = read("runtime/js/packages.ts");
+    let rust = read("docs/reference/packages/rust.md");
+    let typescript = read("docs/reference/packages/typescript.md");
+    let javascript = read("docs/reference/packages/javascript.md");
+
+    for phrase in [
+        "Package Reload Lifecycle",
+        "Generation-local",
+        "Explicitly persistent user/workspace state",
+        "Unsupported migration hooks",
+        "onReload",
+        "migrateState",
+        "force: true",
+        "empty `globalThis.__clayLoadedPackages`",
+        "keep the previous generation active",
+        "authorizeLanguageServer",
+        "does not broaden",
+        "viewport-prioritized",
+    ] {
+        assert!(
+            [&package_guide, &package_loading, &wiki, &facade]
+                .iter()
+                .any(|source| source.contains(phrase)),
+            "package reload lifecycle docs must cover `{phrase}`"
+        );
+    }
+
+    for (path, source, specifier) in [
+        ("rust.md", &rust, "@clay/rust"),
+        ("typescript.md", &typescript, "@clay/typescript"),
+        ("javascript.md", &javascript, "@clay/javascript"),
+    ] {
+        assert!(
+            source.contains(&format!("await loadPackage(\"{specifier}\")")),
+            "{path} must preserve one-line loadPackage"
+        );
+        assert!(
+            source.contains("empty `globalThis.__clayLoadedPackages` cache"),
+            "{path} must document generation-local cache invalidation"
+        );
+        assert!(
+            source.contains("failed reloads keep the prior")
+                || source.contains("Failed reloads keep the prior"),
+            "{path} must document rollback keeping the prior generation"
+        );
+    }
+
+    assert!(
+        package_loading.contains("## Package Reload Lifecycle"),
+        "package-loading primitive must promote reload lifecycle out of deferrals"
+    );
+    assert!(
+        !package_guide.contains("hot reload remain **Planned/target**"),
+        "creating-packages must not still mark hot reload as Planned/target"
+    );
+    assert!(
+        facade.contains("Generation-local only")
+            || facade.contains("no package reload callback API"),
+        "packages.ts must document generation-local cache and rejected force/callback APIs"
+    );
 }
 
 #[test]

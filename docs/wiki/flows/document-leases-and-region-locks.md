@@ -4,6 +4,7 @@
 
 - `src/protocol/mod.rs`
 - `src/server/document.rs`
+- `src/server/locks.rs`
 - `src/server/connection.rs`
 - `src/client/mod.rs`
 - `src/editor/surface.rs`
@@ -27,6 +28,8 @@ During handshake, `send_welcome_snapshot_and_manifest` locks the shared `Documen
 Every edit message includes both `client_id` and `lease_id`. `DocumentState::apply_edit` rejects edits before mutation when there is no active lease, the message omits a lease, or the client/lease pair does not match the active holder. Missing authority returns `LeaseRequired`; stale, guessed, or replayed lease IDs return `LeaseExpired { lease_id }`. Read-only clients are stopped twice: `EditorSurface` does not produce mutation events for read-only snapshots, and `ClientEditQueue` rolls back pending reservations instead of sending an edit when no lease ID is configured.
 
 Region locks are server-internal metadata stored in `DocumentState::region_locks`. `register_region_lock` validates that each lock range is non-empty, in bounds, and aligned to UTF-8 character boundaries, then records a lock ID, byte range, owner metadata, and the document version at which the lock was created. Phase 5 exposes conflict metadata in protocol rejections, but it does not expose public lock-management APIs or AI/extension mutation authority.
+
+Phase 19 adds a separate transient `ScopedLockManager` for command/service mutation scopes. `ScopedLockTarget` carries range coordinates or document identity where `LockScope` alone is not enough, and `ScopedLockGuard` releases on drop. Range locks share `ranges_overlap` with `DocumentState`; document/range conflicts are document-local, behavior locks do not block ordinary document edits, and workspace locks conflict with every scope. Acquisition is immediate rather than queued, so callers remain cancellable and can return a typed conflict. Runtime reload currently uses only the behavior target during final commit; other targets are generic primitives for later server/AI mutations.
 
 Before rope mutation, the server converts each edit into an affected range. Inserts conflict when the insertion offset falls inside a locked half-open range. Delete and replace spans conflict when their half-open byte range overlaps a lock. Empty replace ranges are treated like inserts so a client cannot bypass a lock by changing operation shape. A conflict returns `EditRejection::RegionLocked { conflict }` with the lock ID, range, owner, and creation version; the canonical rope, document version, and last transaction ID remain unchanged.
 
@@ -75,6 +78,7 @@ let response = document.apply_edit(
 - `src/editor/surface.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
 - `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side authority enforcement.
 - `src/server/document.rs`: region-lock tests validate insert/delete conflicts, non-overlapping edits, invalid lock range rejection, and conflict metadata.
+- `src/server/locks.rs`: tests validate range/document/workspace conflict rules and behavior-lock RAII release.
 - `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflicts across the real Unix socket IPC path.
 - Relevant commands: `cargo test server --quiet`, `cargo test client --quiet`, `cargo test --quiet`.
 

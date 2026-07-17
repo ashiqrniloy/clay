@@ -87,6 +87,12 @@ impl StaticSduiState {
             .map(|tree| ServerMessage::SduiSnapshot { client_id, tree })
     }
 
+    pub(crate) fn cloned_tree_or_default(&self) -> SduiTree {
+        self.tree
+            .clone()
+            .unwrap_or_else(|| default_document_tree(self.document_id, 1))
+    }
+
     pub(crate) fn replace_with_runtime_tree(
         &mut self,
         tree: SduiTree,

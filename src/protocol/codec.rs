@@ -257,16 +257,16 @@ mod tests {
             SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         },
         protocol::{
-            BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
-            CompletionRejection, CompletionReplacementRange, CompletionRequest,
-            CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentAccess,
-            DocumentMetadata, EditOperation, EditRejection, FileErrorCode,
-            LanguageIntelligenceFeature, LanguageIntelligencePayload,
+            ActiveTheme, ActiveTypography, BehaviorManifest, ClientMessage, CompletionItem,
+            CompletionProvenance, CompletionRejection, CompletionReplacementRange,
+            CompletionRequest, CompletionResultSet, CompletionStatus, CompletionTrigger,
+            DocumentAccess, DocumentMetadata, DocumentRuntimeRenderState, EditOperation,
+            EditRejection, FileErrorCode, LanguageIntelligenceFeature, LanguageIntelligencePayload,
             LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceResult,
-            LanguageIntelligenceStatus, LockOwner, PROTOCOL_VERSION, RegionLockConflict,
-            RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
-            SduiNodeId, SduiNodeKind, SduiTree, SduiTreeUpdate, ServerMessage,
-            representative_panel_update, representative_sdui_tree,
+            LanguageIntelligenceStatus, LockOwner, PROTOCOL_VERSION, PackageUiSnapshot,
+            RegionLockConflict, RuntimeDiagnostic, RuntimeStateSnapshot, SduiActionIntent,
+            SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
+            SduiTreeUpdate, ServerMessage, representative_panel_update, representative_sdui_tree,
         },
     };
 
@@ -940,6 +940,72 @@ mod tests {
         let error = codec.decode_server_message(&frame).unwrap_err();
 
         assert!(matches!(error, CodecError::Deserialize(_)));
+    }
+
+    #[test]
+    fn runtime_state_snapshot_round_trips_with_generation_and_bounded_payload() {
+        let codec = Codec::default();
+        let snapshot = RuntimeStateSnapshot {
+            runtime_generation_id: 2,
+            client_id: 9,
+            behavior: BehaviorManifest::minimal_text_editing(4),
+            active_theme: ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            },
+            active_typography: ActiveTypography::default(),
+            sdui_tree: representative_sdui_tree(),
+            package_ui: PackageUiSnapshot { version: 2 },
+            documents: vec![DocumentRuntimeRenderState {
+                document_id: 1,
+                document_version: 3,
+                reset_decorations: true,
+                reset_diagnostics: true,
+                initial_decorations: None,
+                initial_diagnostics: None,
+            }],
+            diagnostics: vec![RuntimeDiagnostic::error(
+                "clay.runtime.reload_succeeded",
+                "Configuration reloaded.",
+            )],
+        };
+        snapshot.validate().expect("fixture snapshot is valid");
+        let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot));
+        let frame = codec.encode_server_message(&message).unwrap();
+        assert!(frame.len() < DEFAULT_MAX_FRAME_SIZE);
+        assert_eq!(codec.decode_server_message(&frame).unwrap(), message);
+
+        let ack = ClientMessage::RuntimeGenerationInstalled {
+            client_id: 9,
+            runtime_generation_id: 2,
+        };
+        let ack_frame = codec.encode_client_message(&ack).unwrap();
+        assert_eq!(codec.decode_client_message(&ack_frame).unwrap(), ack);
+    }
+
+    #[test]
+    fn oversized_or_invalid_runtime_snapshot_is_rejected_before_install() {
+        let codec = Codec::new(64);
+        let mut snapshot = RuntimeStateSnapshot {
+            runtime_generation_id: 2,
+            client_id: 1,
+            behavior: BehaviorManifest::minimal_text_editing(1),
+            active_theme: ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            },
+            active_typography: ActiveTypography::default(),
+            sdui_tree: representative_sdui_tree(),
+            package_ui: PackageUiSnapshot::default(),
+            documents: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot.clone()));
+        let error = codec.encode_server_message(&message).unwrap_err();
+        assert!(matches!(error, CodecError::FrameTooLarge { max: 64, .. }));
+
+        snapshot.behavior.manifest_id.clear();
+        assert!(snapshot.validate().is_err());
     }
 
     /// A full-text protocol message (`InitialDocument`) carrying more text than

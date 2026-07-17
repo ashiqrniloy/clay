@@ -88,7 +88,7 @@ Phase 18.21 replaces the text-only `send`/`read` with exact byte `sendBytes`/`re
 
 `LanguageServerError` distinguishes unauthorized/mismatched sessions, unknown sessions, too many sessions, payload overflow, spawn/I/O failure, timeout, child exit, and invalid roots. Facade ops translate failures to stable Clay error codes and do not expose raw process handles or unrestricted stderr.
 
-Every operation rechecks the current grant using package name, contribution ID, and descriptor fingerprint. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which kills and reaps every owned session. Runtime service replacement/drop closes the route and performs the same cleanup.
+Every operation rechecks the current grant using package name, contribution ID, and descriptor fingerprint. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which kills and reaps every owned session. Runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_generation_resources` so previous-generation sessions end immediately; service replacement/drop closes the route and performs the same cleanup.
 
 ## Primitive Coverage
 
@@ -146,5 +146,6 @@ cargo test --test editor_performance_invariants
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Third-Party Runtime Authority](third-party-runtime-authority.md)
 - [Package Loading](package-loading.md)
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `shutdown_all` kills and reaps all previous-generation language-server sessions after atomic commit; `shutdown_generation_resources` delegates through `ClayJsRuntimeService`.
 - [Package Security Reference](../../reference/primitives/package-security.md)
 - [LSP 3.17 Bridge Contract](../../reference/primitives/language-intelligence.md)

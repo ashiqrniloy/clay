@@ -18,7 +18,7 @@ key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; native dialog execution requires explicit user key routing, selected files are server-validated as single-file grants, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, broad filesystem/workspace authority, or client-side JavaScript authority.
 agent_guidance: Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion, package loading, shell/network effects, WASM, AI mutation, or client-side JavaScript execution.
-lookup_tags: [documents, open-dialog, file-dialog, windows, markdown, keybindings, js-api]
+lookup_tags: [documents, open-dialog, file-dialog, windows, linux, macos, markdown, keybindings, js-api]
 app_visible: true
 help_visible: true
 stability: runtime-backed-command
@@ -66,11 +66,11 @@ import { bindKey } from "clay:keybindings";
 bindKey("Ctrl+O", clientOpenFileDialog(), { scope: "editor" });
 ```
 
-On Windows, the configured key opens the native file browser with fixed Markdown filters for `.md`, `.markdown`, and `.mdown`, plus an all-files fallback. On unsupported platforms the command reports a diagnostic/status instead of panicking. Cancellation is a non-error no-op, and selected-file-only server validation applies before Clay opens the document.
+On Windows, Linux, and macOS, the configured key opens the native file browser with fixed Markdown filters for `.md`, `.markdown`, and `.mdown`, plus an all-files fallback (Windows/Linux filter dropdown; macOS Markdown extensions with other types allowed). On unsupported platforms the command reports a diagnostic/status instead of panicking. Cancellation is a non-error no-op, and selected-file-only server validation applies before Clay opens the document.
 
 ## Options
 
-No options are accepted by `clientOpenFileDialog`. Dialog filters, default directory behavior, and save behavior are not configurable in Phase 19. The fixed defaults are Windows-only native dialog support, Markdown/all-files filters, cancellation as a no-op, and edit-only selected-file opening with save intentionally out of scope.
+No options are accepted by `clientOpenFileDialog`. Dialog filters, default directory behavior, and save behavior are not configurable through this API. The fixed defaults are native dialog support on Windows, Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`), Markdown/all-files filters, cancellation as a no-op, and selected-file opening that still consumes server-issued single-use capabilities.
 
 ## Key bindings
 
@@ -121,4 +121,4 @@ Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKe
 - Module/export: `clay:documents` / `clientOpenFileDialog`
 - Default key bindings: none
 - Custom properties: none
-- Tags: `[documents, open-dialog, file-dialog, windows, markdown, keybindings, js-api]`
+- Tags: `[documents, open-dialog, file-dialog, windows, linux, macos, markdown, keybindings, js-api]`

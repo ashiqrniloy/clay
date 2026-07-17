@@ -184,6 +184,9 @@ pub enum SyntaxGrammarRegistryError {
         target: String,
         tier: String,
     },
+    InvalidSnapshotArtifact {
+        id: String,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -378,6 +381,28 @@ impl SyntaxGrammarRegistry {
 
     pub fn first_party_native_descriptors() -> &'static [NativeGrammarDescriptor] {
         FIRST_PARTY_NATIVE_GRAMMARS
+    }
+
+    pub(crate) fn validate_snapshot(
+        grammars: &[SyntaxGrammarContribution],
+        engine_preferences: &BTreeMap<String, SyntaxEngineTier>,
+    ) -> Result<(), SyntaxGrammarRegistryError> {
+        let mut registry = Self::new();
+        for (target, tier) in engine_preferences {
+            registry.set_engine_preference(target, *tier)?;
+        }
+        for grammar in grammars {
+            if grammar.engine_tier == SyntaxEngineTier::Wasm
+                && grammar.web_tree_sitter_artifact_contract().is_err()
+            {
+                return Err(SyntaxGrammarRegistryError::InvalidSnapshotArtifact {
+                    id: grammar.id.clone(),
+                });
+            }
+            registry.validate_no_conflict(grammar)?;
+            registry.insert_contribution(grammar.clone());
+        }
+        Ok(())
     }
 
     pub fn register_first_party_native_grammars(

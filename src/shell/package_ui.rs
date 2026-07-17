@@ -16,7 +16,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use masonry::kurbo::Rect;
 use serde_json::{Map, Value};
 
-use crate::{editor::typography::UiTextVariant, protocol::FontRole};
+use crate::{
+    editor::typography::UiTextVariant,
+    protocol::{FontRole, PackageUiSnapshot},
+};
 
 use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
 use super::transient_menu::{
@@ -245,6 +248,18 @@ impl PackageUiRuntimeState {
         self.transient_overlays = transient_overlays;
         self.input_routing = input_routing;
         Ok(())
+    }
+
+    /// Replace package UI for a runtime-generation snapshot.
+    ///
+    /// Contribution payloads are empty until package UI crosses IPC, so this
+    /// clears previous panels/overlays/routes and advances the version to the
+    /// snapshot generation under one install boundary.
+    pub(crate) fn install_runtime_snapshot(&mut self, snapshot: &PackageUiSnapshot) {
+        self.version = snapshot.version;
+        self.fixed_panels.clear();
+        self.transient_overlays.clear();
+        self.input_routing.clear();
     }
 
     pub(crate) fn slot_layout(&self) -> PaneSlotLayout {

@@ -1,16 +1,19 @@
 pub(crate) mod behavior;
 pub mod clipboard;
 pub mod file_dialog;
+pub(crate) mod runtime_state;
 
 pub use behavior::ClientUiCommandRoute;
 pub use behavior::language_intelligence_feature_for_command;
 pub use clipboard::{
     ClipboardError, ClipboardSink, SystemClipboard, copy_text_to_system_clipboard,
+    read_text_from_system_clipboard,
 };
 pub use file_dialog::{
     FileDialogFilter, FileDialogResult, markdown_file_dialog_filters, open_folder_dialog,
     open_markdown_file_dialog,
 };
+pub(crate) use runtime_state::{ClientRuntimeStateCandidate, ClientRuntimeStateInstallError};
 
 use std::{
     collections::VecDeque,
@@ -210,6 +213,10 @@ impl ClientEditQueue {
         )
     }
 
+    pub(crate) fn client_id(&self) -> ClientId {
+        self.client_id
+    }
+
     pub fn from_sender(sender: mpsc::Sender<ClientMessage>) -> Self {
         Self {
             sender,
@@ -316,6 +323,18 @@ impl ClientEditQueue {
             behavior_version,
             command_id,
         })
+    }
+
+    /// Acknowledge a fully installed runtime generation after atomic client install.
+    pub(crate) fn enqueue_runtime_generation_installed(
+        &self,
+        runtime_generation_id: crate::protocol::RuntimeGenerationId,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender
+            .try_send(ClientMessage::RuntimeGenerationInstalled {
+                client_id: self.client_id,
+                runtime_generation_id,
+            })
     }
 
     pub(crate) fn enqueue_completion_request(
@@ -470,6 +489,8 @@ pub enum ClientConnectionEvent {
     },
     ActiveTheme(crate::protocol::ActiveTheme),
     ActiveTypography(ActiveTypography),
+    /// Phase 19 complete runtime-generation snapshot staged for atomic install.
+    RuntimeStateSnapshot(Box<crate::protocol::RuntimeStateSnapshot>),
     ResyncSnapshot(ClientResyncSnapshot),
     DocumentOpened {
         metadata: DocumentMetadata,
@@ -789,6 +810,7 @@ fn rejection_requests_resync(reason: &EditRejection) -> bool {
             | EditRejection::LeaseExpired { .. }
             | EditRejection::ReadOnlyDocument
             | EditRejection::RegionLocked { .. }
+            | EditRejection::InvalidBehaviorVersion { .. }
     )
 }
 
@@ -931,6 +953,22 @@ async fn run_connection<S>(
                         let _ = events.send(ClientConnectionEvent::ActiveTypography(typography)).await;
                     }
                     Ok(ServerMessage::ActiveTypography(_)) => {}
+                    Ok(ServerMessage::RuntimeStateSnapshot(snapshot)) => {
+                        // Protocol-level gate only. Full candidate validation and
+                        // atomic install happen in the editor; acknowledgement is
+                        // sent only after that install succeeds.
+                        if snapshot.client_id != client_id || snapshot.validate().is_err() {
+                            let _ = events
+                                .send(ClientConnectionEvent::ConnectionError(
+                                    "invalid runtime state snapshot".to_string(),
+                                ))
+                                .await;
+                            return;
+                        }
+                        let _ = events
+                            .send(ClientConnectionEvent::RuntimeStateSnapshot(snapshot))
+                            .await;
+                    }
                     Ok(ServerMessage::BehaviorManifest(manifest)) => {
                         let behavior_version = manifest.behavior_version;
                         let install_result = behavior_state
@@ -1048,6 +1086,16 @@ mod tests {
             }
         }
         panic!("failed to connect to test socket: {:?}", last_error);
+    }
+
+    #[test]
+    fn invalid_behavior_version_rejection_requests_resync() {
+        assert!(super::rejection_requests_resync(
+            &crate::protocol::EditRejection::InvalidBehaviorVersion {
+                behavior_version: 1,
+                server_behavior_version: 2,
+            }
+        ));
     }
 
     #[cfg(windows)]
@@ -2547,6 +2595,177 @@ mod tests {
                 manifest: BehaviorManifest::minimal_text_editing(5),
             }
         );
+        server_task.await.unwrap();
+    }
+
+    fn sample_runtime_snapshot(
+        generation: u64,
+        client_id: u64,
+    ) -> crate::protocol::RuntimeStateSnapshot {
+        let snapshot = crate::protocol::RuntimeStateSnapshot {
+            runtime_generation_id: generation,
+            client_id,
+            behavior: BehaviorManifest::minimal_text_editing(generation),
+            active_theme: crate::protocol::ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            },
+            active_typography: ActiveTypography::default(),
+            sdui_tree: SduiTree {
+                ui_version: generation,
+                root_id: SduiNodeId(1),
+                nodes: vec![SduiNode::new(
+                    SduiNodeId(1),
+                    SduiNodeKind::Label {
+                        text: format!("gen-{generation}"),
+                    },
+                )],
+            },
+            package_ui: crate::protocol::PackageUiSnapshot {
+                version: generation,
+            },
+            documents: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        snapshot.validate().expect("fixture");
+        snapshot
+    }
+
+    async fn write_minimal_bootstrap(
+        codec: &Codec,
+        server: &mut tokio::io::DuplexStream,
+        client_id: u64,
+    ) {
+        let _hello = codec.read_client_message(server).await.unwrap();
+        codec
+            .write_server_message(
+                server,
+                &ServerMessage::Welcome {
+                    client_id,
+                    protocol_version: PROTOCOL_VERSION,
+                },
+            )
+            .await
+            .unwrap();
+        codec
+            .write_server_message(
+                server,
+                &ServerMessage::InitialDocument {
+                    document_id: 2,
+                    version: 3,
+                    text: String::new(),
+                    access: DocumentAccess::Editable { lease_id: 1 },
+                    lease_id: Some(1),
+                },
+            )
+            .await
+            .unwrap();
+        codec
+            .write_server_message(
+                server,
+                &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1)),
+            )
+            .await
+            .unwrap();
+        codec
+            .write_server_message(
+                server,
+                &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
+                    specifier: "@clay/default".to_string(),
+                    overrides: Vec::new(),
+                }),
+            )
+            .await
+            .unwrap();
+        codec
+            .write_server_message(
+                server,
+                &ServerMessage::ActiveTypography(ActiveTypography::default()),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn runtime_state_snapshot_is_staged_without_immediate_ack() {
+        let (client, mut server) = duplex(8192);
+        let codec = Codec::default();
+        let snapshot = sample_runtime_snapshot(2, 1);
+        let server_task = tokio::spawn({
+            let snapshot = snapshot.clone();
+            async move {
+                write_minimal_bootstrap(&codec, &mut server, 1).await;
+                codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::RuntimeStateSnapshot(Box::new(snapshot)),
+                    )
+                    .await
+                    .unwrap();
+                // Receive loop must not acknowledge before editor install.
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(50),
+                    codec.read_client_message(&mut server),
+                )
+                .await
+                {
+                    Err(_) => {}
+                    Ok(Ok(message)) => {
+                        panic!("unexpected client message before install: {message:?}")
+                    }
+                    Ok(Err(_)) => {}
+                }
+            }
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+        match session.events.recv().await.unwrap() {
+            ClientConnectionEvent::RuntimeStateSnapshot(received) => {
+                assert_eq!(received.runtime_generation_id, 2);
+                assert_eq!(received.client_id, 1);
+            }
+            other => panic!("expected staged runtime snapshot, got {other:?}"),
+        }
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_runtime_state_snapshot_fail_closes_without_ack_or_event() {
+        let (client, mut server) = duplex(8192);
+        let codec = Codec::default();
+        let server_task = tokio::spawn({
+            async move {
+                write_minimal_bootstrap(&codec, &mut server, 1).await;
+                let mut invalid = sample_runtime_snapshot(2, 1);
+                invalid.behavior.manifest_id.clear();
+                codec
+                    .write_server_message(
+                        &mut server,
+                        &ServerMessage::RuntimeStateSnapshot(Box::new(invalid)),
+                    )
+                    .await
+                    .unwrap();
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(50),
+                    codec.read_client_message(&mut server),
+                )
+                .await
+                {
+                    Err(_) => {}
+                    Ok(Ok(message)) => panic!("invalid snapshot must not acknowledge: {message:?}"),
+                    Ok(Err(_)) => {}
+                }
+            }
+        });
+
+        let mut session = connect_from_stream(client, codec).await.unwrap();
+        match session.events.recv().await.unwrap() {
+            ClientConnectionEvent::ConnectionError(message) => {
+                assert!(message.contains("invalid runtime state snapshot"));
+            }
+            other => panic!("expected fail-closed connection error, got {other:?}"),
+        }
+        assert!(session.events.recv().await.is_none());
         server_task.await.unwrap();
     }
 

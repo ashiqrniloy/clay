@@ -441,6 +441,56 @@ impl StyleRegistry {
     }
 }
 
+/// Relative luminance (WCAG 2.x) for an sRGB [`Color`], ignoring alpha.
+/// Used only for theme-authoring / polish checks — not on the paint hot path.
+pub fn relative_luminance(color: Color) -> f64 {
+    fn channel(component: f64) -> f64 {
+        let c = component / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    let rgba = color.to_rgba8();
+    0.2126 * channel(f64::from(rgba.r))
+        + 0.7152 * channel(f64::from(rgba.g))
+        + 0.0722 * channel(f64::from(rgba.b))
+}
+
+/// WCAG contrast ratio between two opaque colors. Larger is better; 4.5 is AA
+/// for normal text and is the floor Clay uses for status chrome polish.
+pub fn contrast_ratio(foreground: Color, background: Color) -> f64 {
+    let l1 = relative_luminance(foreground);
+    let l2 = relative_luminance(background);
+    let (lighter, darker) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
+    (lighter + 0.05) / (darker + 0.05)
+}
+
+/// Status-chrome contrast for a resolved registry (`statusText` on `statusBg`).
+pub fn status_chrome_contrast_ratio(registry: &StyleRegistry) -> f64 {
+    contrast_ratio(registry.base.status_text, registry.base.status_bg)
+}
+
+/// Minimum AA contrast Clay expects for themed status chrome.
+pub const STATUS_CHROME_MIN_CONTRAST: f64 = 4.5;
+
+/// True when status chrome meets Clay's AA contrast floor.
+pub fn status_chrome_meets_contrast(registry: &StyleRegistry) -> bool {
+    status_chrome_contrast_ratio(registry) >= STATUS_CHROME_MIN_CONTRAST
+}
+
+/// Compact, path-free theme label for status/accessibility observability.
+/// `"@clay/theme-gruvbox-material-dark"` → `"theme-gruvbox-material-dark"`.
+pub fn theme_display_label(specifier: &str) -> String {
+    specifier
+        .rsplit('/')
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or(specifier)
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,5 +750,24 @@ mod tests {
             )
             .italic
         );
+    }
+
+    #[test]
+    fn clay_default_status_chrome_meets_aa_contrast() {
+        let ratio = status_chrome_contrast_ratio(&StyleRegistry::clay_default());
+        assert!(
+            ratio >= STATUS_CHROME_MIN_CONTRAST,
+            "Clay default status chrome contrast {ratio:.2} must be >= {STATUS_CHROME_MIN_CONTRAST}"
+        );
+    }
+
+    #[test]
+    fn theme_display_label_strips_package_prefix() {
+        assert_eq!(
+            theme_display_label("@clay/theme-gruvbox-material-dark"),
+            "theme-gruvbox-material-dark"
+        );
+        assert_eq!(theme_display_label("@clay/default"), "default");
+        assert_eq!(theme_display_label("local"), "local");
     }
 }

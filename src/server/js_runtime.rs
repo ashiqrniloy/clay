@@ -260,7 +260,9 @@ const CLAY_FACADE_PACKAGES: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
 // Per-runtime-generation cache. Hot reload invalidates it by swapping to a
-// fresh ClayJsRuntimeService, not by mutating globals/module cache in place.
+// fresh ClayJsRuntimeService, not by mutating globals/module cache in place,
+// adding a force flag, or invoking package-authored reload/migration hooks.
+// Generation-local only: this object is empty in every candidate generation.
 const loadedPackages = globalThis.__clayLoadedPackages ??= Object.create(null);
 export function serverValidatePackageManifest(manifest) {
   return parse(ops.op_clay_packages_validate_manifest(JSON.stringify(manifest ?? null)));
@@ -604,6 +606,10 @@ export function clientScrollTo(options) { void options; unavailable("clay.editor
 export function clientSetCursorStyle(options) { void options; unavailable("clay.editor.clientSetCursorStyle"); }
 export function clientSetViewport(options) { void options; unavailable("clay.editor.clientSetViewport"); }
 export function clientCopySelection() { return "clay.editor.clientCopySelection"; }
+export function clientCutSelection() { return "clay.editor.clientCutSelection"; }
+export function clientPasteClipboard() { return "clay.editor.clientPasteClipboard"; }
+export function clientUndo() { return "clay.editor.clientUndo"; }
+export function clientRedo() { return "clay.editor.clientRedo"; }
 "#;
 
 const CLAY_FACADE_THEME: &str = r#"
@@ -856,9 +862,15 @@ impl ClayJsRuntimeService {
     > {
         let mut registered = Vec::new();
         for registration in &evaluation.js_parse_handlers {
-            match coordinator.register_handler_meta_for_generation(
+            if registration.meta.package_prefix != registration.package.manifest.clay.api_prefix {
+                return Err(
+                    crate::server::parse_coordinator::ParseCoordinatorError::ProvenanceMismatch,
+                );
+            }
+            match coordinator.register_handler_for_generation(
+                &registration.package,
                 generation_id,
-                registration.meta.clone(),
+                registration.meta.mode_id.clone(),
                 JsParseHandler {
                     runtime: self.clone(),
                     registration: registration.clone(),
@@ -887,7 +899,7 @@ impl ClayJsRuntimeService {
             registration.meta.generation = generation_id;
             let meta = registration.meta.clone();
             let package = registration.package.clone();
-            match coordinator.register_package(
+            match coordinator.register_package_for_generation(
                 &package,
                 meta.clone(),
                 JsCompletionProvider {
@@ -916,7 +928,7 @@ impl ClayJsRuntimeService {
         for registration in &evaluation.js_language_intelligence_providers {
             let mut meta = registration.meta.clone();
             meta.generation = generation_id;
-            match coordinator.register_package(
+            match coordinator.register_package_for_generation(
                 &registration.package,
                 meta.clone(),
                 JsLanguageIntelligenceProvider {
@@ -1129,10 +1141,9 @@ impl ClayJsRuntimeService {
         result
     }
 
-    pub(crate) fn document_analysis_authorized(
+    pub(crate) fn document_analysis_registration_authorized(
         &self,
         registration: &crate::server::document_analysis::JsDocumentAnalyzerRegistration,
-        workspace_root_id: crate::protocol::WorkspaceRootId,
     ) -> bool {
         use crate::packages::{
             authorization::language_server_descriptor_fingerprint, permissions::PackagePermission,
@@ -1168,22 +1179,37 @@ impl ClayJsRuntimeService {
             .package_service()
             .lock()
             .expect("package service mutex poisoned");
-        let enabled = service.enabled_records().any(|record| {
+        service.enabled_records().any(|record| {
             record.manifest.name == registration.package.manifest.name
                 && record.manifest.version == registration.package.manifest.version
                 && record.manifest.clay.api_prefix == registration.package.manifest.clay.api_prefix
-        });
-        enabled
-            && service
+        }) && service
+            .language_server_grant(
+                &registration.package.manifest.name,
+                &registration.contribution,
+            )
+            .is_some_and(|grant| {
+                grant.descriptor_fingerprint == language_server_descriptor_fingerprint(descriptor)
+            })
+    }
+
+    pub(crate) fn document_analysis_authorized(
+        &self,
+        registration: &crate::server::document_analysis::JsDocumentAnalyzerRegistration,
+        workspace_root_id: crate::protocol::WorkspaceRootId,
+    ) -> bool {
+        self.document_analysis_registration_authorized(registration)
+            && self
+                .worker()
+                .op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned")
                 .language_server_grant(
                     &registration.package.manifest.name,
                     &registration.contribution,
                 )
-                .is_some_and(|grant| {
-                    grant.descriptor_fingerprint
-                        == language_server_descriptor_fingerprint(descriptor)
-                        && grant.workspace_root_ids.contains(&workspace_root_id)
-                })
+                .is_some_and(|grant| grant.workspace_root_ids.contains(&workspace_root_id))
     }
 
     pub(crate) async fn invoke_document_analyzer(
@@ -1265,6 +1291,29 @@ impl ClayJsRuntimeService {
                 .lock()
                 .expect("Clay runtime service worker mutex poisoned"),
         )
+    }
+
+    /// Revoke previous-generation executable process authority after commit.
+    /// Coordinator registrations are cancelled separately; this tears down any
+    /// language-server children still owned by this service.
+    pub(crate) async fn shutdown_generation_resources(&self) -> usize {
+        self.worker()
+            .op_state
+            .shutdown_language_server_sessions()
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn language_server_session_count(&self) -> usize {
+        self.worker().op_state.language_server_session_count().await
+    }
+
+    /// Test-only handle to the generation-owned language-server process service.
+    #[cfg(test)]
+    pub(crate) fn language_server_process_for_test(
+        &self,
+    ) -> crate::server::language_server::LanguageServerProcessService {
+        self.worker().op_state.language_server_process()
     }
 
     fn replace_worker(&self) {
@@ -1366,7 +1415,7 @@ impl crate::server::language_intelligence::LanguageIntelligenceProvider
 }
 
 /// Result of one JavaScript evaluation returned across the Rust boundary.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) op_records: Vec<String>,
     pub(crate) published_sdui_tree: Option<crate::protocol::SduiTree>,
@@ -6027,6 +6076,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn configuration_can_explicitly_bind_reload_without_default_binding() {
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey } from "clay:keybindings";
+                bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" });
+                "#,
+            )
+            .await
+            .expect("bind reload command");
+        let manifest = result.behavior_manifest.expect("bound behavior manifest");
+        let rule = manifest
+            .keymaps
+            .iter()
+            .find(|rule| rule.command_id == "clay.runtime.reloadConfiguration")
+            .expect("explicit reload binding");
+
+        assert_eq!(rule.context, crate::protocol::KeyBindingContext::Global);
+        assert_eq!(
+            rule.routing_policy,
+            crate::protocol::RoutingPolicy::ServerFirstWithLock {
+                lock_scope: crate::protocol::LockScope::Behavior,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn package_javascript_cannot_directly_execute_reload_command() {
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { serverExecuteCommand } from "clay:commands";
+                try {
+                  await serverExecuteCommand("clay.runtime.reloadConfiguration");
+                } catch (error) {
+                  Deno.core.ops.op_clay_runtime_record(String(error));
+                }
+                "#,
+            )
+            .await
+            .expect("reload denial remains a handled JS error");
+
+        assert!(result.op_records.iter().any(|record| {
+            record.contains("UnauthorizedTarget")
+                && record.contains("runtime reload requires a user command intent")
+        }));
+    }
+
+    #[tokio::test]
     async fn configuration_binds_client_ui_file_folder_and_copy_commands() {
         let service = ClayJsRuntimeService::default();
         let result = service
@@ -9148,6 +9246,59 @@ mod tests {
                 .any(|record| record == "loaded-once")
         );
         assert_eq!(result.js_parse_handlers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn load_package_remains_idempotent_inside_one_generation() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = service
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                const first = await loadPackage("@clay/markdown");
+                const second = await loadPackage("@clay/markdown");
+                const third = await loadPackage("@clay/rust");
+                const fourth = await loadPackage("@clay/rust");
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                  markdownSame: first === second,
+                  rustSame: third === fourth,
+                  markdownCached: Boolean(globalThis.__clayLoadedPackages?.["@clay/markdown"]),
+                  rustCached: Boolean(globalThis.__clayLoadedPackages?.["@clay/rust"]),
+                }));
+                "#,
+            )
+            .await
+            .expect("in-generation repeated loads must succeed");
+
+        assert_eq!(
+            evaluation
+                .js_parse_handlers
+                .iter()
+                .filter(|handler| handler.package.manifest.name == "@clay/markdown")
+                .count(),
+            1,
+            "markdown parse handler must register once per generation"
+        );
+        assert_eq!(
+            evaluation
+                .completion_providers
+                .iter()
+                .filter(|provider| provider.id == "rust.keywords")
+                .count(),
+            1,
+            "rust completion provider must register once per generation"
+        );
+        let record = evaluation
+            .op_records
+            .into_iter()
+            .next()
+            .expect("idempotency record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON");
+        assert_eq!(parsed["markdownSame"], true);
+        assert_eq!(parsed["rustSame"], true);
+        assert_eq!(parsed["markdownCached"], true);
+        assert_eq!(parsed["rustCached"], true);
     }
 
     #[tokio::test]

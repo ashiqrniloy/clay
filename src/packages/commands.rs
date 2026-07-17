@@ -194,6 +194,30 @@ impl CommandRegistry {
         self.commands.values()
     }
 
+    /// Remove every command owned by `package_name`. Returns the number removed.
+    /// Used by package disable/revoke withdrawal; runtime reload replaces the
+    /// whole command registry with the next generation's service instead.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "package-scoped command withdrawal is exercised by reload cleanup tests and disable hooks"
+        )
+    )]
+    pub(crate) fn remove_package_commands(&mut self, package_name: &str) -> usize {
+        let removed: Vec<String> = self
+            .commands
+            .iter()
+            .filter(|(_, command)| command.package_name == package_name)
+            .map(|(command_id, _)| command_id.clone())
+            .collect();
+        let count = removed.len();
+        for command_id in removed {
+            self.commands.remove(&command_id);
+        }
+        count
+    }
+
     /// Test-only helper to insert a command directly without package manifest
     /// validation. Used by integration tests that need to exercise routing or
     /// permission combinations that package registration intentionally rejects.

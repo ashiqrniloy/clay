@@ -102,6 +102,7 @@ validate_manifest(&manifest).unwrap();
 
 - [Protocol Codec](protocol-codec.md)
 - [Behavior Runtime Registration](behavior-runtime-registration.md)
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `BehaviorGraceState` stale-edit grace and `InvalidBehaviorVersion` resync.
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
 - [Client Edit Emission](../flows/client-edit-emission.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)

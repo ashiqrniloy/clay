@@ -136,10 +136,21 @@ import { serverPublishDecorations } from "clay:decorations";
 import { serverRegisterParseHandler } from "clay:parse";
 ```
 
+## Package Reload Lifecycle
+
+Phase 19 preserves the one-line `loadPackage` contract. Reload does not add a force flag or package migration hook; it replaces the runtime generation and reruns ordinary configuration:
+
+1. **Candidate prepare:** Construct a fresh `ClayJsRuntimeService` with an empty `globalThis.__clayLoadedPackages` cache and a rebuilt `PackageLoadEntryAllowlist`. Evaluate `~/.config/clay/init.js` so every `await loadPackage(...)` line re-imports and executes package `loadEntry` modules under the same resolver, authorization, package-root confinement, and deny-by-default module rules as startup.
+2. **Validate in isolation:** Stage behavior, theme, typography, SDUI/package UI, modes/commands, syntax grammars, parse/completion/language-intelligence/document-analysis contributions, and open-document refresh metadata without mutating the live generation.
+3. **Atomic commit:** On success, acquire the behavior-scope lock, install the candidate, publish one bounded `RuntimeStateSnapshot` per connected client, cancel older-generation handlers/tasks/workers, shut down previous-generation language-server sessions, and refresh open documents through generic mode activation plus bounded background reparsing. On failure, drop the candidate and keep the prior generation active with sanitized diagnostics.
+4. **Cache invalidation:** Successful swap drops the old service's `PackageLoadEntryAllowlist` and `globalThis.__clayLoadedPackages`. Repeated `loadPackage` calls remain idempotent inside one generation only.
+5. **Authority continuity:** Reload reuses exact user-approved package/process grants declared again by `init.js` (for example `authorizeLanguageServer` before `loadPackage`). It does not broaden source trust, auto-grant bundled `language-server` authority, or leave old-generation workers/sessions live after commit.
+
+Generation-local package state (module closures, handler tokens, sessions, in-memory caches) must be rebuilt from `loadEntry`. Explicitly persistent user/workspace state (open documents, leases, workspace roots, grants, documented package options/layout overrides) lives outside the runtime generation and is re-applied through documented Clay JS APIs. Unsupported migration hooks such as `onReload`/`migrateState` are intentionally absent.
+
 ## Carried-forward deferrals
 
 - **Durable package state:** Runtime `PackageService` can resolve installed/source-aware packages already present in its registry, but durable enable/authorization hydration across server restarts is not implemented; packages are reloaded from configuration each runtime generation.
-- **Hot-reload:** Phase 19 invalidates `loadPackage` state by replacing the runtime generation. The old generation's `PackageLoadEntryAllowlist` and `globalThis.__clayLoadedPackages` are dropped with the old service after a successful swap; failed reloads keep the prior service active.
 - **Authority model update:** `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` supersedes the strict third-party deny-first policy. Resolver tests now cover source-aware package loading through the shared package service path rather than treating source as a capability ceiling.
 
 ## References

@@ -273,6 +273,14 @@ impl SduiNativeState {
         Ok(())
     }
 
+    pub(crate) fn install_package_ui_snapshot(
+        &mut self,
+        snapshot: &crate::protocol::PackageUiSnapshot,
+    ) {
+        self.package_ui.install_runtime_snapshot(snapshot);
+        self.actions.clear();
+    }
+
     pub(crate) fn package_ui_version(&self) -> u64 {
         self.package_ui.version()
     }
@@ -467,7 +475,61 @@ impl SduiNativeState {
                 &mut entries,
             );
         }
+        if let Some(menu) = &self.active_menu
+            && menu.is_active()
+        {
+            let overlay = crate::shell::TransientPackageOverlay::from_menu_session(menu);
+            let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
+            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            self.collect_active_menu_accessibility_entries(menu, rect, &mut cursor_y, &mut entries);
+        }
         entries
+    }
+
+    fn collect_active_menu_accessibility_entries(
+        &self,
+        menu: &crate::shell::TransientMenuSession,
+        rect: Rect,
+        cursor_y: &mut f64,
+        entries: &mut Vec<SduiAccessibilityEntry>,
+    ) {
+        let body = self.body_metrics();
+        let prompt = crate::editor::accessibility::sanitize_recovery_summary(menu.prompt())
+            .unwrap_or_else(|| "Transient menu".to_string());
+        entries.push(SduiAccessibilityEntry {
+            role: Role::Menu,
+            label: Some(prompt.clone()),
+            bounds: Rect::new(rect.x0, rect.y0, rect.x1, rect.y1),
+        });
+        *cursor_y += body.row_height;
+        for (index, item) in menu.items().iter().enumerate() {
+            let selected = index == menu.selected_index();
+            let base = if item.accessibility_label.trim().is_empty() {
+                item.label.clone()
+            } else {
+                item.accessibility_label.clone()
+            };
+            let label = if selected {
+                format!("{base} selected")
+            } else {
+                base
+            };
+            entries.push(SduiAccessibilityEntry {
+                role: Role::MenuItem,
+                label: Some(label),
+                bounds: row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
+            });
+            *cursor_y += body.row_height;
+        }
+        if let crate::shell::TransientMenuStatus::Empty { message } = menu.status()
+            && let Some(summary) = crate::editor::accessibility::sanitize_recovery_summary(message)
+        {
+            entries.push(SduiAccessibilityEntry {
+                role: Role::Status,
+                label: Some(summary),
+                bounds: row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
+            });
+        }
     }
 
     fn collect_accessibility_entries(
@@ -543,7 +605,7 @@ impl SduiNativeState {
             SduiNodeKind::EditorView { binding } => {
                 entries.push(SduiAccessibilityEntry {
                     role: Role::MultilineTextInput,
-                    label: Some(format!("Editor document {}", binding.document_id)),
+                    label: Some(format!("Editor view for document {}", binding.document_id)),
                     bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
                 });
                 *cursor_y += body.row_height;
@@ -913,7 +975,7 @@ impl SduiNativeState {
             }
             SduiNodeKind::EditorView { binding } => nodes.push(SduiAccessibleNode {
                 role: Role::MultilineTextInput,
-                label: Some(format!("Editor document {}", binding.document_id)),
+                label: Some(format!("Editor view for document {}", binding.document_id)),
             }),
             SduiNodeKind::Flex { children, .. } | SduiNodeKind::Stack { children } => {
                 nodes.push(SduiAccessibleNode {
@@ -1545,7 +1607,7 @@ impl Widget for SduiNativeState {
     }
 
     fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
+        Role::Group
     }
 
     fn accessibility(
@@ -1554,7 +1616,7 @@ impl Widget for SduiNativeState {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        node.set_label("Server-driven UI");
+        node.set_label("Server-driven UI panels");
         node.set_children(self.append_accessibility_children(ctx));
     }
 
@@ -2519,10 +2581,10 @@ mod tests {
     }
 
     #[test]
-    fn sdui_accessibility_role_is_generic_container() {
+    fn sdui_accessibility_role_is_group_container() {
         let state = SduiNativeState::empty();
 
-        assert_eq!(state.accessibility_role(), Role::GenericContainer);
+        assert_eq!(state.accessibility_role(), Role::Group);
     }
 
     #[test]
@@ -2586,7 +2648,7 @@ mod tests {
 
         assert!(state.accessibility_nodes().contains(&SduiAccessibleNode {
             role: Role::MultilineTextInput,
-            label: Some("Editor document 7".to_string()),
+            label: Some("Editor view for document 7".to_string()),
         }));
     }
 
@@ -2626,6 +2688,41 @@ mod tests {
         assert_eq!(overlays[0].id, "clay.menu.3");
         assert_eq!(overlays[0].anchor, PackageOverlayAnchor::Bottom);
         assert_eq!(overlays[0].component_kind, "stack");
+    }
+
+    #[test]
+    fn active_menu_exposes_menu_role_and_item_accessibility_labels() {
+        use crate::shell::transient_menu::{TransientMenuAction, TransientMenuItem};
+
+        let mut state = SduiNativeState::empty();
+        let menu = TransientMenuSession::new(TransientMenuSessionId(9), "Conflict recovery")
+            .with_items(vec![
+                TransientMenuItem::new(
+                    "reload",
+                    "Reload",
+                    TransientMenuAction::new("clay.documents.serverReloadDocument"),
+                )
+                .with_accessibility_label("Reload from disk"),
+                TransientMenuItem::new(
+                    "keep",
+                    "Keep editing",
+                    TransientMenuAction::new("clay.documents.dismissConflict"),
+                )
+                .with_accessibility_label("Keep dirty buffer"),
+            ]);
+        state.set_active_menu(menu);
+
+        let entries = state.accessibility_entries(Size::new(900.0, 600.0));
+        assert!(entries.iter().any(|entry| {
+            entry.role == Role::Menu && entry.label.as_deref() == Some("Conflict recovery")
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.role == Role::MenuItem
+                && entry.label.as_deref() == Some("Reload from disk selected")
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.role == Role::MenuItem && entry.label.as_deref() == Some("Keep dirty buffer")
+        }));
     }
 
     #[test]

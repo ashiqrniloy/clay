@@ -138,7 +138,7 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.15 | Document the locked text vocabulary (`TokenType` + `Modifiers`), inert `textStyles` theme-package contract, one-active-theme `setTheme()` selection API, and the separation between SDUI typed theme tokens and editor text `StyleRegistry` overrides. |
 | Phase 18.17 | Document bounded analyzer-owned `DiagnosticSpan`/`DiagnosticSet` publication through `serverPublishDiagnostics`, theme severity colors, additive squiggle rendering, Tree-sitter authority exclusion, and the no-LSP-process boundary. |
 
-Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, package enable/disable from configuration, and hot reload remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
+Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Phase 19 hot reload is implemented as ordinary one-line `loadPackage` re-evaluation in a fresh runtime generation (see [Package Reload Lifecycle](#package-reload-lifecycle-phase-19)); no package-specific reload callback, `force` flag, or copied-manifest bootstrap is required. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, and package enable/disable from configuration remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
 ## Package Manifest
 
@@ -568,6 +568,52 @@ Forbidden anti-patterns:
 - Markdown-only Rust branches such as `if path.ends_with(".md")`, `if mode_id == "markdown"`, or handwritten markdown-it token handling in server/client Rust.
 - Publishing representative/fake decorations from `init.js` instead of returning an `IncrementalParseUpdate` from the package parse handler.
 - Client-side JavaScript, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, or layout mutation hidden inside package UI/layout declarations.
+
+## Package Reload Lifecycle (Phase 19)
+
+Hot reload preserves the one-line end-user default. Users keep writing ordinary loads in `~/.config/clay/init.js`; Clay does not introduce `loadPackage(spec, { force: true })`, package-authored `onReload` callbacks, or copied manifests:
+
+```js
+import { loadPackage } from "clay:packages";
+import { authorizeLanguageServer } from "clay:language-server";
+import { bindKey } from "clay:keybindings";
+
+await authorizeLanguageServer({
+  package: "@clay/lsp-rust",
+  contribution: "lsp-rust.server",
+  workspaceRootIds: [1],
+});
+await loadPackage("@clay/rust");
+await loadPackage("@clay/lsp-rust");
+// Optional: bind the built-in reload command. There is no default binding and
+// no filesystem watcher; reload is explicit only.
+bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" });
+```
+
+### What reload does
+
+1. Evaluate a candidate generation off to the side (fresh `ClayJsRuntimeService`, empty `globalThis.__clayLoadedPackages`, rebuilt `PackageLoadEntryAllowlist`).
+2. Rerun the same `init.js` one-line loads so every `loadEntry` rebuilds modes, commands, syntax grammars, completion metadata, UI contributions, parse handlers, and language-server analyzer registrations from durable package metadata plus current user grants/overrides.
+3. Validate all contributions in isolation; commit only when every validator succeeds.
+4. Acquire the behavior-scope lock, atomically install the candidate, fan out one bounded `RuntimeStateSnapshot` per client, cancel older-generation workers/sessions, and refresh open documents with generic mode activation plus bounded background reparsing.
+5. On any failure, drop the candidate, keep the previous generation active, and emit sanitized diagnostics.
+
+### Generation-local vs persistent state
+
+| Kind | Survives reload? | Examples | Authoring rule |
+| --- | --- | --- | --- |
+| Generation-local | No | `globalThis.__clayLoadedPackages`, module closures, parse/completion/intelligence tokens, language-server sessions, package-owned caches | Rebuild from `loadEntry` every generation. Do not treat JS globals as persistence. |
+| Explicitly persistent user/workspace state | Yes (outside the runtime generation) | Open documents, leases, workspace roots, user-approved package/process grants re-applied by `init.js`, documented package options/layout overrides | Read durable configuration/package metadata; re-apply through documented Clay JS APIs in `init.js` or `loadEntry`. |
+| Unsupported migration hooks | N/A | `onReload`, `migrateState`, force-reload flags, in-place V8 module mutation | Not provided. Generation replacement is the only supported rebuild mechanism. |
+
+The same lifecycle applies equally to Markdown, Rust, TypeScript, JavaScript, Git, themes, and LSP bridges. There is no language-specific Rust reload branch.
+
+### Authoring, performance, and security rules
+
+- Register contributions at load/reload time only. Do not perform synchronous package work before local paint; reparsing is viewport-prioritized, cancellable, and background.
+- Reload does not broaden package source trust or permissions. Exact language-server grants must be re-declared with `authorizeLanguageServer` before `loadPackage` in the fresh generation; first load seals grants again; old-generation workers/sessions are cleaned after commit.
+- Reject executable client declarations, raw ops, and renderer callbacks in package contributions. Failed candidate evaluation never mutates live registries, grants, or open-document state.
+- Test reload by rerunning the same one-line `init.js` loads and asserting generation-scoped contributions return; do not invent package-private reload helpers for fixtures.
 
 ## UI and Layout Model
 
@@ -1697,7 +1743,7 @@ File browser authority stays server-owned:
 - Directory listing runs through the bounded server listing service with Clay-defined ignore rules, depth/count limits, cancellation, refresh, and diagnostics. Packages cannot list arbitrary filesystem paths, bypass limits, or run directory scans from paint/layout/input handlers.
 - In-root opens route through `WorkspaceState::open_existing_file`; out-of-root selected files route through `WorkspaceState::open_selected_file`, which creates a single-file grant. Packages cannot turn a selected-file grant into directory authority.
 - `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.openDirectory`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser` are built-in server-first commands. Directory navigation requires Clay-provided root-relative arguments from the file-browser SDUI row; it is not a package-owned global key or raw path API. Save/save-as/rename/delete are not registered file-browser commands in this phase.
-- `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are bindable client UI command IDs, not package authority grants. Packages cannot use them to receive native path handles, add workspace roots without server validation, read clipboard data, paste/cut, or write arbitrary clipboard text.
+- `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` / `clientCutSelection` / `clientPasteClipboard` are bindable client UI command IDs, not package authority grants. Packages cannot use them to receive native path handles, add workspace roots without server validation, or invent package clipboard-contents / arbitrary clipboard-text APIs.
 
 Package UI may reference workspace-backed actions only through documented command/API surfaces. It must not pass raw client-chosen paths, call raw `Deno.core.ops`, execute client-side JavaScript, or read files directly from the Rust client.
 

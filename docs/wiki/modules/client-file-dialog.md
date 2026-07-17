@@ -34,12 +34,12 @@ On Windows, the backend uses the `windows` crate and Shell COM APIs:
 5. Show the modal dialog and map `ERROR_CANCELLED` to `Cancelled`.
 6. Convert `GetResult().GetDisplayName(SIGDN_FILESYSPATH)` to `PathBuf` and free the COM-allocated string.
 
-On Linux, `open_folder_dialog()` uses `xdg-desktop-portal` over the D-Bus session bus through `zbus` (`org.freedesktop.portal.FileChooser.OpenFile` with `directory=true`) and converts returned `file://` URI results to paths. On non-Windows platforms, `open_markdown_file_dialog()` still returns `Unsupported`; on non-Windows/non-Linux platforms, `open_folder_dialog()` returns `Unsupported` so the app can report a status diagnostic without panicking.
+On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg-desktop-portal` over the D-Bus session bus through `zbus` (`org.freedesktop.portal.FileChooser.OpenFile`). File open passes Markdown/all-files filters as portal `filters` (`a(sa(us))`, with `*.*` normalized to `*`); folder open sets `directory=true`. Returned `file://` URIs are converted to paths. On macOS, both dialogs use `NSOpenPanel` (Markdown extension tokens plus `allowsOtherFileTypes` for the all-files fallback; folder mode chooses directories only). On platforms other than Windows/Linux/macOS, both dialogs return `Unsupported` so the app can report a status diagnostic without panicking.
 
 ## Invariants and Constraints
 
 - Dialog invocation happens only from an explicit `ClientUiCommand` app-driver action, never during startup, typing, paint, scroll, layout, text events, background IPC reads, or JavaScript evaluation.
-- Windows-specific code is isolated behind `#[cfg(windows)]` in `src/client/file_dialog.rs`; Linux portal code is isolated behind `#[cfg(target_os = "linux")]`.
+- Platform backends are isolated behind `#[cfg(windows)]`, `#[cfg(target_os = "linux")]`, and `#[cfg(target_os = "macos")]` seams in `src/client/file_dialog.rs`.
 - Cancellation is a non-error no-op.
 - Unsupported platforms report a diagnostic/status through the app command handler.
 - A selected path is not an authorization grant by itself; the server validates it through `WorkspaceState::open_selected_file` before granting only that canonical file.
@@ -48,10 +48,13 @@ On Linux, `open_folder_dialog()` uses `xdg-desktop-portal` over the D-Bus sessio
 ## Tests
 
 - `src/client/file_dialog.rs::tests::windows_file_dialog_filter_allows_markdown_extensions`
-- `src/client/file_dialog.rs::tests::non_windows_open_file_dialog_reports_unsupported` on non-Windows targets
+- `src/client/file_dialog.rs::tests::portal_glob_normalizes_all_files_sentinel`
+- `src/client/file_dialog.rs::tests::macos_extensions_ignore_all_files_sentinel_and_keep_markdown_tokens`
+- `src/client/file_dialog.rs::tests::linux_portal_filters_use_file_chooser_signature` on Linux
+- `src/client/file_dialog.rs::tests::unsupported_platform_open_file_dialog_reports_unsupported` on non-Windows/Linux/macOS targets
 - `src/main.rs::tests::file_dialog_cancellation_is_a_no_op`
 - `src/main.rs::tests::file_dialog_result_conversion_reports_selected_and_sanitized_failures`
-- `src/main.rs::tests::non_windows_client_open_file_dialog_command_reports_status_diagnostic` on non-Windows targets
+- `src/main.rs::tests::unsupported_platform_client_open_file_dialog_command_reports_status_diagnostic` on non-Windows/Linux/macOS targets
 - `src/client/mod.rs::tests::selected_file_open_request_emits_non_edit_message`
 - `src/client/mod.rs::tests::selected_folder_root_request_emits_non_edit_message`
 - `src/server/connection.rs::tests::connection_add_selected_workspace_root_sends_file_browser_snapshot`

@@ -202,11 +202,16 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "clay.workspace.openFuzzyFile"
             | "clay.workspace.toggleFileBrowser"
             | "clay.editor.clientCopySelection"
+            | "clay.editor.clientCutSelection"
+            | "clay.editor.clientPasteClipboard"
+            | "clay.editor.clientUndo"
+            | "clay.editor.clientRedo"
             | "clay.language.hover"
             | "clay.language.goToDefinition"
             | "clay.language.codeActions"
             | "clay.language.signatureHelp"
             | "clay.documents.serverSaveDocument"
+            | "clay.runtime.reloadConfiguration"
             | "clay.documents.serverReloadDocument"
             | "clay.documents.serverGetDocumentStatus"
             | "clay.documents.serverListDocuments"
@@ -217,6 +222,10 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
 fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPolicy, JsErrorBox> {
     if matches!(command_id, "text.insert_newline" | "text.insert_tab") {
         Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
+    } else if command_id == "clay.runtime.reloadConfiguration" {
+        Ok(crate::protocol::RoutingPolicy::ServerFirstWithLock {
+            lock_scope: crate::protocol::LockScope::Behavior,
+        })
     } else if command_id == "completion.trigger"
         || crate::client::behavior::language_intelligence_feature_for_command(command_id).is_some()
     {
@@ -226,6 +235,10 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
         "clay.documents.clientOpenFileDialog"
             | "clay.workspace.clientOpenFolderDialog"
             | "clay.editor.clientCopySelection"
+            | "clay.editor.clientCutSelection"
+            | "clay.editor.clientPasteClipboard"
+            | "clay.editor.clientUndo"
+            | "clay.editor.clientRedo"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
@@ -324,6 +337,17 @@ mod tests {
             assert_eq!(
                 command_routing_policy(command).unwrap(),
                 RoutingPolicy::UiReactivePriority
+            );
+        }
+    }
+
+    #[test]
+    fn undo_redo_commands_are_runtime_bindable_client_ui_routes() {
+        for command in ["clay.editor.clientUndo", "clay.editor.clientRedo"] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientUiCommand
             );
         }
     }

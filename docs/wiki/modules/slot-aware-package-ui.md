@@ -181,6 +181,7 @@ CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs --quiet
 - [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)
 - [Clay JS Documentation Registry](clay-js-doc-registry.md)
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `PackageUiRuntimeState::install_runtime_snapshot` atomically replaces package UI version during live reload.
 - [Phase 18.3 Slot-Aware Package UI Primitive Review](phase18.3-slot-ui-primitive-review.md)
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
 - [Package Authoring Guide](../../reference/packages/creating-packages.md)

@@ -145,6 +145,64 @@ impl AppDriver for Driver {
                             }
                         });
                 }
+                ClientUiCommandResult::CutSelection => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let outcome = editor.widget.cut_selection_to_system_clipboard();
+                                let mut changed = outcome.changed;
+                                if let Some(event) = outcome.diagnostic {
+                                    changed |= editor.widget.apply_connection_event(event);
+                                }
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
+                ClientUiCommandResult::PasteClipboard => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let outcome = editor.widget.paste_from_system_clipboard();
+                                let mut changed = outcome.changed;
+                                if let Some(event) = outcome.diagnostic {
+                                    changed |= editor.widget.apply_connection_event(event);
+                                }
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
+                ClientUiCommandResult::Undo => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>()
+                                && editor.widget.undo()
+                            {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        });
+                }
+                ClientUiCommandResult::Redo => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>()
+                                && editor.widget.redo()
+                            {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        });
+                }
             },
         }
     }
@@ -160,6 +218,10 @@ enum ClientUiCommandResult {
     SelectedFile(PathBuf),
     SelectedFolder(PathBuf),
     CopySelection,
+    CutSelection,
+    PasteClipboard,
+    Undo,
+    Redo,
 }
 
 fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
@@ -173,6 +235,10 @@ fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> Cli
             SelectedPathKind::Folder,
         ),
         "clay.editor.clientCopySelection" => ClientUiCommandResult::CopySelection,
+        "clay.editor.clientCutSelection" => ClientUiCommandResult::CutSelection,
+        "clay.editor.clientPasteClipboard" => ClientUiCommandResult::PasteClipboard,
+        "clay.editor.clientUndo" => ClientUiCommandResult::Undo,
+        "clay.editor.clientRedo" => ClientUiCommandResult::Redo,
         _ => ClientUiCommandResult::None,
     }
 }
@@ -1556,9 +1622,44 @@ mod tests {
         assert!(matches!(result, ClientUiCommandResult::CopySelection));
     }
 
-    #[cfg(not(windows))]
     #[test]
-    fn non_windows_client_open_file_dialog_command_reports_status_diagnostic() {
+    fn client_cut_selection_command_routes_to_editor_widget() {
+        let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientCutSelection".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+
+        assert!(matches!(result, ClientUiCommandResult::CutSelection));
+    }
+
+    #[test]
+    fn client_paste_clipboard_command_routes_to_editor_widget() {
+        let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientPasteClipboard".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+
+        assert!(matches!(result, ClientUiCommandResult::PasteClipboard));
+    }
+
+    #[test]
+    fn client_undo_and_redo_commands_route_to_editor_widget() {
+        let undo = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientUndo".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+        assert!(matches!(undo, ClientUiCommandResult::Undo));
+
+        let redo = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientRedo".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+        assert!(matches!(redo, ClientUiCommandResult::Redo));
+    }
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    #[test]
+    fn unsupported_platform_client_open_file_dialog_command_reports_status_diagnostic() {
         let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
             command_id: "clay.documents.clientOpenFileDialog".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
@@ -1568,7 +1669,7 @@ mod tests {
             result,
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
                 if diagnostic.code == "clay.client.file_dialog.unsupported"
-                    && diagnostic.message.contains("Windows only")
+                    && diagnostic.message.contains("not supported on this platform")
         ));
     }
 

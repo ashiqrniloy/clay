@@ -114,6 +114,12 @@ enum SessionCommand {
         package: String,
         reply: oneshot::Sender<usize>,
     },
+    ShutdownAll {
+        reply: oneshot::Sender<usize>,
+    },
+    SessionCount {
+        reply: oneshot::Sender<usize>,
+    },
 }
 
 /// Host-owned language-server process/session service.
@@ -285,6 +291,38 @@ impl LanguageServerProcessService {
         }
         reply_rx.await.unwrap_or(0)
     }
+
+    /// Kill and reap every live session. Used when a runtime generation is
+    /// replaced so previous-generation language-server authority ends immediately
+    /// rather than waiting for `Drop` of the owning service.
+    pub async fn shutdown_all(&self) -> usize {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .inner
+            .command_tx
+            .send(SessionCommand::ShutdownAll { reply: reply_tx })
+            .await
+            .is_err()
+        {
+            return 0;
+        }
+        reply_rx.await.unwrap_or(0)
+    }
+
+    /// Current live session count. Test/diagnostic helper for generation cleanup.
+    pub async fn session_count(&self) -> usize {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .inner
+            .command_tx
+            .send(SessionCommand::SessionCount { reply: reply_tx })
+            .await
+            .is_err()
+        {
+            return 0;
+        }
+        reply_rx.await.unwrap_or(0)
+    }
 }
 
 fn spawn_router_thread(mut command_rx: mpsc::Receiver<SessionCommand>) {
@@ -365,6 +403,13 @@ async fn router_loop(command_rx: &mut mpsc::Receiver<SessionCommand>) {
             SessionCommand::RevokeForPackage { package, reply } => {
                 let count = handle_revoke(&mut sessions, &package).await;
                 let _ = reply.send(count);
+            }
+            SessionCommand::ShutdownAll { reply } => {
+                let count = handle_shutdown_all(&mut sessions).await;
+                let _ = reply.send(count);
+            }
+            SessionCommand::SessionCount { reply } => {
+                let _ = reply.send(sessions.len());
             }
         }
     }
@@ -533,6 +578,18 @@ async fn handle_revoke(
             if let Some(handle) = session.stderr_task.take() {
                 handle.abort();
             }
+        }
+    }
+    count
+}
+
+async fn handle_shutdown_all(sessions: &mut HashMap<LanguageServerSessionId, Session>) -> usize {
+    let count = sessions.len();
+    for (_, mut session) in sessions.drain() {
+        let _ = session.child.start_kill();
+        let _ = session.child.wait().await;
+        if let Some(handle) = session.stderr_task.take() {
+            handle.abort();
         }
     }
     count

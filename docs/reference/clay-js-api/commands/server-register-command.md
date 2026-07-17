@@ -136,6 +136,45 @@ Command registration through this API declares metadata only — routing policy,
 
 See `docs/reference/clay-js-api/configuration.md` (Phase 18.8 configuration review) and `docs/reference/primitives/package-security.md` for the full validation checklist and denied-authority list.
 
+## Phase 19 built-in reload command boundary
+
+`clay.runtime.reloadConfiguration` (**Reload Configuration and Packages**) is a Clay-owned built-in global command registered through `builtin_server_command`. It is intentionally **not** a Clay JS API facade: there is no `clay:runtime`, no `clay:configuration.reloadConfiguration` export, no `clay.commands.serverExecuteCommand("clay.runtime.reloadConfiguration")` path, and no `Deno.core.ops` op for direct JavaScript invocation.
+
+### Boundary
+
+| Surface | Status |
+|---|---|
+| Clay JS facade | None — not callable from any `clay:*` module |
+| `serverListCommands` output | Not listed (built-in commands are separate from package commands) |
+| `builtin_server_command_ids` | Included — `pub(crate)` Rust-only lookup |
+| Control Center | Discoverable (`ControlCenter::open` appends built-in commands) |
+| `bindKey` | Bindable — `bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" })` |
+| SDUI action | Routable — `SduiActionIntent { commandId: "clay.runtime.reloadConfiguration" }` |
+| Package JS via `serverExecuteCommand` | Rejected with `UnauthorizedTarget` ("runtime reload requires a user command intent") |
+| Direct Rust call (`IpcServer::reload_runtime_generation`) | `pub(crate)` — exposed only to the command execution path and tests; `trigger_developer_hot_reload` is `#[doc(hidden)]` |
+
+### Execution
+
+Activating the command routes through `CommandExecutor` with `ServerFirstWithLock { lock_scope: Behavior }`. The executor validates command id, routing policy, provenance, declared permissions, target context, argument budget, and session/action freshness. On success, `IpcServer::execute_reload_command` acquires a reload-attempt guard (concurrent triggers return `ReloadInProgress`), then delegates to `reload_runtime_generation` which performs the full candidate prepare/commit cycle.
+
+### Diagnostics
+
+| Diagnostic code | Condition |
+|---|---|
+| `clay.runtime.reload_succeeded` | Commit succeeded; G2 is active |
+| `ReloadInProgress` | A concurrent reload is already evaluating/committing |
+| `clay.runtime.behavior_locked` | Behavior lock acquisition failed (another mutation in progress) |
+| `clay.runtime.snapshot_too_large` | Candidate snapshot exceeds the 1 MiB IPC frame ceiling |
+| `clay.packages.not_installed` | A configured package is not installed |
+| `clay.runtime.evaluation_failed` | Candidate JS evaluation threw an error |
+| `clay.runtime.incomplete_candidate` | Candidate evaluation produced no `ClayRuntimeEvaluation` |
+
+All diagnostics are sanitized — they contain no raw source text, file paths, package internals, or token payloads.
+
+### Authority
+
+Reload does not broaden package source trust, process grants, filesystem access, network access, shell authority, extension loading, AI mutation, workspace expansion, WASM, raw-op, native-widget, client-side JavaScript, or package-manager authority. It reruns the same `~/.config/clay/init.js` in a fresh generation with an empty `globalThis.__clayLoadedPackages` cache. See `docs/reference/clay-js-api/configuration.md#phase-19-persistent-runtime-hot-reload-configuration-review` for the compiled budget table and rejected hidden keys.
+
 ## Lookup metadata
 
 - Stable ID: `clay.commands.serverRegisterCommand`

@@ -1,7 +1,8 @@
 use std::ops::Range;
 
-use masonry::core::PaintCtx;
+use masonry::core::{BrushIndex, PaintCtx, render_text};
 use masonry::kurbo::{Affine, Point, Rect};
+use masonry::parley::style::StyleProperty;
 use masonry::peniko::{Color, Fill};
 
 use crate::client::behavior::{
@@ -25,7 +26,9 @@ use crate::protocol::{
 use crate::shell::CompletionMenuAcceptAction;
 
 use super::buffer::{EditResult, EditorBuffer, VisibleSnapshot};
+use super::composition::CompositionState;
 use super::cursor::CursorState;
+use super::history::{EditHistory, HistoryEntry, HistorySelection, invert_edit_operation};
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState, VisibleTextStyleRun};
 use super::selection::SelectionState;
@@ -716,6 +719,8 @@ pub struct EditorSurface {
     document: EditorDocumentState,
     cursor: CursorState,
     selection: Option<SelectionState>,
+    history: EditHistory,
+    composition: CompositionState,
     snippet_session: Option<SnippetSession>,
     viewport: Viewport,
     layout: LayoutState,
@@ -733,6 +738,10 @@ pub struct EditorSurface {
     /// 4). Defaults to the Clay theme; task 5 swaps in the active theme at
     /// load/reload. Immutable during paint.
     theme: StyleRegistry,
+    /// Active theme package specifier last installed from an `ActiveTheme`
+    /// snapshot (`@clay/default` until the first install). Used only for
+    /// status/accessibility theme-label observability — never for paint.
+    theme_specifier: String,
     /// Client-owned cached profiles, replaced outside paint by bootstrap/live
     /// typography updates and read by the cached Parley layout builder.
     typography: TypographyRegistry,
@@ -757,6 +766,8 @@ impl EditorSurface {
         self.document.access = access;
         self.cursor.set_caret(0);
         self.selection = None;
+        self.history.clear();
+        self.composition.clear();
         self.snippet_session = None;
         self.viewport = Viewport::default();
         self.layout = LayoutState::default();
@@ -816,6 +827,58 @@ impl EditorSurface {
         self.diagnostics.apply_set(set)
     }
 
+    /// Clear decoration caches for the open document during runtime-generation install.
+    pub(crate) fn clear_decorations(&mut self) -> bool {
+        if self.decorations.span_count() == 0 {
+            self.decorations = EditorDecorationState::default();
+            return false;
+        }
+        self.decorations = EditorDecorationState::default();
+        self.bump_layout_style_revision();
+        true
+    }
+
+    /// Clear diagnostic caches for the open document during runtime-generation install.
+    pub(crate) fn clear_diagnostics(&mut self) -> bool {
+        if self.diagnostics.span_count() == 0 {
+            self.diagnostics = EditorDiagnosticState::default();
+            return false;
+        }
+        self.diagnostics = EditorDiagnosticState::default();
+        true
+    }
+
+    /// Install typography from a runtime snapshot while preserving caret,
+    /// selection, and viewport scroll when profiles actually change.
+    pub(crate) fn install_runtime_typography(
+        &mut self,
+        typography: crate::protocol::ActiveTypography,
+    ) -> bool {
+        let Ok(next) =
+            crate::editor::typography::TypographyRegistry::from_active_typography(typography)
+        else {
+            return false;
+        };
+        if self.typography == next {
+            return false;
+        }
+        let caret = self.cursor.caret();
+        let selection = self.selection;
+        let visual_scroll_y = self.visual_scroll_y;
+        let last_visual_max_scroll_y = self.last_visual_max_scroll_y;
+        let follow_visual_end = self.follow_visual_end;
+        let pin_caret_visible = self.pin_caret_visible;
+        self.typography = next;
+        self.layout = LayoutState::default();
+        self.cursor.set_caret(caret);
+        self.selection = selection;
+        self.visual_scroll_y = visual_scroll_y;
+        self.last_visual_max_scroll_y = last_visual_max_scroll_y;
+        self.follow_visual_end = follow_visual_end;
+        self.pin_caret_visible = pin_caret_visible;
+        true
+    }
+
     pub fn layout_style_revision_for_test(&self) -> u64 {
         self.layout_style_revision
     }
@@ -868,6 +931,29 @@ impl EditorSurface {
             self.theme = theme;
             self.bump_layout_style_revision();
         }
+    }
+
+    /// Install an inert `ActiveTheme` snapshot: resolve colors into the
+    /// registry and retain the package specifier for theme-label observability.
+    pub(crate) fn set_active_theme(&mut self, theme: &crate::protocol::ActiveTheme) {
+        self.theme_specifier = theme.specifier.clone();
+        self.set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
+            theme,
+        ));
+    }
+
+    /// Active theme package specifier (`@clay/...`), or `@clay/default` before install.
+    pub(crate) fn theme_specifier(&self) -> &str {
+        if self.theme_specifier.is_empty() {
+            "@clay/default"
+        } else {
+            self.theme_specifier.as_str()
+        }
+    }
+
+    /// Compact theme label for status/accessibility (no package path).
+    pub(crate) fn theme_label(&self) -> String {
+        crate::editor::theme::theme_display_label(self.theme_specifier())
     }
 
     /// Install newer validated typography and discard geometry derived from the
@@ -1075,8 +1161,7 @@ impl EditorSurface {
             end: end as u64,
             text: text.clone(),
         };
-        let result = self.buffer.replace_range(start..end, &text);
-        let mut outcome = self.finish_edit_with_operation(result, operation);
+        let mut outcome = self.apply_and_record_local_edit(operation, None);
         if let Some(placeholders) = snippet_placeholders
             && self.install_snippet_session(placeholders)
         {
@@ -1223,6 +1308,50 @@ impl EditorSurface {
         self.replace_selection_or_insert_with_event(text)
     }
 
+    /// Insert or replace using clipboard paste text.
+    ///
+    /// Unlike ordinary typed insertion, paste may include newlines and tabs after
+    /// line-ending normalization. Empty or control-containing clipboard payloads
+    /// are no-ops.
+    pub fn paste_text_with_event(&mut self, text: &str) -> EditorCommandOutcome {
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+        let Some(normalized) = crate::editor::normalize_clipboard_paste_text(text) else {
+            return EditorCommandOutcome::unchanged();
+        };
+        self.replace_selection_or_insert_with_event(&normalized)
+    }
+
+    /// True when a non-empty IME preedit overlay is active.
+    pub fn is_composing(&self) -> bool {
+        self.composition.is_active()
+    }
+
+    /// Paint-only preedit text, if composition is active.
+    pub fn preedit_text(&self) -> Option<&str> {
+        self.composition
+            .is_active()
+            .then_some(self.composition.text())
+    }
+
+    /// Optional byte-indexed cursor span within the active preedit.
+    pub fn preedit_cursor_span(&self) -> Option<(usize, usize)> {
+        self.composition.cursor_span()
+    }
+
+    /// Update the local preedit overlay. Empty text clears composition.
+    ///
+    /// This never mutates the canonical rope or enqueues edits.
+    pub fn set_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) -> bool {
+        self.composition.set_preedit(text, cursor)
+    }
+
+    /// Discard unfinished composition without committing text.
+    pub fn cancel_composition(&mut self) -> bool {
+        self.composition.clear()
+    }
+
     pub fn insert_newline(&mut self) -> bool {
         self.insert_newline_with_event().changed
     }
@@ -1232,25 +1361,21 @@ impl EditorSurface {
             return EditorCommandOutcome::unchanged();
         }
 
-        let (result, operation) = if let Some(range) = self.selected_range() {
-            let operation = EditOperation::Replace {
+        let operation = if let Some(range) = self.selected_range() {
+            EditOperation::Replace {
                 start: range.start as u64,
                 end: range.end as u64,
                 text: "\n".to_string(),
-            };
-            (self.buffer.replace_range(range, "\n"), operation)
+            }
         } else {
             let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
             let text = self.newline_text_at(byte_offset);
-            (
-                self.buffer.insert_at(byte_offset, &text),
-                EditOperation::Insert {
-                    byte_offset: byte_offset as u64,
-                    text,
-                },
-            )
+            EditOperation::Insert {
+                byte_offset: byte_offset as u64,
+                text,
+            }
         };
-        self.finish_edit_with_operation(result, operation)
+        self.apply_and_record_local_edit(operation, None)
     }
 
     pub fn backspace(&mut self) -> bool {
@@ -1263,12 +1388,13 @@ impl EditorSurface {
         }
 
         if let Some(range) = self.selected_range() {
-            let operation = EditOperation::Delete {
-                start: range.start as u64,
-                end: range.end as u64,
-            };
-            let result = self.buffer.delete_range(range);
-            return self.finish_edit_with_operation(result, operation);
+            return self.apply_and_record_local_edit(
+                EditOperation::Delete {
+                    start: range.start as u64,
+                    end: range.end as u64,
+                },
+                None,
+            );
         }
 
         let caret = self.buffer.clamp_byte_offset(self.cursor.caret());
@@ -1276,13 +1402,12 @@ impl EditorSurface {
             let result = self.buffer.backspace_at(caret);
             return self.finish_edit(result);
         };
-        let result = self.buffer.delete_range(previous..caret);
-        self.finish_edit_with_operation(
-            result,
+        self.apply_and_record_local_edit(
             EditOperation::Delete {
                 start: previous as u64,
                 end: caret as u64,
             },
+            None,
         )
     }
 
@@ -1296,12 +1421,13 @@ impl EditorSurface {
         }
 
         if let Some(range) = self.selected_range() {
-            let operation = EditOperation::Delete {
-                start: range.start as u64,
-                end: range.end as u64,
-            };
-            let result = self.buffer.delete_range(range);
-            return self.finish_edit_with_operation(result, operation);
+            return self.apply_and_record_local_edit(
+                EditOperation::Delete {
+                    start: range.start as u64,
+                    end: range.end as u64,
+                },
+                None,
+            );
         }
 
         let caret = self.buffer.clamp_byte_offset(self.cursor.caret());
@@ -1309,13 +1435,12 @@ impl EditorSurface {
             let result = self.buffer.delete_after(caret);
             return self.finish_edit(result);
         };
-        let result = self.buffer.delete_range(caret..next);
-        self.finish_edit_with_operation(
-            result,
+        self.apply_and_record_local_edit(
             EditOperation::Delete {
                 start: caret as u64,
                 end: next as u64,
             },
+            None,
         )
     }
 
@@ -1407,6 +1532,30 @@ impl EditorSurface {
     pub fn caret_geometry(&self, width: f32) -> Option<Rect> {
         let snapshot = self.visible_snapshot();
         self.caret_geometry_from_visible_snapshot(&snapshot, width)
+    }
+
+    /// Candidate-window IME area in editor-local coordinates.
+    ///
+    /// Uses caret geometry and widens by an estimate of active preedit width so
+    /// platform candidate UI stays near the composition.
+    pub fn ime_cursor_area(&self, editor_width: f64, editor_height: f64) -> Rect {
+        if let Some(caret) = self.caret_geometry(CARET_WIDTH as f32) {
+            let mut area = caret;
+            if let Some(preedit) = self.preedit_text() {
+                let estimated = (preedit.chars().count() as f64) * (caret.height().max(8.0) * 0.55);
+                area.x1 = (area.x0 + estimated.max(area.width())).min(editor_width);
+            }
+            // Keep the area inside the editor panel.
+            area.x0 = area.x0.clamp(0.0, editor_width);
+            area.x1 = area.x1.clamp(area.x0, editor_width);
+            area.y0 = area.y0.clamp(0.0, editor_height);
+            area.y1 = area.y1.clamp(area.y0, editor_height);
+            if area.width() < 1.0 || area.height() < 1.0 {
+                return Rect::new(0.0, 0.0, editor_width.max(1.0), editor_height.max(1.0));
+            }
+            return area;
+        }
+        Rect::new(0.0, 0.0, editor_width.max(1.0), editor_height.max(1.0))
     }
 
     pub fn place_caret_at_point(&mut self, point: Point) -> bool {
@@ -1694,8 +1843,18 @@ impl EditorSurface {
         } else {
             self.last_visual_max_scroll_y = metrics.max_scroll_y(available_height);
         }
-        if focused {
+        if focused && !self.composition.is_active() {
             self.paint_caret(
+                scene,
+                max_width,
+                available_height,
+                caret_visible_offset,
+                origin,
+            );
+        }
+        if focused && self.composition.is_active() {
+            self.paint_preedit_overlay(
+                ctx,
                 scene,
                 max_width,
                 available_height,
@@ -1737,6 +1896,103 @@ impl EditorSurface {
             origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            self.theme.base.caret,
+            None,
+            &caret,
+        );
+        scene.pop_layer();
+    }
+
+    fn paint_preedit_overlay(
+        &self,
+        ctx: &mut PaintCtx<'_>,
+        scene: &mut masonry::vello::Scene,
+        max_width: f32,
+        available_height: f64,
+        caret_visible_offset: Option<usize>,
+        origin: (f64, f64),
+    ) {
+        let Some(preedit) = self.preedit_text() else {
+            return;
+        };
+        let Some(visible_offset) = caret_visible_offset else {
+            return;
+        };
+        let Some(geometry) = self
+            .layout
+            .caret_geometry_for_visible_byte_offset(visible_offset, CARET_WIDTH as f32)
+        else {
+            return;
+        };
+
+        let insert_x = origin.0 + geometry.rect.x0 + TEXT_INSET;
+        let insert_y = origin.1 + geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y;
+        let line_height = (geometry.rect.y1 - geometry.rect.y0).max(1.0);
+
+        let document_font_role = self.document_font_role();
+        let profile = self.typography.profile(document_font_role);
+        let (font_context, layout_context) = ctx.text_contexts();
+        let mut builder = layout_context.ranged_builder(font_context, preedit, 1.0, true);
+        builder.push_default(StyleProperty::FontStack(profile.font_stack()));
+        builder.push_default(StyleProperty::FontSize(profile.size()));
+        builder.push_default(StyleProperty::Brush(BrushIndex(0)));
+        builder.push_default(StyleProperty::Underline(true));
+        let mut layout = builder.build(preedit);
+        layout.break_all_lines(Some(max_width));
+
+        let clip = Rect::new(
+            origin.0 + TEXT_INSET,
+            origin.1 + TEXT_INSET,
+            origin.0 + TEXT_INSET + max_width as f64,
+            origin.1 + TEXT_INSET + available_height,
+        );
+        scene.push_clip_layer(Affine::IDENTITY, &clip);
+
+        let preedit_width = layout.full_width() as f64;
+        if let Some((begin, end)) = self.preedit_cursor_span()
+            && begin < end
+            && !preedit.is_empty()
+            && end <= preedit.len()
+        {
+            let frac_start = begin as f64 / preedit.len() as f64;
+            let frac_end = end as f64 / preedit.len() as f64;
+            let span = Rect::new(
+                insert_x + preedit_width * frac_start,
+                insert_y,
+                insert_x + preedit_width * frac_end.max(frac_start),
+                insert_y + line_height,
+            );
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                self.theme.base.selection,
+                None,
+                &span,
+            );
+        }
+
+        render_text(
+            scene,
+            Affine::translate((insert_x, insert_y)),
+            &layout,
+            &[self.theme.base.text.into()],
+            true,
+        );
+
+        let caret_frac = match self.preedit_cursor_span() {
+            Some((begin, _)) if !preedit.is_empty() => begin as f64 / preedit.len() as f64,
+            _ => 1.0,
+        };
+        let caret_x = insert_x + preedit_width * caret_frac;
+        let caret = Rect::new(
+            caret_x,
+            insert_y,
+            caret_x + CARET_WIDTH,
+            insert_y + line_height,
+        );
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
@@ -1993,30 +2249,29 @@ impl EditorSurface {
             return EditorCommandOutcome::unchanged();
         }
 
-        let (result, operation, final_caret) = if let Some(range) = self.selected_range() {
+        let (operation, final_caret) = if let Some(range) = self.selected_range() {
             let selected_text = self.buffer.text_range(range.clone());
             let replacement = format!("{}{}{}", pair.open, selected_text, pair.close);
             let operation = EditOperation::Replace {
                 start: range.start as u64,
                 end: range.end as u64,
-                text: replacement.clone(),
+                text: replacement,
             };
-            let result = self.buffer.replace_range(range, &replacement);
-            let final_caret = result.caret;
-            (result, operation, final_caret)
+            let final_caret =
+                range.start + pair.open.len() + selected_text.len() + pair.close.len();
+            (operation, final_caret)
         } else {
             let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
             let insertion = format!("{}{}", pair.open, pair.close);
             let operation = EditOperation::Insert {
                 byte_offset: byte_offset as u64,
-                text: insertion.clone(),
+                text: insertion,
             };
-            let result = self.buffer.insert_at(byte_offset, &insertion);
             let final_caret = byte_offset + pair.open.len();
-            (result, operation, final_caret)
+            (operation, final_caret)
         };
 
-        self.finish_edit_with_operation_and_caret(result, operation, final_caret)
+        self.apply_and_record_local_edit(operation, Some(final_caret))
     }
 
     /// Apply an electric-character rule locally from manifest data. For
@@ -2050,13 +2305,10 @@ impl EditorSurface {
         let operation = EditOperation::Replace {
             start: line_start as u64,
             end: byte_offset as u64,
-            text: replacement.clone(),
+            text: replacement,
         };
-        let result = self
-            .buffer
-            .replace_range(line_start..byte_offset, &replacement);
         let final_caret = line_start + dedented.len() + rule.trigger.len();
-        self.finish_edit_with_operation_and_caret(result, operation, final_caret)
+        self.apply_and_record_local_edit(operation, Some(final_caret))
     }
 
     fn electric_tab_kind(&self) -> crate::protocol::TabMode {
@@ -2076,24 +2328,20 @@ impl EditorSurface {
     }
 
     fn replace_selection_or_insert_with_event(&mut self, text: &str) -> EditorCommandOutcome {
-        let (result, operation) = if let Some(range) = self.selected_range() {
-            let operation = EditOperation::Replace {
+        let operation = if let Some(range) = self.selected_range() {
+            EditOperation::Replace {
                 start: range.start as u64,
                 end: range.end as u64,
                 text: text.to_string(),
-            };
-            (self.buffer.replace_range(range, text), operation)
+            }
         } else {
             let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
-            (
-                self.buffer.insert_at(byte_offset, text),
-                EditOperation::Insert {
-                    byte_offset: byte_offset as u64,
-                    text: text.to_string(),
-                },
-            )
+            EditOperation::Insert {
+                byte_offset: byte_offset as u64,
+                text: text.to_string(),
+            }
         };
-        self.finish_edit_with_operation(result, operation)
+        self.apply_and_record_local_edit(operation, None)
     }
 
     fn collapse_selection_to(&mut self, caret: usize) -> bool {
@@ -2119,12 +2367,53 @@ impl EditorSurface {
         EditorCommandOutcome::changed(None)
     }
 
-    fn finish_edit_with_operation(
+    /// Apply a local edit operation, record its inverse for undo, and emit an
+    /// ordinary client-first edit event when the lease/manifest allow it.
+    fn apply_and_record_local_edit(
         &mut self,
-        result: EditResult,
         operation: EditOperation,
+        final_caret: Option<usize>,
     ) -> EditorCommandOutcome {
-        self.finish_edit_with_operation_and_caret(result, operation, result.caret)
+        let selection_before = self.capture_history_selection();
+        let prior_text = self.prior_text_for_operation(&operation);
+        let result = self.apply_buffer_operation(&operation);
+        let caret = final_caret.unwrap_or(result.caret);
+        self.finish_edit_with_operation_and_caret(
+            result,
+            operation,
+            caret,
+            selection_before,
+            prior_text,
+        )
+    }
+
+    /// Undo the latest local edit by applying its inverse as an ordinary edit.
+    pub fn undo_with_event(&mut self) -> EditorCommandOutcome {
+        let _ = self.composition.clear();
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+        let Some(entry) = self.history.undo() else {
+            return EditorCommandOutcome::unchanged();
+        };
+        self.apply_history_restore(&entry.inverse, entry.selection_before)
+    }
+
+    /// Redo the latest undone local edit as an ordinary edit.
+    pub fn redo_with_event(&mut self) -> EditorCommandOutcome {
+        let _ = self.composition.clear();
+        if !self.is_editable() {
+            return EditorCommandOutcome::unchanged();
+        }
+        let Some(entry) = self.history.redo() else {
+            return EditorCommandOutcome::unchanged();
+        };
+        self.apply_history_restore(&entry.forward, entry.selection_after)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn history_for_test(&self) -> &EditHistory {
+        &self.history
     }
 
     fn finish_edit_with_operation_and_caret(
@@ -2132,6 +2421,8 @@ impl EditorSurface {
         result: EditResult,
         operation: EditOperation,
         caret: usize,
+        selection_before: HistorySelection,
+        prior_text: String,
     ) -> EditorCommandOutcome {
         if result.changed {
             self.update_snippet_session_after_edit(&operation);
@@ -2148,8 +2439,77 @@ impl EditorSurface {
         self.ensure_caret_line_visible();
         self.follow_visual_end = true;
         self.perf.record_counter("editor.input.local_edit", 1);
+        let selection_after = self.capture_history_selection();
+        let inverse = invert_edit_operation(&operation, &prior_text);
+        self.history.record(HistoryEntry {
+            forward: operation.clone(),
+            inverse,
+            selection_before,
+            selection_after,
+        });
         let edit_event = self.client_first_event(operation);
         EditorCommandOutcome::changed(edit_event)
+    }
+
+    fn apply_history_restore(
+        &mut self,
+        operation: &EditOperation,
+        selection: HistorySelection,
+    ) -> EditorCommandOutcome {
+        let result = self.apply_buffer_operation(operation);
+        if !result.changed {
+            return EditorCommandOutcome::unchanged();
+        }
+        self.snippet_session = None;
+        if self.decorations.apply_edit(operation) {
+            self.bump_layout_style_revision();
+        }
+        self.restore_history_selection(selection);
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = true;
+        self.perf.record_counter("editor.input.local_edit", 1);
+        let edit_event = self.client_first_event(operation.clone());
+        EditorCommandOutcome::changed(edit_event)
+    }
+
+    fn apply_buffer_operation(&mut self, operation: &EditOperation) -> EditResult {
+        match operation {
+            EditOperation::Insert { byte_offset, text } => {
+                self.buffer.insert_at(*byte_offset as usize, text)
+            }
+            EditOperation::Delete { start, end } => {
+                self.buffer.delete_range(*start as usize..*end as usize)
+            }
+            EditOperation::Replace { start, end, text } => self
+                .buffer
+                .replace_range(*start as usize..*end as usize, text),
+        }
+    }
+
+    fn prior_text_for_operation(&self, operation: &EditOperation) -> String {
+        match operation {
+            EditOperation::Insert { .. } => String::new(),
+            EditOperation::Delete { start, end } | EditOperation::Replace { start, end, .. } => {
+                self.buffer.text_range(*start as usize..*end as usize)
+            }
+        }
+    }
+
+    fn capture_history_selection(&self) -> HistorySelection {
+        HistorySelection {
+            caret: self.cursor.caret(),
+            anchor: self.selection.map(|selection| selection.anchor()),
+        }
+    }
+
+    fn restore_history_selection(&mut self, selection: HistorySelection) {
+        let caret = self.buffer.clamp_byte_offset(selection.caret);
+        self.cursor.set_caret(caret);
+        self.selection = selection.anchor.and_then(|anchor| {
+            let restored = SelectionState::new(self.buffer.clamp_byte_offset(anchor), caret)
+                .clamped(&self.buffer);
+            (!restored.is_collapsed()).then_some(restored)
+        });
     }
 
     fn client_first_event(&self, operation: EditOperation) -> Option<EditorEditEvent> {
@@ -2266,13 +2626,13 @@ impl EditorSurface {
     }
 
     #[cfg(test)]
-    fn selection_for_test(&self) -> Option<(usize, usize)> {
+    pub(crate) fn selection_for_test(&self) -> Option<(usize, usize)> {
         self.selection
             .map(|selection| (selection.anchor(), selection.focus()))
     }
 
     #[cfg(test)]
-    fn set_selection_for_test(&mut self, anchor: usize, focus: usize) {
+    pub(crate) fn set_selection_for_test(&mut self, anchor: usize, focus: usize) {
         let selection = SelectionState::new(anchor, focus).clamped(&self.buffer);
         self.cursor.set_caret(selection.focus());
         self.selection = (!selection.is_collapsed()).then_some(selection);
@@ -2812,6 +3172,98 @@ mod tests {
             }
         );
         assert_eq!(editor.visible_text(), "aXb");
+    }
+
+    #[test]
+    fn undo_insert_delete_replace_restores_text_and_caret() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            3,
+            "abc".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        editor.set_caret_for_test(1);
+
+        assert!(editor.insert_text_with_event("X").changed);
+        assert_eq!(editor.visible_text(), "aXbc");
+        assert_eq!(editor.caret_for_test(), 2);
+
+        let undone = editor.undo_with_event();
+        assert!(undone.changed);
+        assert_eq!(
+            undone
+                .edit_event
+                .expect("undo emits inverse edit")
+                .operation,
+            EditOperation::Delete { start: 1, end: 2 }
+        );
+        assert_eq!(editor.visible_text(), "abc");
+        assert_eq!(editor.caret_for_test(), 1);
+
+        editor.set_selection_for_test(1, 2);
+        assert!(editor.insert_text_with_event("YZ").changed);
+        assert_eq!(editor.visible_text(), "aYZc");
+        let undone_replace = editor.undo_with_event();
+        assert!(undone_replace.changed);
+        assert_eq!(editor.visible_text(), "abc");
+        assert_eq!(editor.selection_for_test(), Some((1, 2)));
+
+        editor.set_selection_for_test(3, 3);
+        assert!(editor.backspace_with_event().changed);
+        assert_eq!(editor.visible_text(), "ab");
+        assert!(editor.undo_with_event().changed);
+        assert_eq!(editor.visible_text(), "abc");
+        assert_eq!(editor.caret_for_test(), 3);
+    }
+
+    #[test]
+    fn redo_restores_undone_edit_and_new_edit_clears_redo() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            3,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        editor.set_caret_for_test(2);
+        assert!(editor.insert_text_with_event("!").changed);
+        assert!(editor.undo_with_event().changed);
+        assert!(editor.history_for_test().can_redo());
+
+        let redone = editor.redo_with_event();
+        assert!(redone.changed);
+        assert_eq!(editor.visible_text(), "ab!");
+        assert_eq!(editor.caret_for_test(), 3);
+        assert!(!editor.history_for_test().can_redo());
+
+        assert!(editor.undo_with_event().changed);
+        assert!(editor.insert_text_with_event("?").changed);
+        assert!(!editor.history_for_test().can_redo());
+        assert!(!editor.redo_with_event().changed);
+        assert_eq!(editor.visible_text(), "ab?");
+    }
+
+    #[test]
+    fn read_only_observer_undo_is_noop_and_resync_clears_history() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            7,
+            3,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        editor.set_caret_for_test(2);
+        assert!(editor.insert_text_with_event("x").changed);
+        assert!(editor.history_for_test().can_undo());
+
+        editor.load_resync_snapshot(7, 4, "abx".to_string(), DocumentAccess::ReadOnly);
+        assert!(!editor.history_for_test().can_undo());
+        assert!(!editor.undo_with_event().changed);
+        assert_eq!(editor.visible_text(), "abx");
     }
 
     #[test]
@@ -3381,6 +3833,116 @@ mod tests {
         editor.set_selection_for_test(1, 1);
 
         assert_eq!(editor.selected_text(), None);
+    }
+
+    #[test]
+    fn paste_text_inserts_at_caret_and_replaces_selection() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "abc".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+
+        let inserted = editor.paste_text_with_event("X\nY");
+        assert!(inserted.changed);
+        assert_eq!(editor.visible_text(), "X\nYabc");
+
+        editor.set_selection_for_test(0, 3);
+        let replaced = editor.paste_text_with_event("Z");
+        assert!(replaced.changed);
+        assert_eq!(editor.visible_text(), "Zabc");
+    }
+
+    #[test]
+    fn paste_text_normalizes_crlf_and_rejects_controls() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "abc".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+
+        assert!(editor.paste_text_with_event("a\r\nb").changed);
+        assert_eq!(editor.visible_text(), "a\nbabc");
+        assert!(!editor.paste_text_with_event("").changed);
+        assert!(!editor.paste_text_with_event("a\0b").changed);
+        assert_eq!(editor.visible_text(), "a\nbabc");
+    }
+
+    #[test]
+    fn preedit_does_not_change_canonical_text_or_enqueue_edits() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "hello".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.set_preedit("あ".into(), Some((0, 3))));
+        assert!(editor.is_composing());
+        assert_eq!(editor.preedit_text(), Some("あ"));
+        assert_eq!(editor.visible_text(), "hello");
+        assert_eq!(editor.history_for_test().undo_len(), 0);
+        assert!(editor.set_preedit(String::new(), None));
+        assert!(!editor.is_composing());
+        assert_eq!(editor.visible_text(), "hello");
+    }
+
+    #[test]
+    fn empty_preedit_clears_overlay_without_edit() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "x".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.set_preedit("pre".into(), Some((0, 3))));
+        assert!(editor.set_preedit(String::new(), None));
+        assert!(!editor.is_composing());
+        assert_eq!(editor.visible_text(), "x");
+        assert!(!editor.cancel_composition());
+    }
+
+    #[test]
+    fn load_snapshot_cancels_unfinished_composition() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "abc".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.set_preedit("compose".into(), None));
+        editor.load_snapshot(
+            2,
+            1,
+            "other".to_string(),
+            DocumentAccess::Editable { lease_id: 2 },
+        );
+        assert!(!editor.is_composing());
+        assert_eq!(editor.visible_text(), "other");
+    }
+
+    #[test]
+    fn undo_cancels_preedit_before_inverse_edit() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.command(EditorCommand::Insert("ab")));
+        assert!(editor.set_preedit("未".into(), Some((0, 3))));
+        assert!(editor.is_composing());
+        let outcome = editor.undo_with_event();
+        assert!(outcome.changed);
+        assert!(!editor.is_composing());
+        assert_eq!(editor.visible_text(), "");
     }
 
     #[test]

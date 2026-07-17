@@ -16,6 +16,7 @@ mod js_runtime;
 pub mod language_intelligence;
 #[doc(hidden)]
 pub mod language_server;
+pub(crate) mod locks;
 #[allow(dead_code)]
 mod ops;
 pub mod parse_coordinator;
@@ -44,6 +45,9 @@ use tokio::{
     task::JoinSet,
 };
 
+#[cfg(test)]
+use tokio::sync::oneshot;
+
 #[cfg(unix)]
 use tokio::net::UnixListener;
 #[cfg(windows)]
@@ -63,14 +67,29 @@ use windows::Win32::{
 
 use crate::{
     ipc::IpcEndpoint,
-    protocol::{DocumentId, RuntimeDiagnostic, ServerMessage, codec::Codec},
+    packages::commands::CommandRegistry,
+    perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
+    protocol::{
+        DocumentId, LockOwner, RuntimeDiagnostic, RuntimeGenerationId, RuntimeStateSnapshot,
+        ServerMessage, codec::Codec,
+    },
+    server::command_execution::{
+        CommandExecutionDiagnostic, CommandExecutionRequest, CommandExecutionRule,
+        CommandExecutionTarget, CommandExecutor, RELOAD_CONFIGURATION_COMMAND_ID,
+        is_reload_command,
+    },
 };
 
 use self::{
-    behavior::ActiveBehaviorManifest, connection::handle_connection_with_analysis,
-    document::DocumentState, js_runtime::ClayJsRuntimeService,
-    language_intelligence::LanguageIntelligenceCoordinator, parse_coordinator::ParseCoordinator,
-    sdui::StaticSduiState, workspace::WorkspaceState,
+    behavior::{ActiveBehaviorManifest, BehaviorGraceState},
+    connection::handle_connection_with_analysis,
+    document::DocumentState,
+    js_runtime::ClayJsRuntimeService,
+    language_intelligence::LanguageIntelligenceCoordinator,
+    locks::{ScopedLockManager, ScopedLockTarget},
+    parse_coordinator::ParseCoordinator,
+    sdui::StaticSduiState,
+    workspace::WorkspaceState,
 };
 
 #[cfg(windows)]
@@ -100,6 +119,7 @@ impl ServerConfig {
 pub(crate) struct RuntimeGeneration {
     id: u64,
     service: ClayJsRuntimeService,
+    evaluation: Option<Arc<js_runtime::ClayRuntimeEvaluation>>,
     diagnostics: Vec<RuntimeDiagnostic>,
 }
 
@@ -108,6 +128,7 @@ impl RuntimeGeneration {
         Self {
             id: 1,
             service: ClayJsRuntimeService::default(),
+            evaluation: None,
             diagnostics: Vec::new(),
         }
     }
@@ -117,6 +138,89 @@ impl RuntimeGeneration {
 pub(crate) struct RuntimeGenerationStore {
     current: Arc<Mutex<RuntimeGeneration>>,
     typography: ActiveTypographyState,
+    runtime_state: ActiveRuntimeStateFanout,
+    behavior_grace: BehaviorGraceState,
+}
+
+/// Latest committed runtime snapshot and bounded live-update channel.
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveRuntimeStateFanout {
+    latest: Arc<Mutex<Option<RuntimeStateSnapshot>>>,
+    updates: broadcast::Sender<RuntimeGenerationId>,
+    acknowledgements:
+        Arc<Mutex<std::collections::HashMap<crate::protocol::ClientId, RuntimeGenerationId>>>,
+}
+
+impl Default for ActiveRuntimeStateFanout {
+    fn default() -> Self {
+        let (updates, _) = broadcast::channel(RUNTIME_STATE_BROADCAST_CAPACITY);
+        Self {
+            latest: Arc::new(Mutex::new(None)),
+            updates,
+            acknowledgements: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+}
+
+impl ActiveRuntimeStateFanout {
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<RuntimeGenerationId> {
+        self.updates.subscribe()
+    }
+
+    pub(crate) async fn latest_for(
+        &self,
+        client_id: crate::protocol::ClientId,
+    ) -> Option<RuntimeStateSnapshot> {
+        self.latest
+            .lock()
+            .await
+            .clone()
+            .map(|snapshot| snapshot.for_client(client_id))
+    }
+
+    pub(crate) async fn publish(&self, snapshot: RuntimeStateSnapshot) {
+        let generation = snapshot.runtime_generation_id;
+        *self.latest.lock().await = Some(snapshot);
+        let _ = self.updates.send(generation);
+    }
+
+    /// Record a client install acknowledgement. Spoofed client IDs, future
+    /// generations, and generations older than the latest committed snapshot are
+    /// ignored so acknowledgement never invents authority.
+    pub(crate) async fn note_installed(
+        &self,
+        client_id: crate::protocol::ClientId,
+        expected_client_id: crate::protocol::ClientId,
+        runtime_generation_id: RuntimeGenerationId,
+    ) -> bool {
+        if client_id != expected_client_id {
+            return false;
+        }
+        let latest = self
+            .latest
+            .lock()
+            .await
+            .as_ref()
+            .map(|snapshot| snapshot.runtime_generation_id);
+        let Some(latest_generation) = latest else {
+            return false;
+        };
+        if runtime_generation_id == 0 || runtime_generation_id > latest_generation {
+            return false;
+        }
+        self.acknowledgements
+            .lock()
+            .await
+            .insert(client_id, runtime_generation_id);
+        true
+    }
+
+    pub(crate) async fn acknowledged_generation(
+        &self,
+        client_id: crate::protocol::ClientId,
+    ) -> Option<RuntimeGenerationId> {
+        self.acknowledgements.lock().await.get(&client_id).copied()
+    }
 }
 
 /// Server-owned active typography and bounded live-update channel.
@@ -147,6 +251,7 @@ impl ActiveTypographyState {
 
     /// Replace all profiles only after complete validation. Equal profiles keep
     /// their revision and emit no duplicate client event.
+    #[cfg(test)]
     pub(crate) async fn replace(
         &self,
         mut typography: crate::protocol::ActiveTypography,
@@ -175,6 +280,8 @@ impl RuntimeGenerationStore {
         Self {
             current: Arc::new(Mutex::new(RuntimeGeneration::initial())),
             typography: ActiveTypographyState::default(),
+            runtime_state: ActiveRuntimeStateFanout::default(),
+            behavior_grace: BehaviorGraceState::new(),
         }
     }
 
@@ -188,6 +295,44 @@ impl RuntimeGenerationStore {
         self.typography.subscribe()
     }
 
+    pub(crate) fn subscribe_runtime_state(&self) -> broadcast::Receiver<RuntimeGenerationId> {
+        self.runtime_state.subscribe()
+    }
+
+    pub(crate) fn behavior_grace(&self) -> &BehaviorGraceState {
+        &self.behavior_grace
+    }
+
+    pub(crate) async fn latest_runtime_snapshot_for(
+        &self,
+        client_id: crate::protocol::ClientId,
+    ) -> Option<RuntimeStateSnapshot> {
+        self.runtime_state.latest_for(client_id).await
+    }
+
+    pub(crate) async fn publish_runtime_snapshot(&self, snapshot: RuntimeStateSnapshot) {
+        self.runtime_state.publish(snapshot).await;
+    }
+
+    pub(crate) async fn note_runtime_generation_installed(
+        &self,
+        client_id: crate::protocol::ClientId,
+        expected_client_id: crate::protocol::ClientId,
+        runtime_generation_id: RuntimeGenerationId,
+    ) -> bool {
+        self.runtime_state
+            .note_installed(client_id, expected_client_id, runtime_generation_id)
+            .await
+    }
+
+    pub(crate) async fn acknowledged_runtime_generation(
+        &self,
+        client_id: crate::protocol::ClientId,
+    ) -> Option<RuntimeGenerationId> {
+        self.runtime_state.acknowledged_generation(client_id).await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn replace_typography(
         &self,
         typography: crate::protocol::ActiveTypography,
@@ -207,7 +352,7 @@ impl RuntimeGenerationStore {
     }
 
     pub(crate) async fn current_service(&self) -> ClayJsRuntimeService {
-        self.current().await.service
+        self.current.lock().await.service.clone()
     }
 
     async fn push_diagnostic(&self, diagnostic: RuntimeDiagnostic) {
@@ -217,6 +362,22 @@ impl RuntimeGenerationStore {
     async fn swap(&self, next: RuntimeGeneration) {
         *self.current.lock().await = next;
     }
+}
+
+#[derive(Debug)]
+struct RuntimeGenerationCandidate {
+    expected_generation_id: u64,
+    generation: RuntimeGeneration,
+    expected_behavior: ActiveBehaviorManifest,
+    behavior: ActiveBehaviorManifest,
+    expected_sdui: StaticSduiState,
+    sdui: StaticSduiState,
+    expected_theme: Option<crate::protocol::ActiveTheme>,
+    active_theme: Option<crate::protocol::ActiveTheme>,
+    expected_typography: crate::protocol::ActiveTypography,
+    active_typography: crate::protocol::ActiveTypography,
+    open_documents: Vec<workspace::OpenDocumentSnapshot>,
+    runtime_snapshot: RuntimeStateSnapshot,
 }
 
 #[doc(hidden)]
@@ -236,7 +397,7 @@ pub struct RuntimeReloadOutcome {
     pub refreshed_documents: Vec<ReloadedDocumentRefresh>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IpcServer {
     config: ServerConfig,
     codec: Codec,
@@ -254,7 +415,61 @@ pub struct IpcServer {
     document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
     language_intelligence: LanguageIntelligenceCoordinator,
     runtime_generation: RuntimeGenerationStore,
-    next_client_id: AtomicU64,
+    scoped_locks: ScopedLockManager,
+    reload_attempt: Arc<Mutex<()>>,
+    next_client_id: Arc<AtomicU64>,
+    /// Test-only barrier that parks candidate evaluation until the test releases
+    /// it. Production builds omit this field entirely.
+    #[cfg(test)]
+    reload_barrier: ReloadCandidateBarrier,
+}
+
+/// Parks a reload candidate between attempt-lock acquisition and configuration
+/// evaluation so tests can prove ordinary edits continue without waiting.
+#[cfg(test)]
+#[derive(Clone, Default)]
+struct ReloadCandidateBarrier {
+    inner: Arc<Mutex<ReloadCandidateBarrierState>>,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for ReloadCandidateBarrier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReloadCandidateBarrier")
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct ReloadCandidateBarrierState {
+    entered: Option<oneshot::Sender<()>>,
+    release: Option<oneshot::Receiver<()>>,
+}
+
+#[cfg(test)]
+impl ReloadCandidateBarrier {
+    async fn arm(&self) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *self.inner.lock().await = ReloadCandidateBarrierState {
+            entered: Some(entered_tx),
+            release: Some(release_rx),
+        };
+        (entered_rx, release_tx)
+    }
+
+    async fn wait_if_armed(&self) {
+        let (entered, release) = {
+            let mut state = self.inner.lock().await;
+            (state.entered.take(), state.release.take())
+        };
+        if let Some(entered) = entered {
+            let _ = entered.send(());
+        }
+        if let Some(release) = release {
+            let _ = release.await;
+        }
+    }
 }
 
 impl IpcServer {
@@ -291,7 +506,11 @@ impl IpcServer {
                 crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
             language_intelligence: LanguageIntelligenceCoordinator::new(),
             runtime_generation: RuntimeGenerationStore::initial(),
-            next_client_id: AtomicU64::new(1),
+            scoped_locks: ScopedLockManager::default(),
+            reload_attempt: Arc::new(Mutex::new(())),
+            next_client_id: Arc::new(AtomicU64::new(1)),
+            #[cfg(test)]
+            reload_barrier: ReloadCandidateBarrier::default(),
         })
     }
 
@@ -353,17 +572,36 @@ impl IpcServer {
     }
 
     async fn load_default_configuration(&self) {
+        let generation_id = self.runtime_generation.generation_id().await;
         let service = self.runtime_generation.current_service().await;
-        let evaluation = self.load_configuration_for_service(&service).await;
-
-        match evaluation {
+        match self.load_configuration_for_service(&service).await {
             Ok(Some(evaluation)) => {
-                self.apply_runtime_evaluation(
-                    self.runtime_generation.generation_id().await,
-                    &service,
-                    evaluation,
-                )
-                .await
+                match self
+                    .prepare_runtime_generation_candidate(
+                        generation_id,
+                        generation_id,
+                        service,
+                        evaluation,
+                    )
+                    .await
+                {
+                    Ok(candidate) => {
+                        if let Err(diagnostic) = self.commit_runtime_generation(candidate).await {
+                            self.record_runtime_diagnostic(
+                                "clay server configuration commit failed",
+                                diagnostic,
+                            )
+                            .await;
+                        }
+                    }
+                    Err(diagnostic) => {
+                        self.record_runtime_diagnostic(
+                            "clay server configuration validation failed",
+                            diagnostic,
+                        )
+                        .await;
+                    }
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -393,7 +631,11 @@ impl IpcServer {
     }
 
     async fn record_runtime_error(&self, context: &str, error: js_runtime::ClayRuntimeError) {
-        let diagnostic = error.diagnostic();
+        self.record_runtime_diagnostic(context, error.diagnostic())
+            .await;
+    }
+
+    async fn record_runtime_diagnostic(&self, context: &str, diagnostic: RuntimeDiagnostic) {
         eprintln!("{context} [{}]: {}", diagnostic.code, diagnostic.message);
         self.runtime_generation
             .push_diagnostic(diagnostic.clone())
@@ -406,50 +648,131 @@ impl IpcServer {
         self.reload_runtime_generation().await
     }
 
+    /// Arm a test-only barrier that parks the next reload candidate after the
+    /// attempt lock is held and before configuration evaluation begins.
+    /// Returns `(entered, release)`: await `entered` before submitting edits,
+    /// then drop/send on `release` to let the candidate continue.
+    #[cfg(test)]
+    pub(crate) async fn arm_reload_candidate_barrier(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        self.reload_barrier.arm().await
+    }
+
+    pub(crate) async fn execute_reload_command(
+        &self,
+        request: CommandExecutionRequest,
+    ) -> Result<RuntimeReloadOutcome, CommandExecutionDiagnostic> {
+        if !is_reload_command(&request.command_id) {
+            return Err(CommandExecutionDiagnostic {
+                command_id: request.command_id,
+                rule: CommandExecutionRule::UnknownCommand,
+                message: "command is not the runtime reload command".to_string(),
+            });
+        }
+        CommandExecutor::new().execute(&CommandRegistry::new(), request)?;
+        let Ok(_attempt) = Arc::clone(&self.reload_attempt).try_lock_owned() else {
+            return Err(CommandExecutionDiagnostic {
+                command_id: RELOAD_CONFIGURATION_COMMAND_ID.to_string(),
+                rule: CommandExecutionRule::ReloadInProgress,
+                message: "runtime reload is already in progress".to_string(),
+            });
+        };
+        Ok(self.reload_runtime_generation_inner().await)
+    }
+
     pub(crate) async fn reload_runtime_generation(&self) -> RuntimeReloadOutcome {
+        match self
+            .execute_reload_command(CommandExecutionRequest {
+                command_id: RELOAD_CONFIGURATION_COMMAND_ID.to_string(),
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            })
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let generation_id = self.runtime_generation.generation_id().await;
+                RuntimeReloadOutcome {
+                    previous_generation_id: generation_id,
+                    active_generation_id: generation_id,
+                    reloaded: false,
+                    diagnostics: vec![RuntimeDiagnostic::error(
+                        "clay.runtime.reload_in_progress",
+                        error.message,
+                    )],
+                    refreshed_documents: Vec::new(),
+                }
+            }
+        }
+    }
+
+    async fn reload_runtime_generation_inner(&self) -> RuntimeReloadOutcome {
+        #[cfg(test)]
+        self.reload_barrier.wait_if_armed().await;
+
         let previous_generation_id = self.runtime_generation.generation_id().await;
         let next_generation_id = previous_generation_id.saturating_add(1);
         let next_service = ClayJsRuntimeService::default();
 
-        match self.load_configuration_for_service(&next_service).await {
-            Ok(evaluation) => {
-                let diagnostics = Vec::new();
-                if let Some(evaluation) = evaluation {
-                    self.apply_runtime_evaluation(next_generation_id, &next_service, evaluation)
-                        .await;
-                } else {
-                    self.install_active_typography(crate::protocol::ActiveTypography::default())
-                        .await;
-                }
-                self.parse_coordinator
-                    .cancel_generation(previous_generation_id);
-                self.completion.cancel_generation(previous_generation_id);
-                self.document_analysis
-                    .cancel_generation(previous_generation_id);
-                self.language_intelligence
-                    .cancel_generation(previous_generation_id);
-                self.runtime_generation
-                    .swap(RuntimeGeneration {
-                        id: next_generation_id,
-                        service: next_service.clone(),
-                        diagnostics: Vec::new(),
-                    })
-                    .await;
-                let refreshed_documents = self
-                    .refresh_open_documents_after_reload(next_generation_id, &next_service)
-                    .await;
-                RuntimeReloadOutcome {
-                    previous_generation_id,
-                    active_generation_id: next_generation_id,
-                    reloaded: true,
-                    diagnostics,
-                    refreshed_documents,
-                }
-            }
+        let evaluation = match self.load_configuration_for_service(&next_service).await {
+            Ok(evaluation) => evaluation.unwrap_or_default(),
             Err(error) => {
                 let diagnostic = error.diagnostic();
                 self.record_runtime_error("clay server runtime reload failed", error)
                     .await;
+                return RuntimeReloadOutcome {
+                    previous_generation_id,
+                    active_generation_id: previous_generation_id,
+                    reloaded: false,
+                    diagnostics: vec![diagnostic],
+                    refreshed_documents: Vec::new(),
+                };
+            }
+        };
+
+        let candidate = match self
+            .prepare_runtime_generation_candidate(
+                previous_generation_id,
+                next_generation_id,
+                next_service,
+                evaluation,
+            )
+            .await
+        {
+            Ok(candidate) => candidate,
+            Err(diagnostic) => {
+                self.record_runtime_diagnostic(
+                    "clay server runtime reload validation failed",
+                    diagnostic.clone(),
+                )
+                .await;
+                return RuntimeReloadOutcome {
+                    previous_generation_id,
+                    active_generation_id: previous_generation_id,
+                    reloaded: false,
+                    diagnostics: vec![diagnostic],
+                    refreshed_documents: Vec::new(),
+                };
+            }
+        };
+
+        match self.commit_runtime_generation(candidate).await {
+            Ok(refreshed_documents) => RuntimeReloadOutcome {
+                previous_generation_id,
+                active_generation_id: next_generation_id,
+                reloaded: true,
+                diagnostics: Vec::new(),
+                refreshed_documents,
+            },
+            Err(diagnostic) => {
+                self.record_runtime_diagnostic(
+                    "clay server runtime reload commit failed",
+                    diagnostic.clone(),
+                )
+                .await;
                 RuntimeReloadOutcome {
                     previous_generation_id,
                     active_generation_id: previous_generation_id,
@@ -461,28 +784,287 @@ impl IpcServer {
         }
     }
 
+    async fn prepare_runtime_generation_candidate(
+        &self,
+        expected_generation_id: u64,
+        generation_id: u64,
+        service: ClayJsRuntimeService,
+        evaluation: js_runtime::ClayRuntimeEvaluation,
+    ) -> Result<RuntimeGenerationCandidate, RuntimeDiagnostic> {
+        let expected_behavior = self.behavior.lock().await.clone();
+        let mut behavior = expected_behavior.clone();
+        if let Some(manifest) = evaluation.behavior_manifest.clone() {
+            let staged = behavior.stage_replacement(manifest).map_err(|_| {
+                runtime_candidate_error(
+                    "clay.behavior.invalid_manifest",
+                    "Runtime behavior manifest failed server validation.",
+                )
+            })?;
+            behavior.install_staged(staged);
+        }
+
+        let expected_sdui = self.sdui.lock().await.clone();
+        let mut sdui = expected_sdui.clone();
+        if let Some(tree) = evaluation.published_sdui_tree.clone() {
+            sdui.replace_for_document_with_runtime_tree(sdui.document_id(), tree)
+                .map_err(|_| {
+                    runtime_candidate_error(
+                        "clay.sdui.invalid_tree",
+                        "Runtime SDUI tree failed server validation.",
+                    )
+                })?;
+        }
+
+        evaluation.ui_contributions.validate().map_err(|_| {
+            runtime_candidate_error(
+                "clay.ui.invalid_snapshot",
+                "Runtime package UI contributions failed server validation.",
+            )
+        })?;
+        syntax::SyntaxGrammarRegistry::validate_snapshot(
+            &evaluation.syntax_grammars,
+            &evaluation.syntax_engine_preferences,
+        )
+        .map_err(|_| {
+            runtime_candidate_error(
+                "clay.syntax.invalid_snapshot",
+                "Runtime syntax grammar contributions failed server validation.",
+            )
+        })?;
+        if let Some(set) = &evaluation.published_decoration_set {
+            decorations::validate_decoration_set(set.document_version, set.clone(), None).map_err(
+                |_| {
+                    runtime_candidate_error(
+                        "clay.decorations.invalid_set",
+                        "Runtime decoration set failed server validation.",
+                    )
+                },
+            )?;
+        }
+        if let Some(set) = &evaluation.published_diagnostic_set {
+            diagnostics::validate_diagnostic_set(set.document_version, set.clone(), None).map_err(
+                |_| {
+                    runtime_candidate_error(
+                        "clay.diagnostics.invalid_set",
+                        "Runtime diagnostic set failed server validation.",
+                    )
+                },
+            )?;
+        }
+
+        let expected_typography = self.runtime_generation.active_typography().await;
+        let active_typography = stage_typography(
+            &expected_typography,
+            evaluation.active_typography.clone().unwrap_or_default(),
+        )?;
+        self.validate_runtime_registrations(generation_id, &service, &evaluation)?;
+
+        let open_documents = self
+            .workspace
+            .lock()
+            .await
+            .open_document_snapshots(0)
+            .await
+            .map_err(|_| {
+                runtime_candidate_error(
+                    "clay.runtime.reload_refresh_failed",
+                    "Reload open-document refresh metadata could not be prepared.",
+                )
+            })?;
+        let expected_theme = self.active_theme.lock().await.clone();
+        let active_theme = evaluation
+            .active_theme
+            .clone()
+            .or_else(|| expected_theme.clone())
+            .unwrap_or_else(|| crate::protocol::ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            });
+        let runtime_diagnostics = self.runtime_diagnostics.lock().await.clone();
+        let runtime_snapshot = build_runtime_state_snapshot(
+            generation_id,
+            behavior.manifest().clone(),
+            active_theme.clone(),
+            active_typography.clone(),
+            sdui.cloned_tree_or_default(),
+            &open_documents,
+            evaluation.published_decoration_set.clone(),
+            evaluation.published_diagnostic_set.clone(),
+            runtime_diagnostics,
+        )?;
+        // Fail closed before commit when the complete snapshot cannot fit one
+        // bounded IPC frame. Partial/live mutation must not begin.
+        self.codec
+            .encode_server_message(&ServerMessage::RuntimeStateSnapshot(Box::new(
+                runtime_snapshot.clone(),
+            )))
+            .map_err(|_| {
+                runtime_candidate_error(
+                    "clay.runtime.snapshot_too_large",
+                    "Runtime state snapshot exceeds the 1 MiB IPC frame ceiling.",
+                )
+            })?;
+        let published_theme = evaluation.active_theme.clone();
+        let evaluation = Arc::new(evaluation);
+        Ok(RuntimeGenerationCandidate {
+            expected_generation_id,
+            generation: RuntimeGeneration {
+                id: generation_id,
+                service,
+                evaluation: Some(evaluation),
+                diagnostics: Vec::new(),
+            },
+            expected_behavior,
+            behavior,
+            expected_sdui,
+            sdui,
+            expected_theme,
+            active_theme: published_theme,
+            expected_typography,
+            active_typography,
+            open_documents,
+            runtime_snapshot,
+        })
+    }
+
+    fn validate_runtime_registrations(
+        &self,
+        generation_id: u64,
+        service: &ClayJsRuntimeService,
+        evaluation: &js_runtime::ClayRuntimeEvaluation,
+    ) -> Result<(), RuntimeDiagnostic> {
+        let parse = ParseCoordinator::new();
+        let completion = completion::CompletionCoordinator::new();
+        let document_analysis = document_analysis::DocumentAnalysisCoordinator::default();
+        let language_intelligence = LanguageIntelligenceCoordinator::new();
+        register_runtime_contributions(
+            generation_id,
+            service,
+            evaluation,
+            &parse,
+            &completion,
+            &document_analysis,
+            &language_intelligence,
+        )
+    }
+
+    async fn commit_runtime_generation(
+        &self,
+        candidate: RuntimeGenerationCandidate,
+    ) -> Result<Vec<ReloadedDocumentRefresh>, RuntimeDiagnostic> {
+        let behavior_lock = self
+            .scoped_locks
+            .try_acquire(ScopedLockTarget::Behavior, LockOwner::Server)
+            .map_err(|_| {
+                runtime_candidate_error(
+                    "clay.runtime.behavior_locked",
+                    "Runtime behavior state is locked by another server operation.",
+                )
+            })?;
+        if self.runtime_generation.generation_id().await != candidate.expected_generation_id {
+            return Err(runtime_candidate_error(
+                "clay.runtime.generation_conflict",
+                "Runtime generation changed before the prepared candidate could commit.",
+            ));
+        }
+
+        let mut behavior = self.behavior.lock().await;
+        let mut sdui = self.sdui.lock().await;
+        let mut active_theme = self.active_theme.lock().await;
+        let mut active_typography = self.runtime_generation.typography.current.lock().await;
+        if *behavior != candidate.expected_behavior
+            || *sdui != candidate.expected_sdui
+            || *active_theme != candidate.expected_theme
+            || *active_typography != candidate.expected_typography
+        {
+            return Err(runtime_candidate_error(
+                "clay.runtime.active_state_conflict",
+                "Active runtime state changed before the prepared candidate could commit.",
+            ));
+        }
+
+        let Some(evaluation) = candidate.generation.evaluation.as_deref() else {
+            return Err(runtime_candidate_error(
+                "clay.runtime.incomplete_candidate",
+                "Prepared runtime generation is missing validated evaluation state.",
+            ));
+        };
+        register_runtime_contributions(
+            candidate.generation.id,
+            &candidate.generation.service,
+            evaluation,
+            &self.parse_coordinator,
+            &self.completion,
+            &self.document_analysis,
+            &self.language_intelligence,
+        )?;
+
+        let previous_generation = self.runtime_generation.current().await;
+        let previous_generation_id = candidate.expected_generation_id;
+        let previous_behavior_manifest = behavior.manifest().clone();
+        let typography_changed = *active_typography != candidate.active_typography;
+        *behavior = candidate.behavior;
+        *sdui = candidate.sdui;
+        *active_theme = candidate.active_theme;
+        *active_typography = candidate.active_typography.clone();
+        self.runtime_generation
+            .swap(candidate.generation.clone())
+            .await;
+
+        if candidate.generation.id != previous_generation_id {
+            cancel_older_runtime_generations(
+                candidate.generation.id,
+                &self.parse_coordinator,
+                &self.completion,
+                &self.document_analysis,
+                &self.language_intelligence,
+            );
+            // Old grants/process authority end at commit. Cleanup failure must
+            // not restore previous-generation executable handlers.
+            let _ = previous_generation
+                .service
+                .shutdown_generation_resources()
+                .await;
+            // Retain only the immediately previous inert manifest for bounded
+            // stale Edit/EditorIntent acceptance. Executable authority is gone.
+            self.runtime_generation
+                .behavior_grace()
+                .begin(previous_behavior_manifest, previous_generation_id)
+                .await;
+        } else {
+            self.runtime_generation.behavior_grace().clear().await;
+        }
+        drop(active_typography);
+        drop(active_theme);
+        drop(sdui);
+        drop(behavior);
+        if typography_changed {
+            let _ = self
+                .runtime_generation
+                .typography
+                .updates
+                .send(candidate.active_typography);
+        }
+        self.runtime_generation
+            .publish_runtime_snapshot(candidate.runtime_snapshot)
+            .await;
+        drop(behavior_lock);
+
+        Ok(self
+            .refresh_open_documents_after_reload(
+                candidate.generation.id,
+                &candidate.generation.service,
+                candidate.open_documents,
+            )
+            .await)
+    }
+
     async fn refresh_open_documents_after_reload(
         &self,
         generation_id: u64,
         service: &ClayJsRuntimeService,
+        snapshots: Vec<workspace::OpenDocumentSnapshot>,
     ) -> Vec<ReloadedDocumentRefresh> {
-        let snapshots = match self.workspace.lock().await.open_document_snapshots(0).await {
-            Ok(snapshots) => snapshots,
-            Err(error) => {
-                self.runtime_diagnostics
-                    .lock()
-                    .await
-                    .push(RuntimeDiagnostic::error(
-                        "clay.runtime.reload_refresh_failed",
-                        format!(
-                            "Reload open-document refresh failed: {:?}",
-                            error.diagnostic()
-                        ),
-                    ));
-                return Vec::new();
-            }
-        };
-
         let roots = self.workspace.lock().await.directory_roots();
         let mut refreshed = Vec::with_capacity(snapshots.len());
         for snapshot in snapshots {
@@ -523,109 +1105,6 @@ impl IpcServer {
         refreshed
     }
 
-    async fn apply_runtime_evaluation(
-        &self,
-        generation_id: u64,
-        service: &ClayJsRuntimeService,
-        evaluation: js_runtime::ClayRuntimeEvaluation,
-    ) {
-        let application = apply_runtime_outputs(
-            &evaluation,
-            self.sdui.lock().await.document_id(),
-            &self.behavior,
-            &self.sdui,
-        )
-        .await;
-
-        // Plan 046 task 7: resolve the active theme selected by `setTheme` in
-        // `init.js` onto the shared slot the welcome handshake ships to the
-        // client. `None` clears any previously selected theme on reload.
-        *self.active_theme.lock().await = evaluation.active_theme.clone();
-        self.install_active_typography(evaluation.active_typography.clone().unwrap_or_default())
-            .await;
-
-        if let Err(error) =
-            service.register_parse_handlers(&self.parse_coordinator, generation_id, &evaluation)
-        {
-            self.runtime_diagnostics
-                .lock()
-                .await
-                .push(RuntimeDiagnostic::error(
-                    "clay.parse.registration_failed",
-                    format!("Runtime parse handler registration failed: {error:?}"),
-                ));
-        }
-
-        if let Err(error) =
-            service.register_completion_providers(&self.completion, generation_id, &evaluation)
-        {
-            self.runtime_diagnostics
-                .lock()
-                .await
-                .push(RuntimeDiagnostic::error(
-                    "clay.completion.registration_failed",
-                    format!("Runtime completion provider registration failed: {error:?}"),
-                ));
-        }
-
-        for registration in &evaluation.document_analyzers {
-            if let Err(error) = self.document_analysis.register(
-                generation_id,
-                service.clone(),
-                registration.clone(),
-                &self.completion,
-                &self.language_intelligence,
-            ) {
-                self.runtime_diagnostics
-                    .lock()
-                    .await
-                    .push(RuntimeDiagnostic::error(
-                        "clay.analysis.registration_failed",
-                        format!("Runtime document analyzer registration failed: {error}"),
-                    ));
-            }
-        }
-
-        if let Err(error) = service.register_language_intelligence_providers(
-            &self.language_intelligence,
-            generation_id,
-            &evaluation,
-        ) {
-            self.runtime_diagnostics
-                .lock()
-                .await
-                .push(RuntimeDiagnostic::error(
-                    "clay.language.registration_failed",
-                    format!(
-                        "Runtime language-intelligence provider registration failed: {error:?}"
-                    ),
-                ));
-        }
-
-        // Startup reads the shared behavior/SDUI state lazily during the
-        // welcome handshake, so only validation failures produce diagnostics
-        // here. Decorations are pass-through (no startup client / decoration store).
-        for diagnostic in application.diagnostics() {
-            eprintln!(
-                "clay server rejected runtime output [{}]: {}",
-                diagnostic.code, diagnostic.message
-            );
-            self.runtime_diagnostics.lock().await.push(diagnostic);
-        }
-    }
-
-    async fn install_active_typography(&self, typography: crate::protocol::ActiveTypography) {
-        if let Err(error) = self.runtime_generation.replace_typography(typography).await {
-            self.runtime_diagnostics
-                .lock()
-                .await
-                .push(RuntimeDiagnostic::error(
-                    "clay.typography.invalid_configuration",
-                    format!("Typography configuration failed validation: {error:?}"),
-                ));
-        }
-    }
-
     fn spawn_connection<S>(&self, stream: S, connections: &mut JoinSet<()>)
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -642,6 +1121,7 @@ impl IpcServer {
         let completion = self.completion.clone();
         let document_analysis = self.document_analysis.clone();
         let language_intelligence = self.language_intelligence.clone();
+        let reload_server = IpcServer::clone(self);
         let codec = self.codec;
         connections.spawn(async move {
             if let Err(error) = handle_connection_with_analysis(
@@ -658,6 +1138,7 @@ impl IpcServer {
                 completion,
                 document_analysis,
                 language_intelligence,
+                Some(reload_server),
                 codec,
             )
             .await
@@ -666,6 +1147,188 @@ impl IpcServer {
             }
         });
     }
+}
+
+fn register_runtime_contributions(
+    generation_id: u64,
+    service: &ClayJsRuntimeService,
+    evaluation: &js_runtime::ClayRuntimeEvaluation,
+    parse: &ParseCoordinator,
+    completion: &completion::CompletionCoordinator,
+    document_analysis: &document_analysis::DocumentAnalysisCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+) -> Result<(), RuntimeDiagnostic> {
+    service
+        .register_parse_handlers(parse, generation_id, evaluation)
+        .map_err(|_| {
+            runtime_candidate_error(
+                "clay.parse.registration_failed",
+                "Runtime parse handler registration failed validation.",
+            )
+        })?;
+    service
+        .register_completion_providers(completion, generation_id, evaluation)
+        .map_err(|_| {
+            runtime_candidate_error(
+                "clay.completion.registration_failed",
+                "Runtime completion provider registration failed validation.",
+            )
+        })?;
+    for registration in &evaluation.document_analyzers {
+        if !service.document_analysis_registration_authorized(registration) {
+            return Err(runtime_candidate_error(
+                "clay.analysis.unauthorized",
+                "Runtime document analyzer lacks an exact current package/process grant.",
+            ));
+        }
+        document_analysis
+            .register(
+                generation_id,
+                service.clone(),
+                registration.clone(),
+                completion,
+                language_intelligence,
+            )
+            .map_err(|_| {
+                runtime_candidate_error(
+                    "clay.analysis.registration_failed",
+                    "Runtime document analyzer registration failed validation.",
+                )
+            })?;
+    }
+    service
+        .register_language_intelligence_providers(language_intelligence, generation_id, evaluation)
+        .map_err(|_| {
+            runtime_candidate_error(
+                "clay.language.registration_failed",
+                "Runtime language-intelligence provider registration failed validation.",
+            )
+        })?;
+    Ok(())
+}
+
+/// Shared post-commit cleanup for every generation-owned coordinator registry.
+/// Package disable/revoke uses [`withdraw_package_contributions`] for the
+/// package-scoped variant of the same cancel primitives.
+fn cancel_older_runtime_generations(
+    active_generation: u64,
+    parse: &ParseCoordinator,
+    completion: &completion::CompletionCoordinator,
+    document_analysis: &document_analysis::DocumentAnalysisCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+) {
+    parse.cancel_older_generations(active_generation);
+    completion.cancel_older_generations(active_generation);
+    document_analysis.cancel_older_generations(active_generation);
+    language_intelligence.cancel_older_generations(active_generation);
+}
+
+/// Shared package-scoped withdrawal used by disable/revoke and any future
+/// mid-generation package removal. Reload uses generation cancel instead, but
+/// both paths share these coordinator primitives.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "package-disable wiring reuses this helper when a live server disable path lands"
+    )
+)]
+pub(crate) fn withdraw_package_contributions(
+    package_name: &str,
+    package_prefix: &str,
+    parse: &ParseCoordinator,
+    completion: &completion::CompletionCoordinator,
+    document_analysis: &document_analysis::DocumentAnalysisCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+) {
+    parse.cancel_package(package_prefix);
+    completion.cancel_package(package_prefix);
+    language_intelligence.cancel_package(package_prefix);
+    document_analysis.cancel_package(package_name);
+}
+
+fn stage_typography(
+    current: &crate::protocol::ActiveTypography,
+    mut requested: crate::protocol::ActiveTypography,
+) -> Result<crate::protocol::ActiveTypography, RuntimeDiagnostic> {
+    requested.validate().map_err(|_| {
+        runtime_candidate_error(
+            "clay.typography.invalid_configuration",
+            "Runtime typography failed server validation.",
+        )
+    })?;
+    requested.revision = if current.monospace == requested.monospace
+        && current.proportional == requested.proportional
+        && current.ui == requested.ui
+    {
+        current.revision
+    } else {
+        current.revision.saturating_add(1)
+    };
+    Ok(requested)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one prepare helper keeps every snapshot field explicit before commit"
+)]
+fn build_runtime_state_snapshot(
+    runtime_generation_id: RuntimeGenerationId,
+    behavior: crate::protocol::BehaviorManifest,
+    active_theme: crate::protocol::ActiveTheme,
+    active_typography: crate::protocol::ActiveTypography,
+    sdui_tree: crate::protocol::SduiTree,
+    open_documents: &[workspace::OpenDocumentSnapshot],
+    published_decorations: Option<crate::protocol::DecorationSet>,
+    published_diagnostics: Option<crate::protocol::DiagnosticSet>,
+    diagnostics: Vec<RuntimeDiagnostic>,
+) -> Result<RuntimeStateSnapshot, RuntimeDiagnostic> {
+    let package_ui = crate::protocol::PackageUiSnapshot {
+        // Package UI payloads are not on the wire yet; advance the version with
+        // the runtime generation so clients clear previous package UI under the
+        // same atomic install boundary.
+        version: runtime_generation_id,
+    };
+    let documents = open_documents
+        .iter()
+        .map(|document| {
+            let document_id = document.metadata.document_id;
+            crate::protocol::DocumentRuntimeRenderState {
+                document_id,
+                document_version: document.metadata.version,
+                reset_decorations: true,
+                reset_diagnostics: true,
+                initial_decorations: published_decorations
+                    .clone()
+                    .filter(|set| set.document_id == document_id),
+                initial_diagnostics: published_diagnostics
+                    .clone()
+                    .filter(|set| set.document_id == document_id),
+            }
+        })
+        .collect();
+    let snapshot = RuntimeStateSnapshot {
+        runtime_generation_id,
+        client_id: 0,
+        behavior,
+        active_theme,
+        active_typography,
+        sdui_tree,
+        package_ui,
+        documents,
+        diagnostics,
+    };
+    snapshot.validate().map_err(|_| {
+        runtime_candidate_error(
+            "clay.runtime.invalid_snapshot",
+            "Runtime state snapshot failed validation before commit.",
+        )
+    })?;
+    Ok(snapshot)
+}
+
+fn runtime_candidate_error(code: &'static str, message: &'static str) -> RuntimeDiagnostic {
+    RuntimeDiagnostic::error(code, message)
 }
 
 /// Outcome of applying a [`js_runtime::ClayRuntimeEvaluation`]'s shared
@@ -680,11 +1343,19 @@ pub(crate) struct RuntimeOutputApplication {
     /// `Some(Ok(installed))` when a behavior manifest replaced the active
     /// manifest; `Some(Err(()))` when the manifest failed validation; `None`
     /// when the evaluation carried no manifest.
+    #[allow(
+        dead_code,
+        reason = "open-time publication ignores installed behavior metadata"
+    )]
     pub(crate) behavior: Option<Result<crate::protocol::BehaviorManifest, ()>>,
     /// `Some(Ok(tree))` when a runtime tree replaced the per-document SDUI
     /// state — the caller builds the `SduiSnapshot` message with its own
     /// `client_id`. `Some(Err(()))` on validation failure; `None` when no
     /// tree was published.
+    #[allow(
+        dead_code,
+        reason = "open-time publication intentionally skips shared SDUI"
+    )]
     pub(crate) sdui: Option<Result<crate::protocol::SduiTree, ()>>,
     /// Published decoration set, passed through for the caller to emit. The
     /// config-eval boundary holds no per-document decoration store, so this is
@@ -706,6 +1377,7 @@ impl RuntimeOutputApplication {
     /// Unified diagnostics for outputs that failed validation. Both call sites
     /// surface these so the diagnostic codes stay identical across flows
     /// (`clay.behavior.invalid_manifest`, `clay.sdui.invalid_tree`).
+    #[cfg(test)]
     pub(crate) fn diagnostics(&self) -> Vec<RuntimeDiagnostic> {
         let mut diagnostics = Vec::new();
         if matches!(self.behavior, Some(Err(()))) {
@@ -730,8 +1402,9 @@ impl RuntimeOutputApplication {
 /// `ui_contributions` on the evaluation are intentionally not applied here:
 /// the shell owns the package-UI registry; `IpcServer` does not hold one to
 /// merge a `PackageUiRegistrySnapshot` into. JS parse handlers are registered
-/// separately by `IpcServer::apply_runtime_evaluation` because they need the
-/// persistent runtime service, not just this output-application primitive.
+/// separately by the runtime-generation candidate because they need the
+/// persistent runtime service, not just this open-document output primitive.
+#[cfg(test)]
 pub(crate) async fn apply_runtime_outputs(
     evaluation: &js_runtime::ClayRuntimeEvaluation,
     document_id: crate::protocol::DocumentId,
@@ -1321,9 +1994,31 @@ mod runtime_outputs_tests {
 
 #[cfg(test)]
 mod runtime_generation_tests {
-    use std::{fs, time::SystemTime};
+    use std::{
+        fs,
+        time::{Duration, SystemTime},
+    };
 
-    use crate::{ipc::IpcEndpoint, protocol::ServerMessage};
+    use crate::{
+        ipc::IpcEndpoint,
+        packages::record::assemble_package_record,
+        protocol::{
+            ActiveTheme, BehaviorManifest, FontProfile, IncrementalParseUpdate, ParseByteRange,
+            ParseEditNotification, ServerMessage,
+        },
+        server::{
+            command_execution::{
+                CommandExecutionRequest, CommandExecutionRule, CommandExecutionTarget,
+                RELOAD_CONFIGURATION_COMMAND_ID,
+            },
+            completion::BufferWordCompletionProvider,
+            js_runtime::ClayRuntimeEvaluation,
+            language_intelligence::LanguageIntelligenceProviderMeta,
+            parse_coordinator::ParseScheduleRequest,
+            sdui::default_document_tree,
+            withdraw_package_contributions,
+        },
+    };
 
     use super::{IpcServer, ServerConfig};
 
@@ -1345,6 +2040,209 @@ mod runtime_generation_tests {
         let mut config = ServerConfig::new(IpcEndpoint::from_argument("runtime-generation-test"));
         config.configuration_root = Some(root);
         IpcServer::new(config)
+    }
+
+    fn reload_request() -> CommandExecutionRequest {
+        CommandExecutionRequest {
+            command_id: RELOAD_CONFIGURATION_COMMAND_ID.to_string(),
+            arguments: serde_json::Value::Null,
+            target: CommandExecutionTarget::Global,
+            provenance: None,
+            expected_permissions: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_reload_commands_commit_at_most_one_candidate_at_a_time() {
+        let root = temp_config_root("reload-in-progress", "");
+        let server = server_with_config(root);
+        let active_attempt = server.reload_attempt.lock().await;
+
+        let error = server
+            .execute_reload_command(reload_request())
+            .await
+            .expect_err("concurrent reload must not queue");
+        assert_eq!(error.rule, CommandExecutionRule::ReloadInProgress);
+        assert_eq!(server.runtime_generation.generation_id().await, 1);
+
+        drop(active_attempt);
+        assert!(
+            server
+                .execute_reload_command(reload_request())
+                .await
+                .expect("next reload runs after release")
+                .reloaded
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_reload_releases_attempt_lock() {
+        let root = temp_config_root("reload-lock-release", "const = broken;");
+        let server = server_with_config(root.clone());
+
+        assert!(
+            !server
+                .execute_reload_command(reload_request())
+                .await
+                .expect("invalid configuration is a completed reload attempt")
+                .reloaded
+        );
+        fs::write(root.join("init.js"), "").unwrap();
+        assert!(
+            server
+                .execute_reload_command(reload_request())
+                .await
+                .expect("failed attempt released reload locks")
+                .reloaded
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_candidate_commit_releases_behavior_lock() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "candidate-lock-release",
+        )));
+        let candidate = server
+            .prepare_runtime_generation_candidate(
+                1,
+                2,
+                super::ClayJsRuntimeService::default(),
+                ClayRuntimeEvaluation::default(),
+            )
+            .await
+            .expect("prepare candidate");
+        *server.active_theme.lock().await = Some(ActiveTheme {
+            specifier: "@clay/conflict".to_string(),
+            overrides: Vec::new(),
+        });
+
+        assert!(server.commit_runtime_generation(candidate).await.is_err());
+
+        let next = server
+            .prepare_runtime_generation_candidate(
+                1,
+                2,
+                super::ClayJsRuntimeService::default(),
+                ClayRuntimeEvaluation::default(),
+            )
+            .await
+            .expect("prepare replacement candidate");
+        assert!(server.commit_runtime_generation(next).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn candidate_validation_failure_changes_no_active_state() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "candidate-validation-rollback",
+        )));
+        let generation_before = server.runtime_generation.current().await;
+        let behavior_before = server.behavior.lock().await.clone();
+        let sdui_before = server.sdui.lock().await.clone();
+        let theme_before = server.active_theme.lock().await.clone();
+        let typography_before = server.runtime_generation.active_typography().await;
+        let completion_before = server.completion.providers();
+        let intelligence_before = server.language_intelligence.providers();
+
+        let mut evaluation = ClayRuntimeEvaluation::default();
+        let mut manifest = BehaviorManifest::minimal_text_editing(99);
+        manifest.manifest_id = "clay.test.candidate".to_string();
+        evaluation.behavior_manifest = Some(manifest);
+        evaluation.published_sdui_tree = Some(default_document_tree(2, 1));
+
+        let result = server
+            .prepare_runtime_generation_candidate(
+                1,
+                2,
+                super::ClayJsRuntimeService::default(),
+                evaluation,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            server.runtime_generation.current().await.id,
+            generation_before.id
+        );
+        assert_eq!(*server.behavior.lock().await, behavior_before);
+        assert_eq!(*server.sdui.lock().await, sdui_before);
+        assert_eq!(*server.active_theme.lock().await, theme_before);
+        assert_eq!(
+            server.runtime_generation.active_typography().await,
+            typography_before
+        );
+        assert_eq!(server.completion.providers(), completion_before);
+        assert_eq!(
+            server.language_intelligence.providers(),
+            intelligence_before
+        );
+    }
+
+    #[tokio::test]
+    async fn candidate_commit_advances_all_server_generation_state_once() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "candidate-commit",
+        )));
+        let mut evaluation = ClayRuntimeEvaluation::default();
+        let mut manifest = BehaviorManifest::minimal_text_editing(99);
+        manifest.manifest_id = "clay.test.committed".to_string();
+        evaluation.behavior_manifest = Some(manifest);
+        evaluation.published_sdui_tree = Some(default_document_tree(1, 1));
+        evaluation.active_theme = Some(ActiveTheme {
+            specifier: "@clay/theme-test".to_string(),
+            overrides: Vec::new(),
+        });
+        evaluation.active_typography = Some(crate::protocol::ActiveTypography {
+            revision: 99,
+            monospace: FontProfile {
+                families: vec!["monospace".to_string()],
+                size: 17.0,
+            },
+            proportional: FontProfile {
+                families: vec!["sans-serif".to_string()],
+                size: 18.0,
+            },
+            ui: FontProfile {
+                families: vec!["system-ui".to_string()],
+                size: 14.0,
+            },
+        });
+        let candidate = server
+            .prepare_runtime_generation_candidate(
+                1,
+                2,
+                super::ClayJsRuntimeService::default(),
+                evaluation,
+            )
+            .await
+            .expect("valid candidate");
+
+        server
+            .commit_runtime_generation(candidate)
+            .await
+            .expect("candidate commit");
+
+        let current = server.runtime_generation.current().await;
+        assert_eq!(current.id, 2);
+        assert_eq!(server.behavior.lock().await.version(), 2);
+        assert_eq!(
+            server.behavior.lock().await.manifest().manifest_id,
+            "clay.test.committed"
+        );
+        assert!(server.sdui.lock().await.snapshot_message(1).is_some());
+        assert_eq!(
+            server
+                .active_theme
+                .lock()
+                .await
+                .as_ref()
+                .map(|theme| theme.specifier.as_str()),
+            Some("@clay/theme-test")
+        );
+        assert_eq!(
+            server.runtime_generation.active_typography().await.revision,
+            1
+        );
+        assert!(current.evaluation.is_some());
     }
 
     #[tokio::test]
@@ -1586,6 +2484,117 @@ Deno.core.ops.op_clay_runtime_record("still-cached");"#,
     }
 
     #[tokio::test]
+    async fn reload_reruns_one_line_loads_and_rebuilds_representative_contributions() {
+        let root = temp_config_root(
+            "one-line-rebuild",
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");
+await loadPackage("@clay/rust");
+await loadPackage("@clay/typescript");
+await loadPackage("@clay/javascript");"#,
+        );
+        let server = server_with_config(root);
+
+        let outcome = server.reload_runtime_generation().await;
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 2);
+
+        let evaluation = server
+            .runtime_generation
+            .current()
+            .await
+            .evaluation
+            .expect("committed generation must retain evaluation snapshot");
+
+        assert!(
+            evaluation
+                .js_parse_handlers
+                .iter()
+                .any(|handler| handler.package.manifest.name == "@clay/markdown"),
+            "markdown parse handler must rebuild in G2"
+        );
+        assert!(
+            evaluation.behavior_manifest.is_some(),
+            "language/command behavior contributions must rebuild in G2"
+        );
+        for language in ["rust", "typescript", "javascript", "markdown"] {
+            assert!(
+                evaluation
+                    .syntax_grammars
+                    .iter()
+                    .any(|grammar| grammar.language_id == language),
+                "{language} syntax grammar must rebuild in G2"
+            );
+        }
+        for provider_id in [
+            "markdown.keywords",
+            "rust.keywords",
+            "typescript.keywords",
+            "javascript.keywords",
+        ] {
+            assert!(
+                evaluation
+                    .completion_providers
+                    .iter()
+                    .any(|provider| provider.id == provider_id),
+                "{provider_id} completion metadata must rebuild in G2"
+            );
+        }
+        assert!(
+            !evaluation.ui_contributions.components.is_empty()
+                || !evaluation.ui_contributions.panels.is_empty(),
+            "package UI contributions must rebuild in G2"
+        );
+
+        let cached = server
+            .runtime_generation
+            .current_service()
+            .await
+            .evaluate_controlled_module(
+                r#"import { loadPackage } from "clay:packages";
+Deno.core.ops.op_clay_runtime_record(String(Boolean(globalThis.__clayLoadedPackages?.["@clay/markdown"])));
+Deno.core.ops.op_clay_runtime_record(String(Boolean(globalThis.__clayLoadedPackages?.["@clay/rust"])));
+await loadPackage("@clay/markdown");
+await loadPackage("@clay/rust");
+Deno.core.ops.op_clay_runtime_record("idempotent");"#,
+            )
+            .await
+            .unwrap();
+        assert!(cached.op_records.iter().any(|record| record == "true"));
+        assert_eq!(cached.op_records.last().unwrap(), "idempotent");
+    }
+
+    #[tokio::test]
+    async fn runtime_timeout_drops_candidate_service_and_keeps_old_generation() {
+        let root = temp_config_root("candidate-timeout", "while (true) {}");
+        let server = server_with_config(root);
+        let original = server.runtime_generation.current().await;
+        let candidate_service = super::ClayJsRuntimeService::with_timeout_and_heap_limit(
+            Duration::from_millis(10),
+            crate::perf::budgets::JS_RUNTIME_HEAP_LIMIT_BYTES,
+        );
+
+        let error = server
+            .load_configuration_for_service(&candidate_service)
+            .await
+            .expect_err("candidate evaluation must time out");
+
+        assert!(matches!(
+            error,
+            super::js_runtime::ClayRuntimeError::Timeout
+        ));
+        assert_eq!(server.runtime_generation.current().await.id, original.id);
+        assert!(
+            server
+                .runtime_generation
+                .current()
+                .await
+                .evaluation
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn failed_reload_keeps_previous_runtime_generation_active() {
         let root = temp_config_root("failure", "export const = ;");
         let server = server_with_config(root);
@@ -1617,6 +2626,1454 @@ Deno.core.ops.op_clay_runtime_record("still-cached");"#,
                 .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
         );
     }
+
+    fn seed_package() -> crate::packages::record::PackageRecord {
+        assemble_package_record(&serde_json::json!({
+            "name": "@clay/markdown",
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": "markdown",
+                "entry": "./dist/index.js",
+                "permissions": ["parse-document", "completion-provider"],
+                "modes": ["markdown"],
+                "docs": "./docs/index.md"
+            }
+        }))
+        .expect("seed package validates")
+    }
+
+    fn seed_old_generation_contributions(server: &IpcServer) {
+        let package = seed_package();
+        server
+            .parse_coordinator
+            .register_handler_for_generation(
+                &package,
+                1,
+                "markdown",
+                |_notification: ParseEditNotification| async move {
+                    Ok(IncrementalParseUpdate {
+                        document_id: 7,
+                        document_version: 1,
+                        behavior_version: 1,
+                        package_prefix: "markdown".to_string(),
+                        mode_id: "markdown".to_string(),
+                        parse_unit: crate::protocol::ParseUnit::File,
+                        viewport: ParseByteRange::new(0, 1),
+                        invalidated_ranges: Vec::new(),
+                        syntax_tree_delta: None,
+                        decoration_update: None,
+                        diagnostic_update: None,
+                    })
+                },
+            )
+            .expect("seed parse handler");
+        server
+            .completion
+            .register_builtin_buffer_words(1)
+            .expect("seed completion");
+        server
+            .language_intelligence
+            .register_builtin(
+                LanguageIntelligenceProviderMeta::builtin_core(
+                    "hover",
+                    vec![crate::protocol::LanguageIntelligenceFeature::Hover],
+                    1,
+                    500,
+                    1,
+                ),
+                |_request, _window| async move {
+                    Err(
+                        crate::server::language_intelligence::LanguageIntelligenceProviderError::ProviderFailed(
+                            "seed".to_string(),
+                        ),
+                    )
+                },
+            )
+            .expect("seed language intelligence");
+    }
+
+    #[tokio::test]
+    async fn successful_reload_replaces_all_provider_registries_and_cancels_old_work() {
+        let root = temp_config_root(
+            "replace-all",
+            r#"Deno.core.ops.op_clay_runtime_record("generation-two");"#,
+        );
+        let server = server_with_config(root);
+        seed_old_generation_contributions(&server);
+        assert_eq!(server.parse_coordinator.registered_generations(), vec![1]);
+        assert_eq!(server.completion.registered_generations(), vec![1]);
+        assert_eq!(
+            server.language_intelligence.registered_generations(),
+            vec![1]
+        );
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 2);
+        assert!(
+            server
+                .parse_coordinator
+                .registered_generations()
+                .iter()
+                .all(|&generation| generation >= 2)
+        );
+        assert!(
+            server
+                .completion
+                .registered_generations()
+                .iter()
+                .all(|&generation| generation >= 2)
+        );
+        assert!(
+            server
+                .language_intelligence
+                .registered_generations()
+                .iter()
+                .all(|&generation| generation >= 2)
+        );
+        assert!(
+            server.document_analysis.registered_generations().is_empty()
+                || server
+                    .document_analysis
+                    .registered_generations()
+                    .iter()
+                    .all(|&generation| generation >= 2)
+        );
+        assert!(
+            server.document_analysis.worker_generations().is_empty()
+                || server
+                    .document_analysis
+                    .worker_generations()
+                    .iter()
+                    .all(|&generation| generation >= 2)
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_reload_keeps_workers_sessions_and_outputs_on_previous_generation() {
+        let root = temp_config_root("keep-old", "export const = ;");
+        let server = server_with_config(root);
+        seed_old_generation_contributions(&server);
+        let sessions_before = server
+            .runtime_generation
+            .current_service()
+            .await
+            .language_server_session_count()
+            .await;
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(!outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 1);
+        assert_eq!(server.parse_coordinator.registered_generations(), vec![1]);
+        assert_eq!(server.completion.registered_generations(), vec![1]);
+        assert_eq!(
+            server.language_intelligence.registered_generations(),
+            vec![1]
+        );
+        assert_eq!(
+            server
+                .runtime_generation
+                .current_service()
+                .await
+                .language_server_session_count()
+                .await,
+            sessions_before
+        );
+    }
+
+    #[tokio::test]
+    async fn late_old_generation_parse_completion_diagnostic_and_intelligence_output_is_dropped() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "stale-output-drop",
+        )));
+        let package = seed_package();
+        server
+            .parse_coordinator
+            .register_handler_for_generation(
+                &package,
+                1,
+                "markdown",
+                |notification: ParseEditNotification| async move {
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    Ok(IncrementalParseUpdate {
+                        document_id: notification.document_id,
+                        document_version: notification.document_version,
+                        behavior_version: notification.behavior_version,
+                        package_prefix: notification.package_prefix,
+                        mode_id: notification.mode_id,
+                        parse_unit: crate::protocol::ParseUnit::File,
+                        viewport: notification.viewport,
+                        invalidated_ranges: notification.invalidated_ranges,
+                        syntax_tree_delta: None,
+                        decoration_update: None,
+                        diagnostic_update: None,
+                    })
+                },
+            )
+            .unwrap();
+        server
+            .completion
+            .register_builtin(
+                BufferWordCompletionProvider::meta(1),
+                BufferWordCompletionProvider,
+            )
+            .unwrap();
+
+        server
+            .parse_coordinator
+            .schedule_parse(ParseScheduleRequest {
+                document_id: 7,
+                document_version: 1,
+                behavior_version: 1,
+                package_prefix: "markdown".to_string(),
+                mode_id: "markdown".to_string(),
+                viewport: ParseByteRange::new(0, 8),
+                invalidated_ranges: vec![ParseByteRange::new(0, 8)],
+            })
+            .unwrap();
+        server.parse_coordinator.cancel_older_generations(2);
+        server.completion.cancel_older_generations(2);
+        server.language_intelligence.cancel_older_generations(2);
+        server.document_analysis.cancel_older_generations(2);
+
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(300),
+                server.parse_coordinator.next_update()
+            )
+            .await
+            .is_err(),
+            "late old-generation parse output must be drained/dropped"
+        );
+        assert!(server.parse_coordinator.registered_generations().is_empty());
+        assert!(server.completion.registered_generations().is_empty());
+        assert_eq!(server.completion.stats().stale_results_rejected, 0);
+    }
+
+    #[tokio::test]
+    async fn removed_language_package_reclassifies_to_core_fallback() {
+        use crate::packages::modes::{DocumentClassificationInput, ModeDeclaration, ModeRegistry};
+
+        let package = assemble_package_record(&serde_json::json!({
+            "name": "@clay/markdown",
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": "markdown",
+                "entry": "./dist/index.js",
+                "permissions": ["mode-registration", "mode-activation"],
+                "modes": ["markdown"],
+                "docs": "./docs/index.md"
+            }
+        }))
+        .expect("mode package validates");
+        let mut registry = ModeRegistry::new();
+        registry
+            .register_mode(
+                &package.manifest,
+                ModeDeclaration {
+                    package_name: package.manifest.name.clone(),
+                    package_version: package.manifest.version.clone(),
+                    api_prefix: package.manifest.clay.api_prefix.clone(),
+                    mode_id: "markdown".to_string(),
+                    display_name: "Markdown".to_string(),
+                    document_font_role: crate::protocol::DocumentFontRole::Proportional,
+                    extensions: vec!["md".to_string()],
+                    mime_types: Vec::new(),
+                    file_names: Vec::new(),
+                    file_name_patterns: Vec::new(),
+                    shebang_patterns: Vec::new(),
+                    content_probes: Vec::new(),
+                },
+            )
+            .expect("register markdown mode");
+        let classified = registry
+            .classify(&DocumentClassificationInput {
+                document_id: 7,
+                path: Some("note.md".to_string()),
+                mime_type: None,
+                shebang: None,
+                leading_content: None,
+            })
+            .expect("markdown claims .md");
+        assert_eq!(classified.mode_id, "markdown");
+        assert_eq!(registry.unregister_package_modes("markdown"), 1);
+
+        let fallback = registry
+            .classify(&DocumentClassificationInput {
+                document_id: 7,
+                path: Some("note.md".to_string()),
+                mime_type: None,
+                shebang: None,
+                leading_content: None,
+            })
+            .expect("core fallback remains after package withdrawal");
+        assert_eq!(fallback.mode_id, "core.text");
+        assert_eq!(fallback.api_prefix, "core");
+    }
+
+    #[tokio::test]
+    async fn withdraw_package_contributions_reuses_generation_cancel_primitives() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "withdraw-package",
+        )));
+        seed_old_generation_contributions(&server);
+        withdraw_package_contributions(
+            "@clay/markdown",
+            "markdown",
+            &server.parse_coordinator,
+            &server.completion,
+            &server.document_analysis,
+            &server.language_intelligence,
+        );
+        assert!(server.parse_coordinator.registered_generations().is_empty());
+        // Built-in buffer-word completion uses clay.core provenance, so package
+        // withdraw leaves it; language-intelligence seed uses clay.core too.
+        assert!(
+            server
+                .completion
+                .providers()
+                .iter()
+                .all(|meta| meta.provenance.package_prefix != "markdown")
+        );
+
+        let mut commands = crate::packages::commands::CommandRegistry::new();
+        commands.insert_test_command(crate::packages::commands::RegisteredCommand {
+            package_name: "@clay/markdown".to_string(),
+            package_version: "0.1.0".to_string(),
+            api_prefix: "markdown".to_string(),
+            command_id: "markdown.togglePreview".to_string(),
+            display_name: "Toggle Preview".to_string(),
+            routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            custom_properties: Default::default(),
+            permissions: Vec::new(),
+        });
+        assert_eq!(commands.remove_package_commands("@clay/markdown"), 1);
+        assert!(commands.list().next().is_none());
+    }
+
+    fn sample_runtime_snapshot(generation: u64) -> crate::protocol::RuntimeStateSnapshot {
+        let snapshot = crate::protocol::RuntimeStateSnapshot {
+            runtime_generation_id: generation,
+            client_id: 0,
+            behavior: BehaviorManifest::minimal_text_editing(generation),
+            active_theme: ActiveTheme {
+                specifier: "@clay/default".to_string(),
+                overrides: Vec::new(),
+            },
+            active_typography: crate::protocol::ActiveTypography::default(),
+            sdui_tree: default_document_tree(1, 1),
+            package_ui: crate::protocol::PackageUiSnapshot {
+                version: generation,
+            },
+            documents: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        snapshot.validate().expect("sample snapshot");
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn successful_reload_publishes_runtime_state_snapshot_to_subscribers() {
+        let root = temp_config_root(
+            "snapshot-fanout",
+            r#"Deno.core.ops.op_clay_runtime_record("fanout");"#,
+        );
+        let server = server_with_config(root.clone());
+        let mut updates = server.runtime_generation.subscribe_runtime_state();
+
+        let outcome = server.reload_runtime_generation().await;
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 2);
+
+        let generation = tokio::time::timeout(Duration::from_millis(200), updates.recv())
+            .await
+            .expect("subscriber receives generation notice")
+            .expect("runtime-state channel remains open");
+        assert_eq!(generation, 2);
+        let snapshot = server
+            .runtime_generation
+            .latest_runtime_snapshot_for(42)
+            .await
+            .expect("latest snapshot retained after commit");
+        assert_eq!(snapshot.runtime_generation_id, 2);
+        assert_eq!(snapshot.client_id, 42);
+        assert!(snapshot.package_ui.version >= 2);
+        snapshot.validate().expect("published snapshot validates");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn lagged_connection_receives_latest_snapshot_not_intermediate_generations() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "lagged-runtime-snapshot",
+        )));
+        let mut updates = server.runtime_generation.subscribe_runtime_state();
+
+        for generation in 1..=20 {
+            server
+                .runtime_generation
+                .publish_runtime_snapshot(sample_runtime_snapshot(generation))
+                .await;
+        }
+
+        match updates.recv().await {
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Ok(generation) => {
+                // Capacity may still deliver the newest notice without lagging
+                // when the runtime coalesces; either way recovery uses latest.
+                assert_eq!(generation, 20);
+            }
+            Err(other) => panic!("unexpected broadcast error: {other:?}"),
+        }
+
+        let latest = server
+            .runtime_generation
+            .latest_runtime_snapshot_for(9)
+            .await
+            .expect("latest complete snapshot");
+        assert_eq!(latest.runtime_generation_id, 20);
+        assert_eq!(latest.client_id, 9);
+        assert_ne!(latest.runtime_generation_id, 19);
+    }
+
+    #[tokio::test]
+    async fn spoofed_or_future_install_ack_is_ignored() {
+        let server = IpcServer::new(ServerConfig::new(IpcEndpoint::from_argument(
+            "spoofed-runtime-ack",
+        )));
+        server
+            .runtime_generation
+            .publish_runtime_snapshot(sample_runtime_snapshot(3))
+            .await;
+
+        assert!(
+            !server
+                .runtime_generation
+                .note_runtime_generation_installed(99, 7, 3)
+                .await,
+            "spoofed client id must be ignored"
+        );
+        assert!(
+            !server
+                .runtime_generation
+                .note_runtime_generation_installed(7, 7, 4)
+                .await,
+            "future generation must be ignored"
+        );
+        assert!(
+            !server
+                .runtime_generation
+                .note_runtime_generation_installed(7, 7, 0)
+                .await,
+            "zero generation must be ignored"
+        );
+        assert!(
+            server
+                .runtime_generation
+                .note_runtime_generation_installed(7, 7, 3)
+                .await
+        );
+        assert_eq!(
+            server
+                .runtime_generation
+                .acknowledged_runtime_generation(7)
+                .await,
+            Some(3)
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_reload_reaches_two_connected_clients() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "two-clients",
+            r#"Deno.core.ops.op_clay_runtime_record("two clients");"#,
+        );
+        let server = server_with_config(root.clone());
+        let codec = crate::protocol::codec::Codec::default();
+
+        async fn bootstrap_client(
+            server: &IpcServer,
+            client_id: u64,
+            codec: crate::protocol::codec::Codec,
+        ) -> (
+            tokio::io::DuplexStream,
+            tokio::task::JoinHandle<Result<(), crate::protocol::codec::CodecError>>,
+        ) {
+            let (client, server_stream) = duplex(64 * 1024);
+            let connection_server = server.clone();
+            let handle = tokio::spawn(async move {
+                crate::server::connection::handle_connection_with_analysis(
+                    server_stream,
+                    client_id,
+                    Arc::clone(&connection_server.document),
+                    Arc::clone(&connection_server.behavior),
+                    Arc::clone(&connection_server.workspace),
+                    Arc::clone(&connection_server.sdui),
+                    Arc::clone(&connection_server.active_theme),
+                    Arc::clone(&connection_server.runtime_diagnostics),
+                    connection_server.runtime_generation.clone(),
+                    connection_server.parse_coordinator.clone(),
+                    connection_server.completion.clone(),
+                    connection_server.document_analysis.clone(),
+                    connection_server.language_intelligence.clone(),
+                    Some(connection_server),
+                    codec,
+                )
+                .await
+            });
+            let mut client = client;
+            codec
+                .write_client_message(
+                    &mut client,
+                    &crate::protocol::ClientMessage::Hello {
+                        protocol_version: crate::protocol::PROTOCOL_VERSION,
+                        client_name: format!("client-{client_id}"),
+                    },
+                )
+                .await
+                .unwrap();
+            loop {
+                match codec.read_server_message(&mut client).await.unwrap() {
+                    ServerMessage::Welcome {
+                        client_id: welcome_id,
+                        ..
+                    } => {
+                        assert_eq!(welcome_id, client_id);
+                        break;
+                    }
+                    ServerMessage::Error { code, message } => {
+                        panic!("bootstrap failed: {code:?} {message}");
+                    }
+                    _ => {}
+                }
+            }
+            // Drain remaining bootstrap messages so reload fan-out is next.
+            for _ in 0..16 {
+                match tokio::time::timeout(
+                    Duration::from_millis(10),
+                    codec.read_server_message(&mut client),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(_)) | Err(_) => break,
+                }
+            }
+            (client, handle)
+        }
+
+        let (mut client_a, task_a) = bootstrap_client(&server, 21, codec).await;
+        let (mut client_b, task_b) = bootstrap_client(&server, 22, codec).await;
+
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        async fn read_snapshot(
+            codec: &crate::protocol::codec::Codec,
+            client: &mut tokio::io::DuplexStream,
+            expected_client_id: u64,
+        ) -> crate::protocol::RuntimeStateSnapshot {
+            loop {
+                match tokio::time::timeout(
+                    Duration::from_millis(500),
+                    codec.read_server_message(client),
+                )
+                .await
+                .expect("client receives fan-out")
+                .unwrap()
+                {
+                    ServerMessage::RuntimeStateSnapshot(snapshot) => {
+                        assert_eq!(snapshot.client_id, expected_client_id);
+                        assert_eq!(snapshot.runtime_generation_id, 2);
+                        return *snapshot;
+                    }
+                    ServerMessage::ActiveTypography(_)
+                    | ServerMessage::BehaviorManifest(_)
+                    | ServerMessage::DecorationSet(_)
+                    | ServerMessage::DiagnosticSet(_)
+                    | ServerMessage::RuntimeDiagnostic(_)
+                    | ServerMessage::SduiSnapshot { .. }
+                    | ServerMessage::SduiUpdate { .. } => {}
+                    other => panic!("unexpected fan-out message: {other:?}"),
+                }
+            }
+        }
+
+        let snapshot_a = read_snapshot(&codec, &mut client_a, 21).await;
+        let snapshot_b = read_snapshot(&codec, &mut client_b, 22).await;
+        assert_eq!(
+            snapshot_a.runtime_generation_id,
+            snapshot_b.runtime_generation_id
+        );
+
+        codec
+            .write_client_message(
+                &mut client_a,
+                &crate::protocol::ClientMessage::RuntimeGenerationInstalled {
+                    client_id: 21,
+                    runtime_generation_id: 2,
+                },
+            )
+            .await
+            .unwrap();
+        codec
+            .write_client_message(
+                &mut client_b,
+                &crate::protocol::ClientMessage::RuntimeGenerationInstalled {
+                    client_id: 22,
+                    runtime_generation_id: 2,
+                },
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            server
+                .runtime_generation
+                .acknowledged_runtime_generation(21)
+                .await,
+            Some(2)
+        );
+        assert_eq!(
+            server
+                .runtime_generation
+                .acknowledged_runtime_generation(22)
+                .await,
+            Some(2)
+        );
+
+        drop(client_a);
+        drop(client_b);
+        let _ = task_a.await;
+        let _ = task_b.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn edit_sent_before_snapshot_install_is_accepted_once_under_previous_generation() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "grace-accept",
+            r#"
+            import { bindKey } from "clay:keybindings";
+            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            Deno.core.ops.op_clay_runtime_record("grace accept");
+            "#,
+        );
+        let server = server_with_config(root.clone());
+        let previous_behavior = server.behavior.lock().await.manifest().clone();
+        assert_eq!(previous_behavior.behavior_version, 1);
+
+        let outcome = server.reload_runtime_generation().await;
+        assert!(outcome.reloaded);
+        assert_eq!(server.runtime_generation.generation_id().await, 2);
+        assert_eq!(server.behavior.lock().await.version(), 2);
+
+        let (client, server_stream) = duplex(64 * 1024);
+        let codec = crate::protocol::codec::Codec::default();
+        let connection_server = server.clone();
+        let server_task = tokio::spawn(async move {
+            crate::server::connection::handle_connection_with_analysis(
+                server_stream,
+                31,
+                Arc::clone(&connection_server.document),
+                Arc::clone(&connection_server.behavior),
+                Arc::clone(&connection_server.workspace),
+                Arc::clone(&connection_server.sdui),
+                Arc::clone(&connection_server.active_theme),
+                Arc::clone(&connection_server.runtime_diagnostics),
+                connection_server.runtime_generation.clone(),
+                connection_server.parse_coordinator.clone(),
+                connection_server.completion.clone(),
+                connection_server.document_analysis.clone(),
+                connection_server.language_intelligence.clone(),
+                Some(connection_server),
+                codec,
+            )
+            .await
+        });
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Hello {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION,
+                    client_name: "grace-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+
+        let document = server.document.lock().await;
+        let document_id = document.document_id();
+        let version = document.version();
+        let lease_id = match document.access_for_client(31) {
+            crate::protocol::DocumentAccess::Editable { lease_id } => Some(lease_id),
+            _ => None,
+        };
+        drop(document);
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Edit {
+                    document_id,
+                    client_id: 31,
+                    lease_id,
+                    base_version: version,
+                    behavior_version: previous_behavior.behavior_version,
+                    transaction_id: 501,
+                    operation: crate::protocol::EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "g1".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        match codec.read_server_message(&mut client).await.unwrap() {
+            crate::protocol::ServerMessage::EditAck {
+                document_id: ack_document_id,
+                transaction_id,
+                confirmed_version,
+            } => {
+                assert_eq!(ack_document_id, document_id);
+                assert_eq!(transaction_id, 501);
+                assert_eq!(confirmed_version, version + 1);
+            }
+            other => panic!("expected EditAck under grace, got {other:?}"),
+        }
+
+        drop(client);
+        let _ = server_task.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn previous_generation_edit_after_ack_or_expiry_is_rejected_and_snapshot_resent() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "grace-reject",
+            r#"
+            import { bindKey } from "clay:keybindings";
+            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            Deno.core.ops.op_clay_runtime_record("grace reject");
+            "#,
+        );
+        let server = server_with_config(root.clone());
+        let previous_version = server.behavior.lock().await.version();
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        let (client, server_stream) = duplex(64 * 1024);
+        let codec = crate::protocol::codec::Codec::default();
+        let connection_server = server.clone();
+        let server_task = tokio::spawn(async move {
+            crate::server::connection::handle_connection_with_analysis(
+                server_stream,
+                32,
+                Arc::clone(&connection_server.document),
+                Arc::clone(&connection_server.behavior),
+                Arc::clone(&connection_server.workspace),
+                Arc::clone(&connection_server.sdui),
+                Arc::clone(&connection_server.active_theme),
+                Arc::clone(&connection_server.runtime_diagnostics),
+                connection_server.runtime_generation.clone(),
+                connection_server.parse_coordinator.clone(),
+                connection_server.completion.clone(),
+                connection_server.document_analysis.clone(),
+                connection_server.language_intelligence.clone(),
+                Some(connection_server),
+                codec,
+            )
+            .await
+        });
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Hello {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION,
+                    client_name: "grace-reject-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::RuntimeGenerationInstalled {
+                    client_id: 32,
+                    runtime_generation_id: 2,
+                },
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let document = server.document.lock().await;
+        let document_id = document.document_id();
+        let version = document.version();
+        let lease_id = match document.access_for_client(32) {
+            crate::protocol::DocumentAccess::Editable { lease_id } => Some(lease_id),
+            _ => None,
+        };
+        let text_before = document.text();
+        drop(document);
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Edit {
+                    document_id,
+                    client_id: 32,
+                    lease_id,
+                    base_version: version,
+                    behavior_version: previous_version,
+                    transaction_id: 777,
+                    operation: crate::protocol::EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "stale".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        match codec.read_server_message(&mut client).await.unwrap() {
+            crate::protocol::ServerMessage::EditRejected {
+                reason:
+                    crate::protocol::EditRejection::InvalidBehaviorVersion {
+                        behavior_version,
+                        server_behavior_version,
+                    },
+                ..
+            } => {
+                assert_eq!(behavior_version, previous_version);
+                assert_eq!(server_behavior_version, 2);
+            }
+            other => panic!("expected InvalidBehaviorVersion, got {other:?}"),
+        }
+        match codec.read_server_message(&mut client).await.unwrap() {
+            crate::protocol::ServerMessage::RuntimeStateSnapshot(snapshot) => {
+                assert_eq!(snapshot.runtime_generation_id, 2);
+                assert_eq!(snapshot.client_id, 32);
+            }
+            other => panic!("expected RuntimeStateSnapshot republish, got {other:?}"),
+        }
+        assert_eq!(server.document.lock().await.text(), text_before);
+
+        server
+            .runtime_generation
+            .behavior_grace()
+            .expire_for_test()
+            .await;
+        assert!(
+            server
+                .runtime_generation
+                .behavior_grace()
+                .validate_edit_version(
+                    &*server.behavior.lock().await,
+                    99,
+                    document_id,
+                    1,
+                    previous_version,
+                    2,
+                    None,
+                    std::time::Instant::now(),
+                )
+                .await
+                .is_err()
+        );
+
+        drop(client);
+        let _ = server_task.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn grace_never_bypasses_lease_validation() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "grace-lease",
+            r#"
+            import { bindKey } from "clay:keybindings";
+            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            Deno.core.ops.op_clay_runtime_record("grace lease");
+            "#,
+        );
+        let server = server_with_config(root.clone());
+        let previous_version = server.behavior.lock().await.version();
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        let (client, server_stream) = duplex(64 * 1024);
+        let codec = crate::protocol::codec::Codec::default();
+        let connection_server = server.clone();
+        let server_task = tokio::spawn(async move {
+            crate::server::connection::handle_connection_with_analysis(
+                server_stream,
+                33,
+                Arc::clone(&connection_server.document),
+                Arc::clone(&connection_server.behavior),
+                Arc::clone(&connection_server.workspace),
+                Arc::clone(&connection_server.sdui),
+                Arc::clone(&connection_server.active_theme),
+                Arc::clone(&connection_server.runtime_diagnostics),
+                connection_server.runtime_generation.clone(),
+                connection_server.parse_coordinator.clone(),
+                connection_server.completion.clone(),
+                connection_server.document_analysis.clone(),
+                connection_server.language_intelligence.clone(),
+                Some(connection_server),
+                codec,
+            )
+            .await
+        });
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Hello {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION,
+                    client_name: "grace-lease-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+
+        let document = server.document.lock().await;
+        let document_id = document.document_id();
+        let version = document.version();
+        let text_before = document.text();
+        drop(document);
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Edit {
+                    document_id,
+                    client_id: 33,
+                    lease_id: Some(u64::MAX),
+                    base_version: version,
+                    behavior_version: previous_version,
+                    transaction_id: 808,
+                    operation: crate::protocol::EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "nope".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        match codec.read_server_message(&mut client).await.unwrap() {
+            crate::protocol::ServerMessage::EditRejected {
+                reason:
+                    crate::protocol::EditRejection::LeaseExpired { .. }
+                    | crate::protocol::EditRejection::LeaseRequired,
+                ..
+            } => {}
+            other => panic!("grace must not bypass lease checks, got {other:?}"),
+        }
+        assert_eq!(server.document.lock().await.text(), text_before);
+
+        drop(client);
+        let _ = server_task.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn typing_and_edit_ack_continue_while_candidate_runtime_is_blocked_on_test_barrier() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "barrier-typing",
+            r#"Deno.core.ops.op_clay_runtime_record("barrier ok");"#,
+        );
+        let server = server_with_config(root.clone());
+        let (entered_rx, release_tx) = server.arm_reload_candidate_barrier().await;
+
+        let (client, server_stream) = duplex(64 * 1024);
+        let codec = crate::protocol::codec::Codec::default();
+        let connection_server = server.clone();
+        let server_task = tokio::spawn(async move {
+            crate::server::connection::handle_connection_with_analysis(
+                server_stream,
+                41,
+                Arc::clone(&connection_server.document),
+                Arc::clone(&connection_server.behavior),
+                Arc::clone(&connection_server.workspace),
+                Arc::clone(&connection_server.sdui),
+                Arc::clone(&connection_server.active_theme),
+                Arc::clone(&connection_server.runtime_diagnostics),
+                connection_server.runtime_generation.clone(),
+                connection_server.parse_coordinator.clone(),
+                connection_server.completion.clone(),
+                connection_server.document_analysis.clone(),
+                connection_server.language_intelligence.clone(),
+                Some(connection_server),
+                codec,
+            )
+            .await
+        });
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Hello {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION,
+                    client_name: "barrier-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+
+        let reload_server = server.clone();
+        let reload_task =
+            tokio::spawn(async move { reload_server.reload_runtime_generation().await });
+        entered_rx
+            .await
+            .expect("reload candidate must reach the test barrier");
+        assert_eq!(
+            server.runtime_generation.generation_id().await,
+            1,
+            "generation must stay on G1 while candidate is blocked"
+        );
+
+        let document = server.document.lock().await;
+        let document_id = document.document_id();
+        let version = document.version();
+        let lease_id = match document.access_for_client(41) {
+            crate::protocol::DocumentAccess::Editable { lease_id } => Some(lease_id),
+            _ => None,
+        };
+        let behavior_version = server.behavior.lock().await.version();
+        drop(document);
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Edit {
+                    document_id,
+                    client_id: 41,
+                    lease_id,
+                    base_version: version,
+                    behavior_version,
+                    transaction_id: 7001,
+                    operation: crate::protocol::EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "typed".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        match tokio::time::timeout(
+            Duration::from_millis(250),
+            codec.read_server_message(&mut client),
+        )
+        .await
+        .expect("edit ack must not wait for blocked reload")
+        .unwrap()
+        {
+            crate::protocol::ServerMessage::EditAck {
+                document_id: ack_document_id,
+                transaction_id,
+                confirmed_version,
+            } => {
+                assert_eq!(ack_document_id, document_id);
+                assert_eq!(transaction_id, 7001);
+                assert_eq!(confirmed_version, version + 1);
+            }
+            other => panic!("expected EditAck while reload is blocked, got {other:?}"),
+        }
+
+        release_tx.send(()).expect("release blocked reload");
+        let outcome = reload_task.await.expect("reload task joins");
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 2);
+
+        drop(client);
+        let _ = server_task.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn failed_reload_broadcasts_diagnostic_but_no_generation_snapshot() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "failed-no-snapshot",
+            r#"Deno.core.ops.op_clay_runtime_record("baseline");"#,
+        );
+        let server = server_with_config(root.clone());
+        assert_eq!(server.runtime_generation.generation_id().await, 1);
+
+        let (client, server_stream) = duplex(64 * 1024);
+        let codec = crate::protocol::codec::Codec::default();
+        let connection_server = server.clone();
+        let server_task = tokio::spawn(async move {
+            crate::server::connection::handle_connection_with_analysis(
+                server_stream,
+                42,
+                Arc::clone(&connection_server.document),
+                Arc::clone(&connection_server.behavior),
+                Arc::clone(&connection_server.workspace),
+                Arc::clone(&connection_server.sdui),
+                Arc::clone(&connection_server.active_theme),
+                Arc::clone(&connection_server.runtime_diagnostics),
+                connection_server.runtime_generation.clone(),
+                connection_server.parse_coordinator.clone(),
+                connection_server.completion.clone(),
+                connection_server.document_analysis.clone(),
+                connection_server.language_intelligence.clone(),
+                Some(connection_server),
+                codec,
+            )
+            .await
+        });
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &crate::protocol::ClientMessage::Hello {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION,
+                    client_name: "failed-reload-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+
+        let mut updates = server.runtime_generation.subscribe_runtime_state();
+        fs::write(root.join("init.js"), "export const = ;").unwrap();
+
+        let outcome = server
+            .execute_reload_command(reload_request())
+            .await
+            .expect("failed reload still returns a command outcome");
+        assert!(!outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 1);
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
+        );
+        assert!(
+            server
+                .runtime_diagnostics
+                .lock()
+                .await
+                .iter()
+                .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
+        );
+        assert!(
+            server
+                .runtime_generation
+                .latest_runtime_snapshot_for(42)
+                .await
+                .is_none()
+        );
+        assert!(
+            matches!(
+                updates.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ),
+            "failed reload must not publish a runtime generation id"
+        );
+
+        // Live connection must stay on G1: no RuntimeStateSnapshot appears.
+        match tokio::time::timeout(
+            Duration::from_millis(80),
+            codec.read_server_message(&mut client),
+        )
+        .await
+        {
+            Err(_) => {}
+            Ok(Ok(ServerMessage::RuntimeStateSnapshot(_))) => {
+                panic!("failed reload must not fan out a generation snapshot")
+            }
+            Ok(Ok(ServerMessage::RuntimeDiagnostic(diagnostic))) => {
+                assert_ne!(diagnostic.code, "clay.runtime.reload_succeeded");
+            }
+            Ok(Ok(other)) => panic!("unexpected live message after failed reload: {other:?}"),
+            Ok(Err(error)) => panic!("client read failed: {error}"),
+        }
+
+        drop(client);
+        let _ = server_task.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn successful_reload_is_observed_as_one_generation_by_all_clients() {
+        use std::sync::Arc;
+        use tokio::io::duplex;
+
+        let root = temp_config_root(
+            "one-generation",
+            r#"
+            import { bindKey } from "clay:keybindings";
+            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            Deno.core.ops.op_clay_runtime_record("one generation");
+            "#,
+        );
+        let server = server_with_config(root.clone());
+        let codec = crate::protocol::codec::Codec::default();
+
+        async fn bootstrap_client(
+            server: &IpcServer,
+            client_id: u64,
+            codec: crate::protocol::codec::Codec,
+        ) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
+            let (client, server_stream) = duplex(64 * 1024);
+            let connection_server = server.clone();
+            let handle = tokio::spawn(async move {
+                let _ = crate::server::connection::handle_connection_with_analysis(
+                    server_stream,
+                    client_id,
+                    Arc::clone(&connection_server.document),
+                    Arc::clone(&connection_server.behavior),
+                    Arc::clone(&connection_server.workspace),
+                    Arc::clone(&connection_server.sdui),
+                    Arc::clone(&connection_server.active_theme),
+                    Arc::clone(&connection_server.runtime_diagnostics),
+                    connection_server.runtime_generation.clone(),
+                    connection_server.parse_coordinator.clone(),
+                    connection_server.completion.clone(),
+                    connection_server.document_analysis.clone(),
+                    connection_server.language_intelligence.clone(),
+                    Some(connection_server),
+                    codec,
+                )
+                .await;
+            });
+            let mut client = client;
+            codec
+                .write_client_message(
+                    &mut client,
+                    &crate::protocol::ClientMessage::Hello {
+                        protocol_version: crate::protocol::PROTOCOL_VERSION,
+                        client_name: format!("client-{client_id}"),
+                    },
+                )
+                .await
+                .unwrap();
+            for _ in 0..16 {
+                match tokio::time::timeout(
+                    Duration::from_millis(10),
+                    codec.read_server_message(&mut client),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(_)) | Err(_) => break,
+                }
+            }
+            (client, handle)
+        }
+
+        let (mut client_a, task_a) = bootstrap_client(&server, 51, codec).await;
+        let (mut client_b, task_b) = bootstrap_client(&server, 52, codec).await;
+
+        assert!(server.reload_runtime_generation().await.reloaded);
+        assert_eq!(server.runtime_generation.generation_id().await, 2);
+
+        async fn read_complete_snapshot(
+            codec: &crate::protocol::codec::Codec,
+            client: &mut tokio::io::DuplexStream,
+            expected_client_id: u64,
+        ) -> crate::protocol::RuntimeStateSnapshot {
+            loop {
+                match tokio::time::timeout(
+                    Duration::from_millis(500),
+                    codec.read_server_message(client),
+                )
+                .await
+                .expect("client receives one complete generation")
+                .unwrap()
+                {
+                    ServerMessage::RuntimeStateSnapshot(snapshot) => {
+                        assert_eq!(snapshot.client_id, expected_client_id);
+                        assert_eq!(snapshot.runtime_generation_id, 2);
+                        assert_eq!(snapshot.behavior.behavior_version, 2);
+                        snapshot.validate().expect("fan-out snapshot validates");
+                        return *snapshot;
+                    }
+                    ServerMessage::ActiveTypography(_)
+                    | ServerMessage::BehaviorManifest(_)
+                    | ServerMessage::DecorationSet(_)
+                    | ServerMessage::DiagnosticSet(_)
+                    | ServerMessage::RuntimeDiagnostic(_)
+                    | ServerMessage::SduiSnapshot { .. }
+                    | ServerMessage::SduiUpdate { .. } => {}
+                    other => panic!("unexpected fan-out message: {other:?}"),
+                }
+            }
+        }
+
+        let snapshot_a = read_complete_snapshot(&codec, &mut client_a, 51).await;
+        let snapshot_b = read_complete_snapshot(&codec, &mut client_b, 52).await;
+        assert_eq!(
+            snapshot_a.runtime_generation_id,
+            snapshot_b.runtime_generation_id
+        );
+        assert_eq!(
+            snapshot_a.behavior.behavior_version,
+            snapshot_b.behavior.behavior_version
+        );
+        assert_eq!(snapshot_a.active_theme, snapshot_b.active_theme);
+        assert_eq!(
+            snapshot_a.active_typography.revision,
+            snapshot_b.active_typography.revision
+        );
+
+        // Neither client may observe a second generation id for this commit.
+        for (client, client_id) in [(&mut client_a, 51u64), (&mut client_b, 52)] {
+            match tokio::time::timeout(Duration::from_millis(40), codec.read_server_message(client))
+                .await
+            {
+                Err(_) => {}
+                Ok(Ok(ServerMessage::RuntimeStateSnapshot(snapshot))) => {
+                    panic!(
+                        "client {client_id} observed a second snapshot generation {}",
+                        snapshot.runtime_generation_id
+                    );
+                }
+                Ok(Ok(_)) | Ok(Err(_)) => {}
+            }
+        }
+
+        drop(client_a);
+        drop(client_b);
+        let _ = task_a.await;
+        let _ = task_b.await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reload_preserves_authority_denials_and_cleans_old_lsp_worker() {
+        use std::{
+            io::Write,
+            os::unix::fs::PermissionsExt,
+            path::{Path, PathBuf},
+        };
+
+        use crate::server::language_server::LanguageServerSpawn;
+
+        fn fake_echo_child(root: &Path) -> PathBuf {
+            let path = root.join("fake-echo");
+            let mut file = fs::File::create(&path).unwrap();
+            file.write_all(
+                b"#!/bin/sh\nwhile IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; done\n",
+            )
+            .unwrap();
+            file.sync_all().unwrap();
+            drop(file);
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        let root = temp_config_root(
+            "lsp-cleanup",
+            r#"Deno.core.ops.op_clay_runtime_record("lsp cleanup");"#,
+        );
+        let server = server_with_config(root.clone());
+        let previous = server.runtime_generation.current_service().await;
+        let process = previous.language_server_process_for_test();
+        let executable = fake_echo_child(&root);
+        let session = process
+            .start(LanguageServerSpawn {
+                package_name: "example".to_string(),
+                contribution_id: "example.echo".to_string(),
+                descriptor_fingerprint: 0,
+                canonical_executable: executable,
+                args: Vec::new(),
+                inherit_environment: Vec::new(),
+                cwd: root.clone(),
+            })
+            .await
+            .expect("seed previous-generation language-server session");
+        assert_eq!(previous.language_server_session_count().await, 1);
+        let _ = session;
+
+        let outcome = server.reload_runtime_generation().await;
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.active_generation_id, 2);
+        assert_eq!(
+            previous.language_server_session_count().await,
+            0,
+            "successful commit must shut down previous-generation language-server sessions"
+        );
+
+        // Authority denials remain deny-by-default after a successful swap.
+        fs::write(
+            root.join("init.js"),
+            r#"import "https://example.com/not-allowed.js";"#,
+        )
+        .unwrap();
+        let denied = server.reload_runtime_generation().await;
+        assert!(!denied.reloaded);
+        assert_eq!(denied.active_generation_id, 2);
+        let diagnostic = denied.diagnostics.last().expect("denial diagnostic");
+        assert_eq!(diagnostic.code, "clay.configuration.invalid_module");
+        assert!(
+            !diagnostic
+                .message
+                .contains("https://example.com/not-allowed.js"),
+            "diagnostics must not leak denied module URLs"
+        );
+        assert!(
+            !diagnostic
+                .message
+                .contains(&root.to_string_lossy().to_string()),
+            "diagnostics must not leak configuration paths"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -1631,7 +4088,7 @@ mod tests {
 
     use super::{ActiveBehaviorManifest, IpcServer, RuntimeGenerationStore, ServerConfig};
     use crate::server::{
-        language_intelligence::LanguageIntelligenceCoordinator,
+        language_intelligence::LanguageIntelligenceCoordinator, locks::ScopedLockManager,
         parse_coordinator::ParseCoordinator, sdui::StaticSduiState,
     };
     use crate::{
@@ -1672,7 +4129,11 @@ mod tests {
                 crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
             language_intelligence: LanguageIntelligenceCoordinator::new(),
             runtime_generation: RuntimeGenerationStore::initial(),
-            next_client_id: AtomicU64::new(1),
+            scoped_locks: ScopedLockManager::default(),
+            reload_attempt: Arc::new(Mutex::new(())),
+            next_client_id: Arc::new(AtomicU64::new(1)),
+            #[cfg(test)]
+            reload_barrier: super::ReloadCandidateBarrier::default(),
         }
     }
 

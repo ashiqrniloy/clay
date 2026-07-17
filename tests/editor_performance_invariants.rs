@@ -115,6 +115,55 @@ fn typography_updates_do_not_enter_editor_hot_paths() {
 }
 
 #[test]
+fn runtime_generation_install_stays_outside_paint_and_text_event_hot_paths() {
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let layout = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
+    let masonry = fs::read_to_string("src/masonry_editor.rs").expect("masonry editor readable");
+    let hot_paths = format!("{}\n{}", non_test_body(&surface), non_test_body(&layout));
+    let paint_body = masonry
+        .split("fn paint(")
+        .nth(1)
+        .and_then(|rest| rest.split("fn accessibility_role(").next())
+        .expect("paint method present");
+    let text_event_body = masonry
+        .split("fn on_text_event(")
+        .nth(1)
+        .and_then(|rest| rest.split("fn on_access_event(").next())
+        .unwrap_or("");
+
+    assert!(
+        masonry.contains("fn install_runtime_state_snapshot"),
+        "runtime install must remain a dedicated connection-event path"
+    );
+    assert!(
+        masonry.contains("ClientRuntimeStateCandidate::validate"),
+        "runtime install must validate a complete candidate before mutation"
+    );
+    for forbidden in [
+        "ClientRuntimeStateCandidate",
+        "install_runtime_state_snapshot",
+        "RuntimeStateSnapshot",
+        "Deno.core",
+        "op_clay_",
+        "write_client_message",
+        "reload_runtime_generation",
+    ] {
+        assert!(
+            !hot_paths.contains(forbidden),
+            "editor paint/layout paths must not validate or install runtime snapshots: {forbidden}"
+        );
+        assert!(
+            !paint_body.contains(forbidden),
+            "masonry paint must not validate or install runtime snapshots: {forbidden}"
+        );
+        assert!(
+            !text_event_body.contains(forbidden),
+            "masonry text events must not validate or install runtime snapshots: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn parse_window_snapshot_primitive_uses_bounded_rope_slicing() {
     let document_source =
         fs::read_to_string("src/server/document.rs").expect("document source readable");
@@ -433,7 +482,7 @@ fn diagnostic_paint_uses_theme_owned_severity_styles_only() {
         .split("fn apply_diagnostic_set")
         .nth(1)
         .expect("apply_diagnostic_set")
-        .split("pub fn layout_style_revision_for_test")
+        .split("pub(crate) fn clear_decorations")
         .next()
         .expect("apply_diagnostic_set body");
     assert!(

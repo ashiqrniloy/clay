@@ -6,8 +6,10 @@
 
 const ops = globalThis.Deno?.core?.ops;
 // Per-runtime-generation cache: repeated calls are idempotent inside one
-// ClayJsRuntimeService, and hot reload invalidates it by swapping to a fresh
-// runtime rather than mutating globals/module cache in place.
+// ClayJsRuntimeService. Hot reload invalidates it by swapping to a fresh
+// runtime rather than mutating globals/module cache in place, adding a
+// force flag, or invoking package-authored reload/migration hooks.
+// Generation-local only: this object is empty in every candidate generation.
 const loadedPackages = ((globalThis as typeof globalThis & { __clayLoadedPackages?: Record<string, unknown> }).__clayLoadedPackages ??= Object.create(null));
 
 function requireOps(): NonNullable<typeof ops> {
@@ -97,9 +99,12 @@ export function setConflictOverride(_options: { contributionId: string; winnerPa
  * `loadEntry` so the package registers modes, commands, parse handlers, and
  * decorations under Clay's authority. Repeated calls within one runtime
  * generation return the cached summary; hot reload reruns `init.js` in a fresh
- * generation so the cache starts empty. The module loader imports only
- * canonical loadEntry paths recorded in the validated package allowlist, and
- * relative imports remain confined to the package root. */
+ * generation so the cache starts empty and every `loadEntry` rebuilds
+ * declarations from durable configuration/package metadata. There is no
+ * `loadPackage(spec, { force: true })` and no package reload callback API.
+ * The module loader imports only canonical loadEntry paths recorded in the
+ * validated package allowlist, and relative imports remain confined to the
+ * package root. */
 export async function loadPackage(specifier: string): Promise<unknown> {
   if (typeof specifier !== "string") {
     throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");

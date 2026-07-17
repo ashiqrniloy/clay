@@ -2092,8 +2092,100 @@ documentation_path = "docs/reference/clay-js-api/editor/client-copy-selection.md
 key_bindings = ["Ctrl+C", "Cmd+C"]
 custom_properties = []
 permissions = []
-security_notes = "Writes only the current non-empty native editor selection after explicit user routing; does not grant filesystem/workspace authority, clipboard read, paste, cut, arbitrary clipboard text writes, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+security_notes = "Writes only the current non-empty native editor selection after explicit user routing; does not grant filesystem/workspace authority, arbitrary clipboard text writes, package/configuration/AI clipboard-contents APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Cut and paste are separate documented command IDs."
 current_rust_owner = "src/masonry_editor.rs::EditorWidget::copy_selection_to_system_clipboard"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientCutSelection"
+category = "clipboard"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientCutSelection"
+user_facing_name = "Cut Selection"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; actual cut runs only after explicit native user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary key-insertion hot paths."
+facade_path = "runtime/js/editor.ts::clientCutSelection"
+backing_rust = "src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-cut-selection.md"
+key_bindings = ["Ctrl+X", "Cmd+X"]
+custom_properties = []
+permissions = []
+security_notes = "Writes only the current non-empty native editor selection after explicit user routing, then deletes that selection through the ordinary local edit path; does not grant filesystem/workspace authority, arbitrary clipboard text writes, package/configuration/AI clipboard-contents APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientPasteClipboard"
+category = "clipboard"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientPasteClipboard"
+user_facing_name = "Paste Clipboard"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; actual paste reads the OS clipboard only after explicit native user routing and stays off paint, layout, scroll, and ordinary key-insertion hot paths."
+facade_path = "runtime/js/editor.ts::clientPasteClipboard"
+backing_rust = "src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::paste_text_with_event"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-paste-clipboard.md"
+key_bindings = ["Ctrl+V", "Cmd+V"]
+custom_properties = []
+permissions = []
+security_notes = "Reads OS clipboard text only after explicit user routing and inserts/replaces through the ordinary local edit path; does not grant filesystem/workspace authority, package/configuration/AI clipboard-contents inspection APIs, arbitrary clipboard writes, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Diagnostics never include full clipboard contents."
+current_rust_owner = "src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientUndo"
+category = "history"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientUndo"
+user_facing_name = "Undo"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; actual undo applies a client-local inverse edit after explicit native user routing and stays off full-document IPC, package JavaScript, paint, and layout hot paths beyond ordinary local edits."
+facade_path = "runtime/js/editor.ts::clientUndo"
+backing_rust = "src/masonry_editor.rs::EditorWidget::undo; src/editor/surface.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-undo.md"
+key_bindings = ["Ctrl+Z", "Cmd+Z"]
+custom_properties = []
+permissions = []
+security_notes = "Applies a client-local ordinary inverse edit under the editable lease after explicit user routing; does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_editor.rs::EditorWidget::undo"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientRedo"
+category = "history"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientRedo"
+user_facing_name = "Redo"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; actual redo reapplies a client-local forward edit after explicit native user routing and stays off full-document IPC, package JavaScript, paint, and layout hot paths beyond ordinary local edits."
+facade_path = "runtime/js/editor.ts::clientRedo"
+backing_rust = "src/masonry_editor.rs::EditorWidget::redo; src/editor/surface.rs::EditorSurface::redo_with_event; src/editor/history.rs::EditHistory"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-redo.md"
+key_bindings = ["Ctrl+Shift+Z", "Cmd+Shift+Z", "Ctrl+Y"]
+custom_properties = []
+permissions = []
+security_notes = "Applies a client-local ordinary inverse edit under the editable lease after explicit user routing; does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_editor.rs::EditorWidget::redo"
 registry_public = true
 
 [[api]]

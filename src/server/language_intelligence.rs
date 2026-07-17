@@ -466,35 +466,35 @@ impl LanguageIntelligenceProviderRegistry {
         meta: LanguageIntelligenceProviderMeta,
         provider: impl LanguageIntelligenceProvider,
     ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
-        if !package
-            .manifest
-            .clay
-            .permissions
-            .contains(&PackagePermission::ParseDocument)
+        validate_package_provider(package, &meta)?;
+        self.register(meta, provider)
+    }
+
+    fn register_package_replacing_older(
+        &mut self,
+        package: &PackageRecord,
+        meta: LanguageIntelligenceProviderMeta,
+        provider: impl LanguageIntelligenceProvider,
+    ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
+        validate_package_provider(package, &meta)?;
+        validate_provider_meta(&meta)?;
+        if let Some(existing) = self.providers.get(&meta.id)
+            && existing.meta.generation >= meta.generation
         {
             return Err(
-                LanguageIntelligenceProviderRegistryError::MissingPermission {
-                    package_prefix: package.manifest.clay.api_prefix.clone(),
-                },
-            );
-        }
-        if meta.id.starts_with("clay.") {
-            return Err(
-                LanguageIntelligenceProviderRegistryError::ReservedClayNamespace {
+                LanguageIntelligenceProviderRegistryError::ProviderAlreadyRegistered {
                     id: meta.id.clone(),
                 },
             );
         }
-        let api_prefix = package.manifest.clay.api_prefix.as_str();
-        if !is_package_owned_id(&meta.id, api_prefix) && !meta.id.starts_with("core.") {
-            return Err(
-                LanguageIntelligenceProviderRegistryError::IdNotPackageOwned {
-                    id: meta.id.clone(),
-                    api_prefix: api_prefix.to_string(),
-                },
-            );
-        }
-        self.register(meta, provider)
+        self.providers.insert(
+            meta.id.clone(),
+            RegisteredProvider {
+                meta,
+                provider: Arc::new(provider),
+            },
+        );
+        Ok(())
     }
 
     fn register(
@@ -502,16 +502,7 @@ impl LanguageIntelligenceProviderRegistry {
         meta: LanguageIntelligenceProviderMeta,
         provider: impl LanguageIntelligenceProvider,
     ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
-        if meta.features.is_empty() {
-            return Err(LanguageIntelligenceProviderRegistryError::EmptyFeatures {
-                id: meta.id.clone(),
-            });
-        }
-        if meta.timeout_ms == 0 || meta.timeout_ms > LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS {
-            return Err(LanguageIntelligenceProviderRegistryError::InvalidTimeout {
-                timeout_ms: meta.timeout_ms,
-            });
-        }
+        validate_provider_meta(&meta)?;
         if self.providers.contains_key(&meta.id) {
             return Err(
                 LanguageIntelligenceProviderRegistryError::ProviderAlreadyRegistered {
@@ -633,6 +624,57 @@ pub(crate) fn provider_is_disabled(
         || disabled.contains(&meta.provenance.package_prefix)
 }
 
+fn validate_package_provider(
+    package: &PackageRecord,
+    meta: &LanguageIntelligenceProviderMeta,
+) -> Result<(), LanguageIntelligenceProviderRegistryError> {
+    if !package
+        .manifest
+        .clay
+        .permissions
+        .contains(&PackagePermission::ParseDocument)
+    {
+        return Err(
+            LanguageIntelligenceProviderRegistryError::MissingPermission {
+                package_prefix: package.manifest.clay.api_prefix.clone(),
+            },
+        );
+    }
+    if meta.id.starts_with("clay.") {
+        return Err(
+            LanguageIntelligenceProviderRegistryError::ReservedClayNamespace {
+                id: meta.id.clone(),
+            },
+        );
+    }
+    let api_prefix = package.manifest.clay.api_prefix.as_str();
+    if !is_package_owned_id(&meta.id, api_prefix) && !meta.id.starts_with("core.") {
+        return Err(
+            LanguageIntelligenceProviderRegistryError::IdNotPackageOwned {
+                id: meta.id.clone(),
+                api_prefix: api_prefix.to_string(),
+            },
+        );
+    }
+    Ok(())
+}
+
+fn validate_provider_meta(
+    meta: &LanguageIntelligenceProviderMeta,
+) -> Result<(), LanguageIntelligenceProviderRegistryError> {
+    if meta.features.is_empty() {
+        return Err(LanguageIntelligenceProviderRegistryError::EmptyFeatures {
+            id: meta.id.clone(),
+        });
+    }
+    if meta.timeout_ms == 0 || meta.timeout_ms > LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS {
+        return Err(LanguageIntelligenceProviderRegistryError::InvalidTimeout {
+            timeout_ms: meta.timeout_ms,
+        });
+    }
+    Ok(())
+}
+
 fn is_package_owned_id(value: &str, api_prefix: &str) -> bool {
     value == api_prefix
         || value
@@ -736,6 +778,19 @@ impl LanguageIntelligenceCoordinator {
             .register_package(package, meta, provider)
     }
 
+    pub(crate) fn register_package_for_generation(
+        &self,
+        package: &PackageRecord,
+        meta: LanguageIntelligenceProviderMeta,
+        provider: impl LanguageIntelligenceProvider,
+    ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
+        self.inner
+            .lock()
+            .expect("language intelligence coordinator lock poisoned")
+            .registry
+            .register_package_replacing_older(package, meta, provider)
+    }
+
     pub fn bump_generation(
         &self,
         document_id: DocumentId,
@@ -813,20 +868,51 @@ impl LanguageIntelligenceCoordinator {
     }
 
     pub fn cancel_generation(&self, generation: LanguageIntelligenceProviderGeneration) {
+        self.cancel_older_generations(generation.saturating_add(1));
+    }
+
+    /// After a successful runtime-generation commit, keep only providers at or
+    /// above `active_generation` and abort older in-flight work. Late results
+    /// from aborted tasks never reach clients because schedule uses oneshot
+    /// replies that drop when the task is cancelled.
+    pub fn cancel_older_generations(
+        &self,
+        active_generation: LanguageIntelligenceProviderGeneration,
+    ) {
         let mut inner = self
             .inner
             .lock()
             .expect("language intelligence coordinator lock poisoned");
-        inner
-            .registry
-            .remove_older_generations(generation.saturating_add(1));
+        inner.registry.remove_older_generations(active_generation);
         let task_keys: Vec<_> = inner
             .active_tasks
             .keys()
-            .filter(|key| key.generation <= generation)
+            .filter(|key| key.generation < active_generation)
             .cloned()
             .collect();
         abort_tasks(&mut inner, task_keys);
+        for current in inner.current_generations.values_mut() {
+            *current = (*current).max(active_generation);
+        }
+    }
+
+    /// Snapshot of provider generations currently retained by the registry.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "generation introspection is used by reload cleanup tests"
+        )
+    )]
+    pub(crate) fn registered_generations(&self) -> Vec<LanguageIntelligenceProviderGeneration> {
+        let mut generations = self
+            .providers()
+            .into_iter()
+            .map(|meta| meta.generation)
+            .collect::<Vec<_>>();
+        generations.sort_unstable();
+        generations.dedup();
+        generations
     }
 
     pub fn providers(&self) -> Vec<LanguageIntelligenceProviderMeta> {

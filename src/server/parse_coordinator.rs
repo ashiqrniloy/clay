@@ -325,6 +325,7 @@ impl ParseCoordinator {
         Ok(meta)
     }
 
+    /// Cancel handlers and active work for one exact generation.
     pub fn cancel_generation(&self, generation_id: u64) {
         let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
         inner
@@ -337,6 +338,25 @@ impl ParseCoordinator {
             .cloned()
             .collect();
         abort_tasks(&mut inner, task_keys);
+    }
+
+    /// After a successful runtime-generation commit, remove every handler and
+    /// in-flight task older than `active_generation`, then drain any already
+    /// queued parse outputs so late old-generation results cannot publish.
+    pub fn cancel_older_generations(&self, active_generation: u64) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner
+            .handlers
+            .retain(|_, registered| registered.generation_id >= active_generation);
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|task_key| task_key.generation_id < active_generation)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+        drop(inner);
+        self.drain_pending_outputs();
     }
 
     /// Cancel parse handlers and active work owned by one package prefix. This
@@ -354,6 +374,39 @@ impl ParseCoordinator {
             .cloned()
             .collect();
         abort_tasks(&mut inner, task_keys);
+    }
+
+    /// Drop already-queued parse updates/diagnostics without waiting. Used by
+    /// generation replacement so stale channel contents cannot reach clients.
+    pub(crate) fn drain_pending_outputs(&self) {
+        if let Ok(mut updates) = self.updates_rx.try_lock() {
+            while updates.try_recv().is_ok() {}
+        }
+        if let Ok(mut diagnostics) = self.diagnostics_rx.try_lock() {
+            while diagnostics.try_recv().is_ok() {}
+        }
+    }
+
+    /// Snapshot of currently registered handler generations for tests/diagnostics.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "generation introspection is used by reload cleanup tests"
+        )
+    )]
+    pub(crate) fn registered_generations(&self) -> Vec<u64> {
+        let mut generations = self
+            .inner
+            .lock()
+            .expect("parse coordinator lock poisoned")
+            .handlers
+            .values()
+            .map(|registered| registered.generation_id)
+            .collect::<Vec<_>>();
+        generations.sort_unstable();
+        generations.dedup();
+        generations
     }
 
     pub(crate) fn cancel_document_handler_tasks(

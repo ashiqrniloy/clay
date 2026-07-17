@@ -90,6 +90,11 @@ pub(crate) struct PackageUiRegistrySnapshot {
 }
 
 impl PackageUiRegistrySnapshot {
+    pub(crate) fn validate(&self) -> Result<(), crate::shell::PackageUiRuntimeError> {
+        let mut state = crate::shell::PackageUiRuntimeState::new();
+        state.apply_update(self.runtime_update(0))
+    }
+
     #[allow(
         dead_code,
         reason = "package UI runtime updates are produced once dynamic package UI publication is wired"

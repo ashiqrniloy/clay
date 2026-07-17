@@ -236,11 +236,68 @@ Configuration evaluation remains startup, package-load, reload, or explicit sett
 
 ## Phase 19 persistent-runtime hot reload configuration review
 
-Phase 19 reviewed persistent runtime hot reload and did **not** promote a new user-facing reload setting, command, key binding, or `clay:configuration` API. Hot reload is an internal/developer-only server lifecycle primitive in this phase, triggered headlessly through `IpcServer::trigger_developer_hot_reload` for tests and developer workflow. That Rust helper and its `RuntimeReloadOutcome`/`ReloadedDocumentRefresh` types are `#[doc(hidden)]` test/developer surfaces around the shared reload primitive; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`.
+Phase 19 promotes exactly one built-in reload command: `clay.runtime.reloadConfiguration` (**Reload Configuration and Packages**). There is no `clay:configuration` JS facade for reload; the command is invoked through the existing key-routing, Control Center, SDUI action, and transient-menu paths after an explicit user binding or discovery action.
 
-The only end-user configuration entry point remains normal `~/.config/clay/init.js` JavaScript. Reload rebuilds a fresh runtime generation and re-evaluates that same `init.js`; it does not introduce hidden JSON/TOML/ad hoc keys such as `hotReload`, `hot_reload`, `reloadOnSave`, `autoReload`, `reloadPackages`, or `reloadConfiguration`. If a future user-facing reload command or setting is added, it must be represented as a documented Clay JS API with registry metadata, key binding/custom-property coverage, hot-path policy, examples, diagnostics, and security notes.
+### Command metadata
 
-Configuration evaluation remains startup or explicit developer-triggered reload work only. Ordinary typing, keypress routing, edit acknowledgement, Masonry paint/layout, pointer handling, scroll, selected-file open, parse scheduling, parse-result publication, and decoration rendering do not execute configuration JavaScript or check reload settings. The reload primitive reuses the existing configuration root, current `@clay/*` package loader implementation, module loading through recorded package allowlist entries, sanitized diagnostics, and generation swap fallback; it grants no package-manager, arbitrary filesystem, network, shell, extension loading, package-control, AI mutation, workspace expansion, WASM, raw-op, client-side JavaScript, or native widget authority beyond user-approved package capabilities.
+| Property | Value |
+|---|---|
+| Command ID | `clay.runtime.reloadConfiguration` |
+| User-facing name | Reload Configuration and Packages |
+| Routing policy | `ServerFirstWithLock { lock_scope: Behavior }` |
+| Default key bindings | None (empty) |
+| Permissions | None (empty) |
+| Package provenance | Clay-owned built-in (`package_name = "clay"`) |
+| JS facade | None — not callable from `clay:commands`, `clay:configuration`, or any package JS |
+
+### Explicit binding (optional)
+
+Users may expose reload through a key binding, the Control Center, or an SDUI action — all three route through the same inert behavior manifest and revalidate through `CommandExecutor` before any side effect:
+
+```js
+import { bindKey } from "clay:keybindings";
+
+// Optional: bind a chord to the built-in reload command.
+bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" });
+```
+
+No default binding exists. Control Center discovers the command from the built-in command table; its metadata lists empty `key_bindings` and empty `permissions`.
+
+### Compiled budgets (not configurable)
+
+Reload grace ceilings, snapshot bounds, and broadcast capacity are compiled server budgets, not `init.js` keys:
+
+| Budget | Constant | Value |
+|---|---|---|
+| Stale-edit grace window | `PREVIOUS_BEHAVIOR_GRACE_MS` | 2 000 ms |
+| Max grace transactions | `PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS` | 256 |
+| Snapshot max documents | `RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS` | 64 |
+| Snapshot max diagnostics | `RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS` | 32 |
+| Broadcast capacity | `RUNTIME_STATE_BROADCAST_CAPACITY` | 16 |
+| Frame ceiling | `DEFAULT_MAX_FRAME_SIZE` | 1 MiB |
+| Diff-upgrade trigger | p95 payload ≥ 768 KiB or p95 client install ≥ 16 ms | Measured, not configured |
+
+These are security/performance boundaries defined in `src/perf/budgets.rs`. Raising them from `init.js` would undermine the very boundary they enforce.
+
+### Rejected hidden configuration keys
+
+No hidden JSON/TOML/ad hoc keys are valid for reload. Rejected examples include:
+
+- `hotReload`, `hot_reload`, `reloadOnSave`, `autoReload`, `reloadPackages`
+- `reload.keybinding`, `reload.trigger`, `reload.watch`, `reload.debounce`
+- `reload.graceMs`, `reload.maxGraceTransactions`, `reload.snapshotMaxDocuments`
+- File-watcher paths, inotify/FSEvents flags, polling intervals
+- Auto-reload-on-save, reload-after-package-install, reload-after-config-change
+
+The `IpcServer::trigger_developer_hot_reload`, `RuntimeReloadOutcome`, and `ReloadedDocumentRefresh` Rust helpers remain `#[doc(hidden)]` test/developer surfaces; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`. `pub(crate) async fn reload_runtime_generation` is the shared implementation, never directly invoked from package or configuration JavaScript.
+
+### Security
+
+Reload reruns `~/.config/clay/init.js` in a fresh generation with an empty `globalThis.__clayLoadedPackages` cache and a rebuilt `PackageLoadEntryAllowlist`. Candidate evaluation happens outside the behavior lock; the lock is acquired only for the bounded compare-and-swap commit. Validation, snapshot construction, and document refresh preparation are internal to the server.
+
+Reload does not broaden package source trust or permissions. Exact language-server grants must be re-declared through `authorizeLanguageServer` in the fresh generation. Old-generation workers, sessions, and child processes are cleaned after commit. A concurrent reload trigger returns `ReloadInProgress`; it does not queue another evaluation.
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse scheduling, parse-result publication, decoration rendering, and completion result construction do not execute configuration JavaScript or check reload settings. This review grants no package-manager, arbitrary filesystem, network, shell, extension loading, package-control, AI mutation, workspace expansion, WASM, raw-op, client-side JavaScript, or native widget authority beyond user-approved package capabilities.
 
 ## Phase 19 Windows open-dialog configuration review
 
@@ -254,7 +311,7 @@ bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 
 `clay.documents.clientOpenFileDialog` is a fixed Clay command ID that can be routed by inert behavior manifests after configuration evaluation. No default `Ctrl+O` shortcut in Rust exists; without an `init.js` binding or fixture binding, `Ctrl+O` is not treated as the open-file command.
 
-Dialog behavior in this phase uses fixed defaults, not hidden `init.js` keys: Windows-only native dialog support, Markdown filters for `.md`, `.markdown`, and `.mdown`, an all-files fallback, cancellation as a non-error no-op, selected-file-only server validation/granting, and edit-only selected-file behavior with save out of scope. The `windows-markdown-open` development fixture uses normal package, SDUI, parse/decorations, and `bindKey` APIs; it does not introduce ad hoc keys such as dialog filters, default directories, package enablement settings, or callable client-side hooks.
+Dialog behavior uses fixed defaults, not hidden `init.js` keys: native dialog support on Windows, Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`), Markdown filters for `.md`, `.markdown`, and `.mdown`, an all-files fallback, cancellation as a non-error no-op, and selected-file-only server validation/granting through existing capability tokens. The `windows-markdown-open` development fixture uses normal package, SDUI, parse/decorations, and `bindKey` APIs; it does not introduce ad hoc keys such as dialog filters, default directories, package enablement settings, or callable client-side hooks.
 
 Configuration remains server startup/load-time work. Pressing the configured key uses client-local manifest routing and then an explicit native UI command; ordinary keypress, paint, scroll, layout, text-event, edit acknowledgement, and Markdown decoration rendering paths do not execute configuration JavaScript. This configuration route does not grant arbitrary filesystem authority, package installation or enable/disable authority, shell, network, AI, WASM, raw Deno ops, workspace expansion, or client-side JavaScript authority.
 
@@ -638,7 +695,11 @@ User-visible Phase 18.12 configuration surfaces:
 | Fuzzy-open key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in server-first command `clay.workspace.openFuzzyFile`; no default chord exists in Rust, so fuzzy open is only reachable when `init.js` binds a key or another Clay-owned action opens it |
 | File-browser toggle key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to `clay.workspace.toggleFileBrowser`; the command is validated by `CommandExecutor`, not a hidden panel-visibility key |
 | Native folder picker binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.workspace.clientOpenFolderDialog` | Bind a key to the fixed client UI command id; native selection still goes through selected-path capability and server root validation |
-| Copy current selection binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCopySelection` | Bind an alternate key to copy the current native editor selection; no clipboard read, paste, cut, or arbitrary clipboard text API is exposed |
+| Copy current selection binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCopySelection` | Bind an alternate key to copy the current native editor selection |
+| Cut current selection binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCutSelection` | Bind an alternate key to cut the current native editor selection |
+| Paste clipboard binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientPasteClipboard` | Bind an alternate key to paste OS clipboard text as an ordinary local edit |
+| Undo binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientUndo` | Bind an alternate key to undo the latest local edit as an ordinary inverse edit |
+| Redo binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientRedo` | Bind an alternate key to redo the latest undone local edit |
 | File open/reveal commands | runtime-backed command APIs | [`clay.commands.serverOpenFile`](commands/server-open-file.md), [`clay.commands.serverRevealInTree`](commands/server-reveal-in-tree.md), [`clay.commands.serverExecuteCommand`](commands/server-execute-command.md) | Open and reveal route through server workspace APIs, root-relative paths, selected-file grants, and open-document metadata validation |
 | Workspace roots and discovery | runtime-backed workspace APIs | [`clay.workspace.serverAddWorkspaceRoot`](workspace/server-add-workspace-root.md), [`clay.workspace.serverDiscoverWorkspaceRootForPath`](workspace/server-discover-workspace-root-for-path.md), [`clay.workspace.serverListWorkspaceRoots`](workspace/server-list-workspace-roots.md) | Roots and grants are explicit server-authoritative workspace APIs, not configuration keys |
 | Directory listing | runtime-backed workspace APIs | [`clay.workspace.serverListDirectory`](workspace/server-list-directory.md), [`clay.workspace.serverCreateListingCancelToken`](workspace/server-create-listing-cancel-token.md), [`clay.workspace.serverCancelListing`](workspace/server-cancel-listing.md) | Listing uses server validation, bounded depth/count, compiled ignore defaults, optional cancellation tokens, and diagnostics |
@@ -650,16 +711,20 @@ The expected end-user fuzzy-open configuration is a normal `~/.config/clay/init.
 
 ```js
 import { bindKey } from "clay:keybindings";
-import { clientCopySelection } from "clay:editor";
+import { clientCopySelection, clientCutSelection, clientPasteClipboard, clientUndo, clientRedo } from "clay:editor";
 import { clientOpenFolderDialog } from "clay:workspace";
 
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
+bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
+bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
+bindKey("Alt+Backspace", clientUndo(), { scope: "editor" });
+bindKey("Ctrl+Y", clientRedo(), { scope: "editor" });
 ```
 
-`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for Phase 18.12 fuzzy/toggle routes; no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut in Rust exists for folder/copy workflow routes. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, read clipboard data, or write arbitrary clipboard text through `init.js`.
+`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. `clay.workspace.clientOpenFolderDialog`, `clay.editor.clientCopySelection`, `clay.editor.clientCutSelection`, `clay.editor.clientPasteClipboard`, `clay.editor.clientUndo`, and `clay.editor.clientRedo` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for Phase 18.12 fuzzy/toggle routes; no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut in Rust exists for folder/copy workflow routes. Native cut/copy/paste and undo/redo chords (`Ctrl/Cmd+X`/`C`/`V`/`Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` on non-macOS) are handled directly by the editor. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, or expose package/configuration/AI clipboard-contents APIs through `init.js`.
 
 Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
 
@@ -670,6 +735,6 @@ Hidden/ad hoc configuration keys that are rejected by policy and are not valid u
 - `workspace.ignore`, `workspace.ignoreRules`, `fileBrowser.ignore`, `fileBrowser.exclude`
 - `fileBrowser.maxDepth`, `fileBrowser.maxEntries`, `fileBrowser.maxItems`, `fileBrowser.refreshInterval`
 - `workspace.rawPath`, `workspace.allowArbitraryPath`, `workspace.allowOutsideRoot`, ad hoc selected-file/folder grant keys
-- `clipboard.text`, `clipboard.writeText`, `clipboard.readText`, `copySelection.text`, arbitrary clipboard strings, paste/cut/read keys
+- `clipboard.text`, `clipboard.writeText`, `clipboard.readText`, `copySelection.text`, arbitrary clipboard strings, package/config clipboard-contents keys
 
 File-browser listing/open/reveal authority is server-owned. Root discovery scans only bounded ancestry with a closed marker set; directory listing stays inside known roots and uses bounded ignore/depth/count limits; open file commands route through `WorkspaceState::open_existing_file` or selected-file grants through `WorkspaceState::open_selected_file`; reveal validates open document metadata. Configuration cannot grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native widget, direct Masonry widget, arbitrary root marker, arbitrary ignore-rule, arbitrary path passthrough, or client-side JavaScript authority.

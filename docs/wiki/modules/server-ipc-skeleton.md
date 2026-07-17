@@ -75,6 +75,7 @@ These changes are transport-layer boundaries, not application-level authenticati
 
 - [Protocol Codec](protocol-codec.md)
 - [Server Document State](server-document-state.md)
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `RuntimeStateSnapshot` broadcast fan-out and `RuntimeGenerationInstalled` acknowledgement through existing connection tasks.
 - [Client/Server Edit Acknowledgement Flow](../flows/client-server-edit-ack.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)

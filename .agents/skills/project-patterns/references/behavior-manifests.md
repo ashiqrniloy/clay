@@ -40,6 +40,9 @@ Plans should classify commands/key behavior as one of:
 ## Versioning
 
 - Edits carry `behavior_version` and base document version.
-- Manifest updates are atomic from the client's point of view.
-- Hot reload publishes a new manifest version.
-- Edits under stale behavior versions are accepted, corrected, rejected, or resynced according to the synchronization phase.
+- Manifest/runtime-state updates are validated and installed atomically from the client's point of view; clients acknowledge only after complete installation.
+- Hot reload publishes a new runtime generation and manifest version.
+- Retain only the immediately previous inert manifest for already-rendered edits; never retain its runtime, workers, sessions, grants, providers, or callbacks.
+- Previous-generation `Edit`/`EditorIntent` operations may pass normal validation only before that connection acknowledges the new generation and within the fixed two-second/256-accepted-transaction grace. Old commands and provider/output work never receive grace.
+- After grace, reject with `InvalidBehaviorVersion`, republish latest runtime state, and use canonical document resync.
+- Decision log source: `decision-logs/2026-07-16-1825-phase19-hot-reload-transaction-and-stale-edit-semantics.md`.

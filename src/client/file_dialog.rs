@@ -39,6 +39,50 @@ pub fn open_folder_dialog() -> FileDialogResult {
     platform::open_folder_dialog()
 }
 
+/// Translate a shared glob pattern into a portal FileChooser glob.
+///
+/// Portal filters use shell-style globs. Windows' `*.*` all-files sentinel becomes
+/// `*` so extensionless names remain selectable.
+#[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
+pub(crate) fn portal_glob_for_pattern(pattern: &str) -> Option<&str> {
+    match pattern {
+        "" => None,
+        "*.*" | "*" => Some("*"),
+        other => Some(other),
+    }
+}
+
+/// Extract macOS `allowedFileTypes` extensions from shared globs.
+///
+/// Returns extension tokens without the leading `*.`. All-files sentinels (`*.*` / `*`)
+/// are ignored for the extension list; callers that want an all-files fallback should
+/// pair this with `allowsOtherFileTypes = true` or clear allowed types when the list is
+/// empty.
+#[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
+pub(crate) fn macos_allowed_extensions(filters: &[FileDialogFilter]) -> Vec<String> {
+    let mut extensions = Vec::new();
+    for filter in filters {
+        for pattern in filter.patterns {
+            match *pattern {
+                "*.*" | "*" => {}
+                other => {
+                    let trimmed = other
+                        .strip_prefix("*.")
+                        .or_else(|| other.strip_prefix('.'))
+                        .unwrap_or(other);
+                    if !trimmed.is_empty()
+                        && !trimmed.contains(['*', '?', '/', '\\'])
+                        && !extensions.iter().any(|existing| existing == trimmed)
+                    {
+                        extensions.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+    extensions
+}
+
 #[cfg(windows)]
 mod platform {
     use std::{ffi::c_void, path::PathBuf};
@@ -216,7 +260,7 @@ mod platform {
         zvariant::{OwnedObjectPath, OwnedValue, Value},
     };
 
-    use super::FileDialogResult;
+    use super::{FileDialogResult, markdown_file_dialog_filters, portal_glob_for_pattern};
 
     #[proxy(
         interface = "org.freedesktop.portal.FileChooser",
@@ -243,14 +287,17 @@ mod platform {
     }
 
     pub(super) fn open_markdown_file_dialog() -> FileDialogResult {
-        FileDialogResult::Unsupported {
-            message: "Clay native file-open dialog is supported on Windows only in Phase 19."
-                .to_string(),
+        match open_dialog_via_portal(OpenDialogKind::File) {
+            Ok(Some(path)) => FileDialogResult::Selected(path),
+            Ok(None) => FileDialogResult::Cancelled,
+            Err(error) => FileDialogResult::Failed {
+                message: format!("Linux file-open dialog failed: {error}"),
+            },
         }
     }
 
     pub(super) fn open_folder_dialog() -> FileDialogResult {
-        match open_folder_dialog_via_portal() {
+        match open_dialog_via_portal(OpenDialogKind::Folder) {
             Ok(Some(path)) => FileDialogResult::Selected(path),
             Ok(None) => FileDialogResult::Cancelled,
             Err(error) => FileDialogResult::Failed {
@@ -259,15 +306,33 @@ mod platform {
         }
     }
 
-    fn open_folder_dialog_via_portal() -> Result<Option<PathBuf>, String> {
+    #[derive(Clone, Copy)]
+    enum OpenDialogKind {
+        File,
+        Folder,
+    }
+
+    fn open_dialog_via_portal(kind: OpenDialogKind) -> Result<Option<PathBuf>, String> {
         let connection = Connection::session().map_err(|error| error.to_string())?;
         let proxy =
             FileChooserProxyBlocking::new(&connection).map_err(|error| error.to_string())?;
         let mut options = HashMap::new();
-        options.insert("directory", Value::from(true));
         options.insert("modal", Value::from(true));
+        match kind {
+            OpenDialogKind::Folder => {
+                options.insert("directory", Value::from(true));
+            }
+            OpenDialogKind::File => {
+                options.insert("directory", Value::from(false));
+                options.insert("filters", portal_filters_value());
+            }
+        }
+        let title = match kind {
+            OpenDialogKind::File => "Open File",
+            OpenDialogKind::Folder => "Open Folder",
+        };
         let handle = proxy
-            .open_file("", "Open Folder", options)
+            .open_file("", title, options)
             .map_err(|error| error.to_string())?;
         let request = RequestProxyBlocking::builder(&connection)
             .path(handle)
@@ -279,8 +344,7 @@ mod platform {
             .map_err(|error| error.to_string())?;
         let signal = responses
             .next()
-            .ok_or_else(|| "portal response stream ended".to_string())
-            .map_err(|error| error.to_string())?;
+            .ok_or_else(|| "portal response stream ended".to_string())?;
         let args = signal.args().map_err(|error| error.to_string())?;
         if *args.response() != 0 {
             return Ok(None);
@@ -295,6 +359,29 @@ mod platform {
             return Ok(None);
         };
         file_uri_to_path(uri)
+    }
+
+    fn portal_filters_value() -> Value<'static> {
+        type Rule = (u32, String);
+        type Filter = (String, Vec<Rule>);
+        let filters: Vec<Filter> = markdown_file_dialog_filters()
+            .iter()
+            .filter_map(|filter| {
+                let rules: Vec<Rule> = filter
+                    .patterns
+                    .iter()
+                    .filter_map(|pattern| {
+                        portal_glob_for_pattern(pattern).map(|glob| (0u32, glob.to_string()))
+                    })
+                    .collect();
+                if rules.is_empty() {
+                    None
+                } else {
+                    Some((filter.name.to_string(), rules))
+                }
+            })
+            .collect();
+        Value::new(filters)
     }
 
     fn file_uri_to_path(uri: &str) -> Result<Option<PathBuf>, String> {
@@ -312,15 +399,108 @@ mod platform {
     pub(super) fn parse_file_uri_for_test(uri: &str) -> Result<Option<PathBuf>, String> {
         file_uri_to_path(uri)
     }
+
+    #[cfg(test)]
+    pub(super) fn portal_filters_signature_for_test() -> String {
+        portal_filters_value().value_signature().to_string()
+    }
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use std::path::PathBuf;
+
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
+    use objc2_foundation::{NSArray, NSString, NSURL};
+
+    use super::{FileDialogResult, macos_allowed_extensions, markdown_file_dialog_filters};
+
+    pub(super) fn open_markdown_file_dialog() -> FileDialogResult {
+        match show_open_panel(false) {
+            Ok(Some(path)) => FileDialogResult::Selected(path),
+            Ok(None) => FileDialogResult::Cancelled,
+            Err(error) => FileDialogResult::Failed {
+                message: format!("macOS file-open dialog failed: {error}"),
+            },
+        }
+    }
+
+    pub(super) fn open_folder_dialog() -> FileDialogResult {
+        match show_open_panel(true) {
+            Ok(Some(path)) => FileDialogResult::Selected(path),
+            Ok(None) => FileDialogResult::Cancelled,
+            Err(error) => FileDialogResult::Failed {
+                message: format!("macOS folder dialog failed: {error}"),
+            },
+        }
+    }
+
+    fn show_open_panel(pick_folder: bool) -> Result<Option<PathBuf>, String> {
+        let mtm = MainThreadMarker::new()
+            .ok_or_else(|| "macOS open panel must run on the main thread".to_string())?;
+        let panel = NSOpenPanel::openPanel(mtm);
+        panel.setCanChooseFiles(!pick_folder);
+        panel.setCanChooseDirectories(pick_folder);
+        panel.setAllowsMultipleSelection(false);
+        panel.setResolvesAliases(true);
+        let title = if pick_folder {
+            NSString::from_str("Open Folder")
+        } else {
+            NSString::from_str("Open File")
+        };
+        panel.setTitle(Some(&title));
+        if !pick_folder {
+            apply_markdown_filters(&panel);
+        }
+
+        let response = panel.runModal();
+        if response != NSModalResponseOK {
+            return Ok(None);
+        }
+
+        let urls = panel.URLs();
+        let Some(url) = urls.firstObject() else {
+            return Ok(None);
+        };
+        path_from_url(&url)
+    }
+
+    fn apply_markdown_filters(panel: &NSOpenPanel) {
+        let extensions = macos_allowed_extensions(markdown_file_dialog_filters());
+        if extensions.is_empty() {
+            #[allow(deprecated)]
+            panel.setAllowedFileTypes(None);
+            return;
+        }
+        let ns_extensions: Vec<_> = extensions
+            .iter()
+            .map(|extension| NSString::from_str(extension))
+            .collect();
+        let types = NSArray::from_retained_slice(&ns_extensions);
+        // Deprecated allowedFileTypes still accepts extension tokens and avoids
+        // pulling UniformTypeIdentifiers solely for Markdown filters. All-files
+        // fallback is preserved by allowing other types beyond the Markdown list.
+        #[allow(deprecated)]
+        panel.setAllowedFileTypes(Some(&types));
+        panel.setAllowsOtherFileTypes(true);
+    }
+
+    fn path_from_url(url: &NSURL) -> Result<Option<PathBuf>, String> {
+        let Some(path) = url.path() else {
+            return Err("macOS open panel returned a URL without a file path".to_string());
+        };
+        Ok(Some(PathBuf::from(path.to_string())))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 mod platform {
     use super::FileDialogResult;
 
     pub(super) fn open_markdown_file_dialog() -> FileDialogResult {
         FileDialogResult::Unsupported {
-            message: "Clay native file-open dialog is supported on Windows only in Phase 19."
+            message: "Clay native file-open dialog is not supported on this platform yet."
                 .to_string(),
         }
     }
@@ -334,9 +514,9 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
-    use super::markdown_file_dialog_filters;
-    #[cfg(not(windows))]
-    use super::{FileDialogResult, open_markdown_file_dialog};
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    use super::{FileDialogResult, open_folder_dialog, open_markdown_file_dialog};
+    use super::{macos_allowed_extensions, markdown_file_dialog_filters, portal_glob_for_pattern};
 
     #[test]
     fn windows_file_dialog_filter_allows_markdown_extensions() {
@@ -349,13 +529,48 @@ mod tests {
         assert_eq!(markdown.patterns, ["*.md", "*.markdown", "*.mdown"]);
     }
 
-    #[cfg(not(windows))]
     #[test]
-    fn non_windows_open_file_dialog_reports_unsupported() {
+    fn portal_glob_normalizes_all_files_sentinel() {
+        assert_eq!(portal_glob_for_pattern("*.*"), Some("*"));
+        assert_eq!(portal_glob_for_pattern("*.md"), Some("*.md"));
+        assert_eq!(portal_glob_for_pattern(""), None);
+    }
+
+    #[test]
+    fn macos_extensions_ignore_all_files_sentinel_and_keep_markdown_tokens() {
+        assert_eq!(
+            macos_allowed_extensions(markdown_file_dialog_filters()),
+            vec![
+                "md".to_string(),
+                "markdown".to_string(),
+                "mdown".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn macos_extensions_extract_markdown_tokens_without_all_files() {
+        let filters = [super::FileDialogFilter {
+            name: "Markdown files",
+            patterns: &["*.md", "*.markdown", "*.mdown"],
+        }];
+        assert_eq!(
+            macos_allowed_extensions(&filters),
+            vec![
+                "md".to_string(),
+                "markdown".to_string(),
+                "mdown".to_string()
+            ]
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    #[test]
+    fn unsupported_platform_open_file_dialog_reports_unsupported() {
         assert_eq!(
             open_markdown_file_dialog(),
             FileDialogResult::Unsupported {
-                message: "Clay native file-open dialog is supported on Windows only in Phase 19."
+                message: "Clay native file-open dialog is not supported on this platform yet."
                     .to_string(),
             }
         );
@@ -370,11 +585,20 @@ mod tests {
         );
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_portal_filters_use_file_chooser_signature() {
+        assert_eq!(
+            super::platform::portal_filters_signature_for_test(),
+            "a(sa(us))"
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     #[test]
     fn unsupported_platform_open_folder_dialog_reports_unsupported() {
         assert_eq!(
-            super::open_folder_dialog(),
+            open_folder_dialog(),
             FileDialogResult::Unsupported {
                 message: "Clay native folder dialog is not supported on this platform yet."
                     .to_string(),

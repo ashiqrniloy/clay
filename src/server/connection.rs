@@ -28,7 +28,7 @@ use crate::{
 
 use super::{
     RuntimeGenerationStore,
-    behavior::ActiveBehaviorManifest,
+    behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
     command_execution::{CommandExecutionRequest, CommandExecutionTarget, CommandExecutor},
     completion::{CompletionProviderMeta, apply_exclusive_suppression},
     document::DocumentState,
@@ -79,6 +79,7 @@ where
         crate::server::completion::CompletionCoordinator::new(),
         crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
         language_intelligence,
+        None,
         codec,
     )
     .await
@@ -102,12 +103,14 @@ pub(crate) async fn handle_connection_with_analysis<S>(
     completion: crate::server::completion::CompletionCoordinator,
     document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
     language_intelligence: LanguageIntelligenceCoordinator,
+    reload_server: Option<super::IpcServer>,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut typography_updates = runtime_generation.subscribe_typography();
+    let mut runtime_state_updates = runtime_generation.subscribe_runtime_state();
     let (completion_tx, mut completion_rx) =
         tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
     let (language_intelligence_tx, mut language_intelligence_rx) =
@@ -188,6 +191,25 @@ where
                     codec
                         .write_server_message(&mut stream, &ServerMessage::ActiveTypography(typography))
                         .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            runtime_generation_id = runtime_state_updates.recv() => match runtime_generation_id {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Always send the latest complete snapshot. Lagged receivers
+                    // must not replay intermediate generations.
+                    if let Some(snapshot) = runtime_generation
+                        .latest_runtime_snapshot_for(client_id)
+                        .await
+                    {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::RuntimeStateSnapshot(Box::new(snapshot)),
+                            )
+                            .await?;
+                    }
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
@@ -276,14 +298,29 @@ where
                 transaction_id,
                 operation,
             } => {
-                if let Err(response) = behavior.lock().await.validate_message_version(
+                let behavior_decision = match validate_edit_behavior_version(
+                    &behavior,
+                    &runtime_generation,
+                    client_id,
                     document_id,
                     transaction_id,
                     behavior_version,
-                ) {
-                    codec.write_server_message(&mut stream, &response).await?;
-                    continue;
-                }
+                )
+                .await
+                {
+                    Ok(decision) => decision,
+                    Err(response) => {
+                        reject_invalid_behavior_version(
+                            &codec,
+                            &mut stream,
+                            &runtime_generation,
+                            client_id,
+                            response,
+                        )
+                        .await?;
+                        continue;
+                    }
+                };
 
                 let target_document =
                     document_for_message(document_id, &document, &workspace).await;
@@ -304,6 +341,15 @@ where
                     confirmed_version, ..
                 } = response
                 {
+                    if matches!(
+                        behavior_decision,
+                        BehaviorVersionDecision::PreviousWithinGrace
+                    ) {
+                        let _ = runtime_generation
+                            .behavior_grace()
+                            .record_previous_accepted(std::time::Instant::now())
+                            .await;
+                    }
                     completion.document_changed(document_id, confirmed_version);
                     language_intelligence.document_changed(document_id, confirmed_version);
                     analysis_documents.insert(document_id, confirmed_version);
@@ -348,14 +394,29 @@ where
                 transaction_id,
                 intent,
             } => {
-                if let Err(response) = behavior.lock().await.validate_message_version(
+                let behavior_decision = match validate_edit_behavior_version(
+                    &behavior,
+                    &runtime_generation,
+                    client_id,
                     document_id,
                     transaction_id,
                     behavior_version,
-                ) {
-                    codec.write_server_message(&mut stream, &response).await?;
-                    continue;
-                }
+                )
+                .await
+                {
+                    Ok(decision) => decision,
+                    Err(response) => {
+                        reject_invalid_behavior_version(
+                            &codec,
+                            &mut stream,
+                            &runtime_generation,
+                            client_id,
+                            response,
+                        )
+                        .await?;
+                        continue;
+                    }
+                };
 
                 let operation = match intent {
                     crate::protocol::EditorIntent::InsertText { byte_offset, text } => {
@@ -384,6 +445,15 @@ where
                     confirmed_version, ..
                 } = response
                 {
+                    if matches!(
+                        behavior_decision,
+                        BehaviorVersionDecision::PreviousWithinGrace
+                    ) {
+                        let _ = runtime_generation
+                            .behavior_grace()
+                            .record_previous_accepted(std::time::Instant::now())
+                            .await;
+                    }
                     completion.document_changed(document_id, confirmed_version);
                     language_intelligence.document_changed(document_id, confirmed_version);
                     analysis_documents.insert(document_id, confirmed_version);
@@ -672,6 +742,7 @@ where
                     &document,
                     &sdui,
                     client_id,
+                    reload_server.as_ref(),
                 )
                 .await;
                 if let Some(response) = response {
@@ -716,6 +787,7 @@ where
                 if request_client_id != client_id {
                     continue;
                 }
+                // Commands never receive previous-generation grace.
                 if behavior.lock().await.version() != behavior_version {
                     codec
                         .write_server_message(
@@ -740,6 +812,7 @@ where
                     &document,
                     &sdui,
                     client_id,
+                    reload_server.as_ref(),
                 )
                 .await;
                 if let Some(response) = response {
@@ -942,6 +1015,18 @@ where
                     }
                 }
             }
+            ClientMessage::RuntimeGenerationInstalled {
+                client_id: ack_client_id,
+                runtime_generation_id,
+            } => {
+                let _ = runtime_generation
+                    .note_runtime_generation_installed(
+                        ack_client_id,
+                        client_id,
+                        runtime_generation_id,
+                    )
+                    .await;
+            }
             ClientMessage::Hello { .. } => {
                 codec
                     .write_server_message(
@@ -963,9 +1048,43 @@ async fn execute_command_intent(
     document: &Arc<Mutex<DocumentState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
     client_id: ClientId,
+    reload_server: Option<&super::IpcServer>,
 ) -> Option<ServerMessage> {
     let executor = CommandExecutor::new();
     let registry = CommandRegistry::new();
+
+    if crate::server::command_execution::is_reload_command(&request.command_id) {
+        let Some(server) = reload_server else {
+            return Some(ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                message: "runtime reload service is unavailable".to_string(),
+            });
+        };
+        return match server.execute_reload_command(request).await {
+            Ok(outcome) if outcome.reloaded => Some(ServerMessage::RuntimeDiagnostic(
+                crate::protocol::RuntimeDiagnostic {
+                    severity: crate::protocol::DiagnosticSeverity::Info,
+                    code: "clay.runtime.reload_succeeded".to_string(),
+                    message: format!(
+                        "Runtime configuration reloaded as generation {}.",
+                        outcome.active_generation_id
+                    ),
+                },
+            )),
+            Ok(outcome) => outcome
+                .diagnostics
+                .into_iter()
+                .next()
+                .map(ServerMessage::RuntimeDiagnostic),
+            Err(error) => Some(ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                message: format!(
+                    "command execution rejected: {:?}: {}",
+                    error.rule, error.message
+                ),
+            }),
+        };
+    }
 
     if crate::server::command_execution::is_workspace_command(&request.command_id) {
         let result = {
@@ -1161,6 +1280,59 @@ where
             .await?;
     }
 
+    Ok(())
+}
+
+async fn validate_edit_behavior_version(
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    client_id: ClientId,
+    document_id: DocumentId,
+    transaction_id: crate::protocol::TransactionId,
+    behavior_version: crate::protocol::BehaviorVersion,
+) -> Result<BehaviorVersionDecision, ServerMessage> {
+    let current = behavior.lock().await.clone();
+    let current_runtime_generation = runtime_generation.generation_id().await;
+    let acknowledged_generation = runtime_generation
+        .acknowledged_runtime_generation(client_id)
+        .await;
+    runtime_generation
+        .behavior_grace()
+        .validate_edit_version(
+            &current,
+            client_id,
+            document_id,
+            transaction_id,
+            behavior_version,
+            current_runtime_generation,
+            acknowledged_generation,
+            std::time::Instant::now(),
+        )
+        .await
+}
+
+async fn reject_invalid_behavior_version<S>(
+    codec: &Codec,
+    stream: &mut S,
+    runtime_generation: &RuntimeGenerationStore,
+    client_id: ClientId,
+    rejection: ServerMessage,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    codec.write_server_message(stream, &rejection).await?;
+    if let Some(snapshot) = runtime_generation
+        .latest_runtime_snapshot_for(client_id)
+        .await
+    {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::RuntimeStateSnapshot(Box::new(snapshot)),
+            )
+            .await?;
+    }
     Ok(())
 }
 
@@ -2150,9 +2322,12 @@ mod tests {
             current: Arc::new(Mutex::new(super::super::RuntimeGeneration {
                 id: 1,
                 service: runtime,
+                evaluation: None,
                 diagnostics: Vec::new(),
             })),
             typography: super::super::ActiveTypographyState::default(),
+            runtime_state: super::super::ActiveRuntimeStateFanout::default(),
+            behavior_grace: super::super::behavior::BehaviorGraceState::new(),
         }
     }
 
@@ -2230,14 +2405,58 @@ await loadPackage("@clay/markdown");"#,
         let document = document_state();
         let sdui = sdui_state();
         assert_eq!(
-            execute_command_intent(sdui_request, workspace_state(), &document, &sdui, 1).await,
-            None
-        );
-        assert_eq!(
-            execute_command_intent(keybinding_request, workspace_state(), &document, &sdui, 1)
+            execute_command_intent(sdui_request, workspace_state(), &document, &sdui, 1, None)
                 .await,
             None
         );
+        assert_eq!(
+            execute_command_intent(
+                keybinding_request,
+                workspace_state(),
+                &document,
+                &sdui,
+                1,
+                None,
+            )
+            .await,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_command_intent_uses_shared_server_reload_service() {
+        let root = temp_workspace("reload-command-intent");
+        fs::write(root.join("init.js"), "").unwrap();
+        let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+            "reload-command-intent",
+        ));
+        config.configuration_root = Some(root.clone());
+        let server = super::super::IpcServer::new(config);
+
+        let response = execute_command_intent(
+            CommandExecutionRequest {
+                command_id: "clay.runtime.reloadConfiguration".to_string(),
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            Arc::clone(&server.workspace),
+            &server.document,
+            &server.sdui,
+            1,
+            Some(&server),
+        )
+        .await
+        .expect("reload command returns status");
+
+        assert!(matches!(
+            response,
+            ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic { code, .. })
+                if code == "clay.runtime.reload_succeeded"
+        ));
+        assert_eq!(server.runtime_generation.generation_id().await, 2);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -2253,6 +2472,7 @@ await loadPackage("@clay/markdown");"#,
             &document_state(),
             &sdui_state(),
             1,
+            None,
         )
         .await
         .expect("unknown package UI action returns protocol error");
@@ -2297,6 +2517,7 @@ await loadPackage("@clay/markdown");"#,
             &document,
             &sdui,
             42,
+            None,
         )
         .await
         .expect("directory navigation sends a snapshot");

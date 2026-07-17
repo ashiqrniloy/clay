@@ -33,6 +33,12 @@ pub const DOCUMENT_ANALYSIS_GRACEFUL_SHUTDOWN_MS: u64 = 2_000;
 pub const DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS: u64 = 5_000;
 
 pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
+// Per-document client undo/redo depth (Phase 20). Aligned with pending-edit /
+// previous-behavior-grace transaction ceilings.
+pub const EDIT_HISTORY_MAX_DEPTH: usize = 256;
+// Max combined forward+inverse text bytes retained in one history entry.
+// Oversized edits clear history instead of retaining unbounded payloads.
+pub const EDIT_HISTORY_MAX_ENTRY_BYTES: usize = 64 * 1024;
 // Edit acknowledgement payload budget.  Advisory: rkyv union-layout sizing means
 // the serialized size of `ServerMessage::EditAck` grows with the largest enum
 // variant.  128 bytes reflects the current union floor after adding completion
@@ -137,6 +143,27 @@ pub const LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS: u64 = 5_000;
 /// Bounded open-document text slice handed to a provider. Same size as the
 /// completion window so analyzers never see an unbounded document.
 pub const LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
+
+// Phase 19 runtime-generation snapshot budgets. Complete snapshots reuse the
+// existing 1 MiB codec frame ceiling (`DEFAULT_MAX_FRAME_SIZE`). Document and
+// diagnostic counts keep a single connection-scoped snapshot bounded before
+// encode. Diffs/chunking are deferred until measured payload reaches
+// `RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES` p95 or client install
+// exceeds `RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS`.
+pub const RUNTIME_STATE_BROADCAST_CAPACITY: usize = 16;
+pub const RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS: usize = 64;
+pub const RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS: usize = 32;
+pub const RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES: usize = 768 * 1024;
+pub const RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS: u64 = 16;
+/// Fixed stale-edit grace after a successful runtime-generation commit.
+///
+/// Previous-generation `Edit`/`EditorIntent` stamps remain eligible only until
+/// the first of: per-connection G2 acknowledgement, this deadline, the
+/// accepted-transaction ceiling below, another commit, or shutdown. Not user
+/// configuration.
+pub const PREVIOUS_BEHAVIOR_GRACE_MS: u64 = 2_000;
+/// Maximum previous-generation transactions accepted during one grace window.
+pub const PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS: u64 = 256;
 
 // Phase 18.8 command execution and transient menu budgets.
 pub const COMMAND_ARGUMENT_BUDGET_BYTES: usize = 4 * 1024;

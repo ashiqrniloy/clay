@@ -16,8 +16,8 @@ visibility: public
 permissions: []
 key_bindings: ["Ctrl+C", "Cmd+C"]
 custom_properties: []
-security: Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard, and this API does not grant filesystem/workspace authority, clipboard read, paste, cut, arbitrary clipboard text writes, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientCopySelection` only as a documented command ID for `bindKey`; do not expose raw clipboard text APIs, clipboard reads, paste/cut, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+security: Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard, and this API does not grant filesystem/workspace authority, arbitrary clipboard text writes, package/configuration/AI clipboard-contents APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Cut and paste are separate documented command IDs.
+agent_guidance: Use `clay.editor.clientCopySelection` only as a documented command ID for `bindKey`; do not expose raw clipboard text APIs, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`. Prefer `clientCutSelection` / `clientPasteClipboard` for cut/paste chords.
 lookup_tags: [editor, clipboard, copy, selection, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -70,7 +70,7 @@ Native `Ctrl+C` on Linux/Windows and `Cmd+C` on macOS are handled directly by th
 
 ## Options
 
-No options are accepted. Clipboard target, clipboard readback, paste, cut, primary selection, rich text, HTML, image data, and arbitrary text writes are not configurable through this API.
+No options are accepted. Clipboard target, clipboard readback, primary selection, rich text, HTML, image data, and arbitrary text writes are not configurable through this API. Cut and paste use separate command IDs.
 
 ## Key bindings
 
@@ -92,13 +92,13 @@ The helper has no runtime errors. `bindKey` can reject malformed key chords, uns
 
 No additional permission is required to name or bind the command ID.
 
-Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard, and this API does not grant filesystem/workspace authority, clipboard read, paste, cut, arbitrary clipboard text writes, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
+Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard, and this API does not grant filesystem/workspace authority, arbitrary clipboard text writes, package/configuration/AI clipboard-contents APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Cut and paste are separate documented command IDs.
 
 The server, packages, and configuration JavaScript cannot read clipboard contents or set arbitrary clipboard text. Copy selection is client-local UI work and stays off server command execution, workspace APIs, filesystem paths, package loading, JS evaluation, Masonry paint/layout, and ordinary edit IPC.
 
 ## Agent guidance
 
-Use `clay.editor.clientCopySelection` only as a documented command ID for `bindKey`. Avoid raw clipboard APIs, clipboard reads, paste/cut support, arbitrary strings, server/package clipboard authority, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
+Use `clay.editor.clientCopySelection` only as a documented command ID for `bindKey`. Avoid raw clipboard APIs, arbitrary strings, server/package clipboard authority, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution. Use `clientCutSelection` and `clientPasteClipboard` for cut/paste.
 
 ## Backing implementation
 

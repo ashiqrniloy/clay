@@ -4,7 +4,10 @@
 
 use std::collections::HashSet;
 
-use clay::editor::theme::{StyleRegistry, TextStyleOverride, parse_override_token};
+use clay::editor::theme::{
+    STATUS_CHROME_MIN_CONTRAST, StyleRegistry, TextStyleOverride, parse_override_token,
+    status_chrome_contrast_ratio, status_chrome_meets_contrast,
+};
 use clay::packages::record::{PackageRecord, assemble_package_record};
 use clay::protocol::TokenType;
 
@@ -269,4 +272,43 @@ fn gruvbox_themes_distinct_palettes() {
             .expect("text override present")
     };
     assert_ne!(text_color(&dark), text_color(&light));
+}
+
+#[test]
+fn gruvbox_themes_status_chrome_meets_aa_contrast() {
+    for (specifier, dir) in [
+        (
+            "@clay/theme-gruvbox-material-dark",
+            "theme-gruvbox-material-dark",
+        ),
+        (
+            "@clay/theme-gruvbox-material-light",
+            "theme-gruvbox-material-light",
+        ),
+    ] {
+        let value = read_theme_package(specifier, dir);
+        let record = assemble_package_record(&value).expect("theme validates");
+        let overrides: Vec<TextStyleOverride> = record
+            .contributions
+            .text_styles
+            .iter()
+            .map(|o| TextStyleOverride {
+                token: o.token.clone(),
+                color: o
+                    .color
+                    .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                bold: o.bold,
+                italic: o.italic,
+                underline: o.underline,
+                strike: o.strike,
+                provenance: o.provenance.clone(),
+            })
+            .collect();
+        let registry = StyleRegistry::with_text_overrides(&overrides);
+        let ratio = status_chrome_contrast_ratio(&registry);
+        assert!(
+            status_chrome_meets_contrast(&registry),
+            "{specifier} status chrome contrast {ratio:.2} must be >= {STATUS_CHROME_MIN_CONTRAST}"
+        );
+    }
 }

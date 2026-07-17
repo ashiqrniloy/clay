@@ -189,6 +189,11 @@ let color = style.color;
 - `tests/selected_file_markdown_smoke.rs`: selected-file bootstrap skips `ActiveTheme` while waiting for file-open capability.
 - Commands: `cargo test --lib editor::theme`, `cargo test --test theme_packages`, `cargo test --test decoration_transport`, `cargo test --test editor_performance_invariants`, `cargo test --test clay_js_api_inventory --test clay_js_doc_registry --test clay_js_facade_layout`.
 
+## Phase 20 verification
+
+Roadmap Phase 20's "theme system" item is **satisfied by Phase 18.15**. Phase 20 only verified completeness and landed accessibility/theme polish: status/shell chrome already reads `StyleRegistry` base colors; `theme_display_label` / `SduiStatusObservation.theme_label` expose the active specifier; `status_chrome_meets_contrast` locks WCAG AA contrast for Clay default and Gruvbox Material status chrome. Do not invent a second theme registry.
+
+
 ## Related
 
 - [Phase 18.15 Text Vocabulary, Two-Axis Decorations, and Theme Registry Primitive Review](text-vocabulary-and-theme-primitive-review.md)

@@ -5,6 +5,7 @@
 - `src/packages/commands.rs`
 - `src/server/command_execution.rs`
 - `src/server/control_center.rs`
+- `src/server/locks.rs`
 - `src/server/ops/mod.rs`
 - `tests/package_primitive_gate.rs`
 
@@ -65,6 +66,14 @@ These commands carry bounded workspace authority only: they cannot access paths 
 
 Four built-in `UiReactivePriority` commands—`clay.language.hover`, `clay.language.goToDefinition`, `clay.language.codeActions`, and `clay.language.signatureHelp`—are discoverable with empty default key bindings. Client routing captures current document/version/cursor metadata and emits a `LanguageIntelligenceRequest` rather than executing through a package callback. Definition and code-action menu selections return to the shared command path: workspace definitions reuse `clay.workspace.openFile`; command-backed actions must already be registered and validated by `CommandExecution`; edit previews never mutate text in Phase 18.20.
 
+### Phase 19 explicit runtime reload command
+
+`clay.runtime.reloadConfiguration` is a Clay-owned global command named **Reload Configuration and Packages**. Its built-in metadata declares `ServerFirstWithLock { lock_scope: Behavior }`, no default binding, no permissions, and no package provenance. `ControlCenter::open` discovers it from the existing built-in command table. User configuration can bind it explicitly through `bindKey`, producing the same inert behavior-manifest route as other server-first commands.
+
+Connection command intents and validated SDUI/menu actions call `IpcServer::execute_reload_command`. That method reruns shared `CommandExecutor` validation, rejects a concurrent attempt with `CommandExecutionRule::ReloadInProgress`, evaluates a fresh candidate outside scoped locks, and acquires `ScopedLockTarget::Behavior` only for compare-and-swap commit. RAII drops both attempt and behavior guards on every return/unwind path. Package-side `serverExecuteCommand` rejects this ID with `UnauthorizedTarget`; package JavaScript can declare UI/key routing but cannot directly invoke reload authority. No reload-specific client message or dispatcher exists.
+
+`src/server/locks.rs` supplies immediate, non-waiting range/document/behavior/workspace lock acquisition. Workspace locks conflict with every scope; behavior locks conflict with behavior/workspace; document locks conflict with ranges/documents for the same document; range locks conflict only on overlapping ranges in the same document. Range overlap reuses the helper used by `DocumentState` region-lock validation.
+
 ## Code Examples
 
 ```rust
@@ -95,7 +104,7 @@ registry.register_command(&manifest, PackageCommandDeclaration {
 
 - `tests/package_primitive_gate.rs`: validates duplicate command rejection, package-aware key binding ambiguity rejection, successful inert behavior contribution validation, executable text-transform rejection, client-first and client-ui routing rejection, provenance, permissions, and budget references.
 - `src/server/command_execution.rs` unit tests: validate successful built-in and registered command execution, unknown command rejection, provenance mismatch rejection, undeclared expected permission rejection, client-first route rejection, malformed/oversize arguments, and unauthorized workspace targets. Phase 18.12 adds `workspace_commands` tests covering open in-root, open out-of-root via selected-file grant, reveal, toggle, missing-argument rejection, and unregistered save-related commands.
-- `tests/command_execution.rs`: integration/security tests for unknown command rejection, client-first/client-ui routing rejection, provenance mismatch, undeclared permission, malformed/oversize arguments, invalid document target, workspace-mutation target requirement, and duplicate command ID rejection. It also covers Phase 18.9 mode-discovery commands: `clay.modes.explainActiveMode` reports `core.code` built-in fallback rationale when no language package matched (and `core.text` universal fallback), `clay.modes.listActiveModes` reports package vs `core` built-in provenance with classification source, unknown documents return `None`, discovery commands are reachable from the Control Center built-in command listing, and discovery commands reject no-authority violations (invalid arguments, unauthorized workspace target, non-discovery/bogus command IDs).
+- `tests/command_execution.rs`: integration/security tests for reload command behavior-lock metadata/discovery/shared validation, unknown command rejection, client-first/client-ui routing rejection, provenance mismatch, undeclared permission, malformed/oversize arguments, invalid document target, workspace-mutation target requirement, and duplicate command ID rejection. It also covers Phase 18.9 mode-discovery commands: `clay.modes.explainActiveMode` reports `core.code` built-in fallback rationale when no language package matched (and `core.text` universal fallback), `clay.modes.listActiveModes` reports package vs `core` built-in provenance with classification source, unknown documents return `None`, discovery commands are reachable from the Control Center built-in command listing, and discovery commands reject no-authority violations (invalid arguments, unauthorized workspace target, non-discovery/bogus command IDs).
 - `src/server/connection.rs` unit tests: validate that SDUI/package UI actions and keybinding/menu command intents share command execution and reject unregistered package action targets.
 - `src/client/mod.rs` unit tests: validate that server-first keybindings enqueue bounded `ClientMessage::CommandIntent` values and use `try_send` backpressure.
 - `src/editor/surface.rs` unit tests: validate that ordinary character typing updates local text synchronously while server-first keybindings produce only an intent, preserving the no-block-during-typing invariant.
@@ -106,6 +115,8 @@ Run focused coverage with:
 cargo test --test package_primitive_gate
 cargo test --test command_execution
 cargo test --lib command_execution
+cargo test --lib locks::tests
+cargo test --lib runtime_generation_tests
 cargo test --lib editor
 ```
 

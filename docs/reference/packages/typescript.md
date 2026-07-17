@@ -16,6 +16,8 @@ The package is explicit opt-in and is not auto-loaded. Without this line, `.ts`/
 
 Optional customization is exposed through documented Clay/package JS APIs. For example, after `loadPackage("@clay/typescript")` a user can bind `typescript.toggleLineComment` to a key or toggle a package option; the default load line itself never needs to inline the package manifest.
 
+Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/typescript")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. TypeScript mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `loadEntry`; failed reloads keep the prior TypeScript generation active. No TypeScript-specific reload callback or copied manifest is required.
+
 ## Contract
 
 - `package.json` name: `@clay/typescript`

@@ -434,29 +434,33 @@ impl CompletionProviderRegistry {
         meta: CompletionProviderMeta,
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
-        if !package
-            .manifest
-            .clay
-            .permissions
-            .contains(&PackagePermission::CompletionProvider)
-        {
-            return Err(CompletionProviderRegistryError::MissingPermission {
-                package_prefix: package.manifest.clay.api_prefix.clone(),
-            });
-        }
-        if meta.id.starts_with("clay.") {
-            return Err(CompletionProviderRegistryError::ReservedClayNamespace {
-                id: meta.id.clone(),
-            });
-        }
-        let api_prefix = package.manifest.clay.api_prefix.as_str();
-        if !is_package_owned_id(&meta.id, api_prefix) && !meta.id.starts_with("core.") {
-            return Err(CompletionProviderRegistryError::IdNotPackageOwned {
-                id: meta.id.clone(),
-                api_prefix: api_prefix.to_string(),
-            });
-        }
+        validate_package_provider(package, &meta)?;
         self.register(meta, provider)
+    }
+
+    fn register_package_replacing_older(
+        &mut self,
+        package: &PackageRecord,
+        meta: CompletionProviderMeta,
+        provider: impl CompletionProvider,
+    ) -> Result<(), CompletionProviderRegistryError> {
+        validate_package_provider(package, &meta)?;
+        validate_provider_meta(&meta)?;
+        if let Some(existing) = self.providers.get(&meta.id)
+            && existing.meta.generation >= meta.generation
+        {
+            return Err(CompletionProviderRegistryError::ProviderAlreadyRegistered {
+                id: meta.id.clone(),
+            });
+        }
+        self.providers.insert(
+            meta.id.clone(),
+            RegisteredProvider {
+                meta,
+                provider: Arc::new(provider),
+            },
+        );
+        Ok(())
     }
 
     fn register(
@@ -464,17 +468,7 @@ impl CompletionProviderRegistry {
         meta: CompletionProviderMeta,
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
-        if meta.max_items == 0 || meta.max_items > COMPLETION_RESULT_MAX_ITEMS {
-            return Err(CompletionProviderRegistryError::InvalidMaxItems {
-                max_items: meta.max_items,
-                budget: COMPLETION_RESULT_MAX_ITEMS,
-            });
-        }
-        if meta.timeout_ms == 0 || meta.timeout_ms > 5_000 {
-            return Err(CompletionProviderRegistryError::InvalidTimeout {
-                timeout_ms: meta.timeout_ms,
-            });
-        }
+        validate_provider_meta(&meta)?;
         if self.providers.contains_key(&meta.id) {
             return Err(CompletionProviderRegistryError::ProviderAlreadyRegistered {
                 id: meta.id.clone(),
@@ -602,6 +596,52 @@ pub(crate) fn completion_provider_is_disabled(
         || disabled.contains(&meta.provenance.package_prefix)
 }
 
+fn validate_package_provider(
+    package: &PackageRecord,
+    meta: &CompletionProviderMeta,
+) -> Result<(), CompletionProviderRegistryError> {
+    if !package
+        .manifest
+        .clay
+        .permissions
+        .contains(&PackagePermission::CompletionProvider)
+    {
+        return Err(CompletionProviderRegistryError::MissingPermission {
+            package_prefix: package.manifest.clay.api_prefix.clone(),
+        });
+    }
+    if meta.id.starts_with("clay.") {
+        return Err(CompletionProviderRegistryError::ReservedClayNamespace {
+            id: meta.id.clone(),
+        });
+    }
+    let api_prefix = package.manifest.clay.api_prefix.as_str();
+    if !is_package_owned_id(&meta.id, api_prefix) && !meta.id.starts_with("core.") {
+        return Err(CompletionProviderRegistryError::IdNotPackageOwned {
+            id: meta.id.clone(),
+            api_prefix: api_prefix.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_provider_meta(
+    meta: &CompletionProviderMeta,
+) -> Result<(), CompletionProviderRegistryError> {
+    if meta.max_items == 0 || meta.max_items > COMPLETION_RESULT_MAX_ITEMS {
+        return Err(CompletionProviderRegistryError::InvalidMaxItems {
+            max_items: meta.max_items,
+            budget: COMPLETION_RESULT_MAX_ITEMS,
+        });
+    }
+    if meta.timeout_ms == 0 || meta.timeout_ms > 5_000 {
+        return Err(CompletionProviderRegistryError::InvalidTimeout {
+            timeout_ms: meta.timeout_ms,
+        });
+    }
+    Ok(())
+}
+
 fn is_package_owned_id(value: &str, api_prefix: &str) -> bool {
     value == api_prefix
         || value
@@ -724,6 +764,19 @@ impl CompletionCoordinator {
             .register_package(package, meta, provider)
     }
 
+    pub(crate) fn register_package_for_generation(
+        &self,
+        package: &PackageRecord,
+        meta: CompletionProviderMeta,
+        provider: impl CompletionProvider,
+    ) -> Result<(), CompletionProviderRegistryError> {
+        self.inner
+            .lock()
+            .expect("completion coordinator lock poisoned")
+            .registry
+            .register_package_replacing_older(package, meta, provider)
+    }
+
     /// Bump the active provider generation for a document and drop older-
     /// generation providers. Stale results whose generation differs are
     /// dropped before UI publication.
@@ -814,20 +867,56 @@ impl CompletionCoordinator {
     /// Cancel providers and active work at a specific generation (used when
     /// package reload replaces a generation).
     pub fn cancel_generation(&self, generation: CompletionProviderGeneration) {
+        self.cancel_older_generations(generation.saturating_add(1));
+    }
+
+    /// After a successful runtime-generation commit, keep only providers at or
+    /// above `active_generation`, abort older in-flight work, and drain queued
+    /// results so late old-generation output cannot publish.
+    pub fn cancel_older_generations(&self, active_generation: CompletionProviderGeneration) {
         let mut inner = self
             .inner
             .lock()
             .expect("completion coordinator lock poisoned");
-        inner
-            .registry
-            .remove_older_generations(generation.saturating_add(1));
+        inner.registry.remove_older_generations(active_generation);
         let task_keys: Vec<_> = inner
             .active_tasks
             .keys()
-            .filter(|key| key.generation <= generation)
+            .filter(|key| key.generation < active_generation)
             .cloned()
             .collect();
         abort_tasks(&mut inner, task_keys);
+        for current in inner.current_generations.values_mut() {
+            *current = (*current).max(active_generation);
+        }
+        drop(inner);
+        self.drain_pending_results();
+    }
+
+    /// Drop already-queued completion results without waiting.
+    pub(crate) fn drain_pending_results(&self) {
+        if let Ok(mut results) = self.results_rx.try_lock() {
+            while results.try_recv().is_ok() {}
+        }
+    }
+
+    /// Snapshot of provider generations currently retained by the registry.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "generation introspection is used by reload cleanup tests"
+        )
+    )]
+    pub(crate) fn registered_generations(&self) -> Vec<CompletionProviderGeneration> {
+        let mut generations = self
+            .providers()
+            .into_iter()
+            .map(|meta| meta.generation)
+            .collect::<Vec<_>>();
+        generations.sort_unstable();
+        generations.dedup();
+        generations
     }
 
     /// Snapshot the registry metadata, deterministically priority-ordered.

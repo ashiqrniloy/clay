@@ -110,6 +110,10 @@ Use `clay.commands.serverListCommands` when the user asks for List Commands thro
 
 Phase 18.8 reuses this listing API to populate the built-in Control Center command palette: the internal `ControlCenter` workflow (`src/server/control_center.rs`, `pub(crate)`) takes a snapshot of the registered command list, filters out client-first/client-ui commands, and appends built-in server commands such as `clay.controlCenter.open`. Because listing returns only validated command metadata, it grants no execution authority; activating a listed command from a transient menu enqueues an inert `CommandIntent` that the server-owned `CommandExecutor` re-validates before any side effect. There is no public `clay.commands.serverExecuteCommand` JS facade/op — see [`serverRegisterCommand`](server-register-command.md#phase-188-command-execution-boundary) for the full Phase 18.8 command execution and transient menu boundary.
 
+## Phase 19 built-in command discovery note
+
+`serverListCommands` returns package-registered commands only. Built-in Clay-owned commands (such as `clay.runtime.reloadConfiguration`, `clay.controlCenter.open`, `clay.workspace.openFuzzyFile`, `clay.workspace.toggleFileBrowser`) are not listed by this API. The Control Center (`clay.controlCenter.open`) discovers built-in commands from the Rust `builtin_server_command_ids` table and merges them with the package command list for the transient command palette. User configuration can bind built-in commands through [`bindKey`](../keybindings/bind-key.md) or invoke them through SDUI actions; discovery is through documentation and the Control Center, not through this listing API.
+
 ## Lookup metadata
 
 - Stable ID: `clay.commands.serverListCommands`

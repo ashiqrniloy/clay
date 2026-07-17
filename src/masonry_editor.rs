@@ -13,8 +13,8 @@ use masonry::peniko::Fill;
 use masonry::vello::Scene;
 
 use crate::client::{
-    ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientUiCommandRoute,
-    ClipboardSink, SystemClipboard,
+    ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientRuntimeStateCandidate,
+    ClientRuntimeStateInstallError, ClientUiCommandRoute, ClipboardSink, SystemClipboard,
 };
 use crate::editor::{
     EditorCommand, EditorCommandOutcome, EditorSurface,
@@ -25,8 +25,30 @@ use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
     DocumentVersion, FontRole, KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId,
-    LanguageIntelligenceResult, RuntimeDiagnostic,
+    LanguageIntelligenceResult, RuntimeDiagnostic, RuntimeGenerationId,
 };
+
+#[derive(Debug, Default, PartialEq)]
+pub struct ClipboardCommandOutcome {
+    pub changed: bool,
+    pub diagnostic: Option<ClientConnectionEvent>,
+}
+
+impl ClipboardCommandOutcome {
+    fn unchanged() -> Self {
+        Self {
+            changed: false,
+            diagnostic: None,
+        }
+    }
+
+    fn diagnostic(diagnostic: ClientConnectionEvent) -> Self {
+        Self {
+            changed: false,
+            diagnostic: Some(diagnostic),
+        }
+    }
+}
 
 #[allow(
     clippy::large_enum_variant,
@@ -54,6 +76,10 @@ pub struct EditorStatus {
     version: Option<DocumentVersion>,
     access: Option<DocumentAccess>,
     runtime_diagnostic: Option<RuntimeDiagnostic>,
+    /// Server/client dirty bit for the active document (optimistic after local edits).
+    dirty: bool,
+    /// Sanitized basename-only title for status/accessibility (never an absolute path).
+    document_display_name: Option<String>,
 }
 
 // Internal GUI observability surface for headless tests and future agent inspection.
@@ -66,6 +92,14 @@ pub(crate) struct SduiStatusObservation {
     pub access_label: String,
     pub sync_version: Option<DocumentVersion>,
     pub diagnostic_text: Option<String>,
+    /// Compact active-theme label (`default`, `theme-gruvbox-material-dark`, …).
+    pub theme_label: String,
+    pub dirty: bool,
+    pub document_display_name: Option<String>,
+    pub composing: bool,
+    pub pending_edit_count: usize,
+    /// Sanitized recovery/prompt summary when a menu or conflict diagnostic is active.
+    pub recovery_summary: Option<String>,
 }
 
 impl EditorStatus {
@@ -76,6 +110,8 @@ impl EditorStatus {
             version: None,
             access: None,
             runtime_diagnostic: None,
+            dirty: false,
+            document_display_name: None,
         }
     }
 
@@ -90,6 +126,26 @@ impl EditorStatus {
             version: Some(version),
             access: Some(access),
             runtime_diagnostic: None,
+            dirty: false,
+            document_display_name: None,
+        }
+    }
+
+    pub fn connected_with_metadata(
+        document_id: DocumentId,
+        version: DocumentVersion,
+        access: DocumentAccess,
+        dirty: bool,
+        document_display_name: Option<String>,
+    ) -> Self {
+        Self {
+            connection: EditorConnectionStatus::Connected,
+            document_id: Some(document_id),
+            version: Some(version),
+            access: Some(access),
+            runtime_diagnostic: None,
+            dirty,
+            document_display_name,
         }
     }
 
@@ -100,6 +156,8 @@ impl EditorStatus {
             version: None,
             access: None,
             runtime_diagnostic: None,
+            dirty: false,
+            document_display_name: None,
         }
     }
 
@@ -139,9 +197,17 @@ impl EditorStatus {
     }
 
     fn document_label(&self) -> String {
-        self.document_id
-            .map(|document_id| format!("doc {document_id}"))
-            .unwrap_or_else(|| "local document".to_string())
+        if let Some(name) = self.document_display_name.as_deref() {
+            if let Some(document_id) = self.document_id {
+                format!("{name} — doc {document_id}")
+            } else {
+                name.to_string()
+            }
+        } else {
+            self.document_id
+                .map(|document_id| format!("doc {document_id}"))
+                .unwrap_or_else(|| "local document".to_string())
+        }
     }
 
     fn diagnostic_text(&self) -> Option<String> {
@@ -158,6 +224,11 @@ impl EditorStatus {
             self.document_label(),
             self.version_label()
         );
+        if self.dirty {
+            let marker = crate::editor::accessibility::dirty_marker(true).trim();
+            let marker = marker.trim_end_matches('.');
+            text.push_str(&format!(" — {marker}"));
+        }
         if let Some(diagnostic) = self.diagnostic_text() {
             text.push_str(&format!(" — {diagnostic}"));
         }
@@ -171,6 +242,13 @@ impl EditorStatus {
             access_label: self.access_label().to_string(),
             sync_version: self.version,
             diagnostic_text: self.diagnostic_text(),
+            // Filled by EditorWidget::status_observation from the active theme / chrome.
+            theme_label: String::new(),
+            dirty: self.dirty,
+            document_display_name: self.document_display_name.clone(),
+            composing: false,
+            pending_edit_count: 0,
+            recovery_summary: None,
         }
     }
 }
@@ -201,6 +279,8 @@ pub struct EditorWidget {
     status: EditorStatus,
     sdui: SduiNativeState,
     layout_invalidated: bool,
+    /// Last successfully installed runtime generation (0 before any live snapshot).
+    runtime_generation_id: RuntimeGenerationId,
 }
 
 impl Default for EditorWidget {
@@ -225,6 +305,7 @@ impl Default for EditorWidget {
             status,
             sdui: SduiNativeState::empty(),
             layout_invalidated: false,
+            runtime_generation_id: 0,
         }
     }
 }
@@ -239,9 +320,7 @@ impl EditorWidget {
             initial_state.access.clone(),
         );
         editor.install_behavior_manifest(initial_state.behavior_manifest);
-        editor.set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
-            &initial_state.active_theme,
-        ));
+        editor.set_active_theme(&initial_state.active_theme);
         let _ = editor.set_typography(initial_state.active_typography.clone());
         let status = EditorStatus::connected(
             initial_state.document_id,
@@ -263,6 +342,7 @@ impl EditorWidget {
             status,
             sdui,
             layout_invalidated: false,
+            runtime_generation_id: 0,
         }
     }
 
@@ -290,11 +370,13 @@ impl EditorWidget {
                 ..
             } => {
                 let version_changed = self.editor.note_confirmed_version(document_id, version);
-                let next_status = EditorStatus::connected(
+                let mut next_status = EditorStatus::connected(
                     document_id,
                     version,
                     self.editor.document_state().access.clone(),
                 );
+                next_status.dirty = self.status.dirty;
+                next_status.document_display_name = self.status.document_display_name.clone();
                 let status_changed = self.set_status(next_status);
                 version_changed || status_changed
             }
@@ -308,11 +390,14 @@ impl EditorWidget {
                 if let Some(queue) = self.edit_queue.as_mut() {
                     queue.update_opened_document_authority(&snapshot.access, snapshot.version);
                 }
-                self.set_status(EditorStatus::connected(
+                let mut next_status = EditorStatus::connected(
                     snapshot.document_id,
                     snapshot.version,
                     snapshot.access,
-                ));
+                );
+                next_status.document_display_name = self.status.document_display_name.clone();
+                next_status.dirty = false;
+                self.set_status(next_status);
                 true
             }
             ClientConnectionEvent::DocumentOpened { metadata, text } => {
@@ -329,10 +414,14 @@ impl EditorWidget {
                     .take_pending_definition_navigation_for_path(&metadata.path)
                     .map(|pending| self.editor.navigate_to_byte_offset(pending.byte_start))
                     .unwrap_or(false);
-                let status_changed = self.set_status(EditorStatus::connected(
+                let display_name =
+                    crate::editor::accessibility::sanitize_document_display_name(&metadata.path);
+                let status_changed = self.set_status(EditorStatus::connected_with_metadata(
                     metadata.document_id,
                     metadata.version,
                     metadata.access,
+                    metadata.dirty,
+                    Some(display_name),
                 ));
                 jumped || status_changed
             }
@@ -349,10 +438,7 @@ impl EditorWidget {
                 false
             }
             ClientConnectionEvent::ActiveTheme(theme) => {
-                self.editor
-                    .set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
-                        &theme,
-                    ));
+                self.editor.set_active_theme(&theme);
                 true
             }
             ClientConnectionEvent::ActiveTypography(typography) => {
@@ -397,6 +483,9 @@ impl EditorWidget {
                 next_status.runtime_diagnostic = Some(diagnostic);
                 self.set_status(next_status)
             }
+            ClientConnectionEvent::RuntimeStateSnapshot(snapshot) => {
+                self.install_runtime_state_snapshot(*snapshot)
+            }
             ClientConnectionEvent::Disconnected | ClientConnectionEvent::ConnectionError(_) => {
                 let next_status = EditorStatus {
                     connection: EditorConnectionStatus::Disconnected,
@@ -412,12 +501,153 @@ impl EditorWidget {
         }
     }
 
+    /// Validate and atomically install one complete runtime-generation snapshot.
+    ///
+    /// On success the widget acknowledges the generation through the edit queue.
+    /// On validation failure no partial state remains, no acknowledgement is
+    /// sent, and the connection status becomes disconnected so the shell can
+    /// rebootstrap into the latest authoritative state.
+    fn install_runtime_state_snapshot(
+        &mut self,
+        snapshot: crate::protocol::RuntimeStateSnapshot,
+    ) -> bool {
+        let expected_client_id = self
+            .edit_queue
+            .as_ref()
+            .map(|queue| queue.client_id())
+            .unwrap_or(snapshot.client_id);
+        let candidate = match ClientRuntimeStateCandidate::validate(
+            snapshot,
+            expected_client_id,
+            self.runtime_generation_id,
+        ) {
+            Ok(candidate) => candidate,
+            Err(ClientRuntimeStateInstallError::StaleOrDuplicateGeneration { .. }) => {
+                // Already on this or a newer generation; keep state and send no ack.
+                return false;
+            }
+            Err(_) => {
+                let next_status = EditorStatus {
+                    connection: EditorConnectionStatus::Disconnected,
+                    runtime_diagnostic: Some(RuntimeDiagnostic::error(
+                        "clay.runtime.invalid_snapshot",
+                        "Runtime state snapshot failed client validation and was rejected.",
+                    )),
+                    ..self.status.clone().with_document_values(
+                        self.editor.document_state().document_id,
+                        self.editor.document_state().document_version,
+                        self.editor.document_state().access.clone(),
+                    )
+                };
+                self.set_status(next_status);
+                return true;
+            }
+        };
+
+        self.editor
+            .install_behavior_manifest(candidate.behavior.clone());
+        self.editor.set_active_theme(&candidate.active_theme);
+        let typography_changed = self
+            .editor
+            .install_runtime_typography(candidate.active_typography.clone());
+        if typography_changed {
+            self.sdui.set_typography(self.editor.typography().clone());
+        }
+        self.sdui.apply_snapshot(candidate.sdui_tree.clone());
+        self.sdui.install_package_ui_snapshot(&candidate.package_ui);
+
+        let open_document_id = self.editor.document_state().document_id;
+        let open_document_version = self.editor.document_state().document_version;
+        for document in &candidate.documents {
+            if document.document_id != open_document_id {
+                continue;
+            }
+            if document.reset_decorations {
+                self.editor.clear_decorations();
+            }
+            if document.reset_diagnostics {
+                self.editor.clear_diagnostics();
+            }
+            if let Some(set) = document.initial_decorations.clone()
+                && set.document_version == open_document_version
+            {
+                let _ = self.editor.apply_decoration_set(set);
+            }
+            if let Some(set) = document.initial_diagnostics.clone()
+                && set.document_version == open_document_version
+            {
+                let _ = self.editor.apply_diagnostic_set(set);
+            }
+        }
+
+        if let Some(diagnostic) = candidate.diagnostics.last().cloned() {
+            let mut next_status = self.status.clone();
+            next_status.runtime_diagnostic = Some(diagnostic);
+            let _ = self.set_status(next_status);
+        }
+
+        self.runtime_generation_id = candidate.runtime_generation_id;
+        self.layout_invalidated = true;
+
+        if let Some(queue) = &self.edit_queue {
+            let _ = queue.enqueue_runtime_generation_installed(candidate.runtime_generation_id);
+        }
+        true
+    }
+
     pub fn status_text(&self) -> String {
         self.status_observation().status_text
     }
 
     pub(crate) fn status_observation(&self) -> SduiStatusObservation {
-        self.status.observation()
+        let mut observation = self.status.observation();
+        observation.theme_label = self.editor.theme_label();
+        observation.composing = self.editor.is_composing();
+        observation.pending_edit_count = self
+            .edit_queue
+            .as_ref()
+            .map(|queue| queue.sync_snapshot().pending.len())
+            .unwrap_or(0);
+        observation.recovery_summary = self.recovery_summary();
+        if let Some(pending) =
+            crate::editor::accessibility::pending_edits_summary(observation.pending_edit_count)
+            && !observation.status_text.contains("Pending edits:")
+        {
+            observation.status_text.push_str(&format!(" — {pending}"));
+        }
+        if let Some(recovery) = observation.recovery_summary.as_deref()
+            && !observation.status_text.contains("Recovery:")
+        {
+            observation
+                .status_text
+                .push_str(&format!(" — Recovery: {recovery}"));
+        }
+        observation
+    }
+
+    fn recovery_summary(&self) -> Option<String> {
+        if let Some(menu) = self.sdui.active_menu()
+            && menu.is_active()
+            && let Some(summary) =
+                crate::editor::accessibility::sanitize_recovery_summary(menu.prompt())
+        {
+            return Some(summary);
+        }
+        if let Some(diagnostic) = self.status.runtime_diagnostic.as_ref() {
+            let code = diagnostic.code.as_str();
+            if code.contains("DirtyDocument")
+                || code.contains("StaleFileMetadata")
+                || code.contains("file.")
+                || code.contains("clipboard")
+                || code.contains("resync")
+                || code.contains("disconnect")
+            {
+                return crate::editor::accessibility::sanitize_recovery_summary(
+                    &diagnostic.message,
+                );
+            }
+        }
+        None
     }
 
     pub fn sdui_visible_texts(&self) -> Vec<String> {
@@ -496,6 +726,116 @@ impl EditorWidget {
         })
     }
 
+    pub fn cut_selection_to_system_clipboard(&mut self) -> ClipboardCommandOutcome {
+        let _ = self.editor.cancel_composition();
+        let mut clipboard = SystemClipboard;
+        self.cut_selection_to_clipboard_with(&mut clipboard)
+    }
+
+    fn cut_selection_to_clipboard_with(
+        &mut self,
+        clipboard: &mut impl ClipboardSink,
+    ) -> ClipboardCommandOutcome {
+        let _ = self.editor.cancel_composition();
+        let Some(text) = self.editor.selected_text() else {
+            return ClipboardCommandOutcome::unchanged();
+        };
+        if let Err(error) = clipboard.set_text(text) {
+            return ClipboardCommandOutcome::diagnostic(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.clipboard.write_failed",
+                    format!("Failed to cut selection to the system clipboard: {error}"),
+                ),
+            ));
+        }
+        let outcome = self.editor.command_with_event(EditorCommand::DeleteForward);
+        ClipboardCommandOutcome {
+            changed: self.apply_local_edit_outcome(outcome),
+            diagnostic: None,
+        }
+    }
+
+    pub fn paste_from_system_clipboard(&mut self) -> ClipboardCommandOutcome {
+        let _ = self.editor.cancel_composition();
+        let mut clipboard = SystemClipboard;
+        self.paste_from_clipboard_with(&mut clipboard)
+    }
+
+    fn paste_from_clipboard_with(
+        &mut self,
+        clipboard: &mut impl ClipboardSink,
+    ) -> ClipboardCommandOutcome {
+        let _ = self.editor.cancel_composition();
+        let text = match clipboard.get_text() {
+            Ok(text) => text,
+            Err(error) => {
+                return ClipboardCommandOutcome::diagnostic(
+                    ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                        "clay.client.clipboard.read_failed",
+                        format!("Failed to read text from the system clipboard: {error}"),
+                    )),
+                );
+            }
+        };
+        let outcome = self.editor.paste_text_with_event(&text);
+        ClipboardCommandOutcome {
+            changed: self.apply_local_edit_outcome(outcome),
+            diagnostic: None,
+        }
+    }
+
+    pub fn undo(&mut self) -> bool {
+        // Surface undo/redo also clears composition; track it for render.
+        let cancelled = self.editor.is_composing();
+        let outcome = self.editor.undo_with_event();
+        self.apply_local_edit_outcome(outcome) || cancelled
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let cancelled = self.editor.is_composing();
+        let outcome = self.editor.redo_with_event();
+        self.apply_local_edit_outcome(outcome) || cancelled
+    }
+
+    /// Discard unfinished IME preedit without committing.
+    pub fn cancel_composition(&mut self) -> bool {
+        self.editor.cancel_composition()
+    }
+
+    fn sync_ime_area(&self, ctx: &mut EventCtx<'_>, size: Size) {
+        let editor_rect = self.editor_main_rect(size);
+        let local = self
+            .editor
+            .ime_cursor_area(editor_rect.width(), editor_rect.height());
+        let area = Rect::new(
+            editor_rect.x0 + local.x0,
+            editor_rect.y0 + local.y0,
+            editor_rect.x0 + local.x1,
+            editor_rect.y0 + local.y1,
+        );
+        ctx.set_ime_area(area);
+    }
+
+    fn apply_local_edit_outcome(&mut self, outcome: EditorCommandOutcome) -> bool {
+        if let Some(event) = outcome.edit_event
+            && let Some(edit_queue) = &self.edit_queue
+        {
+            let transaction_id = self.next_transaction_id;
+            self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+            let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+        }
+        if outcome.changed {
+            if !self.status.dirty {
+                self.status.dirty = true;
+            }
+            self.active_completion_request_id = None;
+            self.active_language_intelligence_request_id = None;
+            self.sdui.clear_active_menu();
+            self.enqueue_decoration_viewport_request();
+        }
+        outcome.changed
+    }
+
     fn set_status(&mut self, status: EditorStatus) -> bool {
         if self.status == status {
             return false;
@@ -556,6 +896,7 @@ impl EditorWidget {
     }
 
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
+        let _ = self.editor.cancel_composition();
         let outcome = self.editor.command_with_event(command);
         if let Some(event) = outcome.edit_event
             && let Some(edit_queue) = &self.edit_queue
@@ -864,13 +1205,18 @@ impl EditorWidget {
     }
 
     fn accessibility_label(&self) -> String {
-        let status = self.status_text();
-        let text = self.editor.visible_text();
-        if text.is_empty() {
-            format!("Clay native text canvas. {status}")
-        } else {
-            format!("{status}. {text}")
-        }
+        let observation = self.status_observation();
+        // Recovery/pending markers already live in status_text for chrome consistency.
+        crate::editor::accessibility::compose_editor_accessibility_label(
+            crate::editor::accessibility::EditorAccessibilityLabelParts {
+                status_text: &observation.status_text,
+                theme_label: &observation.theme_label,
+                composing: observation.composing,
+                recovery_summary: None,
+                visible_text: &self.editor.visible_text(),
+                empty_placeholder: "Clay native text canvas.",
+            },
+        )
     }
 
     fn editor_main_rect(&self, size: Size) -> Rect {
@@ -928,17 +1274,43 @@ impl EditorWidget {
 }
 
 fn is_copy_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "c")
+}
+
+fn is_cut_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "x")
+}
+
+fn is_paste_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "v")
+}
+
+fn is_undo_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "z") && !key_event.modifiers.shift()
+}
+
+fn is_redo_shortcut(key_event: &KeyboardEvent) -> bool {
+    if is_primary_character_shortcut(key_event, "z") && key_event.modifiers.shift() {
+        return true;
+    }
+    // Common Windows/Linux redo chord; macOS keeps Cmd+Shift+Z.
+    !cfg!(target_os = "macos")
+        && is_primary_character_shortcut(key_event, "y")
+        && !key_event.modifiers.shift()
+}
+
+fn is_primary_character_shortcut(key_event: &KeyboardEvent, character: &str) -> bool {
     let Key::Character(text) = &key_event.key else {
         return false;
     };
-    if !text.eq_ignore_ascii_case("c") {
+    if !text.eq_ignore_ascii_case(character) {
         return false;
     }
 
     if cfg!(target_os = "macos") {
-        key_event.modifiers.meta()
+        key_event.modifiers.meta() && !key_event.modifiers.ctrl() && !key_event.modifiers.alt()
     } else {
-        key_event.modifiers.ctrl()
+        key_event.modifiers.ctrl() && !key_event.modifiers.meta() && !key_event.modifiers.alt()
     }
 }
 
@@ -984,7 +1356,11 @@ impl Widget for EditorWidget {
                     (false, true)
                 } else if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
                     ctx.capture_pointer();
-                    (self.editor.place_caret_at_point(local_point), true)
+                    let composition_cancelled = self.editor.cancel_composition();
+                    (
+                        self.editor.place_caret_at_point(local_point) || composition_cancelled,
+                        true,
+                    )
                 } else {
                     (false, true)
                 }
@@ -1122,6 +1498,46 @@ impl Widget for EditorWidget {
                         }
                         ctx.set_handled();
                     }
+                    Key::Character(_) if is_cut_shortcut(key_event) => {
+                        let outcome = self.cut_selection_to_system_clipboard();
+                        if let Some(event) = outcome.diagnostic {
+                            ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
+                                event,
+                            ));
+                        }
+                        if outcome.changed {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
+                    Key::Character(_) if is_paste_shortcut(key_event) => {
+                        let outcome = self.paste_from_system_clipboard();
+                        if let Some(event) = outcome.diagnostic {
+                            ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
+                                event,
+                            ));
+                        }
+                        if outcome.changed {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
+                    Key::Character(_) if is_redo_shortcut(key_event) => {
+                        if self.redo() {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
+                    Key::Character(_) if is_undo_shortcut(key_event) => {
+                        if self.undo() {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
                     Key::Character(_) => {
                         if let Some(stroke) = character_key_stroke(key_event) {
                             self.local_key(ctx, stroke);
@@ -1130,8 +1546,54 @@ impl Widget for EditorWidget {
                     _ => {}
                 }
             }
-            TextEvent::Ime(masonry::core::Ime::Commit(text)) => {
-                self.local_command(ctx, EditorCommand::Insert(text));
+            TextEvent::Ime(ime) => {
+                use masonry::core::Ime;
+                match ime {
+                    Ime::Enabled => {
+                        // Ready for composition; publish candidate-window geometry.
+                        self.sync_ime_area(ctx, ctx.size());
+                        ctx.set_handled();
+                    }
+                    Ime::Preedit(text, cursor) => {
+                        let changed = if text.is_empty() {
+                            self.editor.cancel_composition()
+                        } else {
+                            self.editor.set_preedit(text.clone(), *cursor)
+                        };
+                        if changed {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        self.sync_ime_area(ctx, ctx.size());
+                        ctx.set_handled();
+                    }
+                    Ime::Commit(text) => {
+                        let _ = self.editor.cancel_composition();
+                        if !text.is_empty() {
+                            self.local_command(ctx, EditorCommand::Insert(text));
+                        } else {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        self.sync_ime_area(ctx, ctx.size());
+                        ctx.set_handled();
+                    }
+                    Ime::Disabled => {
+                        if self.editor.cancel_composition() {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.clear_ime_area();
+                        ctx.set_handled();
+                    }
+                }
+            }
+            TextEvent::WindowFocusChange(false) => {
+                if self.editor.cancel_composition() {
+                    ctx.request_render();
+                    ctx.request_accessibility_update();
+                }
+                ctx.clear_ime_area();
             }
             _ => {}
         }
@@ -1149,15 +1611,26 @@ impl Widget for EditorWidget {
 
     fn layout(
         &mut self,
-        _ctx: &mut LayoutCtx<'_>,
+        ctx: &mut LayoutCtx<'_>,
         _props: &mut PropertiesMut<'_>,
         bc: &BoxConstraints,
     ) -> Size {
-        if bc.is_width_bounded() && bc.is_height_bounded() {
+        let size = if bc.is_width_bounded() && bc.is_height_bounded() {
             bc.max()
         } else {
             bc.constrain(Size::new(900.0, 600.0))
-        }
+        };
+        let editor_rect = self.editor_main_rect(size);
+        let local = self
+            .editor
+            .ime_cursor_area(editor_rect.width(), editor_rect.height());
+        ctx.set_ime_area(Rect::new(
+            editor_rect.x0 + local.x0,
+            editor_rect.y0 + local.y0,
+            editor_rect.x0 + local.x1,
+            editor_rect.y0 + local.y1,
+        ));
+        size
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
@@ -1195,8 +1668,14 @@ impl Widget for EditorWidget {
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
         let size = ctx.size();
         let status_id = NodeId::from(masonry::core::WidgetId::next());
+        let observation = self.status_observation();
         let mut status = Node::new(Role::Status);
-        status.set_label(self.status_text());
+        status.set_label(
+            crate::editor::accessibility::compose_status_accessibility_label(
+                &observation.status_text,
+                None,
+            ),
+        );
         status.set_bounds(masonry::accesskit::Rect {
             x0: 0.0,
             y0: (size.height - metrics.status_height()).max(0.0),
@@ -1223,7 +1702,10 @@ impl Widget for EditorWidget {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorStatus, EditorWidget, SduiStatusObservation, character_key_stroke};
+    use super::{
+        ClipboardCommandOutcome, EditorStatus, EditorWidget, SduiStatusObservation,
+        character_key_stroke,
+    };
     use crate::client::{
         ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientResyncSnapshot,
         ClipboardError, ClipboardSink,
@@ -1302,6 +1784,13 @@ mod tests {
             }
             self.text = Some(text);
             Ok(())
+        }
+
+        fn get_text(&mut self) -> Result<String, ClipboardError> {
+            if self.fail {
+                return Err(ClipboardError::new("no display"));
+            }
+            Ok(self.text.clone().unwrap_or_default())
         }
     }
 
@@ -1619,6 +2108,260 @@ mod tests {
     }
 
     #[test]
+    fn cut_selection_copies_and_deletes_selection() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(4);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ))
+        .with_edit_queue(
+            queue
+                .with_authority(11, &DocumentAccess::Editable { lease_id: 99 })
+                .with_confirmed_version(12),
+        );
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha 🦀 beta".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.command_with_event(EditorCommand::SelectRight);
+        widget.editor.command_with_event(EditorCommand::SelectRight);
+        let mut clipboard = FakeClipboard::default();
+
+        let outcome = widget.cut_selection_to_clipboard_with(&mut clipboard);
+
+        assert_eq!(outcome.diagnostic, None);
+        assert!(outcome.changed);
+        assert_eq!(clipboard.text.as_deref(), Some("al"));
+        assert_eq!(widget.editor.visible_text(), "pha 🦀 beta");
+        assert_eq!(widget.next_transaction_id, 2);
+        let message = receiver.try_recv().expect("cut should enqueue delete edit");
+        match message {
+            crate::protocol::ClientMessage::Edit {
+                operation: crate::protocol::EditOperation::Delete { start, end },
+                ..
+            } => {
+                assert_eq!((start, end), (0, 2));
+            }
+            other => panic!("expected delete edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cut_selection_is_noop_when_selection_is_collapsed() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        let mut clipboard = FakeClipboard::default();
+
+        let outcome = widget.cut_selection_to_clipboard_with(&mut clipboard);
+
+        assert_eq!(outcome, ClipboardCommandOutcome::unchanged());
+        assert_eq!(clipboard.text, None);
+        assert_eq!(widget.editor.visible_text(), "alpha");
+    }
+
+    #[test]
+    fn cut_selection_failure_reports_runtime_diagnostic_without_deleting() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.command_with_event(EditorCommand::SelectRight);
+        let mut clipboard = FakeClipboard {
+            fail: true,
+            ..FakeClipboard::default()
+        };
+
+        let outcome = widget.cut_selection_to_clipboard_with(&mut clipboard);
+
+        match outcome.diagnostic {
+            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)) => {
+                assert_eq!(diagnostic.code, "clay.client.clipboard.write_failed");
+                assert!(diagnostic.message.contains("Failed to cut selection"));
+            }
+            message => panic!("expected clipboard runtime diagnostic, got {message:?}"),
+        }
+        assert!(!outcome.changed);
+        assert_eq!(widget.editor.visible_text(), "alpha");
+    }
+
+    #[test]
+    fn paste_clipboard_inserts_and_replaces_selection() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        let mut clipboard = FakeClipboard {
+            text: Some("XY".to_string()),
+            fail: false,
+        };
+
+        let inserted = widget.paste_from_clipboard_with(&mut clipboard);
+        assert!(inserted.changed);
+        assert_eq!(inserted.diagnostic, None);
+        assert_eq!(widget.editor.visible_text(), "XYalpha");
+
+        widget.editor.set_selection_for_test(0, 2);
+        clipboard.text = Some("Z".to_string());
+        let replaced = widget.paste_from_clipboard_with(&mut clipboard);
+        assert!(replaced.changed);
+        assert_eq!(widget.editor.visible_text(), "Zalpha");
+    }
+
+    #[test]
+    fn paste_clipboard_empty_text_is_noop() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        let mut clipboard = FakeClipboard::default();
+
+        let outcome = widget.paste_from_clipboard_with(&mut clipboard);
+
+        assert_eq!(outcome, ClipboardCommandOutcome::unchanged());
+        assert_eq!(widget.editor.visible_text(), "alpha");
+    }
+
+    #[test]
+    fn paste_clipboard_failure_reports_runtime_diagnostic() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        let mut clipboard = FakeClipboard {
+            fail: true,
+            ..FakeClipboard::default()
+        };
+
+        let outcome = widget.paste_from_clipboard_with(&mut clipboard);
+
+        match outcome.diagnostic {
+            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)) => {
+                assert_eq!(diagnostic.code, "clay.client.clipboard.read_failed");
+                assert!(diagnostic.message.contains("Failed to read text"));
+            }
+            message => panic!("expected clipboard runtime diagnostic, got {message:?}"),
+        }
+        assert!(!outcome.changed);
+        assert_eq!(widget.editor.visible_text(), "alpha");
+    }
+
+    #[test]
+    fn undo_and_redo_enqueue_ordinary_inverse_edits() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ))
+        .with_edit_queue(
+            queue
+                .with_authority(11, &DocumentAccess::Editable { lease_id: 99 })
+                .with_confirmed_version(12),
+        );
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "ab".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget
+            .editor
+            .install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
+        widget.editor.set_caret_for_test(2);
+        let insert_outcome = widget.editor.insert_text_with_event("x");
+        assert!(widget.apply_local_edit_outcome(insert_outcome));
+        loop {
+            match receiver.try_recv() {
+                Ok(crate::protocol::ClientMessage::Edit { .. }) => break,
+                Ok(_) => continue,
+                Err(_) => panic!("insert should enqueue edit"),
+            }
+        }
+
+        assert!(widget.undo());
+        assert_eq!(widget.editor.visible_text(), "ab");
+        let undo_message = loop {
+            match receiver.try_recv() {
+                Ok(message @ crate::protocol::ClientMessage::Edit { .. }) => break message,
+                Ok(_) => continue,
+                Err(_) => panic!("undo should enqueue delete edit"),
+            }
+        };
+        match undo_message {
+            crate::protocol::ClientMessage::Edit {
+                operation: EditOperation::Delete { start, end },
+                ..
+            } => assert_eq!((start, end), (2, 3)),
+            other => panic!("expected undo delete, got {other:?}"),
+        }
+
+        assert!(widget.redo());
+        assert_eq!(widget.editor.visible_text(), "abx");
+        let redo_message = loop {
+            match receiver.try_recv() {
+                Ok(message @ crate::protocol::ClientMessage::Edit { .. }) => break message,
+                Ok(_) => continue,
+                Err(_) => panic!("redo should enqueue insert edit"),
+            }
+        };
+        match redo_message {
+            crate::protocol::ClientMessage::Edit {
+                operation: EditOperation::Insert { byte_offset, text },
+                ..
+            } => {
+                assert_eq!(byte_offset, 2);
+                assert_eq!(text, "x");
+            }
+            other => panic!("expected redo insert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_only_observer_undo_is_noop() {
+        let mut widget =
+            EditorWidget::with_initial_state(initial_state(DocumentAccess::ReadOnly, 12));
+        widget
+            .editor
+            .load_snapshot(7, 12, "ab".to_string(), DocumentAccess::ReadOnly);
+        assert!(!widget.undo());
+        assert!(!widget.redo());
+        assert_eq!(widget.editor.visible_text(), "ab");
+    }
+
+    #[test]
     fn control_character_key_is_available_for_manifest_routing() {
         let event = KeyboardEvent {
             state: KeyState::Down,
@@ -1645,11 +2388,9 @@ mod tests {
     fn accessibility_label_uses_placeholder_for_empty_editor() {
         let widget = EditorWidget::default();
 
-        assert!(
-            widget
-                .accessibility_label()
-                .starts_with("Clay native text canvas. Clay — Local Fallback")
-        );
+        let label = widget.accessibility_label();
+        assert!(label.starts_with("Clay native text canvas. Theme default. Clay — Local Fallback"));
+        assert!(label.contains("Theme default."));
     }
 
     #[test]
@@ -1660,6 +2401,139 @@ mod tests {
         widget.editor.command(EditorCommand::Insert("X"));
 
         assert!(widget.accessibility_label().ends_with(". abXc"));
+    }
+
+    #[test]
+    fn accessibility_label_marks_composing_without_preedit_text() {
+        let mut widget = EditorWidget::default();
+        widget.editor.command(EditorCommand::Insert("hi"));
+        assert!(widget.editor.set_preedit("漢".into(), Some((0, 3))));
+        let label = widget.accessibility_label();
+        assert!(label.contains("Composing."));
+        assert!(!label.contains("漢"));
+        assert!(widget.editor.cancel_composition());
+        assert!(!widget.accessibility_label().contains("Composing."));
+    }
+
+    #[test]
+    fn accessibility_label_includes_dirty_and_sanitized_display_name() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 7,
+                    version: 12,
+                    access: DocumentAccess::Editable { lease_id: 99 },
+                    lease_id: Some(99),
+                    dirty: true,
+                    workspace_root_id: 77,
+                    path: "/home/alice/secret/note.md".to_string(),
+                },
+                text: "hello".to_string(),
+            })
+        );
+        let observation = widget.status_observation();
+        assert_eq!(
+            observation.document_display_name.as_deref(),
+            Some("note.md")
+        );
+        assert!(observation.dirty);
+        assert!(observation.status_text.contains("note.md"));
+        assert!(observation.status_text.contains("Dirty"));
+        let label = widget.accessibility_label();
+        assert!(label.contains("note.md"));
+        assert!(label.contains("Dirty"));
+        assert!(!label.contains("/home/alice"));
+        assert!(label.contains(&observation.status_text));
+    }
+
+    #[test]
+    fn accessibility_recovery_summary_uses_active_menu_prompt() {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+        };
+
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        let menu = TransientMenuSession::new(TransientMenuSessionId(42), "Reload dirty document?")
+            .with_items(vec![
+                TransientMenuItem::new(
+                    "reload",
+                    "Reload",
+                    TransientMenuAction::new("clay.documents.serverReloadDocument"),
+                )
+                .with_accessibility_label("Reload from disk"),
+            ]);
+        widget.sdui.set_active_menu(menu);
+        let observation = widget.status_observation();
+        assert_eq!(
+            observation.recovery_summary.as_deref(),
+            Some("Reload dirty document?")
+        );
+        assert!(
+            observation
+                .status_text
+                .contains("Recovery: Reload dirty document?")
+        );
+        assert!(
+            widget
+                .accessibility_label()
+                .contains("Recovery: Reload dirty document?")
+        );
+    }
+
+    #[test]
+    fn local_edit_marks_status_dirty_for_accessibility() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 7,
+                    version: 12,
+                    access: DocumentAccess::Editable { lease_id: 99 },
+                    lease_id: Some(99),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: String::new(),
+            })
+        );
+        assert!(!widget.status_observation().dirty);
+        let outcome = widget.editor.insert_text_with_event("y");
+        assert!(widget.apply_local_edit_outcome(outcome));
+        assert!(widget.status_observation().dirty);
+        assert!(widget.accessibility_label().contains("Dirty"));
+    }
+
+    #[test]
+    fn commit_after_preedit_inserts_once_and_clears_overlay() {
+        let mut widget = EditorWidget::default();
+        assert!(widget.editor.set_preedit("ni".into(), Some((0, 2))));
+        assert!(widget.editor.is_composing());
+        // Simulate Ime::Commit semantics used by on_text_event.
+        assert!(widget.editor.cancel_composition());
+        assert!(widget.editor.command(EditorCommand::Insert("你")));
+        assert!(!widget.editor.is_composing());
+        assert_eq!(widget.editor.visible_text(), "你");
+    }
+
+    #[test]
+    fn undo_cancels_unfinished_composition() {
+        let mut widget = EditorWidget::default();
+        assert!(widget.editor.command(EditorCommand::Insert("ab")));
+        assert!(widget.editor.set_preedit("x".into(), None));
+        assert!(widget.undo());
+        assert!(!widget.editor.is_composing());
+        assert_eq!(widget.editor.visible_text(), "");
     }
 
     #[test]
@@ -1761,6 +2635,12 @@ mod tests {
                 access_label: "No Server".to_string(),
                 sync_version: None,
                 diagnostic_text: None,
+                theme_label: "default".to_string(),
+                dirty: false,
+                document_display_name: None,
+                composing: false,
+                pending_edit_count: 0,
+                recovery_summary: None,
             }
         );
     }
@@ -1825,6 +2705,37 @@ mod tests {
                 .contains(&observation.connection_label)
         );
         assert!(observation.status_text.contains(&observation.access_label));
+    }
+
+    #[test]
+    fn status_observation_exposes_active_theme_label() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        assert_eq!(widget.status_observation().theme_label, "default");
+        assert!(widget.accessibility_label().contains("Theme default."));
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::ActiveTheme(
+                crate::protocol::ActiveTheme {
+                    specifier: "@clay/theme-gruvbox-material-dark".to_string(),
+                    overrides: Vec::new(),
+                },
+            ))
+        );
+        assert_eq!(
+            widget.status_observation().theme_label,
+            "theme-gruvbox-material-dark"
+        );
+        assert!(
+            widget
+                .accessibility_label()
+                .contains("Theme theme-gruvbox-material-dark.")
+        );
+        assert!(crate::editor::theme::status_chrome_meets_contrast(
+            &widget.editor.theme()
+        ));
     }
 
     #[test]
@@ -1917,7 +2828,7 @@ mod tests {
         );
         assert_eq!(
             widget.status_text(),
-            "Clay — Connected — Editable — doc 42 — v5"
+            "Clay — Connected — Editable — note.md — doc 42 — v5"
         );
     }
 
@@ -1959,7 +2870,7 @@ mod tests {
         assert_eq!(widget.editor.document_state().document_version, 1);
         assert_eq!(
             widget.status_text(),
-            "Clay — Connected — Editable — doc 43 — v1"
+            "Clay — Connected — Editable — main.rs — doc 43 — v1"
         );
     }
 
@@ -2269,5 +3180,229 @@ mod tests {
         assert_eq!(widget.editor.caret_for_test(), before_caret);
         assert_eq!(widget.editor.visual_scroll_y(), before_scroll_y);
         assert_eq!(widget.status_observation(), before_status);
+    }
+
+    fn runtime_snapshot(
+        generation: u64,
+        client_id: u64,
+        document_id: u64,
+    ) -> crate::protocol::RuntimeStateSnapshot {
+        let snapshot = crate::protocol::RuntimeStateSnapshot {
+            runtime_generation_id: generation,
+            client_id,
+            behavior: BehaviorManifest::minimal_text_editing(generation),
+            active_theme: crate::protocol::ActiveTheme {
+                specifier: format!("@clay/theme-gen-{generation}"),
+                overrides: Vec::new(),
+            },
+            active_typography: {
+                crate::protocol::ActiveTypography {
+                    revision: generation,
+                    monospace: crate::protocol::FontProfile {
+                        size: 12.0 + generation as f32,
+                        ..crate::protocol::ActiveTypography::default().monospace
+                    },
+                    ..crate::protocol::ActiveTypography::default()
+                }
+            },
+            sdui_tree: SduiTree {
+                ui_version: generation,
+                root_id: SduiNodeId(1),
+                nodes: vec![SduiNode::new(
+                    SduiNodeId(1),
+                    SduiNodeKind::Label {
+                        text: format!("runtime-{generation}"),
+                    },
+                )],
+            },
+            package_ui: crate::protocol::PackageUiSnapshot {
+                version: generation,
+            },
+            documents: vec![crate::protocol::DocumentRuntimeRenderState {
+                document_id,
+                document_version: 12,
+                reset_decorations: true,
+                reset_diagnostics: true,
+                initial_decorations: None,
+                initial_diagnostics: None,
+            }],
+            diagnostics: Vec::new(),
+        };
+        snapshot.validate().expect("fixture snapshot");
+        snapshot
+    }
+
+    #[test]
+    fn client_installs_behavior_theme_typography_ui_and_render_generation_atomically() {
+        let (queue, mut outgoing) = ClientEditQueue::bounded(8);
+        let queue = queue.with_authority(11, &DocumentAccess::Editable { lease_id: 1 });
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 1 },
+            12,
+        ))
+        .with_edit_queue(queue);
+
+        // Seed previous-generation package UI so the install must clear it.
+        widget
+            .sdui
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "old.panel",
+                    FixedSlotId::Left,
+                    PackagePanelVisibility::Visible,
+                    PackageUiComponentTree {
+                        id: "old.panel.root".to_string(),
+                        kind: "panel".to_string(),
+                        font_role: FontRole::Ui,
+                        text_variant: None,
+                        title: Some("old".to_string()),
+                        text: None,
+                        label: None,
+                        action_command_id: None,
+                        items: Vec::new(),
+                        children: Vec::new(),
+                    },
+                    Vec::new(),
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .expect("seed package ui");
+        assert_eq!(widget.sdui.package_ui_version(), 1);
+
+        let g1_behavior = widget.editor.document_state().behavior_version;
+        assert_eq!(widget.runtime_generation_id, 0);
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::RuntimeStateSnapshot(Box::new(
+                runtime_snapshot(2, 11, 7)
+            )))
+        );
+
+        assert_eq!(widget.runtime_generation_id, 2);
+        assert_eq!(widget.editor.document_state().behavior_version, 2);
+        assert_ne!(widget.editor.document_state().behavior_version, g1_behavior);
+        assert_eq!(widget.editor.typography().revision(), 2);
+        assert_eq!(widget.sdui.ui_version(), 2);
+        assert_eq!(widget.sdui.package_ui_version(), 2);
+        assert!(
+            widget
+                .sdui
+                .visible_texts()
+                .iter()
+                .any(|text| text.contains("runtime-2"))
+        );
+        assert!(widget.take_layout_invalidation());
+
+        match outgoing.try_recv() {
+            Ok(ClientMessage::RuntimeGenerationInstalled {
+                client_id,
+                runtime_generation_id,
+            }) => {
+                assert_eq!(client_id, 11);
+                assert_eq!(runtime_generation_id, 2);
+            }
+            other => panic!("expected runtime install ack, got {other:?}"),
+        }
+        assert!(outgoing.try_recv().is_err());
+    }
+
+    #[test]
+    fn invalid_snapshot_installs_nothing_and_disconnects_without_ack() {
+        let (queue, mut outgoing) = ClientEditQueue::bounded(8);
+        let queue = queue.with_authority(11, &DocumentAccess::Editable { lease_id: 1 });
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 1 },
+            12,
+        ))
+        .with_edit_queue(queue);
+
+        let before_behavior = widget.editor.document_state().behavior_manifest.clone();
+        let before_theme = widget.editor.theme();
+        let before_typography = widget.editor.typography().revision();
+        let before_ui = widget.sdui.ui_version();
+        let before_package_ui = widget.sdui.package_ui_version();
+        let before_generation = widget.runtime_generation_id;
+
+        let mut invalid = runtime_snapshot(2, 11, 7);
+        invalid.behavior.manifest_id.clear();
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::RuntimeStateSnapshot(Box::new(
+                invalid
+            )))
+        );
+
+        assert_eq!(widget.status_observation().connection_label, "Disconnected");
+        assert_eq!(widget.runtime_generation_id, before_generation);
+        assert_eq!(
+            widget.editor.document_state().behavior_manifest,
+            before_behavior
+        );
+        assert_eq!(widget.editor.theme(), before_theme);
+        assert_eq!(widget.editor.typography().revision(), before_typography);
+        assert_eq!(widget.sdui.ui_version(), before_ui);
+        assert_eq!(widget.sdui.package_ui_version(), before_package_ui);
+        assert!(outgoing.try_recv().is_err());
+    }
+
+    #[test]
+    fn runtime_install_preserves_caret_selection_viewport_and_focus_status() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 1 },
+            12,
+        ));
+        widget
+            .editor
+            .command(EditorCommand::Insert("alpha beta gamma"));
+        widget.editor.set_selection_for_test(6, 10);
+        widget.editor.set_visual_scroll_bounds_for_test(80.0);
+        assert!(widget.editor.scroll_vertical_pixels(24.0));
+
+        let before_caret = widget.editor.caret_for_test();
+        let before_selection = widget.editor.selection_for_test();
+        let before_scroll = widget.editor.visual_scroll_y();
+        let before_connection = widget.status_observation().connection_label.clone();
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::RuntimeStateSnapshot(Box::new(
+                runtime_snapshot(4, 11, 7)
+            )))
+        );
+
+        assert_eq!(widget.runtime_generation_id, 4);
+        assert_eq!(widget.editor.caret_for_test(), before_caret);
+        assert_eq!(widget.editor.selection_for_test(), before_selection);
+        assert_eq!(widget.editor.visual_scroll_y(), before_scroll);
+        assert_eq!(
+            widget.status_observation().connection_label,
+            before_connection
+        );
+    }
+
+    #[test]
+    fn runtime_install_invalidates_layout_once() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 1 },
+            12,
+        ));
+        assert!(!widget.take_layout_invalidation());
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::RuntimeStateSnapshot(Box::new(
+                runtime_snapshot(5, 11, 7)
+            )))
+        );
+        assert!(widget.take_layout_invalidation());
+        assert!(!widget.take_layout_invalidation());
+
+        // Duplicate generation is ignored without another invalidation or ack.
+        assert!(
+            !widget.apply_connection_event(ClientConnectionEvent::RuntimeStateSnapshot(Box::new(
+                runtime_snapshot(5, 11, 7)
+            )))
+        );
+        assert!(!widget.take_layout_invalidation());
     }
 }

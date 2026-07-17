@@ -18,7 +18,7 @@ key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; native folder selection requires explicit user key routing, selected folders are sent through the server selected-path capability flow before becoming workspace roots, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard read/write, or client-side JavaScript authority.
 agent_guidance: Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion without server validation, package loading, shell/network effects, WASM, AI mutation, clipboard access, or client-side JavaScript execution.
-lookup_tags: [workspace, open-folder, folder-dialog, xdg-desktop-portal, windows, keybindings, js-api]
+lookup_tags: [workspace, open-folder, folder-dialog, xdg-desktop-portal, windows, macos, keybindings, js-api]
 app_visible: true
 help_visible: true
 stability: runtime-backed-command
@@ -66,7 +66,7 @@ import { clientOpenFolderDialog } from "clay:workspace";
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 ```
 
-On Linux, Clay uses the xdg-desktop-portal FileChooser over D-Bus with `directory=true`. On Windows, Clay uses COM `IFileOpenDialog` with `FOS_PICKFOLDERS`. Other platforms report a sanitized unsupported diagnostic instead of panicking. Cancellation is a non-error no-op.
+On Linux, Clay uses the xdg-desktop-portal FileChooser over D-Bus with `directory=true`. On Windows, Clay uses COM `IFileOpenDialog` with `FOS_PICKFOLDERS`. On macOS, Clay uses `NSOpenPanel` in directory-chooser mode. Other platforms report a sanitized unsupported diagnostic instead of panicking. Cancellation is a non-error no-op.
 
 ## Options
 
@@ -114,4 +114,4 @@ Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bind
 - Module/export: `clay:workspace` / `clientOpenFolderDialog`
 - Default key bindings: none
 - Custom properties: none
-- Tags: `[workspace, open-folder, folder-dialog, xdg-desktop-portal, windows, keybindings, js-api]`
+- Tags: `[workspace, open-folder, folder-dialog, xdg-desktop-portal, windows, macos, keybindings, js-api]`

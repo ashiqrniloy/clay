@@ -1,7 +1,7 @@
 use clay::packages::commands::{CommandRegistry, CommandValidationRule, PackageCommandDeclaration};
 use clay::packages::manifest::validate_manifest_value;
 use clay::packages::permissions::PackagePermission;
-use clay::protocol::{KeyBindingRule, RoutingPolicy};
+use clay::protocol::{KeyBindingRule, LockScope, RoutingPolicy};
 use clay::server::command_execution::{
     CommandExecutionProvenance, CommandExecutionRequest, CommandExecutionRule,
     CommandExecutionStatus, CommandExecutionTarget, CommandExecutor,
@@ -80,6 +80,41 @@ fn registered_server_command_executes_with_accepted_status() {
         .expect("execute command");
 
     assert_eq!(result.command_id, "markdown.togglePreview");
+    assert_eq!(result.status, CommandExecutionStatus::Accepted);
+}
+
+#[test]
+fn reload_command_is_server_first_behavior_locked_and_discoverable() {
+    let command =
+        clay::server::command_execution::builtin_server_command("clay.runtime.reloadConfiguration")
+            .expect("reload command is built in");
+
+    assert_eq!(command.display_name, "Reload Configuration and Packages");
+    assert_eq!(
+        command.routing_policy,
+        RoutingPolicy::ServerFirstWithLock {
+            lock_scope: LockScope::Behavior,
+        }
+    );
+    assert!(command.key_bindings.is_empty());
+    assert!(command.permissions.is_empty());
+    assert!(
+        clay::server::command_execution::builtin_server_command_ids()
+            .contains(&"clay.runtime.reloadConfiguration")
+    );
+
+    let result = CommandExecutor::new()
+        .execute(
+            &CommandRegistry::new(),
+            CommandExecutionRequest {
+                command_id: command.command_id,
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+        )
+        .expect("reload command validates through shared executor");
     assert_eq!(result.status, CommandExecutionStatus::Accepted);
 }
 

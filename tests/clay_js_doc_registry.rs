@@ -888,9 +888,45 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             "clipboard",
             [
                 "current non-empty native editor selection",
-                "clipboard read",
+                "separate documented command IDs",
                 "raw Deno ops",
             ],
+        ),
+        (
+            "clay.editor.clientCutSelection",
+            "clay:editor",
+            "clientCutSelection",
+            "clipboard",
+            [
+                "ordinary local edit",
+                "arbitrary clipboard text writes",
+                "raw Deno ops",
+            ],
+        ),
+        (
+            "clay.editor.clientPasteClipboard",
+            "clay:editor",
+            "clientPasteClipboard",
+            "clipboard",
+            [
+                "ordinary local edit",
+                "clipboard-contents inspection",
+                "raw Deno ops",
+            ],
+        ),
+        (
+            "clay.editor.clientUndo",
+            "clay:editor",
+            "clientUndo",
+            "undo",
+            ["ordinary inverse edit", "editable lease", "raw Deno ops"],
+        ),
+        (
+            "clay.editor.clientRedo",
+            "clay:editor",
+            "clientRedo",
+            "redo",
+            ["ordinary inverse edit", "editable lease", "raw Deno ops"],
         ),
         (
             "clay.commands.serverOpenDirectory",

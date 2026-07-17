@@ -431,6 +431,43 @@ impl ModeRegistry {
         self.modes.remove(mode_id).is_some()
     }
 
+    /// Remove every package-owned mode declaration for `api_prefix`. Built-in
+    /// `core.*` modes are never removed. Returns the number of modes withdrawn.
+    /// Callers must re-run open-document classification afterward; this only
+    /// mutates the candidate set.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "package-scoped mode withdrawal is exercised by reload cleanup tests and disable hooks"
+        )
+    )]
+    pub(crate) fn unregister_package_modes(&mut self, api_prefix: &str) -> usize {
+        if api_prefix == CORE_API_PREFIX || api_prefix.starts_with("clay.") {
+            return 0;
+        }
+        let removed_major: Vec<String> = self
+            .modes
+            .iter()
+            .filter(|(_, mode)| mode.declaration.api_prefix == api_prefix)
+            .map(|(mode_id, _)| mode_id.clone())
+            .collect();
+        let removed_minor: Vec<String> = self
+            .minor_modes
+            .iter()
+            .filter(|(_, mode)| mode.declaration.api_prefix == api_prefix)
+            .map(|(mode_id, _)| mode_id.clone())
+            .collect();
+        let count = removed_major.len() + removed_minor.len();
+        for mode_id in removed_major {
+            self.modes.remove(&mode_id);
+        }
+        for mode_id in removed_minor {
+            self.minor_modes.remove(&mode_id);
+        }
+        count
+    }
+
     pub fn register_mode(
         &mut self,
         package: &ClayPackageManifest,

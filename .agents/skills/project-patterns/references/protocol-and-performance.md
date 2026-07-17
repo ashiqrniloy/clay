@@ -30,7 +30,12 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 - No IPC work in Masonry paint or text-event handlers.
 - Use bounded queues for outgoing client edits.
 - Use per-document edit ordering, not global serialization across all documents.
-- Use deltas/transactions instead of snapshots except for initial load or resync.
+- Use deltas/transactions instead of snapshots except for initial load, resync, or an atomically installed runtime-generation replacement whose mutually dependent state fits one bounded frame.
+- Runtime-generation snapshots use the existing 1 MiB frame ceiling, complete latest-state recovery after broadcast lag, and one client acknowledgement only after validation and atomic install. Consider diffs/chunking only after measured payload/install thresholds justify a separate protocol decision.
+- Runtime-generation snapshot decision source: `decision-logs/2026-07-16-1825-phase19-hot-reload-transaction-and-stale-edit-semantics.md`.
+- Daily-editing local application (undo/redo inverse apply, clipboard cut/paste command handling, IME preedit paint, active-document chrome switch) must stay off IPC waits; save/conflict/open authority remain server-first/background relative to paint.
+- Bound undo history at 256 entries per document and retained client document sessions at 64; clear a document's undo/redo on full resync/hard open-replace for that document.
+- Daily-editing semantics decision source: `decision-logs/2026-07-17-1841-phase20-daily-editing-semantics.md`.
 - Make UI-reactive server work cancellable and priority-aware.
 - Keep background AI/indexing/file work from delaying input confirmations or UI-reactive work.
 

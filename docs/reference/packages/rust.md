@@ -16,6 +16,8 @@ The package is explicit opt-in and is not auto-loaded. Without this line, `.rs` 
 
 Optional customization is exposed through documented Clay/package JS APIs. For example, after `loadPackage("@clay/rust")` a user can bind `rust.toggleLineComment` to a key or toggle a package option; the default load line itself never needs to inline the package manifest.
 
+Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/rust")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. Rust mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `loadEntry`; failed reloads keep the prior Rust generation active. No Rust-specific reload callback or copied manifest is required.
+
 ## Contract
 
 - `package.json` name: `@clay/rust`

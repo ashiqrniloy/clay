@@ -143,7 +143,7 @@ impl Widget for ClayShellWidget {
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _scene: &mut Scene) {}
 
     fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
+        Role::Group
     }
 
     fn accessibility(
@@ -153,7 +153,7 @@ impl Widget for ClayShellWidget {
         node: &mut Node,
     ) {
         node.set_label(format!(
-            "Clay working area shell, active pane {}",
+            "Clay working area shell. Active pane {}.",
             self.layout.active_pane_id().0
         ));
     }

@@ -1249,22 +1249,31 @@ fn phase19_hot_reload_configuration_review_rejects_hidden_reload_keys() {
     let configuration_doc =
         fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
             .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
     let runtime_doc = fs::read_to_string(root.join("docs/wiki/modules/embedded-js-runtime.md"))
         .expect("read embedded runtime wiki");
     let entries = inventory_entries();
 
     for required in [
         "Phase 19 persistent-runtime hot reload configuration review",
-        "did **not** promote a new user-facing reload setting",
-        "internal/developer-only server lifecycle primitive",
+        "promotes exactly one built-in reload command",
+        "clay.runtime.reloadConfiguration",
+        "Reload Configuration and Packages",
+        "ServerFirstWithLock",
+        "no default binding exists",
+        "No default binding exists",
+        "Compiled budgets",
+        "Rejected hidden configuration keys",
+        "File-watcher paths",
+        "IpcServer::trigger_developer_hot_reload",
         "not callable from `~/.config/clay/init.js`",
-        "hidden JSON/TOML/ad hoc keys",
-        "startup or explicit developer-triggered reload work only",
-        "module loading through recorded package allowlist entries",
-        "sanitized diagnostics",
+        "Reload does not broaden package source trust",
+        "ReloadInProgress",
     ] {
         assert!(
-            configuration_doc.contains(required),
+            configuration_doc.contains(required) || bind_key_doc.contains(required),
             "configuration overview must document Phase 19 hot reload config rule `{required}`"
         );
     }
@@ -1274,7 +1283,6 @@ fn phase19_hot_reload_configuration_review_rejects_hidden_reload_keys() {
         "reloadOnSave",
         "autoReload",
         "reloadPackages",
-        "reloadConfiguration",
     ] {
         assert!(
             configuration_doc.contains(forbidden_key),
@@ -1293,6 +1301,14 @@ fn phase19_hot_reload_configuration_review_rejects_hidden_reload_keys() {
         !(entry.get("js_module") == "clay:configuration"
             && entry.get("id").to_ascii_lowercase().contains("reload"))
     }));
+    // reloadConfiguration is a valid built-in command id, not a hidden key
+    assert!(configuration_doc.contains("clay.runtime.reloadConfiguration"));
+    // It must NOT appear as a Clay JS API facade entry
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.get("id") != "clay.runtime.reloadConfiguration")
+    );
     for denied in denied_configuration_authorities() {
         assert!(
             configuration_doc.contains(denied),
@@ -1339,7 +1355,227 @@ fn phase19_hot_reload_has_no_public_clay_js_api_surface() {
                 && entry.get("id") != "clay.documents.serverReloadDocument"))
     }));
     assert!(!registry.contains("triggerDeveloperHotReload"));
-    assert!(!registry.contains("clay.runtime.reload"));
+}
+
+#[test]
+fn phase19_reload_configuration_review_rejects_hidden_watcher_and_reload_keys() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let entries = inventory_entries();
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    let runtime_js = fs::read_to_string(root.join("runtime/js/application.ts"))
+        .unwrap_or_else(|_| String::new())
+        + &fs::read_to_string(root.join("runtime/js/packages.ts")).expect("read packages facade")
+        + &fs::read_to_string(root.join("runtime/js/configuration.ts"))
+            .expect("read config facade");
+
+    for rejected in [
+        "reload.watch",
+        "reload.debounce",
+        "File-watcher paths",
+        "inotify",
+        "FSEvents",
+        "polling intervals",
+        "Auto-reload-on-save",
+        "reload-after-package-install",
+        "reload-after-config-change",
+        "reload.graceMs",
+        "reload.maxGraceTransactions",
+        "reload.snapshotMaxDocuments",
+    ] {
+        assert!(
+            configuration_doc.contains(rejected),
+            "configuration overview must explicitly reject hidden watcher/debounce/budget key `{rejected}`"
+        );
+    }
+    for absent_key in [
+        "reload.graceMs",
+        "reload.maxGraceTransactions",
+        "reload.snapshotMaxDocuments",
+        "reloadOnSave",
+        "autoReload",
+    ] {
+        assert!(
+            entries.iter().all(|entry| {
+                let id = entry.get("id").to_ascii_lowercase();
+                !id.contains(&absent_key.to_ascii_lowercase())
+                    && !entry
+                        .get("custom_properties")
+                        .to_ascii_lowercase()
+                        .contains(&absent_key.to_ascii_lowercase())
+            }),
+            "API inventory must not contain hidden reload config key `{absent_key}`"
+        );
+        assert!(
+            !registry.contains(absent_key),
+            "generated registry must not contain hidden reload config key `{absent_key}`"
+        );
+    }
+    assert!(
+        !runtime_js.contains("reload.watch")
+            && !runtime_js.contains("reloadOnSave")
+            && !runtime_js.contains("autoReload"),
+        "JS facades must not expose hidden watcher/reload configuration keys"
+    );
+    assert!(
+        !configuration_doc.contains("reloadConfiguration is a hidden")
+            && !configuration_doc.contains("reloadConfiguration is not a user-facing"),
+        "configuration docs must not still describe reloadConfiguration as internal-only"
+    );
+    assert!(configuration_doc.contains("promotes exactly one built-in reload command"));
+    assert!(configuration_doc.contains("Compiled budgets (not configurable)"));
+}
+
+#[test]
+fn reload_command_can_be_bound_through_existing_bind_key_api() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let server_mod = fs::read_to_string(root.join("src/server/mod.rs")).expect("read server mod");
+    let js_runtime =
+        fs::read_to_string(root.join("src/server/js_runtime.rs")).expect("read js_runtime");
+    let entries = inventory_entries();
+    let facade_text = fs::read_to_string(root.join("runtime/js/keybindings.ts"))
+        .expect("read keybindings facade");
+
+    assert!(
+        bind_key_doc.contains("clay.runtime.reloadConfiguration"),
+        "bindKey docs must document reloadConfiguration as a bindable command"
+    );
+    assert!(
+        bind_key_doc.contains("Reload Configuration and Packages"),
+        "bindKey docs must name the reload command"
+    );
+    assert!(
+        bind_key_doc.contains("Ctrl+Shift+R"),
+        "bindKey docs must show an explicit reload keybinding example"
+    );
+    assert!(
+        bind_key_doc.contains("no default chord exists")
+            || configuration_doc.contains("no default binding exists"),
+        "bindKey or configuration docs must state no default chord exists for reload"
+    );
+    assert!(
+        bind_key_doc.contains("ServerFirstWithLock")
+            || configuration_doc.contains("ServerFirstWithLock"),
+        "docs must document the reload command routing policy"
+    );
+    // command execution module defines the built-in reload command
+    let command_exec = fs::read_to_string(root.join("src/server/command_execution.rs"))
+        .expect("read command_execution");
+    assert!(
+        command_exec.contains("clay.runtime.reloadConfiguration")
+            || server_mod.contains("clay.runtime.reloadConfiguration"),
+        "command_execution or server mod must define the reloadConfiguration command path"
+    );
+    assert!(
+        js_runtime.contains("configuration_can_explicitly_bind_reload_without_default_binding"),
+        "js_runtime must contain a test that binds reloadConfiguration through bindKey"
+    );
+    assert!(
+        facade_text.contains("bindKey"),
+        "keybindings facade must export bindKey"
+    );
+    // reloadConfiguration is a command target, NOT a Clay JS API facade
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.get("js_module") != "clay:runtime"
+                && !entry.get("id").starts_with("clay.runtime."))
+    );
+}
+
+#[test]
+fn phase19_reload_command_is_discoverable_and_documented() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let command_exec = fs::read_to_string(root.join("src/server/command_execution.rs"))
+        .expect("read command_execution");
+    let register_command_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/commands/server-register-command.md"),
+    )
+    .expect("read server-register-command docs");
+    let list_commands_doc = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/commands/server-list-commands.md"),
+    )
+    .expect("read server-list-commands docs");
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    let runtime_js =
+        fs::read_to_string(root.join("runtime/js/commands.ts")).expect("read commands facade");
+
+    // Stable command ID and metadata
+    for required in [
+        "RELOAD_CONFIGURATION_COMMAND_ID",
+        "clay.runtime.reloadConfiguration",
+        "Reload Configuration and Packages",
+        "builtin_server_command",
+    ] {
+        assert!(
+            command_exec.contains(required),
+            "command_execution must define reload command metadata `{required}`"
+        );
+    }
+    assert!(command_exec.contains("ServerFirstWithLock"));
+    assert!(command_exec.contains("LockScope::Behavior"));
+    assert!(command_exec.contains("is_reload_command"));
+
+    // Documented in server-register-command.md
+    for required in [
+        "Phase 19 built-in reload command boundary",
+        "clay.runtime.reloadConfiguration",
+        "Reload Configuration and Packages",
+        "Rejected with `UnauthorizedTarget`",
+        "reload_runtime_generation",
+        "ReloadInProgress",
+        "Reload does not broaden",
+        "builtin_server_command",
+    ] {
+        assert!(
+            register_command_doc.contains(required),
+            "server-register-command must document reload boundary `{required}`"
+        );
+    }
+
+    // Server-list-commands notes that built-in commands are separate
+    assert!(list_commands_doc.contains("Phase 19 built-in command discovery note"));
+    assert!(list_commands_doc.contains("not listed by this API"));
+    assert!(list_commands_doc.contains("builtin_server_command_ids"));
+
+    // Configuration.md documents the command
+    assert!(configuration_doc.contains("clay.runtime.reloadConfiguration"));
+    assert!(configuration_doc.contains("Reload Configuration and Packages"));
+
+    // bindKey.md documents binding the command
+    assert!(bind_key_doc.contains("clay.runtime.reloadConfiguration"));
+    assert!(bind_key_doc.contains("Ctrl+Shift+R"));
+
+    // Not in Clay JS facade — no programmatic execution path
+    assert!(!runtime_js.contains("reloadConfiguration"));
+    assert!(!runtime_js.contains("ReloadInProgress"));
+
+    // Not in generated registry (command-only, not a Clay JS API facade)
+    assert!(!registry.contains("clay.runtime.reloadConfiguration"));
+
+    // Not in api-inventory.toml as a JS API entry
+    let entries = inventory_entries();
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.get("id") != "clay.runtime.reloadConfiguration")
+    );
 }
 
 #[test]
@@ -1423,7 +1659,7 @@ fn client_open_file_dialog_api_is_documented_indexed_and_facade_backed() {
         "Module/export: `clay:documents` / `clientOpenFileDialog`",
         "bindKey(\"Ctrl+O\", clientOpenFileDialog(), { scope: \"editor\" })",
         "fixed Markdown filters",
-        "Windows-only native dialog support",
+        "native dialog support on Windows, Linux (xdg-desktop-portal), and macOS",
         "selected-file-only server validation",
         "ordinary editing remains delta-based",
         "background, viewport-bounded work",

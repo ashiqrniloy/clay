@@ -119,6 +119,7 @@ pub enum CommandExecutionRule {
     UndeclaredPermission,
     InvalidArguments,
     UnauthorizedTarget,
+    ReloadInProgress,
 }
 
 #[derive(Debug, Default)]
@@ -603,9 +604,16 @@ fn discovery_document_id(
     Ok(document_id)
 }
 
+pub(crate) const RELOAD_CONFIGURATION_COMMAND_ID: &str = "clay.runtime.reloadConfiguration";
+
+pub(crate) fn is_reload_command(command_id: &str) -> bool {
+    command_id == RELOAD_CONFIGURATION_COMMAND_ID
+}
+
 pub fn builtin_server_command_ids() -> &'static [&'static str] {
     &[
         "clay.controlCenter.open",
+        RELOAD_CONFIGURATION_COMMAND_ID,
         "workspace.refresh",
         "document.focus_active",
         "document.open_recent",
@@ -631,6 +639,7 @@ pub fn builtin_server_command_ids() -> &'static [&'static str] {
 pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
     match command_id {
         "clay.controlCenter.open"
+        | RELOAD_CONFIGURATION_COMMAND_ID
         | "workspace.refresh"
         | "document.focus_active"
         | "document.open_recent"
@@ -655,7 +664,13 @@ pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
             api_prefix: "clay".to_string(),
             command_id: command_id.to_string(),
             display_name: builtin_display_name(command_id).to_string(),
-            routing_policy: RoutingPolicy::ServerFirst,
+            routing_policy: if is_reload_command(command_id) {
+                RoutingPolicy::ServerFirstWithLock {
+                    lock_scope: crate::protocol::LockScope::Behavior,
+                }
+            } else {
+                RoutingPolicy::ServerFirst
+            },
             key_bindings: Vec::new(),
             custom_properties: Default::default(),
             permissions: Vec::new(),
@@ -667,6 +682,7 @@ pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
 fn builtin_display_name(command_id: &str) -> &'static str {
     match command_id {
         "clay.controlCenter.open" => "Open Control Center",
+        RELOAD_CONFIGURATION_COMMAND_ID => "Reload Configuration and Packages",
         "workspace.refresh" => "Refresh Workspace",
         "document.focus_active" => "Focus Active Document",
         "document.open_recent" => "Open Recent Document",

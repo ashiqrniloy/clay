@@ -61,6 +61,10 @@ The generated documentation registry must read this section as the explicit incl
 - [serverReloadDocument](reference/clay-js-api/documents/server-reload-document.md) — `clay.documents.serverReloadDocument`
 - [serverSaveDocument](reference/clay-js-api/documents/server-save-document.md) — `clay.documents.serverSaveDocument`
 - [clientCopySelection](reference/clay-js-api/editor/client-copy-selection.md) — `clay.editor.clientCopySelection`
+- [clientCutSelection](reference/clay-js-api/editor/client-cut-selection.md) — `clay.editor.clientCutSelection`
+- [clientPasteClipboard](reference/clay-js-api/editor/client-paste-clipboard.md) — `clay.editor.clientPasteClipboard`
+- [clientUndo](reference/clay-js-api/editor/client-undo.md) — `clay.editor.clientUndo`
+- [clientRedo](reference/clay-js-api/editor/client-redo.md) — `clay.editor.clientRedo`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `clay.editor.clientMoveCursor`
 - [clientScrollTo](reference/clay-js-api/editor/client-scroll-to.md) — `clay.editor.clientScrollTo`
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `clay.editor.clientSetCursorStyle`

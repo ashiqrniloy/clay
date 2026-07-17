@@ -38,7 +38,7 @@ Semantic tokens, diagnostics, and completion do not use this four-feature result
 
 A package declares `clay.contributions.languageIntelligenceProviders` and calls `serverRegisterLanguageIntelligenceProvider`. `op_clay_language_register_intelligence_provider` verifies package identity, `parse-document`, package-prefixed provider ID, supported modes/features, timeout, safe module path/export, and prohibited executable fields. A JS module export is stored in `globalThis.__clayLanguageIntelligenceHandlers` behind a runtime-issued token; no callback or process handle crosses into Rust metadata.
 
-`ClayRuntimeEvaluation` returns provider metadata and JS registrations. `IpcServer::apply_runtime_evaluation` adapts JS registrations to `JsLanguageIntelligenceProvider` and registers them with the single `LanguageIntelligenceCoordinator`. Runtime generation replacement cancels old work.
+`ClayRuntimeEvaluation` returns provider metadata and JS registrations. Candidate commit registers them with the single `LanguageIntelligenceCoordinator`. Runtime generation replacement then calls `cancel_older_generations`, which removes older provider registrations and aborts older in-flight work so late results cannot publish.
 
 ### Request and coordination flow
 
