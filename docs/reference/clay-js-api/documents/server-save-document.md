@@ -63,7 +63,15 @@ console.log(saved.dirty);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.documents.serverSaveDocument` in `~/.config/clay/init.js` once configuration execution exists.
+Recommended default chord for daily editing:
+
+```js
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+```
+
+No built-in Rust shortcut is hardcoded; without an `init.js` (or fixture) binding, save is reachable through Control Center only if the command is listed there, or through the Clay JS facade. The client routes the bound command as a non-blocking `SaveDocument` protocol request for the active document. Stale on-disk metadata keeps the document dirty and opens a recovery menu instead of overwriting silently.
 
 ## Custom properties
 

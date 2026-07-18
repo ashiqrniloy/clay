@@ -180,7 +180,24 @@ fn parse_window_snapshot_primitive_uses_bounded_rope_slicing() {
 fn paint_uses_cached_inert_spans_without_package_javascript() {
     let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
     let layout_source = fs::read_to_string("src/editor/layout.rs").expect("layout readable");
+    let widget_source =
+        fs::read_to_string("src/masonry_editor.rs").expect("editor widget readable");
     let paint_sources = format!("{surface_source}\n{layout_source}");
+    let surface_paint = surface_source
+        .split("pub fn paint(")
+        .nth(1)
+        .expect("EditorSurface::paint")
+        .split("fn paint_caret(")
+        .next()
+        .expect("EditorSurface paint body through scrollbar/text");
+    let widget_paint = widget_source
+        .split("fn paint(&mut self, ctx: &mut PaintCtx")
+        .nth(1)
+        .expect("EditorWidget::paint")
+        .split("fn accessibility_role(")
+        .next()
+        .expect("EditorWidget::paint body");
+    let paint_bodies = format!("{surface_paint}\n{widget_paint}");
 
     assert!(surface_source.contains("normalize_visible_text_style_runs"));
     assert!(layout_source.contains("StyleProperty::Brush"));
@@ -197,6 +214,27 @@ fn paint_uses_cached_inert_spans_without_package_javascript() {
         assert!(
             !paint_sources.contains(forbidden),
             "paint/layout source must not call package/server/parser code: {forbidden}"
+        );
+    }
+    // Phase 20: clipboard IO and save/reload enqueue stay off the paint path.
+    for forbidden in [
+        "SystemClipboard",
+        "ClipboardSink",
+        "get_text",
+        "set_text",
+        "copy_selection_to_system_clipboard",
+        "cut_selection_to_system_clipboard",
+        "paste_from_system_clipboard",
+        "enqueue_save_document",
+        "enqueue_reload_document",
+        "SaveDocument",
+        "ReloadDocument",
+        "open_markdown_file_dialog",
+        "open_folder_dialog",
+    ] {
+        assert!(
+            !paint_bodies.contains(forbidden),
+            "paint path must not perform clipboard/save/dialog work: {forbidden}"
         );
     }
 }
@@ -512,7 +550,9 @@ fn snippet_accept_is_bounded_client_local_text_work() {
     let hot_path = format!("{accept_body}\n{parser_body}");
 
     assert!(accept_body.contains("parse_snippet"));
-    assert!(accept_body.contains("finish_edit_with_operation"));
+    // Phase 20 routes accepted completion inserts through the shared local-edit
+    // helper so inverse history is recorded the same way as ordinary typing.
+    assert!(accept_body.contains("apply_and_record_local_edit"));
     for forbidden in [
         "Deno.core",
         "op_clay_",

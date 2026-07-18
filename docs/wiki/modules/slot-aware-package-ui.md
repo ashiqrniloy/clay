@@ -184,4 +184,6 @@ CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs --quiet
 - [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `PackageUiRuntimeState::install_runtime_snapshot` atomically replaces package UI version during live reload.
 - [Phase 18.3 Slot-Aware Package UI Primitive Review](phase18.3-slot-ui-primitive-review.md)
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
-- [Package Authoring Guide](../../reference/packages/creating-packages.md)
+- [Package Authoring Guide](../../reference/packages/creating-packages.md) — includes Phase 20 multi-document / dirty-save / recovery chrome non-goals for package UI
+- [Phase 20 Daily Editing Product Hardening Primitive Review](phase20-daily-editing-product-hardening-primitive-review.md)
+- [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md)

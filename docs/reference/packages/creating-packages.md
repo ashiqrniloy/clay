@@ -1766,6 +1766,87 @@ Use the file browser as a model for **composition**, not authority:
 
 Testing for package UI that coexists with the file browser should assert slot conflict diagnostics, fixed-vs-transient behavior, inert command arguments, no raw-op/native-widget/CSS usage, and no workspace authority beyond documented root/grant APIs.
 
+## Phase 20 authoring contract: multi-document sessions, dirty/save status, and recovery chrome
+
+Phase 20 hardens daily editing around Clay-owned shell chrome. Multi-document session switching, dirty/save status, conflict recovery menus, and pending-edit/disconnect/resync recovery surfaces are **Clay-owned**, not package layout contributions. Packages continue to declare inert panels, components, overlays, and command intents through `clay:ui` / `clay:commands`; they do not own document tabs, status chrome, native widgets, or recovery menus.
+
+### Clay-owned surfaces packages must not replace
+
+| Surface | Owner | Package role |
+| --- | --- | --- |
+| Working area, pane/split tree, fixed slots (`left`/`right`/`top`/`bottom`), mandatory `main` editor | Clay shell | May request optional slots for inert panels; must tolerate Clay chrome |
+| Active document title, dirty marker, pending-edit count, theme label, recovery summary | Clay status chrome (`EditorStatus` / `SduiStatusObservation`) | May publish package status items; must not invent a second dirty/save bar |
+| Open-documents switcher (`clay.editor.clientShowOpenDocuments`) | Clay client session map (`DocumentSessionStore`, bound 64) | May bind the command ID; must not ship a package tab host or native document switcher |
+| Save / reload / conflict menus (`StaleFileMetadata`, `DirtyDocument`) | Clay transient menus + server document IO | May bind `clay.documents.serverSaveDocument` / `serverReloadDocument`; must not open native save dialogs or write files |
+| Pending-edit / disconnect / resync recovery (`clientRequestResync`, `clientDismissRecovery`) | Clay recovery menus + existing `RequestResync` | May bind the command IDs; must not invent reconnect sockets or package-owned resync loops |
+| Native file-open dialogs | Clay client platforms + selected-file grants | Must not call platform dialog APIs directly |
+
+Clay remains the owner of shell slots, the document switcher, status chrome, and native widgets. Package UI contributions stay inert declarations that Clay validates, composes, and renders.
+
+### What packages may observe and bind
+
+Packages and `~/.config/clay/init.js` may use documented Clay JS surfaces only:
+
+```js
+import { bindKey } from "clay:keybindings";
+import {
+  clientShowOpenDocuments,
+  clientRequestResync,
+  clientDismissRecovery,
+} from "clay:editor";
+import { serverListDocuments } from "clay:documents";
+
+// Bind Clay-owned chrome commands. These are inert client UI / server-first
+// command IDs — not package authority grants.
+bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
+bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
+bindKey("Escape", clientDismissRecovery(), { scope: "editor" });
+
+// Server-authoritative open-registry metadata (identity, dirty, lease).
+// This is not the client DocumentSessionStore and does not switch sessions.
+const documents = await serverListDocuments();
+for (const document of documents) {
+  console.log(document.documentId, document.dirty);
+}
+```
+
+Rules for those surfaces:
+
+- `serverListDocuments` / `serverGetDocumentStatus` report server open-registry metadata. They do not list or mutate the client-retained session map, caret/viewport/history stash, or recovery menu state.
+- `clientShowOpenDocuments` opens Clay's transient open-documents menu. Activation stays client-local (`clientActivateDocument` via menu arguments). Packages must not reimplement tabs as fixed panels, Masonry widgets, or SDUI trees that claim shell ownership of the active document.
+- Dirty/save chrome is updated by Clay from local edits, `DocumentSaved`, `DocumentReloaded`, and conflict diagnostics. Packages must not create native save dialogs, arbitrary file writes, or a parallel dirty indicator that bypasses server save/reload.
+- Recovery menus are Clay `TransientMenuSession` instances. Package transient overlays remain separate: they cannot replace conflict/resync/disconnect recovery, inject callbacks into those menus, or escalate filesystem/network/shell authority from a recovery action.
+
+### Performance contract
+
+Phase 20 adds **no** package paint-path requirements:
+
+- Document switch, dirty chrome, and recovery menu paint read already-installed client/server state.
+- Package JavaScript still runs only at load, configuration evaluation, explicit command handling, or explicit UI update time.
+- Masonry paint, layout, pointer, scroll, keypress, and text-event handlers must not run package JavaScript, scan the multi-document session map from package code, open dialogs, or perform save/reload IO.
+
+### Security and deferred authority
+
+Phase 20 does **not** give packages, configuration, or AI:
+
+- clipboard-contents APIs (read/write arbitrary clipboard text beyond user-mediated cut/copy/paste command IDs)
+- arbitrary file writes or direct native file/save dialogs
+- filesystem, shell, network, or raw `Deno.core.ops` authority
+- ownership of document sessions, leases, or recovery chrome
+
+Broader package/config/AI authority over those surfaces remains deferred and must be established in a later dedicated decision. Binding `clientShowOpenDocuments`, `clientRequestResync`, `clientDismissRecovery`, `clientCutSelection` / `clientPasteClipboard`, or `clay.documents.clientOpenFileDialog` installs only the documented inert command route; it is not a grant of native handles, clipboard contents, or workspace expansion.
+
+### Package-facing guidance
+
+- Good: bind Clay save / open-documents / resync command IDs from `init.js`; declare package-prefixed status items or preview panels that compose around Clay chrome.
+- Good: keep language/preview UI as inert `clay:ui` contributions that tolerate Clay-owned left file browser, bottom recovery menus, and status dirty markers.
+- Bad: ship a package tab strip, dirty badge overlay, or save button that writes files, opens OS save dialogs, or mutates Masonry widgets.
+- Bad: replace disconnect/resync recovery with package reconnect sockets, background resync loops, or paint-time session scans.
+- Bad: treat `serverListDocuments` dirty flags as permission to overwrite disk or force-reload without Clay's conflict recovery path.
+
+See also [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md) for the user-facing open/save/conflict flow and [Masonry Editor](../../wiki/modules/masonry-editor.md) for client session/recovery implementation notes.
+
 ## Phase 18.9 authoring contract: generic text/code fallback modes and generic key behavior
 
 Phase 18.9 makes every document editable even when no language package is installed, disabled, or invalid, by registering always-on Clay-owned fallback major modes (`core.text`, `core.code`) at server startup. Language packages do **not** replace these fallbacks; they **extend** `core.code`/`core.text` by declaring modes, classification patterns, and behavior manifests through the same generic primitives every other mode uses: `DocumentClassification`, `MajorModeActivation`, `TextTransform`, `KeyRoutingOverride`, and `CommandDeclaration`. The canonical primitive detail lives in [Primitive Registry Schema](../primitives/registry.md); this section is the package-author contract.
@@ -2084,7 +2165,7 @@ Recommended test categories:
 3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage(specifier)` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the module loader only accepts resolver-validated package load entries.
 4. **Mode tests** — classification, activation, behavior manifest composition. For Phase 18.9: assert unknown/plain-text files fall back to `core.text` and code-like extensions/shebangs to `core.code`; assert a package-declared pattern wins precedence over built-ins; assert electric/pair/comment transforms execute client-side from the manifest without IPC; assert `core.*`/`clay.*` mode IDs are rejected at registration; assert oversize behavior manifests are rejected at the payload budget.
 5. **Input tests** — key routing, command routing, mouse/component actions.
-6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy. Phase 18.12 package UI tests should also cover Clay-owned file-browser coexistence.
+6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy. Phase 18.12 package UI tests should also cover Clay-owned file-browser coexistence. Phase 20 package UI docs/tests should assert coexistence with Clay-owned multi-document switcher, dirty/save status chrome, and recovery menus without package-owned tabs, native save dialogs, or paint-path session scans.
 7. **Theme/style tests** — token validation, same-type fallback mapping, typed style variables, and raw CSS/color rejection.
 8. **Package metadata tests** — `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, `themeTokens`, duplicate fixed slot claims, and bounded payload diagnostics.
 9. **Parse/render tests** — bounded snapshots, stale result rejection, decoration payload budgets.
@@ -2248,6 +2329,7 @@ For a simple package:
 - [ ] UI contributions are inert and slot-aware when shell APIs are available.
 - [ ] Command action intents are inert and transient menu items are bounded; no callbacks or client-side handlers.
 - [ ] Package UI coexists with Clay-owned file browser chrome and does not add roots, markers, ignore rules, raw listings, or file-browser-specific native widgets.
+- [ ] Package UI coexists with Clay-owned multi-document switcher, dirty/save status chrome, and recovery menus; it does not own tabs, native save dialogs, or reconnect/resync loops.
 - [ ] Style uses tokens/typed variables, not CSS.
 - [ ] Tests cover validation, loading, runtime behavior, and docs.
 
@@ -2273,6 +2355,8 @@ Do not:
 - Bypass command permission/provenance validation from package code.
 - Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
 - Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom Masonry widget.
+- Treat multi-document sessions, dirty/save status chrome, conflict recovery menus, or pending-edit/disconnect/resync recovery as package-owned layout surfaces, native widgets, or clipboard/filesystem authority grants.
+- Open native save dialogs, write arbitrary files, invent package clipboard-contents APIs, or run reconnect/resync loops from package UI in place of Clay's documented command IDs and recovery menus.
 - Pass raw client-chosen filesystem paths through package UI actions instead of using documented workspace root/grant command APIs.
 - Treat `serverLoadPackage` as ordinary end-user package installation, enablement, or execution authority.
 

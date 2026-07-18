@@ -1966,6 +1966,117 @@ fn phase18_12_workspace_file_browser_configuration_uses_existing_apis() {
 }
 
 #[test]
+fn phase20_daily_editing_configuration_uses_existing_apis_and_compiled_ceilings() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let bind_key_doc =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey docs");
+    let configuration_wiki =
+        fs::read_to_string(root.join("docs/wiki/modules/configuration-runtime.md"))
+            .expect("read configuration wiki");
+    let entries = inventory_entries();
+
+    for required in [
+        "Phase 20 daily editing product hardening configuration review",
+        "did **not** promote a new user-facing `clay:configuration` API",
+        "empty `custom_properties`",
+        "clay.documents.serverSaveDocument",
+        "clay.documents.clientOpenFileDialog",
+        "clay.editor.clientCutSelection",
+        "clay.editor.clientPasteClipboard",
+        "clay.editor.clientUndo",
+        "clay.editor.clientRedo",
+        "clay.editor.clientShowOpenDocuments",
+        "clay.editor.clientRequestResync",
+        "clay.editor.clientDismissRecovery",
+        "EDIT_HISTORY_MAX_DEPTH",
+        "EDIT_HISTORY_MAX_ENTRY_BYTES",
+        "CLIENT_DOCUMENT_SESSION_MAX",
+        "undo.depth",
+        "documentSession.max",
+        "recovery.autoResync",
+        "clipboard.readText",
+        "dialog.filters",
+        "Broader package/configuration/AI authority over clipboard, filesystem, shell, network, and raw ops remains deferred",
+    ] {
+        assert!(
+            configuration_doc.contains(required),
+            "configuration overview must document Phase 20 config surface `{required}`"
+        );
+    }
+
+    for required in [
+        "Phase 20 daily-editing note",
+        "clay.documents.serverSaveDocument",
+        "No default `Ctrl+S` chord exists in Rust",
+        "does **not** promote undo-depth, session-max, recovery-toggle",
+        "phase-20-daily-editing-product-hardening-configuration-review",
+    ] {
+        assert!(
+            bind_key_doc.contains(required),
+            "bind-key.md must document Phase 20 daily-editing binding note `{required}`"
+        );
+    }
+
+    for required in [
+        "Phase 20 daily-editing defaults and command routes",
+        "not new `clay:configuration` APIs",
+        "EDIT_HISTORY_MAX_DEPTH",
+        "CLIENT_DOCUMENT_SESSION_MAX",
+        "clipboard-exfiltration",
+        "broader package/config/AI authority remains deferred",
+    ] {
+        assert!(
+            configuration_wiki.contains(required),
+            "configuration runtime wiki must document Phase 20 config audit `{required}`"
+        );
+    }
+
+    for command_id in [
+        "clay.editor.clientCutSelection",
+        "clay.editor.clientPasteClipboard",
+        "clay.editor.clientUndo",
+        "clay.editor.clientRedo",
+        "clay.editor.clientShowOpenDocuments",
+        "clay.editor.clientRequestResync",
+        "clay.editor.clientDismissRecovery",
+        "clay.documents.serverSaveDocument",
+        "clay.documents.serverReloadDocument",
+        "clay.documents.clientOpenFileDialog",
+    ] {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("id") == command_id)
+            .unwrap_or_else(|| panic!("missing inventory entry for {command_id}"));
+        assert_eq!(
+            entry.get("custom_properties"),
+            "[]",
+            "{command_id} must keep empty custom_properties because Phase 20 adds no tunable settings"
+        );
+    }
+
+    assert!(
+        entries.iter().all(|entry| {
+            let id = entry.get("id");
+            !(id.starts_with("clay.configuration.")
+                && (id.contains("Undo")
+                    || id.contains("Redo")
+                    || id.contains("Clipboard")
+                    || id.contains("DocumentSession")
+                    || id.contains("Recovery")
+                    || id.contains("Ime")
+                    || id.contains("Composition")
+                    || id.contains("AutoSave")
+                    || id.contains("FileDialog")))
+        }),
+        "Phase 20 must not add hidden clay.configuration daily-editing setting APIs"
+    );
+}
+
+#[test]
 fn api_inventory_has_required_fields() {
     let entries = inventory_entries();
     let required_fields = [

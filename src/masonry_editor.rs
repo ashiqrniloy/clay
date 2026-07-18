@@ -18,14 +18,16 @@ use crate::client::{
 };
 use crate::editor::{
     EditorCommand, EditorCommandOutcome, EditorSurface,
+    document_session::{DocumentSessionStore, RetainedDocumentSession},
     typography::{UiTextMetrics, UiTextVariant},
 };
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
-    DocumentVersion, FontRole, KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId,
-    LanguageIntelligenceResult, RuntimeDiagnostic, RuntimeGenerationId,
+    DocumentMetadata, DocumentVersion, EditRejection, FileErrorCode, FontRole, KeyCode,
+    KeyModifiers, KeyStroke, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
+    ProtocolErrorCode, RuntimeDiagnostic, RuntimeGenerationId,
 };
 
 #[derive(Debug, Default, PartialEq)]
@@ -281,6 +283,11 @@ pub struct EditorWidget {
     layout_invalidated: bool,
     /// Last successfully installed runtime generation (0 before any live snapshot).
     runtime_generation_id: RuntimeGenerationId,
+    /// Inactive document sessions retained for multi-document switching (Phase 20).
+    sessions: DocumentSessionStore,
+    /// True after the first real document snapshot/open replaces the empty bootstrap buffer.
+    has_opened_document: bool,
+    next_document_menu_session_id: u64,
 }
 
 impl Default for EditorWidget {
@@ -306,6 +313,9 @@ impl Default for EditorWidget {
             sdui: SduiNativeState::empty(),
             layout_invalidated: false,
             runtime_generation_id: 0,
+            sessions: DocumentSessionStore::default(),
+            has_opened_document: false,
+            next_document_menu_session_id: 1,
         }
     }
 }
@@ -343,6 +353,9 @@ impl EditorWidget {
             sdui,
             layout_invalidated: false,
             runtime_generation_id: 0,
+            sessions: DocumentSessionStore::default(),
+            has_opened_document: true,
+            next_document_menu_session_id: 1,
         }
     }
 
@@ -369,6 +382,18 @@ impl EditorWidget {
                 version,
                 ..
             } => {
+                if document_id != self.editor.document_state().document_id {
+                    if let Some(session) = self.sessions.get_mut(document_id) {
+                        let _ = session.surface.note_confirmed_version(document_id, version);
+                        session.confirmed_version = version;
+                        session.pending.retain(|pending| {
+                            // Keep unmatched pending; specific transaction removal happens when
+                            // the connection layer tracks the active document only.
+                            pending.document_id == document_id
+                        });
+                    }
+                    return false;
+                }
                 let version_changed = self.editor.note_confirmed_version(document_id, version);
                 let mut next_status = EditorStatus::connected(
                     document_id,
@@ -380,7 +405,28 @@ impl EditorWidget {
                 let status_changed = self.set_status(next_status);
                 version_changed || status_changed
             }
+            ClientConnectionEvent::EditRejected {
+                document_id,
+                reason,
+                ..
+            } => self.apply_edit_rejected(document_id, reason),
             ClientConnectionEvent::ResyncSnapshot(snapshot) => {
+                if self.has_opened_document
+                    && snapshot.document_id != self.editor.document_state().document_id
+                {
+                    if let Some(session) = self.sessions.get_mut(snapshot.document_id) {
+                        session.surface.load_resync_snapshot(
+                            snapshot.document_id,
+                            snapshot.version,
+                            snapshot.text,
+                            snapshot.access.clone(),
+                        );
+                        session.confirmed_version = snapshot.version;
+                        session.pending.clear();
+                        session.dirty = false;
+                    }
+                    return false;
+                }
                 self.editor.load_resync_snapshot(
                     snapshot.document_id,
                     snapshot.version,
@@ -388,8 +434,13 @@ impl EditorWidget {
                     snapshot.access.clone(),
                 );
                 if let Some(queue) = self.edit_queue.as_mut() {
-                    queue.update_opened_document_authority(&snapshot.access, snapshot.version);
+                    queue.update_opened_document_authority(
+                        snapshot.document_id,
+                        &snapshot.access,
+                        snapshot.version,
+                    );
                 }
+                self.clear_sync_recovery_menu();
                 let mut next_status = EditorStatus::connected(
                     snapshot.document_id,
                     snapshot.version,
@@ -397,42 +448,27 @@ impl EditorWidget {
                 );
                 next_status.document_display_name = self.status.document_display_name.clone();
                 next_status.dirty = false;
+                next_status.runtime_diagnostic = None;
                 self.set_status(next_status);
                 true
             }
             ClientConnectionEvent::DocumentOpened { metadata, text } => {
-                self.editor.load_snapshot(
-                    metadata.document_id,
-                    metadata.version,
-                    text,
-                    metadata.access.clone(),
-                );
-                if let Some(queue) = self.edit_queue.as_mut() {
-                    queue.update_opened_document_authority(&metadata.access, metadata.version);
-                }
-                let jumped = self
-                    .take_pending_definition_navigation_for_path(&metadata.path)
-                    .map(|pending| self.editor.navigate_to_byte_offset(pending.byte_start))
-                    .unwrap_or(false);
-                let display_name =
-                    crate::editor::accessibility::sanitize_document_display_name(&metadata.path);
-                let status_changed = self.set_status(EditorStatus::connected_with_metadata(
-                    metadata.document_id,
-                    metadata.version,
-                    metadata.access,
-                    metadata.dirty,
-                    Some(display_name),
-                ));
-                jumped || status_changed
+                self.open_document_session(metadata, text)
             }
-            ClientConnectionEvent::FileOperationFailed { code, message, .. } => {
-                let mut next_status = self.status.clone();
-                next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-                    format!("clay.file.{code:?}"),
-                    message,
-                ));
-                self.set_status(next_status)
+            ClientConnectionEvent::DocumentSaved {
+                document_id,
+                version,
+                dirty,
+            } => self.apply_document_saved(document_id, version, dirty),
+            ClientConnectionEvent::DocumentReloaded { metadata, text } => {
+                self.apply_document_reloaded(metadata, text)
             }
+            ClientConnectionEvent::FileOperationFailed {
+                code,
+                message,
+                document_id,
+                ..
+            } => self.apply_file_operation_failed(code, message, document_id),
             ClientConnectionEvent::BehaviorManifestInstalled { manifest, .. } => {
                 self.editor.install_behavior_manifest(manifest);
                 false
@@ -483,19 +519,15 @@ impl EditorWidget {
                 next_status.runtime_diagnostic = Some(diagnostic);
                 self.set_status(next_status)
             }
+            ClientConnectionEvent::ServerError { code, message } => {
+                self.apply_server_error(code, message)
+            }
             ClientConnectionEvent::RuntimeStateSnapshot(snapshot) => {
                 self.install_runtime_state_snapshot(*snapshot)
             }
-            ClientConnectionEvent::Disconnected | ClientConnectionEvent::ConnectionError(_) => {
-                let next_status = EditorStatus {
-                    connection: EditorConnectionStatus::Disconnected,
-                    ..self.status.clone().with_document_values(
-                        self.editor.document_state().document_id,
-                        self.editor.document_state().document_version,
-                        self.editor.document_state().access.clone(),
-                    )
-                };
-                self.set_status(next_status)
+            ClientConnectionEvent::Disconnected => self.apply_disconnect(None),
+            ClientConnectionEvent::ConnectionError(message) => {
+                self.apply_disconnect(Some(message.as_str()))
             }
             _ => false,
         }
@@ -595,6 +627,711 @@ impl EditorWidget {
         true
     }
 
+    fn open_document_session(
+        &mut self,
+        metadata: crate::protocol::DocumentMetadata,
+        text: String,
+    ) -> bool {
+        let incoming_id = metadata.document_id;
+        let active_id = self.editor.document_state().document_id;
+        let mut eviction_notice = None;
+
+        if self.has_opened_document && incoming_id != active_id {
+            eviction_notice = self.stash_active_session();
+            // Server-authored open replaces any stale retained copy for this id.
+            let _ = self.sessions.remove(incoming_id);
+        } else if self.has_opened_document && incoming_id == active_id {
+            // Same-document hard open/replace: keep session map, replace active buffer.
+            self.editor.cancel_composition();
+        }
+
+        // Preserve shared theme/typography/behavior across document switches.
+        let theme = self.editor.theme();
+        let theme_specifier = self.editor.theme_specifier().to_string();
+        let typography = self.editor.typography().clone();
+        let behavior = self.editor.document_state().behavior_manifest.clone();
+
+        self.editor.load_snapshot(
+            metadata.document_id,
+            metadata.version,
+            text,
+            metadata.access.clone(),
+        );
+        self.editor.set_theme(theme);
+        self.editor.set_theme_specifier(theme_specifier);
+        self.editor.set_typography_registry(typography);
+        if let Some(manifest) = behavior {
+            self.editor.install_behavior_manifest(manifest);
+        }
+        self.has_opened_document = true;
+
+        if let Some(queue) = self.edit_queue.as_mut() {
+            queue.update_opened_document_authority(
+                metadata.document_id,
+                &metadata.access,
+                metadata.version,
+            );
+        }
+        let jumped = self
+            .take_pending_definition_navigation_for_path(&metadata.path)
+            .map(|pending| self.editor.navigate_to_byte_offset(pending.byte_start))
+            .unwrap_or(false);
+        let display_name =
+            crate::editor::accessibility::sanitize_document_display_name(&metadata.path);
+        let mut status = EditorStatus::connected_with_metadata(
+            metadata.document_id,
+            metadata.version,
+            metadata.access,
+            metadata.dirty,
+            Some(display_name),
+        );
+        if let Some(message) = eviction_notice {
+            status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
+                "clay.editor.document_session.evicted",
+                message,
+            ));
+        }
+        let status_changed = self.set_status(status);
+        let _ = (jumped, status_changed);
+        true
+    }
+
+    fn stash_active_session(&mut self) -> Option<String> {
+        self.editor.cancel_composition();
+        let document_id = self.editor.document_state().document_id;
+        let access = self.editor.document_state().access.clone();
+        let sync = self
+            .edit_queue
+            .as_ref()
+            .map(|queue| queue.sync_snapshot())
+            .unwrap_or_else(|| crate::client::ClientSyncSnapshot {
+                confirmed_version: self.editor.document_state().document_version,
+                optimistic_version: self.editor.document_state().document_version,
+                pending: Vec::new(),
+                last_resync: None,
+            });
+        let pending: Vec<_> = sync
+            .pending
+            .into_iter()
+            .filter(|pending| pending.document_id == document_id)
+            .collect();
+
+        let theme = self.editor.theme();
+        let theme_specifier = self.editor.theme_specifier().to_string();
+        let typography = self.editor.typography().clone();
+        let behavior = self.editor.document_state().behavior_manifest.clone();
+        let outgoing = std::mem::take(&mut self.editor);
+        // Leave a blank surface with shared theme/typography/behavior until caller loads.
+        self.editor = EditorSurface::default();
+        self.editor.set_theme(theme);
+        self.editor.set_theme_specifier(theme_specifier);
+        self.editor.set_typography_registry(typography);
+        if let Some(manifest) = behavior {
+            self.editor.install_behavior_manifest(manifest);
+        }
+        let _ = access;
+
+        let session = RetainedDocumentSession {
+            surface: outgoing,
+            dirty: self.status.dirty,
+            document_display_name: self.status.document_display_name.clone(),
+            confirmed_version: sync.confirmed_version,
+            pending,
+            last_activated_order: 0,
+        };
+        self.sessions.insert(document_id, session)
+    }
+
+    /// Activate a retained session by document id without re-downloading text.
+    pub fn activate_document(&mut self, document_id: DocumentId) -> bool {
+        if !self.has_opened_document {
+            return false;
+        }
+        if document_id == self.editor.document_state().document_id {
+            return false;
+        }
+        let Some(retained) = self.sessions.remove(document_id) else {
+            let mut next_status = self.status.clone();
+            next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
+                "clay.editor.document_session.missing",
+                format!("No retained client session for document {document_id}."),
+            ));
+            return self.set_status(next_status);
+        };
+
+        let eviction_notice = self.stash_active_session();
+        let theme = self.editor.theme();
+        let theme_specifier = self.editor.theme_specifier().to_string();
+        let typography = self.editor.typography().clone();
+        self.editor = retained.surface;
+        self.editor.set_theme(theme);
+        self.editor.set_theme_specifier(theme_specifier);
+        self.editor.set_typography_registry(typography);
+        self.editor.cancel_composition();
+
+        if let Some(queue) = self.edit_queue.as_mut() {
+            queue.install_document_sync_state(
+                document_id,
+                &self.editor.document_state().access,
+                retained.confirmed_version,
+                retained.pending,
+            );
+        }
+
+        let mut status = EditorStatus::connected_with_metadata(
+            self.editor.document_state().document_id,
+            self.editor.document_state().document_version,
+            self.editor.document_state().access.clone(),
+            retained.dirty,
+            retained.document_display_name,
+        );
+        if let Some(message) = eviction_notice {
+            status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
+                "clay.editor.document_session.evicted",
+                message,
+            ));
+        }
+        let _ = self.set_status(status);
+        true
+    }
+
+    pub fn show_open_documents_menu(&mut self) -> bool {
+        if !self.has_opened_document {
+            return false;
+        }
+        let entries = self.sessions.list_with_active(
+            self.editor.document_state().document_id,
+            self.status.document_display_name.as_deref(),
+            self.status.dirty,
+        );
+        let session_id = self.next_document_menu_session_id;
+        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
+        let items = entries
+            .into_iter()
+            .map(|entry| {
+                let mut label = entry.display_name.clone();
+                if entry.dirty {
+                    label.push_str(" •");
+                }
+                if entry.active {
+                    label.push_str(" (active)");
+                }
+                let action =
+                    crate::shell::TransientMenuAction::new("clay.editor.clientActivateDocument")
+                        .with_arguments(serde_json::json!({ "documentId": entry.document_id }));
+                crate::shell::TransientMenuItem::new(
+                    format!("doc.{}", entry.document_id),
+                    label,
+                    action,
+                )
+                .with_accessibility_label(format!(
+                    "{}{}{}",
+                    entry.display_name,
+                    if entry.dirty { ", dirty" } else { "" },
+                    if entry.active { ", active" } else { "" }
+                ))
+            })
+            .collect::<Vec<_>>();
+        let menu = crate::shell::TransientMenuSession::new(
+            crate::shell::TransientMenuSessionId(session_id),
+            "Open documents",
+        )
+        .with_items(items);
+        self.sdui.set_active_menu(menu);
+        true
+    }
+
+    fn apply_document_saved(
+        &mut self,
+        document_id: DocumentId,
+        version: DocumentVersion,
+        dirty: bool,
+    ) -> bool {
+        if document_id != self.editor.document_state().document_id {
+            if let Some(session) = self.sessions.get_mut(document_id) {
+                let _ = session.surface.note_confirmed_version(document_id, version);
+                session.confirmed_version = version;
+                session.dirty = dirty;
+            }
+            return false;
+        }
+        let version_changed = self.editor.note_confirmed_version(document_id, version);
+        let mut next_status = self.status.clone();
+        next_status.version = Some(version);
+        next_status.dirty = dirty;
+        if !dirty {
+            // Successful clean save clears stale conflict diagnostics.
+            if next_status
+                .runtime_diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| {
+                    diagnostic.code.contains("StaleFileMetadata")
+                        || diagnostic.code.contains("DirtyDocument")
+                        || diagnostic.code.contains("file.")
+                })
+            {
+                next_status.runtime_diagnostic = None;
+            }
+            if self.sdui.active_menu().is_some_and(|menu| {
+                let prompt = menu.prompt();
+                prompt.contains("conflict")
+                    || prompt.contains("unsaved edits")
+                    || prompt.contains("Reload")
+                    || prompt.contains("reload")
+            }) {
+                self.sdui.clear_active_menu();
+            }
+        }
+        version_changed || self.set_status(next_status)
+    }
+
+    fn apply_document_reloaded(&mut self, metadata: DocumentMetadata, text: String) -> bool {
+        if metadata.document_id != self.editor.document_state().document_id {
+            if let Some(session) = self.sessions.get_mut(metadata.document_id) {
+                session.surface.load_resync_snapshot(
+                    metadata.document_id,
+                    metadata.version,
+                    text,
+                    metadata.access.clone(),
+                );
+                session.confirmed_version = metadata.version;
+                session.pending.clear();
+                session.dirty = metadata.dirty;
+                session.document_display_name = Some(
+                    crate::editor::accessibility::sanitize_document_display_name(&metadata.path),
+                );
+            }
+            return false;
+        }
+        self.editor.load_resync_snapshot(
+            metadata.document_id,
+            metadata.version,
+            text,
+            metadata.access.clone(),
+        );
+        if let Some(queue) = self.edit_queue.as_mut() {
+            queue.update_opened_document_authority(
+                metadata.document_id,
+                &metadata.access,
+                metadata.version,
+            );
+        }
+        self.sdui.clear_active_menu();
+        let display_name =
+            crate::editor::accessibility::sanitize_document_display_name(&metadata.path);
+        let mut next_status = EditorStatus::connected_with_metadata(
+            metadata.document_id,
+            metadata.version,
+            metadata.access,
+            metadata.dirty,
+            Some(display_name),
+        );
+        next_status.runtime_diagnostic = None;
+        self.set_status(next_status);
+        true
+    }
+
+    fn apply_file_operation_failed(
+        &mut self,
+        code: FileErrorCode,
+        message: String,
+        document_id: Option<DocumentId>,
+    ) -> bool {
+        let mut next_status = self.status.clone();
+        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
+            format!("clay.file.{code:?}"),
+            message.clone(),
+        ));
+        // Save/reload failures must never clear dirty; keep local edits.
+        let status_changed = self.set_status(next_status);
+        let targets_active =
+            document_id.is_none_or(|id| id == self.editor.document_state().document_id);
+        let opened_conflict_menu = targets_active
+            && matches!(
+                code,
+                FileErrorCode::StaleFileMetadata | FileErrorCode::DirtyDocument
+            )
+            && self.show_save_conflict_menu(code, &message);
+        status_changed || opened_conflict_menu
+    }
+
+    fn show_save_conflict_menu(&mut self, code: FileErrorCode, message: &str) -> bool {
+        if !self.has_opened_document {
+            return false;
+        }
+        let session_id = self.next_document_menu_session_id;
+        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
+        let (prompt, items) = match code {
+            FileErrorCode::StaleFileMetadata => {
+                let prompt = "File changed on disk — resolve save conflict".to_string();
+                let items = vec![
+                    crate::shell::TransientMenuItem::new(
+                        "conflict.reload",
+                        "Reload from disk (discard local edits)",
+                        crate::shell::TransientMenuAction::new(
+                            "clay.documents.serverReloadDocument",
+                        )
+                        .with_arguments(serde_json::json!({ "force": true })),
+                    )
+                    .with_accessibility_label("Reload from disk and discard unsaved local edits"),
+                    crate::shell::TransientMenuItem::new(
+                        "conflict.keep",
+                        "Keep unsaved edits",
+                        crate::shell::TransientMenuAction::new(
+                            "clay.editor.clientKeepUnsavedEdits",
+                        ),
+                    )
+                    .with_accessibility_label("Keep unsaved edits and dismiss conflict menu"),
+                    crate::shell::TransientMenuItem::new(
+                        "conflict.defer",
+                        "Compare later",
+                        crate::shell::TransientMenuAction::new(
+                            "clay.editor.clientDeferConflictCompare",
+                        ),
+                    )
+                    .with_accessibility_label("Defer conflict comparison and keep unsaved edits"),
+                ];
+                (prompt, items)
+            }
+            FileErrorCode::DirtyDocument => {
+                let prompt = "Document has unsaved edits — resolve reload".to_string();
+                let items = vec![
+                    crate::shell::TransientMenuItem::new(
+                        "conflict.save",
+                        "Save first",
+                        crate::shell::TransientMenuAction::new("clay.documents.serverSaveDocument"),
+                    )
+                    .with_accessibility_label("Save the document before reloading"),
+                    crate::shell::TransientMenuItem::new(
+                        "conflict.reload",
+                        "Discard edits and reload",
+                        crate::shell::TransientMenuAction::new(
+                            "clay.documents.serverReloadDocument",
+                        )
+                        .with_arguments(serde_json::json!({ "force": true })),
+                    )
+                    .with_accessibility_label("Discard unsaved edits and reload from disk"),
+                    crate::shell::TransientMenuItem::new(
+                        "conflict.keep",
+                        "Keep unsaved edits",
+                        crate::shell::TransientMenuAction::new(
+                            "clay.editor.clientKeepUnsavedEdits",
+                        ),
+                    )
+                    .with_accessibility_label("Keep unsaved edits and dismiss reload prompt"),
+                ];
+                (prompt, items)
+            }
+            _ => return false,
+        };
+        let _ = message;
+        let menu = crate::shell::TransientMenuSession::new(
+            crate::shell::TransientMenuSessionId(session_id),
+            prompt,
+        )
+        .with_items(items);
+        self.sdui.set_active_menu(menu);
+        true
+    }
+
+    fn request_save_active_document(&self) -> Option<ClientConnectionEvent> {
+        let Some(queue) = &self.edit_queue else {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.save.unavailable",
+                    "Cannot save because this editor is not connected to a Clay server.",
+                ),
+            ));
+        };
+        if !self.has_opened_document {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.save.no_document",
+                    "Cannot save because no document is open.",
+                ),
+            ));
+        }
+        let document = self.editor.document_state();
+        queue
+            .enqueue_save_document(document.document_id, document.document_version)
+            .err()
+            .map(|error| {
+                ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                    "clay.client.save.queue_failed",
+                    format!("Failed to send save request to the Clay server: {error}"),
+                ))
+            })
+    }
+
+    fn request_reload_active_document(&self, force: bool) -> Option<ClientConnectionEvent> {
+        let Some(queue) = &self.edit_queue else {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.reload.unavailable",
+                    "Cannot reload because this editor is not connected to a Clay server.",
+                ),
+            ));
+        };
+        if !self.has_opened_document {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.client.reload.no_document",
+                    "Cannot reload because no document is open.",
+                ),
+            ));
+        }
+        let document = self.editor.document_state();
+        queue
+            .enqueue_reload_document(document.document_id, document.document_version, force)
+            .err()
+            .map(|error| {
+                ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                    "clay.client.reload.queue_failed",
+                    format!("Failed to send reload request to the Clay server: {error}"),
+                ))
+            })
+    }
+
+    fn handle_save_conflict_menu_action(
+        &mut self,
+        action: &crate::shell::TransientMenuAction,
+    ) -> bool {
+        match action.command_id.as_str() {
+            "clay.documents.serverSaveDocument" => {
+                if let Some(diagnostic) = self.request_save_active_document() {
+                    let _ = self.apply_connection_event(diagnostic);
+                }
+                true
+            }
+            "clay.documents.serverReloadDocument" => {
+                let force = action
+                    .arguments
+                    .get("force")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                if let Some(diagnostic) = self.request_reload_active_document(force) {
+                    let _ = self.apply_connection_event(diagnostic);
+                }
+                true
+            }
+            "clay.editor.clientKeepUnsavedEdits" => true,
+            "clay.editor.clientDeferConflictCompare" => {
+                let mut next_status = self.status.clone();
+                next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
+                    "clay.file.conflict_deferred",
+                    "Save conflict deferred — unsaved edits kept; compare later.",
+                ));
+                let _ = self.set_status(next_status);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn apply_edit_rejected(&mut self, document_id: DocumentId, reason: EditRejection) -> bool {
+        if document_id != self.editor.document_state().document_id {
+            return false;
+        }
+        let code = edit_rejection_diagnostic_code(&reason);
+        let auto_resync = edit_rejection_requests_resync(&reason);
+        let message = if auto_resync {
+            format!("{} — requesting resync", edit_rejection_summary(&reason))
+        } else {
+            format!(
+                "{} — choose Resync or Dismiss",
+                edit_rejection_summary(&reason)
+            )
+        };
+        let mut next_status = self.status.clone();
+        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(code, message));
+        let status_changed = self.set_status(next_status);
+        let opened_menu = !auto_resync && self.show_edit_rejection_recovery_menu(&reason);
+        status_changed || opened_menu
+    }
+
+    fn apply_disconnect(&mut self, error_message: Option<&str>) -> bool {
+        // Omit raw transport strings from chrome — they may include host paths/endpoints.
+        let _ = error_message;
+        let mut next_status = EditorStatus {
+            connection: EditorConnectionStatus::Disconnected,
+            ..self.status.clone().with_document_values(
+                self.editor.document_state().document_id,
+                self.editor.document_state().document_version,
+                self.editor.document_state().access.clone(),
+            )
+        };
+        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
+            "clay.client.disconnect",
+            "Disconnected (connection lost). Restart Clay to reconnect; local unsaved edits stay in this window until then.",
+        ));
+        let status_changed = self.set_status(next_status);
+        let opened_menu = self.show_disconnect_recovery_menu();
+        status_changed || opened_menu
+    }
+
+    fn apply_server_error(&mut self, code: ProtocolErrorCode, message: String) -> bool {
+        let sanitized = crate::editor::accessibility::sanitize_recovery_summary(&message)
+            .unwrap_or_else(|| "server error".to_string());
+        let mut next_status = self.status.clone();
+        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
+            format!("clay.server.error.{code:?}"),
+            format!("{sanitized}. Use Resync or Dismiss."),
+        ));
+        let status_changed = self.set_status(next_status);
+        let opened_menu = self.show_sync_recovery_menu(
+            "Server error — recover sync",
+            "Server reported an error. Request a resync or dismiss this prompt.",
+        );
+        status_changed || opened_menu
+    }
+
+    fn show_edit_rejection_recovery_menu(&mut self, reason: &EditRejection) -> bool {
+        let prompt = format!(
+            "Edit rejected ({}) — recover sync",
+            edit_rejection_label(reason)
+        );
+        self.show_sync_recovery_menu(
+            &prompt,
+            "Request a canonical resync or dismiss this recovery prompt.",
+        )
+    }
+
+    fn show_disconnect_recovery_menu(&mut self) -> bool {
+        if !self.has_opened_document && self.sessions.is_empty() {
+            return false;
+        }
+        let session_id = self.next_document_menu_session_id;
+        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
+        let items = vec![
+            crate::shell::TransientMenuItem::new(
+                "recovery.dismiss",
+                "Dismiss",
+                crate::shell::TransientMenuAction::new("clay.editor.clientDismissRecovery"),
+            )
+            .with_accessibility_label("Dismiss disconnect recovery guidance"),
+        ];
+        let menu = crate::shell::TransientMenuSession::new(
+            crate::shell::TransientMenuSessionId(session_id),
+            "Disconnected — reconnect guidance",
+        )
+        .with_items(items);
+        self.sdui.set_active_menu(menu);
+        true
+    }
+
+    fn show_sync_recovery_menu(&mut self, prompt: &str, accessibility_hint: &str) -> bool {
+        if !self.has_opened_document {
+            return false;
+        }
+        let session_id = self.next_document_menu_session_id;
+        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
+        let items = vec![
+            crate::shell::TransientMenuItem::new(
+                "recovery.resync",
+                "Request resync",
+                crate::shell::TransientMenuAction::new("clay.editor.clientRequestResync"),
+            )
+            .with_accessibility_label(format!("{accessibility_hint} Request resync")),
+            crate::shell::TransientMenuItem::new(
+                "recovery.dismiss",
+                "Dismiss",
+                crate::shell::TransientMenuAction::new("clay.editor.clientDismissRecovery"),
+            )
+            .with_accessibility_label("Dismiss recovery prompt"),
+        ];
+        let menu = crate::shell::TransientMenuSession::new(
+            crate::shell::TransientMenuSessionId(session_id),
+            prompt,
+        )
+        .with_items(items);
+        self.sdui.set_active_menu(menu);
+        true
+    }
+
+    fn clear_sync_recovery_menu(&mut self) {
+        if let Some(menu) = self.sdui.active_menu()
+            && menu.is_active()
+        {
+            let prompt = menu.prompt().to_ascii_lowercase();
+            if prompt.contains("recover")
+                || prompt.contains("rejected")
+                || prompt.contains("disconnected")
+                || prompt.contains("server error")
+            {
+                self.sdui.clear_active_menu();
+            }
+        }
+    }
+
+    pub fn request_resync_active_document(&mut self) -> Option<ClientConnectionEvent> {
+        let Some(queue) = &self.edit_queue else {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.editor.resync_unavailable",
+                    "Resync requires an active server connection.",
+                ),
+            ));
+        };
+        if matches!(
+            self.status.connection,
+            EditorConnectionStatus::Disconnected | EditorConnectionStatus::LocalFallback
+        ) {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.editor.resync_unavailable",
+                    "Resync requires an active server connection. Restart Clay to reconnect.",
+                ),
+            ));
+        }
+        let document = self.editor.document_state();
+        if let Err(error) =
+            queue.enqueue_request_resync(document.document_id, document.document_version)
+        {
+            return Some(ClientConnectionEvent::RuntimeDiagnostic(
+                RuntimeDiagnostic::error(
+                    "clay.editor.resync_enqueue_failed",
+                    format!("Failed to request resync: {error}"),
+                ),
+            ));
+        }
+        let mut next_status = self.status.clone();
+        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
+            "clay.editor.resync_requested",
+            "Resync requested — waiting for canonical snapshot.",
+        ));
+        let _ = self.set_status(next_status);
+        None
+    }
+
+    pub fn dismiss_recovery(&mut self) -> bool {
+        let cleared_menu = self.sdui.active_menu().is_some_and(|menu| menu.is_active());
+        self.sdui.clear_active_menu();
+        let mut next_status = self.status.clone();
+        let cleared_diagnostic = next_status.runtime_diagnostic.take().is_some();
+        let status_changed = self.set_status(next_status);
+        cleared_menu || status_changed || cleared_diagnostic
+    }
+
+    fn handle_sync_recovery_menu_action(
+        &mut self,
+        action: &crate::shell::TransientMenuAction,
+    ) -> bool {
+        match action.command_id.as_str() {
+            "clay.editor.clientRequestResync" => {
+                if let Some(diagnostic) = self.request_resync_active_document() {
+                    let _ = self.apply_connection_event(diagnostic);
+                }
+                true
+            }
+            "clay.editor.clientDismissRecovery" => self.dismiss_recovery(),
+            _ => false,
+        }
+    }
+
+    pub fn retained_session_count(&self) -> usize {
+        self.sessions.len()
+    }
+
     pub fn status_text(&self) -> String {
         self.status_observation().status_text
     }
@@ -609,6 +1346,15 @@ impl EditorWidget {
             .map(|queue| queue.sync_snapshot().pending.len())
             .unwrap_or(0);
         observation.recovery_summary = self.recovery_summary();
+        let open_count = self
+            .sessions
+            .len()
+            .saturating_add(usize::from(self.has_opened_document));
+        if open_count > 1 && !observation.status_text.contains("Open docs:") {
+            observation
+                .status_text
+                .push_str(&format!(" — Open docs: {open_count}"));
+        }
         if let Some(pending) =
             crate::editor::accessibility::pending_edits_summary(observation.pending_edit_count)
             && !observation.status_text.contains("Pending edits:")
@@ -641,6 +1387,8 @@ impl EditorWidget {
                 || code.contains("clipboard")
                 || code.contains("resync")
                 || code.contains("disconnect")
+                || code.contains("edit.rejected")
+                || code.contains("server.error")
             {
                 return crate::editor::accessibility::sanitize_recovery_summary(
                     &diagnostic.message,
@@ -948,6 +1696,16 @@ impl EditorWidget {
                 {
                     self.enqueue_language_intelligence_request(event);
                 }
+            } else if intent.command_id == "clay.documents.serverSaveDocument" {
+                if let Some(diagnostic) = self.request_save_active_document() {
+                    let _ = self.apply_connection_event(diagnostic);
+                    ctx.request_render();
+                }
+            } else if intent.command_id == "clay.documents.serverReloadDocument" {
+                if let Some(diagnostic) = self.request_reload_active_document(false) {
+                    let _ = self.apply_connection_event(diagnostic);
+                    ctx.request_render();
+                }
             } else if let Some(edit_queue) = &self.edit_queue {
                 let document = self.editor.document_state();
                 let _ = edit_queue.enqueue_command_intent(
@@ -1016,7 +1774,21 @@ impl EditorWidget {
             self.finish_local_outcome(ctx, outcome);
             self.active_completion_request_id = None;
         } else if let Some(local_action) = self.sdui.menu_selected_action() {
-            if self.handle_language_intelligence_menu_action(&local_action) {
+            if local_action.command_id == "clay.editor.clientActivateDocument" {
+                let document_id = local_action
+                    .arguments
+                    .get("documentId")
+                    .and_then(|value| value.as_u64());
+                let _ = self.sdui.menu_activate_selected();
+                if let Some(document_id) = document_id {
+                    let _ = self.activate_document(document_id);
+                }
+            } else if self.handle_save_conflict_menu_action(&local_action)
+                || self.handle_sync_recovery_menu_action(&local_action)
+            {
+                let _ = self.sdui.menu_activate_selected();
+                ctx.request_render();
+            } else if self.handle_language_intelligence_menu_action(&local_action) {
                 let _ = self.sdui.menu_activate_selected();
             } else if let Some(feature) =
                 crate::client::behavior::language_intelligence_feature_for_command(
@@ -1700,6 +2472,83 @@ impl Widget for EditorWidget {
     }
 }
 
+fn edit_rejection_requests_resync(reason: &EditRejection) -> bool {
+    matches!(
+        reason,
+        EditRejection::StaleVersion { .. }
+            | EditRejection::FutureVersion { .. }
+            | EditRejection::LeaseRequired
+            | EditRejection::LeaseExpired { .. }
+            | EditRejection::ReadOnlyDocument
+            | EditRejection::RegionLocked { .. }
+            | EditRejection::InvalidBehaviorVersion { .. }
+    )
+}
+
+fn edit_rejection_label(reason: &EditRejection) -> &'static str {
+    match reason {
+        EditRejection::StaleVersion { .. } => "stale",
+        EditRejection::FutureVersion { .. } => "future version",
+        EditRejection::LeaseRequired => "lease required",
+        EditRejection::LeaseExpired { .. } => "lease expired",
+        EditRejection::ReadOnlyDocument => "read-only",
+        EditRejection::RegionLocked { .. } => "region locked",
+        EditRejection::InvalidDocument { .. } => "invalid document",
+        EditRejection::InvalidRange { .. } => "invalid range",
+        EditRejection::InvalidBehaviorVersion { .. } => "stale behavior",
+    }
+}
+
+fn edit_rejection_diagnostic_code(reason: &EditRejection) -> String {
+    let kind = match reason {
+        EditRejection::StaleVersion { .. } => "StaleVersion",
+        EditRejection::FutureVersion { .. } => "FutureVersion",
+        EditRejection::LeaseRequired => "LeaseRequired",
+        EditRejection::LeaseExpired { .. } => "LeaseExpired",
+        EditRejection::ReadOnlyDocument => "ReadOnlyDocument",
+        EditRejection::RegionLocked { .. } => "RegionLocked",
+        EditRejection::InvalidDocument { .. } => "InvalidDocument",
+        EditRejection::InvalidRange { .. } => "InvalidRange",
+        EditRejection::InvalidBehaviorVersion { .. } => "InvalidBehaviorVersion",
+    };
+    format!("clay.edit.rejected.{kind}")
+}
+
+fn edit_rejection_summary(reason: &EditRejection) -> String {
+    match reason {
+        EditRejection::StaleVersion {
+            client_base_version,
+            server_version,
+        } => format!(
+            "Edit rejected (stale): local base v{client_base_version}, server v{server_version}"
+        ),
+        EditRejection::FutureVersion {
+            client_base_version,
+            server_version,
+        } => format!(
+            "Edit rejected (future version): local base v{client_base_version}, server v{server_version}"
+        ),
+        EditRejection::LeaseRequired => "Edit rejected (lease required)".to_string(),
+        EditRejection::LeaseExpired { .. } => "Edit rejected (lease expired)".to_string(),
+        EditRejection::ReadOnlyDocument => "Edit rejected (read-only document)".to_string(),
+        EditRejection::RegionLocked { .. } => "Edit rejected (region locked)".to_string(),
+        EditRejection::InvalidDocument { document_id } => {
+            format!("Edit rejected (invalid document {document_id})")
+        }
+        EditRejection::InvalidRange { message } => {
+            let sanitized = crate::editor::accessibility::sanitize_recovery_summary(message)
+                .unwrap_or_else(|| "invalid range".to_string());
+            format!("Edit rejected (invalid range): {sanitized}")
+        }
+        EditRejection::InvalidBehaviorVersion {
+            behavior_version,
+            server_behavior_version,
+        } => format!(
+            "Edit rejected (stale behavior): local bv{behavior_version}, server bv{server_behavior_version}"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1714,9 +2563,10 @@ mod tests {
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CompletionItem, CompletionItemTextFormat,
         CompletionProvenance, CompletionReplacementRange, CompletionResultSet, CompletionStatus,
-        DocumentAccess, DocumentMetadata, EditOperation, FontRole, KeyCode, KeyModifiers,
-        LanguageIntelligenceResult, RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection,
-        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+        DocumentAccess, DocumentMetadata, EditOperation, EditRejection, FileErrorCode, FontRole,
+        KeyCode, KeyModifiers, LanguageIntelligenceResult, RuntimeDiagnostic, SduiEditorBinding,
+        SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation,
+        SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
@@ -2833,7 +3683,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_second_file_browser_file_replaces_editor_snapshot() {
+    fn opening_second_file_retains_prior_session_and_switches_active_document() {
         let mut widget = EditorWidget::default();
 
         assert!(
@@ -2850,6 +3700,8 @@ mod tests {
                 text: "# first\n".to_string(),
             })
         );
+        widget.status.dirty = true;
+
         assert!(
             widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
                 metadata: DocumentMetadata {
@@ -2867,11 +3719,554 @@ mod tests {
 
         assert_eq!(widget.editor.visible_text(), "fn main() {}\n");
         assert_eq!(widget.editor.document_state().document_id, 43);
-        assert_eq!(widget.editor.document_state().document_version, 1);
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connected — Editable — main.rs — doc 43 — v1"
+        assert_eq!(widget.retained_session_count(), 1);
+        assert!(
+            widget.status_text().contains("main.rs — doc 43 — v1"),
+            "{}",
+            widget.status_text()
         );
+        assert!(
+            widget.status_text().contains("Open docs: 2"),
+            "{}",
+            widget.status_text()
+        );
+
+        assert!(widget.activate_document(42));
+        assert_eq!(widget.editor.document_state().document_id, 42);
+        assert!(
+            widget.editor.visible_text().contains("# first"),
+            "{}",
+            widget.editor.visible_text()
+        );
+        assert_eq!(widget.retained_session_count(), 1);
+        assert_eq!(
+            widget.status.document_display_name.as_deref(),
+            Some("first.md")
+        );
+    }
+
+    #[test]
+    fn activate_document_restores_caret_and_history() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 1,
+                    version: 1,
+                    access: DocumentAccess::Editable { lease_id: 1 },
+                    lease_id: Some(1),
+                    dirty: false,
+                    workspace_root_id: 1,
+                    path: "a.txt".to_string(),
+                },
+                text: "abc".to_string(),
+            })
+        );
+        assert!(widget.editor.insert_text_with_event("X").changed);
+        let edited = widget.editor.visible_text();
+        assert!(edited.contains('X') && edited.contains("abc"), "{edited}");
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 2,
+                    version: 1,
+                    access: DocumentAccess::Editable { lease_id: 2 },
+                    lease_id: Some(2),
+                    dirty: false,
+                    workspace_root_id: 1,
+                    path: "b.txt".to_string(),
+                },
+                text: "zzz".to_string(),
+            })
+        );
+        assert_eq!(widget.editor.visible_text(), "zzz");
+
+        assert!(widget.activate_document(1));
+        assert_eq!(widget.editor.visible_text(), edited);
+        assert!(widget.editor.undo_with_event().changed);
+        assert_eq!(widget.editor.visible_text(), "abc");
+    }
+
+    #[test]
+    fn show_open_documents_menu_lists_active_and_retained() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 10,
+                    version: 1,
+                    access: DocumentAccess::Editable { lease_id: 1 },
+                    lease_id: Some(1),
+                    dirty: false,
+                    workspace_root_id: 1,
+                    path: "one.md".to_string(),
+                },
+                text: "one".to_string(),
+            })
+        );
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 11,
+                    version: 1,
+                    access: DocumentAccess::ReadOnly,
+                    lease_id: None,
+                    dirty: false,
+                    workspace_root_id: 1,
+                    path: "two.md".to_string(),
+                },
+                text: "two".to_string(),
+            })
+        );
+        assert!(widget.show_open_documents_menu());
+        let menu = widget.sdui.active_menu().expect("menu");
+        assert_eq!(menu.prompt(), "Open documents");
+        assert_eq!(menu.items().len(), 2);
+        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("two.md") && label.contains("active"))
+        );
+        assert!(labels.iter().any(|label| label.contains("one.md")));
+    }
+
+    #[test]
+    fn document_saved_clears_dirty_and_keeps_status_chrome_clean() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "hello".to_string(),
+            })
+        );
+        widget.status.dirty = true;
+        assert!(widget.status_observation().dirty);
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentSaved {
+                document_id: 42,
+                version: 5,
+                dirty: false,
+            })
+        );
+
+        let observation = widget.status_observation();
+        assert!(!observation.dirty);
+        assert!(!observation.status_text.contains("Dirty"));
+        assert_eq!(observation.sync_version, Some(5));
+    }
+
+    #[test]
+    fn stale_save_conflict_keeps_dirty_and_opens_recovery_menu() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "local edits".to_string(),
+            })
+        );
+        widget.status.dirty = true;
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::FileOperationFailed {
+                code: FileErrorCode::StaleFileMetadata,
+                message: "workspace file note.md changed on disk since it was loaded".to_string(),
+                workspace_root_id: Some(77),
+                document_id: Some(42),
+            })
+        );
+
+        let observation = widget.status_observation();
+        assert!(observation.dirty);
+        assert!(observation.status_text.contains("Dirty"));
+        assert!(observation.diagnostic_text.as_deref().is_some_and(|text| {
+            text.contains("StaleFileMetadata") && text.contains("changed on disk")
+        }));
+        let menu = widget.sdui.active_menu().expect("conflict menu");
+        assert!(menu.prompt().contains("save conflict"));
+        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("Reload from disk"))
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("Keep unsaved edits"))
+        );
+        assert!(labels.iter().any(|label| label.contains("Compare later")));
+        assert_eq!(
+            observation.recovery_summary.as_deref(),
+            Some("File changed on disk — resolve save conflict")
+        );
+        assert_eq!(widget.editor.visible_text(), "local edits");
+    }
+
+    #[test]
+    fn dirty_reload_conflict_offers_save_first_and_keeps_local_text() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 9,
+                    version: 2,
+                    access: DocumentAccess::Editable { lease_id: 1 },
+                    lease_id: Some(1),
+                    dirty: true,
+                    workspace_root_id: 3,
+                    path: "selected.md".to_string(),
+                },
+                text: "unsaved".to_string(),
+            })
+        );
+        assert!(widget.status_observation().dirty);
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::FileOperationFailed {
+                code: FileErrorCode::DirtyDocument,
+                message: "workspace document 9 has unsaved edits".to_string(),
+                workspace_root_id: None,
+                document_id: Some(9),
+            })
+        );
+
+        assert!(widget.status_observation().dirty);
+        assert_eq!(widget.editor.visible_text(), "unsaved");
+        let menu = widget.sdui.active_menu().expect("dirty reload menu");
+        assert!(menu.prompt().contains("unsaved edits"));
+        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
+        assert!(labels.iter().any(|label| label.contains("Save first")));
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("Discard edits and reload"))
+        );
+    }
+
+    #[test]
+    fn document_reloaded_replaces_text_and_clears_dirty() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "old".to_string(),
+            })
+        );
+        widget.status.dirty = true;
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentReloaded {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 6,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "from disk".to_string(),
+            })
+        );
+
+        assert_eq!(widget.editor.visible_text(), "from disk");
+        assert!(!widget.status_observation().dirty);
+        assert_eq!(widget.status_observation().sync_version, Some(6));
+        assert!(widget.sdui.active_menu().is_none());
+    }
+
+    #[tokio::test]
+    async fn save_and_reload_command_intents_enqueue_protocol_file_messages() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(4);
+        let queue = queue
+            .with_authority(8, &DocumentAccess::Editable { lease_id: 8 })
+            .with_confirmed_version(5);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 8 },
+            5,
+        ))
+        .with_edit_queue(queue);
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "hello".to_string(),
+            })
+        );
+
+        assert!(widget.request_save_active_document().is_none());
+        assert!(widget.request_reload_active_document(true).is_none());
+
+        let save = receiver.recv().await.expect("save message");
+        assert!(matches!(
+            save,
+            ClientMessage::SaveDocument {
+                document_id: 42,
+                known_version: 5,
+                ..
+            }
+        ));
+        let reload = receiver.recv().await.expect("reload message");
+        assert!(matches!(
+            reload,
+            ClientMessage::ReloadDocument {
+                document_id: 42,
+                known_version: 5,
+                force: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pending_edit_count_increments_on_enqueue_and_decrements_on_ack() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let queue = queue
+            .with_authority(8, &DocumentAccess::Editable { lease_id: 8 })
+            .with_confirmed_version(5);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 8 },
+            5,
+        ))
+        .with_edit_queue(queue);
+
+        assert_eq!(widget.status_observation().pending_edit_count, 0);
+        assert!(!widget.status_text().contains("Pending edits:"));
+
+        let outcome = widget.editor.insert_text_with_event("x");
+        assert!(widget.apply_local_edit_outcome(outcome));
+        assert_eq!(widget.status_observation().pending_edit_count, 1);
+        assert!(widget.status_text().contains("Pending edits: 1"));
+
+        // Connection task acknowledges before forwarding EditAck; unit-test the same order.
+        widget
+            .edit_queue
+            .as_ref()
+            .expect("queue")
+            .acknowledge_for_test(7, 6, 1);
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::EditAck {
+                document_id: 7,
+                version: 6,
+                transaction_id: 1,
+            })
+        );
+        assert_eq!(widget.status_observation().pending_edit_count, 0);
+        assert!(!widget.status_text().contains("Pending edits:"));
+    }
+
+    #[test]
+    fn disconnect_updates_status_accessibility_and_opens_recovery_prompt() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 8 },
+            5,
+        ));
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: true,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "local".to_string(),
+            })
+        );
+        widget.status.dirty = true;
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::ConnectionError(
+                "/home/secret/path pipe broken".to_string()
+            ))
+        );
+
+        let observation = widget.status_observation();
+        assert_eq!(observation.connection_label, "Disconnected");
+        assert!(observation.status_text.contains("Disconnected"));
+        assert!(
+            observation
+                .status_text
+                .contains("Restart Clay to reconnect")
+        );
+        assert!(observation.recovery_summary.is_some());
+        assert!(
+            observation
+                .diagnostic_text
+                .as_deref()
+                .is_some_and(|text| text.contains("clay.client.disconnect"))
+        );
+        // Path sanitization: host path fragments must not leak.
+        assert!(!observation.status_text.contains("/home/secret"));
+        let menu = widget.sdui.active_menu().expect("disconnect recovery menu");
+        assert!(menu.prompt().contains("reconnect"));
+        assert!(
+            menu.items()
+                .iter()
+                .any(|item| item.label.contains("Dismiss"))
+        );
+        assert!(widget.dismiss_recovery());
+        assert!(widget.sdui.active_menu().is_none());
+        assert!(widget.status.runtime_diagnostic.is_none());
+    }
+
+    #[test]
+    fn stale_edit_rejection_shows_status_without_blocking_menu_while_auto_resync_runs() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 8 },
+            5,
+        ));
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "hello".to_string(),
+            })
+        );
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::EditRejected {
+                document_id: 42,
+                transaction_id: 9,
+                reason: EditRejection::StaleVersion {
+                    client_base_version: 5,
+                    server_version: 8,
+                },
+            })
+        );
+
+        let observation = widget.status_observation();
+        assert!(observation.diagnostic_text.as_deref().is_some_and(|text| {
+            text.contains("StaleVersion") && text.contains("requesting resync")
+        }));
+        assert!(observation.recovery_summary.is_some());
+        assert!(widget.sdui.active_menu().is_none());
+    }
+
+    #[test]
+    fn actionable_invalid_range_rejection_opens_resync_dismiss_recovery_menu() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(4);
+        let queue = queue
+            .with_authority(8, &DocumentAccess::Editable { lease_id: 8 })
+            .with_confirmed_version(5);
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 8 },
+            5,
+        ))
+        .with_edit_queue(queue);
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                metadata: DocumentMetadata {
+                    document_id: 42,
+                    version: 5,
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                    dirty: false,
+                    workspace_root_id: 77,
+                    path: "note.md".to_string(),
+                },
+                text: "hello".to_string(),
+            })
+        );
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::EditRejected {
+                document_id: 42,
+                transaction_id: 3,
+                reason: EditRejection::InvalidRange {
+                    message: "byte range is not UTF-8 aligned".to_string(),
+                },
+            })
+        );
+
+        let observation = widget.status_observation();
+        assert!(
+            observation
+                .diagnostic_text
+                .as_deref()
+                .is_some_and(|text| text.contains("InvalidRange"))
+        );
+        let menu = widget.sdui.active_menu().expect("recovery menu");
+        assert!(menu.prompt().contains("invalid range"));
+        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
+        assert!(labels.iter().any(|label| label.contains("Request resync")));
+        assert!(labels.iter().any(|label| label.contains("Dismiss")));
+
+        assert!(widget.request_resync_active_document().is_none());
+        let message = receiver.try_recv().expect("resync request");
+        assert!(matches!(
+            message,
+            ClientMessage::RequestResync {
+                document_id: 42,
+                known_version: 5,
+                ..
+            }
+        ));
+        assert!(
+            widget
+                .status
+                .runtime_diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| diagnostic.code == "clay.editor.resync_requested")
+        );
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::ResyncSnapshot(
+                ClientResyncSnapshot {
+                    document_id: 42,
+                    version: 9,
+                    text: "canonical".to_string(),
+                    access: DocumentAccess::Editable { lease_id: 8 },
+                    lease_id: Some(8),
+                }
+            ))
+        );
+        assert_eq!(widget.editor.visible_text(), "canonical");
+        assert!(widget.status.runtime_diagnostic.is_none());
+        assert!(widget.sdui.active_menu().is_none());
     }
 
     #[tokio::test]

@@ -686,7 +686,7 @@ Configuration evaluation remains startup, package-load, reload, or explicit sett
 
 ## Phase 18.12 workspace file-browser configuration review
 
-Phase 18.12 added server-owned workspace-root discovery, bounded directory listing, a Clay-owned left file-browser panel, a bottom transient fuzzy-open route, and server-authoritative open/reveal command routing. This review did **not** promote a new user-facing `clay:configuration` API for file-browser visibility, file-browser slot placement, fuzzy-open key binding defaults, workspace root markers, ignore-list overrides, listing depth/count limits, tree refresh policy, reveal behavior, or raw file-open paths. User-visible configuration reuses existing Clay JS APIs: `clay.keybindings.bindKey` for command chords and the Phase 18.12 `clay:workspace` / `clay:commands` APIs for explicit workspace actions.
+Phase 18.12 added server-owned workspace-root discovery, bounded directory listing, a Clay-owned left file-browser panel, a bottom transient fuzzy-open route, and server-authoritative open/reveal command routing. This review did **not** promote a new user-facing `clay:configuration` API for file-browser visibility, file-browser slot placement, fuzzy-open key binding defaults, workspace root markers, ignore-list overrides, listing depth/count limits, tree refresh policy, reveal behavior, or raw file-open paths. User-visible configuration reuses existing Clay JS APIs: `clay.keybindings.bindKey` for command chords and the Phase 18.12 `clay:workspace` / `clay:commands` APIs for explicit workspace actions. Phase 20 daily-editing chords (cut/paste/undo/redo/save/open-documents/recovery) are documented in the [Phase 20 configuration review](#phase-20-daily-editing-product-hardening-configuration-review).
 
 User-visible Phase 18.12 configuration surfaces:
 
@@ -696,10 +696,6 @@ User-visible Phase 18.12 configuration surfaces:
 | File-browser toggle key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to `clay.workspace.toggleFileBrowser`; the command is validated by `CommandExecutor`, not a hidden panel-visibility key |
 | Native folder picker binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.workspace.clientOpenFolderDialog` | Bind a key to the fixed client UI command id; native selection still goes through selected-path capability and server root validation |
 | Copy current selection binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCopySelection` | Bind an alternate key to copy the current native editor selection |
-| Cut current selection binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCutSelection` | Bind an alternate key to cut the current native editor selection |
-| Paste clipboard binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientPasteClipboard` | Bind an alternate key to paste OS clipboard text as an ordinary local edit |
-| Undo binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientUndo` | Bind an alternate key to undo the latest local edit as an ordinary inverse edit |
-| Redo binding | runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientRedo` | Bind an alternate key to redo the latest undone local edit |
 | File open/reveal commands | runtime-backed command APIs | [`clay.commands.serverOpenFile`](commands/server-open-file.md), [`clay.commands.serverRevealInTree`](commands/server-reveal-in-tree.md), [`clay.commands.serverExecuteCommand`](commands/server-execute-command.md) | Open and reveal route through server workspace APIs, root-relative paths, selected-file grants, and open-document metadata validation |
 | Workspace roots and discovery | runtime-backed workspace APIs | [`clay.workspace.serverAddWorkspaceRoot`](workspace/server-add-workspace-root.md), [`clay.workspace.serverDiscoverWorkspaceRootForPath`](workspace/server-discover-workspace-root-for-path.md), [`clay.workspace.serverListWorkspaceRoots`](workspace/server-list-workspace-roots.md) | Roots and grants are explicit server-authoritative workspace APIs, not configuration keys |
 | Directory listing | runtime-backed workspace APIs | [`clay.workspace.serverListDirectory`](workspace/server-list-directory.md), [`clay.workspace.serverCreateListingCancelToken`](workspace/server-create-listing-cancel-token.md), [`clay.workspace.serverCancelListing`](workspace/server-cancel-listing.md) | Listing uses server validation, bounded depth/count, compiled ignore defaults, optional cancellation tokens, and diagnostics |
@@ -711,20 +707,16 @@ The expected end-user fuzzy-open configuration is a normal `~/.config/clay/init.
 
 ```js
 import { bindKey } from "clay:keybindings";
-import { clientCopySelection, clientCutSelection, clientPasteClipboard, clientUndo, clientRedo } from "clay:editor";
+import { clientCopySelection } from "clay:editor";
 import { clientOpenFolderDialog } from "clay:workspace";
 
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
-bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
-bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
-bindKey("Alt+Backspace", clientUndo(), { scope: "editor" });
-bindKey("Ctrl+Y", clientRedo(), { scope: "editor" });
 ```
 
-`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. `clay.workspace.clientOpenFolderDialog`, `clay.editor.clientCopySelection`, `clay.editor.clientCutSelection`, `clay.editor.clientPasteClipboard`, `clay.editor.clientUndo`, and `clay.editor.clientRedo` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for Phase 18.12 fuzzy/toggle routes; no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut in Rust exists for folder/copy workflow routes. Native cut/copy/paste and undo/redo chords (`Ctrl/Cmd+X`/`C`/`V`/`Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` on non-macOS) are handled directly by the editor. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, or expose package/configuration/AI clipboard-contents APIs through `init.js`.
+`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for Phase 18.12 fuzzy/toggle routes; no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut in Rust exists for folder/copy workflow routes. Native copy (`Ctrl/Cmd+C`) is handled directly by the editor. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, or expose package/configuration/AI clipboard-contents APIs through `init.js`.
 
 Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
 
@@ -738,3 +730,86 @@ Hidden/ad hoc configuration keys that are rejected by policy and are not valid u
 - `clipboard.text`, `clipboard.writeText`, `clipboard.readText`, `copySelection.text`, arbitrary clipboard strings, package/config clipboard-contents keys
 
 File-browser listing/open/reveal authority is server-owned. Root discovery scans only bounded ancestry with a closed marker set; directory listing stays inside known roots and uses bounded ignore/depth/count limits; open file commands route through `WorkspaceState::open_existing_file` or selected-file grants through `WorkspaceState::open_selected_file`; reveal validates open document metadata. Configuration cannot grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native widget, direct Masonry widget, arbitrary root marker, arbitrary ignore-rule, arbitrary path passthrough, or client-side JavaScript authority.
+
+## Phase 20 daily editing product hardening configuration review
+
+Phase 20 (plan `plans/055-Phase20-Daily-Editing-Product-Hardening.md`) ships clipboard cut/paste, inverse-edit undo/redo, IME preedit, multi-document retain/switch, save/conflict recovery menus, pending-edit/disconnect/resync recovery chrome, cross-platform file-open dialogs, and accessibility/theme polish. This review did **not** promote a new user-facing `clay:configuration` API. Every user-visible Phase 20 behavior reuses existing Clay JS command helpers plus [`clay.keybindings.bindKey`](keybindings/bind-key.md). Command helpers keep empty `custom_properties` because there are no user-tunable setting fields — only fixed command IDs.
+
+### User-visible Phase 20 configuration surfaces
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Open Markdown file dialog | reused, runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.documents.clientOpenFileDialog`](documents/client-open-file-dialog.md) | No default `Ctrl+O` in Rust; native dialogs on Windows, Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) use fixed Markdown/all-files filters |
+| Save active document | reused, runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.documents.serverSaveDocument`](documents/server-save-document.md) | Recommended `Ctrl+S` binding; client intercepts the intent and enqueues `SaveDocument`; dirty chrome + stale-metadata recovery stay Clay-owned |
+| Reload active document | reused, runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.documents.serverReloadDocument`](documents/server-reload-document.md) | Optional binding; dirty-reload conflicts open Clay-owned recovery menus |
+| Cut current selection | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientCutSelection`](editor/client-cut-selection.md) | Alternate chord; native `Ctrl/Cmd+X` remains editor-handled |
+| Paste clipboard text | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientPasteClipboard`](editor/client-paste-clipboard.md) | Alternate chord; native `Ctrl/Cmd+V` remains editor-handled |
+| Undo latest local edit | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientUndo`](editor/client-undo.md) | Alternate chord; native `Ctrl/Cmd+Z` remains editor-handled |
+| Redo latest undone edit | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientRedo`](editor/client-redo.md) | Alternate chord; native `Ctrl/Cmd+Shift+Z` / non-macOS `Ctrl+Y` remain editor-handled |
+| Open-documents switcher | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientShowOpenDocuments`](editor/client-show-open-documents.md) | Lists retained sessions and activates one locally; no tabstrip configuration API |
+| Request resync | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientRequestResync`](editor/client-request-resync.md) | Enqueues `RequestResync` for the active document |
+| Dismiss recovery chrome | runtime-backed | [`bindKey`](keybindings/bind-key.md), [`clay.editor.clientDismissRecovery`](editor/client-dismiss-recovery.md) | Clears disconnect/rejection recovery menus and sanitized diagnostics |
+| Theme selection | reused (Phase 18.15) | [`clay.theme.setTheme`](theme/set-theme.md) | Phase 20 does not rebuild themes; only verifies contrast/status-label polish |
+
+### Recommended daily-editing `init.js` bindings
+
+```js
+// ~/.config/clay/init.js
+import { bindKey } from "clay:keybindings";
+import {
+  clientCutSelection,
+  clientPasteClipboard,
+  clientUndo,
+  clientRedo,
+  clientShowOpenDocuments,
+  clientRequestResync,
+  clientDismissRecovery,
+} from "clay:editor";
+import { clientOpenFileDialog } from "clay:documents";
+
+bindKey("Ctrl+O", clientOpenFileDialog(), { scope: "editor" });
+bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
+bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
+bindKey("Alt+Backspace", clientUndo(), { scope: "editor" });
+bindKey("Ctrl+Y", clientRedo(), { scope: "editor" });
+bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
+bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
+bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
+```
+
+No default `Ctrl+O` or `Ctrl+S` shortcut exists in Rust. Without an `init.js` (or fixture) binding, those chords do not route to open/save. Native cut/copy/paste and undo/redo chords remain editor-handled even when alternate `bindKey` routes exist. IME preedit overlay, dirty/conflict recovery menus, pending-edit status chrome, and multi-document session retention are Clay-owned runtime behavior — not callable `clay:configuration` APIs and not package-tunable through hidden keys.
+
+### Compiled budgets (not configurable)
+
+Phase 20 security/performance ceilings are compiled constants, not `init.js` keys:
+
+| Budget | Constant | Value | Owner |
+|---|---|---|---|
+| Undo/redo stack depth | `EDIT_HISTORY_MAX_DEPTH` | 256 entries | `src/perf/budgets.rs` |
+| Undo/redo entry payload | `EDIT_HISTORY_MAX_ENTRY_BYTES` | 64 KiB (oversized entries clear both stacks) | `src/perf/budgets.rs` |
+| Retained multi-document sessions | `CLIENT_DOCUMENT_SESSION_MAX` | 64 (aligned with `RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS`) | `src/perf/budgets.rs` |
+| Accessibility display-name budget | `ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS` | 64 | `src/editor/accessibility.rs` |
+| Accessibility recovery-summary budget | `ACCESSIBILITY_RECOVERY_SUMMARY_MAX_CHARS` | 256 | `src/editor/accessibility.rs` |
+| Status chrome contrast floor | `STATUS_CHROME_MIN_CONTRAST` | 4.5:1 (WCAG AA) | `src/editor/theme.rs` |
+
+Raising these from configuration would undermine the memory, observability, and authority boundaries they enforce. Empty `custom_properties` on the Phase 20 command docs record that no user-tunable setting fields exist for these ceilings.
+
+### Rejected hidden configuration keys
+
+No hidden JSON/TOML/ad hoc keys are valid for Phase 20 daily editing. Rejected examples include:
+
+- `undo.depth`, `undo.maxDepth`, `redo.stackSize`, `editHistory.maxEntries`, `history.maxEntryBytes`
+- `documentSession.max`, `multiDocument.maxSessions`, `openDocuments.max`, `tabs.max`
+- `recovery.autoResync`, `recovery.prompts.enabled`, `disconnect.autoReconnect`, `pendingEdits.maxVisible`
+- `save.autoSave`, `save.onFocusLost`, `conflict.autoResolve`, `dirty.autoClear`
+- `ime.preedit.enabled`, `composition.showOverlay`, `composition.commitOnBlur`
+- `clipboard.text`, `clipboard.writeText`, `clipboard.readText`, package/config/AI clipboard-contents keys
+- `dialog.filters`, `dialog.defaultDirectory`, `openFile.extensions`, `fileDialog.backend`
+- `accessibility.labelTemplate`, `status.dirtyMarker`, theme rebuild keys that bypass `clay.theme.setTheme`
+
+### Security
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Ordinary keypress routing, Masonry paint/layout, pointer, scroll, text-event handling, IME preedit paint, edit acknowledgement, pending-edit observation, and recovery-menu presentation do not execute configuration JavaScript.
+
+Phase 20 configuration does **not** invent clipboard-exfiltration, arbitrary filesystem, network, shell, package-manager, WASM, raw-op, or client-side JavaScript authority APIs. Broader package/configuration/AI authority over clipboard, filesystem, shell, network, and raw ops remains deferred (`decision-logs/2026-07-17-1841-phase20-daily-editing-semantics.md`). Binding a Phase 20 command through `bindKey` installs only an inert user-mediated route; clipboard cut/paste stay client-local after explicit user action, save/reload still consume server grants/leases, open dialogs still return selected-file capabilities only, and recovery menus only reuse existing `RequestResync` / save / reload / dismiss primitives.

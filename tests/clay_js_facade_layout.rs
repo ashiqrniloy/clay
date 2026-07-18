@@ -18,6 +18,9 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "clientPasteClipboard",
             "clientUndo",
             "clientRedo",
+            "clientShowOpenDocuments",
+            "clientRequestResync",
+            "clientDismissRecovery",
         ],
     ),
     (

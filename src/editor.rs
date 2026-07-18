@@ -2,6 +2,7 @@ pub(crate) mod accessibility;
 pub(crate) mod buffer;
 pub(crate) mod composition;
 pub(crate) mod cursor;
+pub(crate) mod document_session;
 pub(crate) mod history;
 mod layout;
 pub(crate) mod selection;

@@ -929,6 +929,39 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ["ordinary inverse edit", "editable lease", "raw Deno ops"],
         ),
         (
+            "clay.editor.clientShowOpenDocuments",
+            "clay:editor",
+            "clientShowOpenDocuments",
+            "multi-document",
+            [
+                "retained client sessions",
+                "filesystem/workspace expansion",
+                "raw Deno ops",
+            ],
+        ),
+        (
+            "clay.editor.clientRequestResync",
+            "clay:editor",
+            "clientRequestResync",
+            "resync",
+            [
+                "ordinary inverse edit",
+                "package/configuration/AI mutation authority",
+                "raw Deno ops",
+            ],
+        ),
+        (
+            "clay.editor.clientDismissRecovery",
+            "clay:editor",
+            "clientDismissRecovery",
+            "recovery",
+            [
+                "runtime diagnostics",
+                "package/configuration/AI mutation authority",
+                "raw Deno ops",
+            ],
+        ),
+        (
             "clay.commands.serverOpenDirectory",
             "clay:commands",
             "serverOpenDirectory",

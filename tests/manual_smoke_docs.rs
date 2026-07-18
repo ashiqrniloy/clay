@@ -346,8 +346,12 @@ fn end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract() {
         "loadPackage(\"@clay/javascript\")",
         "clientOpenFolderDialog()",
         "clientCopySelection()",
+        "clientCutSelection()",
+        "clientPasteClipboard()",
+        "clientShowOpenDocuments()",
         "clay.workspace.openFuzzyFile",
         "clay.workspace.toggleFileBrowser",
+        "clay.documents.serverSaveDocument",
     ] {
         assert!(
             fixture.contains(expected),
@@ -376,16 +380,18 @@ fn end_to_end_file_browser_workflow_smoke_covers_cargo_run_config_path() {
 
     // The real product workflow path must be documented alongside the
     // fixture: a bare `cargo run` driven by `~/.config/clay/init.js`, with
-    // the Plan 044 regressions (shifted folder picker, nested `.rs` open,
-    // second-file replacement, file browser surviving Markdown activation,
-    // file-browser scroll, editor scroller, copy) as a manual checklist.
+    // the Plan 044/Phase 20 regressions (shifted folder picker, nested `.rs` open,
+    // multi-document retain/switch, dirty/save/conflict UX, file browser surviving
+    // Markdown activation, file-browser scroll, editor scroller, copy) as a manual checklist.
     for expected in [
         "Product `cargo run` configuration path",
         "cargo run",
         "~/.config/clay/init.js",
         "Ctrl+Shift+O",
         "src/main.rs",
-        "Opening a second file replaces the editor buffer",
+        "Opening a second file retains the prior document session",
+        "clay.documents.serverSaveDocument",
+        "Dirty",
         "The file browser scrolls when there are many rows",
         "The editor shows a slim vertical scrollbar thumb",
         "copies only the selected UTF-8 text",
@@ -396,6 +402,59 @@ fn end_to_end_file_browser_workflow_smoke_covers_cargo_run_config_path() {
         assert!(
             launch_doc.contains(expected),
             "launch smoke docs must cover the cargo run config path marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn phase20_daily_editing_platform_matrix_and_linux_verification_are_documented() {
+    let launch_doc = launch_smoke_doc();
+    let workflow_doc = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/development/file-open-save-reload-workflow.md"
+    ))
+    .expect("read file-open-save-reload workflow doc");
+
+    for expected in [
+        "Phase 20 daily-editing platform matrix and Linux verification",
+        "Platform capability matrix",
+        "Shortcut matrix (native editor chords)",
+        "Linux verification evidence (Plan 055 Task 17)",
+        "cargo fmt --check",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo test --all-targets",
+        "xdg-desktop-portal",
+        "Ctrl+C",
+        "Cmd+C",
+        "Ctrl+Z",
+        "Cmd+Z",
+        "Ctrl+Y",
+        "Cmd+Shift+Z",
+        "clientShowOpenDocuments",
+        "clientRequestResync",
+        "clientDismissRecovery",
+        "ibus/fcitx",
+        "DocumentSessionStore",
+        "Linux-primary",
+        "Windows/macOS host checklists",
+        "Live boot check",
+        "Ime::Enabled",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must record Phase 20 platform matrix marker `{expected}`"
+        );
+    }
+
+    for expected in [
+        "Clipboard copy/cut/paste",
+        "IME preedit overlay",
+        "Pending-edit / disconnect recovery",
+        "launch-and-gui-smoke.md#phase-20-daily-editing-platform-matrix-and-linux-verification",
+    ] {
+        assert!(
+            workflow_doc.contains(expected),
+            "file workflow docs must record Phase 20 platform matrix marker `{expected}`"
         );
     }
 }
@@ -563,8 +622,8 @@ fn phase20_end_user_markdown_setup_is_one_line_load_plus_bind_key() {
 #[test]
 fn phase20_markdown_baseline_no_default_panel_and_edit_only_selected_file() {
     // Guard: default Markdown mode does not require a PanelContribution, and
-    // selected-file save remains out of scope. These baseline invariants must
-    // be recorded in the product docs.
+    // selected-file save/conflict UX is Clay-owned (Ctrl+S + recovery menu).
+    // These baseline invariants must be recorded in the product docs.
     let launch_doc = launch_smoke_doc();
     let markdown_ref = markdown_package_reference();
 
@@ -577,8 +636,8 @@ fn phase20_markdown_baseline_no_default_panel_and_edit_only_selected_file() {
         "defaultVisibility: \"hidden\"",
         "Fixed panels resize the editor",
         "transient overlays may cover content by design",
-        "Selected-file open is edit-only",
-        "Saving a file picked through the dialog is out of scope until a later phase",
+        "Selected-file open supports save/conflict UX",
+        "clay.documents.serverSaveDocument",
         "Configuration/open time only",
         "No authority broadened",
     ] {
@@ -593,8 +652,8 @@ fn phase20_markdown_baseline_no_default_panel_and_edit_only_selected_file() {
         "mandatory `main` slot of `PaneSlotLayout`",
         "No default `PanelContribution`",
         "defaultVisibility: \"hidden\"",
-        "Selected-file open is edit-only",
-        "Saving a file picked through the dialog is out of scope until a later phase",
+        "Selected-file open supports save/conflict UX",
+        "clay.documents.serverSaveDocument",
     ] {
         assert!(
             markdown_ref.contains(required),

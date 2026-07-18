@@ -67,6 +67,8 @@ Live runtime reloads use a different path. `ClientConnectionEvent::RuntimeStateS
 
 Clipboard copy/cut/paste are intentionally client-only and user-mediated. `EditorSurface::selected_text()` normalizes the current anchor/focus byte range and extracts only that UTF-8 rope slice through `EditorBuffer::text_range`. `EditorWidget::copy_selection_to_system_clipboard()` writes the returned text through `SystemClipboard` (`ClipboardSink` / `arboard` in `src/client/clipboard.rs`). Cut reuses that write then deletes the selection through the ordinary local edit path. Paste reads with `ClipboardSink::get_text`, normalizes line endings, and inserts/replaces through `EditorSurface::paste_text_with_event`. Collapsed cut/copy are no-ops; empty paste text is a no-op. Clipboard failures become sanitized `clay.client.clipboard.write_failed` / `clay.client.clipboard.read_failed` diagnostics that never include full clipboard contents. OS clipboard work happens only on explicit cut/copy/paste commands, never during paint/layout/scroll or ordinary key insertion.
 
+Undo and redo are client-local inverse operations built on the normal edit path. `EditHistory` (`src/editor/history.rs`) stores the last `EDIT_HISTORY_MAX_DEPTH` (256) local `EditOperation` entries. Every edit path — typing, selection replace, cut, paste, IME commit — captures `prior_text` and `selection_before` before buffer mutation via the centralized `apply_and_record_local_edit` helper, then records the inverse `EditOperation` (Insert → Delete of the inserted range, Delete → Insert of the original text, Replace → Replace back to prior text). Each inverse is an ordinary `Edit` transaction the server processes identically to forward edits; the server remains undo-unaware. `Ctrl+Z` (`clientUndo`) pops the most recent undo entry, applies it locally, and pushes its own inverse onto the redo stack. `Ctrl+Shift+Z` / `Ctrl+Y` (`clientRedo`) pops from the redo stack. The redo stack is cleared by any non-undo/redo local edit. Per-entry text is capped at 64 KiB (`EDIT_HISTORY_MAX_ENTRY_BYTES`); entries exceeding this limit clear both stacks to prevent unbounded memory growth. Undo and redo both guard on `DocumentAccess::is_editable()` and cancel any active IME composition before applying. History is per-document-surface and is stashed/restored alongside the surface during multi-document switching. Native shortcut matching uses `is_primary_character_shortcut` (primary modifier `Ctrl` on Linux/Windows, `Cmd` on macOS); redo shortcut is checked before undo shortcut to prevent `Ctrl+Shift+Z` from matching the undo branch.
+
 IME composition is client-local and paint-only until commit. `CompositionState` (`src/editor/composition.rs`) stores preedit text and an optional byte-indexed cursor span on `EditorSurface`. `Ime::Preedit` updates the overlay without mutating the rope or enqueueing edits; empty preedit clears it. `Ime::Commit` clears composition and applies one ordinary insert/replace through the existing local-edit path. `Ime::Enabled` refreshes candidate-window geometry via Masonry `set_ime_area`; `Ime::Disabled`, window focus loss, pointer caret moves, undo/redo, cut/paste, and hard open/resync cancel unfinished composition without committing. Accessibility exposes a `Composing.` flag without including raw preedit text. Dirty/display-name/recovery markers share the same centralized helpers and AccessKit status child. Preedit updates never wait on IPC, server work, or package JavaScript.
 
 ## Code Examples
@@ -111,6 +113,7 @@ assert_eq!(observation.sync_version, Some(5));
 - `src/masonry_editor.rs`: `status_observation_does_not_regress_accessibility_label` validates consistency between status observation and accessibility text.
 - `src/masonry_editor.rs`: `status_observation_exposes_active_theme_label` validates `theme_label` observability and accessibility `Theme …` marker after `ActiveTheme` install.
 - `src/masonry_editor.rs`: dirty/display-name/recovery accessibility tests assert basename-only titles, dirty markers after open/local edit, and menu prompt recovery summaries.
+- `src/masonry_editor.rs`: `document_saved_clears_dirty_and_keeps_status_chrome_clean`, `stale_save_conflict_keeps_dirty_and_opens_recovery_menu`, `dirty_reload_conflict_offers_save_first_and_keeps_local_text`, `document_reloaded_replaces_text_and_clears_dirty`, and `save_and_reload_command_intents_enqueue_protocol_file_messages` cover save/conflict chrome and protocol enqueue.
 - `src/editor/accessibility.rs`: sanitize/compose helper unit tests.
 - `src/masonry_sdui.rs`: active transient menus expose `Role::Menu` / `Role::MenuItem` accessibility entries.
 - `src/editor/surface.rs`: `selected_text_returns_forward_backward_unicode_ranges` and `selected_text_returns_none_for_collapsed_selection` validate UTF-8 selection extraction.
@@ -129,6 +132,22 @@ assert_eq!(observation.sync_version, Some(5));
 - `src/masonry_editor.rs`: `client_installs_behavior_theme_typography_ui_and_render_generation_atomically`, `invalid_snapshot_installs_nothing_and_disconnects_without_ack`, `runtime_install_preserves_caret_selection_viewport_and_focus_status`, and `runtime_install_invalidates_layout_once` validate atomic runtime-generation install.
 - Command: `cargo test -p clay --lib masonry_editor`
 
+## Multi-document sessions (Phase 20)
+
+`EditorWidget` keeps a bounded `DocumentSessionStore` of inactive documents. `DocumentOpened` for another `DocumentId` stashes the prior `EditorSurface` (text, caret/selection, viewport, history, dirty chrome) instead of destroying it. `show_open_documents_menu` / `activate_document` switch locally without re-downloading text. Server open-registry/lease/dirty authority is unchanged. Ceiling: `CLIENT_DOCUMENT_SESSION_MAX` (64).
+
+## Save / conflict persistence UX (Phase 20)
+
+Local accepted edits mark `EditorStatus.dirty` optimistically. Bound `Ctrl+S` (`clay.documents.serverSaveDocument`) is intercepted client-side and enqueued as `ClientMessage::SaveDocument` for the active document (never on the paint path). `DocumentSaved` updates dirty/version chrome; a clean save clears stale conflict diagnostics. `DocumentReloaded` replaces text like a same-document resync and clears dirty from metadata. `FileOperationFailed` with `StaleFileMetadata` or `DirtyDocument` keeps dirty text and opens a `TransientMenuSession` recovery menu: reload-from-disk (force), keep unsaved edits, compare later (stale save), or save-first / discard-and-reload / keep (dirty reload). Force-save overwrite is intentionally not offered; resolving a stale disk change requires an explicit reload or keeping local edits.
+
+## Pending-edit / disconnect / resync recovery (Phase 20)
+
+Outbound pending-edit depth is visible in status/accessibility via `SduiStatusObservation.pending_edit_count`. `EditRejected` updates sanitized diagnostics: auto-resync classes (stale/future/lease/read-only/region-lock/invalid behavior) note that resync was requested while the connection task continues auto-`RequestResync`; actionable `InvalidRange` / `InvalidDocument` and `ServerError` open Resync/Dismiss menus. Disconnect/connection-error events mark `Disconnected` with reconnect guidance (restart Clay) and a Dismiss menu without leaking host paths. Explicit commands `clay.editor.clientRequestResync` and `clay.editor.clientDismissRecovery` are bindable client UI routes. Successful `ResyncSnapshot` clears sync-recovery menus and diagnostics.
+
+## Pixel / GPU snapshot stance (Phase 20)
+
+Phase 20 revisited Masonry `TestHarness` / `assert_render_snapshot` and re-deferred pixel/GPU goldens: the harness hardcodes Vello `use_cpu: true`, so it does not validate Clay's production GPU path. Editor/SDUI regression stays on structural `SduiObservableSnapshot` / `SduiStatusObservation` (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`).
+
 ## Related
 
 - [Masonry Shell Runtime](masonry-shell.md)
@@ -141,4 +160,6 @@ assert_eq!(observation.sync_version, Some(5));
 - [Client Cut Selection Clay JS API](../../reference/clay-js-api/editor/client-cut-selection.md)
 - [Client Paste Clipboard Clay JS API](../../reference/clay-js-api/editor/client-paste-clipboard.md)
 - [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)
+- [Package Authoring Guide](../../reference/packages/creating-packages.md) — Phase 20 package non-goals for multi-document / recovery chrome
+- [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md)
 - `src/client/mod.rs`

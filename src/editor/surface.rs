@@ -952,12 +952,25 @@ impl EditorSurface {
     }
 
     /// Compact theme label for status/accessibility (no package path).
+    pub(crate) fn set_theme_specifier(&mut self, specifier: impl Into<String>) {
+        self.theme_specifier = specifier.into();
+    }
+
     pub(crate) fn theme_label(&self) -> String {
         crate::editor::theme::theme_display_label(self.theme_specifier())
     }
 
     /// Install newer validated typography and discard geometry derived from the
     /// old profiles. Invalid/stale snapshots leave the current layout intact.
+    pub(crate) fn set_typography_registry(&mut self, typography: TypographyRegistry) {
+        self.typography = typography;
+        self.layout = LayoutState::default();
+        self.visual_scroll_y = 0.0;
+        self.last_visual_max_scroll_y = 0.0;
+        self.pin_caret_visible = false;
+        self.bump_layout_style_revision();
+    }
+
     pub(crate) fn set_typography(&mut self, typography: crate::protocol::ActiveTypography) -> bool {
         let Ok(changed) = self.typography.install(typography) else {
             return false;

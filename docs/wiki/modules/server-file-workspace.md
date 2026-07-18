@@ -75,7 +75,7 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - Invalid UTF-8 files do not create or poison registry entries; selected-file grants are not created until UTF-8 validation succeeds, and a later valid open can still use the same canonical path.
 - Save and reload reauthorize the stored canonical path before file IO so deleted/replaced/symlinked paths cannot bypass workspace-root authorization.
 - Dirty reloads are rejected unless explicitly forced, preventing silent loss of accepted in-memory edits.
-- Stale on-disk metadata is a save conflict, not an implicit overwrite; the in-memory document stays dirty so the caller can decide whether to reload, force a later operation, or surface a conflict.
+- Stale on-disk metadata is a save conflict, not an implicit overwrite; the in-memory document stays dirty so the caller can decide whether to reload, force a later operation, or surface a conflict. Phase 20 client chrome opens a `TransientMenuSession` recovery menu on `StaleFileMetadata` / `DirtyDocument` (`FileOperationFailed`) rather than silently overwriting.
 - Workspace protocol and runtime-op errors are typed for programmatic handling and sanitize outside-root failures to avoid disclosing unauthorized host paths.
 - Absolute paths from failed unauthorized requests are rendered as `<requested path>` in diagnostics unless they are server-authorized workspace roots. This keeps host path discovery out of client-visible messages while preserving actionable relative workspace paths.
 - Container/toolbox/distrobox diagnostics are passive mappings of known IO failures. They do not run shell probes, scan mounts, access the network, or expand workspace authority.
@@ -111,6 +111,7 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 
 ## Related
 
+- [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md) — end-user workflow, platform matrices, smoke steps
 - [Workspace Discovery and File Browser](workspace-file-browser.md)
 - [Server Document State](server-document-state.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)

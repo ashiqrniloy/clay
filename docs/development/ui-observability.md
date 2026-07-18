@@ -13,13 +13,13 @@ Clay's Phase 15 UI regression coverage is intentionally structural and headless.
 - accessibility role/label coverage for rendered SDUI nodes; and
 - GUI chrome status text and runtime diagnostics.
 
-This coverage is designed to run under normal test commands without opening a window, allocating a GPU surface, or depending on platform font/rasterization behavior. Pixel-buffer snapshots are deferred because they would currently be brittle across operating systems and require a reliable Masonry/winit render target that can run in CI without an interactive desktop session.
+This coverage is designed to run under normal test commands without opening a window, allocating a GPU surface, or depending on platform font/rasterization behavior. Pixel-buffer / GPU snapshots remain deferred after the Phase 20 Masonry 0.4 revisit: `masonry_testing::TestHarness` / `assert_render_snapshot` exist, but the harness hardcodes Vello `use_cpu: true`, so goldens would not exercise Clay's production GPU path and would still be brittle across fonts/DPI/AA. See `decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`.
 
 ## Observable state used by tests
 
 SDUI structural tests use `SduiObservableSnapshot` from `src/masonry_sdui.rs`. A test applies a representative SDUI snapshot or update to `SduiNativeState`, calls `observable_snapshot(...)`, and compares the resulting typed fields. This lets tests assert exact UI structure while avoiding screenshots and golden image files.
 
-GUI status tests use `SduiStatusObservation` from `src/masonry_editor.rs`. `EditorWidget::status_observation()` returns the status line, connection label, access label, latest sync version, any active runtime diagnostic message, compact active `theme_label`, dirty/display-name markers, composing flag, pending-edit count, and sanitized recovery summary without painting or starting a window. Accessibility labels are composed by `src/editor/accessibility.rs` and stay consistent with that observation, including `Theme …`, `Composing.`, dirty/display-name, and recovery markers. SDUI/shell roots publish `Role::Group`; transient menus publish `Role::Menu` / `Role::MenuItem`.
+GUI status tests use `SduiStatusObservation` from `src/masonry_editor.rs`. `EditorWidget::status_observation()` returns the status line, connection label, access label, latest sync version, any active runtime diagnostic message, compact active `theme_label`, dirty/display-name markers, composing flag, pending-edit count, and sanitized recovery summary without painting or starting a window. Accessibility labels are composed by `src/editor/accessibility.rs` and stay consistent with that observation, including `Theme …`, `Composing.`, dirty/display-name, and recovery markers. SDUI/shell roots publish `Role::Group`; transient menus publish `Role::Menu` / `Role::MenuItem`. Phase 20 save/conflict recovery menus reuse the same transient-menu accessibility path when `StaleFileMetadata` or `DirtyDocument` failures arrive. Pending-edit depth, edit rejections, disconnect reconnect guidance, and explicit `clientRequestResync` / `clientDismissRecovery` recovery menus also surface through the same status/accessibility channel rather than stderr-only diagnostics.
 
 Markdown mode uses the same structural strategy. The deterministic `markdown-mode` fixture publishes a `Markdown Preview` panel with mode, parse, decorations, preview, and toggle-action text; `markdown_structural_sdui_snapshot_matches_fixture` verifies those visible labels through `SduiNativeState` without a window or GPU surface. Phase 18.5 also keeps large-file Markdown status structural and inert: package SDUI can report `full`, `windowed`, `degraded`, or `plain-text-fallback` highlighting with sanitized fixed strings, including a policy label for partial/viewport-only highlighting and plain-text fallback. This is the regression layer for the Markdown preview/status workflow.
 
@@ -44,9 +44,15 @@ The automated structural tests do not replace window smoke runs. They provide de
 
 ## Deferred GPU-backed pixel snapshot path
 
-If Masonry/winit later provides reliable headless rendering support, Clay can add GPU-backed pixel snapshot tests as a separate layer. That path should include:
+Phase 20 revisited Masonry 0.4 `TestHarness` / `assert_render_snapshot` and **re-deferred** pixel / GPU snapshots with evidence (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`):
 
-1. a deterministic offscreen render target that works in CI without an interactive desktop;
+- Masonry now has a headless capture path, but `TestHarness` forces `use_cpu: true`. That is intentional for CPU determinism and does **not** match Clay's production `masonry_winit` renderer (`use_cpu: false`, wgpu texture blit).
+- Clay therefore does not depend on `masonry_testing`, does not land golden PNGs, and keeps structural observability as the hard CI layer.
+- Renderer upgrades that could improve GPU fidelity (newer Vello/Parley/wgpu) remain blocked until a newer Masonry release; Masonry 0.4.0 is still the latest published line.
+
+Promote GPU-backed pixel snapshots only when all of the following exist:
+
+1. a deterministic offscreen render target that works in CI without an interactive desktop and can run the **production GPU** path (`use_cpu: false`) or an explicitly accepted GPU-faithful alternative;
 2. fixed font, DPI, scale-factor, theme, and window-size inputs;
 3. stable screenshot capture for the native SDUI editor/sidebar composition;
 4. golden image review/update workflow with clear commands and platform expectations;

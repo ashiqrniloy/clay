@@ -30,6 +30,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Range Diagnostics](reference/primitives/diagnostics.md) — Phase 18.17 byte-range diagnostic primitive for explicit analyzers, theme-owned squiggles, and future LSP bridges; Tree-sitter highlighting has no diagnostic authority.
 - [Language Intelligence and LSP 3.17 Bridge Contract](reference/primitives/language-intelligence.md) — Phase 18.20 analyzer-neutral intelligence primitives, `language-server` authority, and the LSP 3.17 → Clay mapping contract for Phase 18.21 bridge packages.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, tiered syntax-engine smoke, `smoke-gui`, foreground server/client, GUI status, and local IPC validation.
+- [File Open, Save, and Reload Workflow](development/file-open-save-reload-workflow.md) — selected-file and workspace open, server-first save/reload, dirty-state tracking, conflict recovery menus, multi-document sessions, capability tokens, platform support matrices, and manual smoke steps.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
@@ -65,6 +66,9 @@ The generated documentation registry must read this section as the explicit incl
 - [clientPasteClipboard](reference/clay-js-api/editor/client-paste-clipboard.md) — `clay.editor.clientPasteClipboard`
 - [clientUndo](reference/clay-js-api/editor/client-undo.md) — `clay.editor.clientUndo`
 - [clientRedo](reference/clay-js-api/editor/client-redo.md) — `clay.editor.clientRedo`
+- [clientShowOpenDocuments](reference/clay-js-api/editor/client-show-open-documents.md) — `clay.editor.clientShowOpenDocuments`
+- [clientRequestResync](reference/clay-js-api/editor/client-request-resync.md) — `clay.editor.clientRequestResync`
+- [clientDismissRecovery](reference/clay-js-api/editor/client-dismiss-recovery.md) — `clay.editor.clientDismissRecovery`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `clay.editor.clientMoveCursor`
 - [clientScrollTo](reference/clay-js-api/editor/client-scroll-to.md) — `clay.editor.clientScrollTo`
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `clay.editor.clientSetCursorStyle`

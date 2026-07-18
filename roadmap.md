@@ -21,7 +21,7 @@ The following items consolidate the compromises and further actions from complet
 - **Synchronization recovery:** Phase 5 uses snapshot-based resync that can discard unacknowledged optimistic edits. Richer correction transactions, pending-edit replay, user-visible pending/error reporting, and recovery UX remain future synchronization/product-hardening work.
 - **Leases, locks, and collaboration:** Collaboration is currently a single-writer lease model with read-only observers. Lease transfer/steal/renewal UX, first-class region-lock ownership APIs, persistence, UI, AI/extension lock workflows, and multi-document/multi-client scaling remain future work.
 - **Behavior manifests and modes:** Phase 6 installed one default manifest and whole-manifest replacement. Per-document/per-mode/package-selected manifests, richer language-specific rules such as Markdown list continuation, manifest diffs, hot reload, conflict policy, stale-version recovery, and command side-effect routing remain central to the upcoming mode/package phases.
-- **Server-driven UI:** Phase 12 intentionally started with static Rust-generated SDUI, Phase 13 added JavaScript-generated SDUI, and Phase 15 added deterministic structural SDUI regression/observability coverage. Pixel-buffer/GPU snapshots remain deferred until Masonry/winit offers deterministic CI-friendly offscreen rendering. Public `clay:sdui.queryUiState` observability and user-facing SDUI layout/panel visibility configuration APIs remain deferred until package-owned UI, agent introspection, or workspace panel settings create real requirements.
+- **Server-driven UI:** Phase 12 intentionally started with static Rust-generated SDUI, Phase 13 added JavaScript-generated SDUI, and Phase 15 added deterministic structural SDUI regression/observability coverage. Pixel-buffer/GPU snapshots remain deferred after the Phase 20 Masonry 0.4 TestHarness revisit (`use_cpu: true` harness is not production-GPU-faithful; see `decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`). Public `clay:sdui.queryUiState` observability and user-facing SDUI layout/panel visibility configuration APIs remain deferred until package-owned UI, agent introspection, or workspace panel settings create real requirements.
 - **Runtime and package iteration:** Phase 13 proves server-side JavaScript configuration and SDUI publication, and Phase 17 establishes package loading, mode ownership, deterministic conflict handling, a pnpm-delegated package-manager boundary, server-side package runtime facades, decoration transport, and parse-coordinator handoff foundations. Long-run follow-up remains for provider-facing decoration/parse Clay JS APIs, persistent shared package enable/disable state, live reload semantics, and a Markdown mode proof of concept. Phase 17 deliberately promoted `clay.packages.serverLoadPackage` while keeping decoration/parse provider APIs planned/unavailable until their public op/facade contracts are finalized.
 - **Docs and CI:** API docs/registry/wiki coverage exists, but future phases should add CI for formatting, native all-target tests, Windows MSVC checks, generated registry freshness, package docs, wiki navigation, and user-facing feature coverage. A Markdown/wiki lint command should automate index-link and source-reference checks once documentation volume grows.
 - **Daily editing basics:** Clipboard, undo/redo, IME/composition, themes, accessibility polish, cross-platform UI polish including macOS/Linux native file dialogs, and richer file workflows such as save-after-selected-open, selected-file conflict handling, save-as, watchers, autosave, and conflict resolution remain product-hardening work.
@@ -344,7 +344,7 @@ Completed focus areas:
 
 Carried-forward items:
 
-- Automated visual/layout regression coverage was picked up by Phase 15 as deterministic structural SDUI observability; pixel-buffer/GPU snapshots remain deferred until deterministic offscreen rendering is available.
+- Automated visual/layout regression coverage was picked up by Phase 15 as deterministic structural SDUI observability; pixel-buffer/GPU snapshots remain deferred after the Phase 20 Masonry TestHarness revisit (CPU-only harness, not production-GPU-faithful).
 - SDUI update compression or specialized payload shaping should be revisited only if representative snapshots exceed 4 KiB, simple panel updates exceed 1 KiB, or updates stop being materially smaller than equivalent snapshots.
 - Documented SDUI layout/panel visibility configuration APIs should be introduced only when real user-facing layout or panel settings exist, with the go/no-go decision now assigned to Phase 16/17 package UI work.
 
@@ -429,7 +429,7 @@ Expected outcome:
 
 Carried-forward items:
 
-- **Pixel-buffer / GPU snapshot testing:** Structural `SduiObservableSnapshot` assertions are used instead of pixel-buffer snapshots because Masonry 0.4.0 has no headless render surface. If a future Masonry/winit version adds a headless render target, promote the structural regression tests to pixel-accurate snapshot tests and add a `cargo test` fixture for each shipped SDUI composition. Until then, the structural approach is the approved regression strategy.
+- **Pixel-buffer / GPU snapshot testing:** Structural `SduiObservableSnapshot` assertions remain the hard regression layer. Phase 20 revisited Masonry 0.4 `masonry_testing::TestHarness` / `assert_render_snapshot` and re-deferred pixel/GPU goldens: the harness hardcodes Vello `use_cpu: true`, so it does not exercise Clay's production GPU path, and font/DPI/AA brittleness remains (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`). Promote only when a CI-friendly offscreen target can run the production GPU path (or an explicitly accepted GPU-faithful alternative) with pinned fonts/theme/DPI and a golden update workflow.
 - **`clay:sdui.queryUiState` Clay JS API:** `SduiObservableSnapshot` and `SduiStatusObservation` are `pub(crate)` test infrastructure in Phase 15 and are not exposed as Clay JS APIs. If a future agent-introspection, package-tooling, or help-system phase needs programmatic SDUI state querying, introduce a dedicated `clay:sdui.queryUiState` API with full Markdown docs, a stable registry ID, key binding metadata, custom properties, `docs/index.md` link, and generated registry coverage before exposing the type publicly.
 - **SDUI layout/panel visibility configuration APIs:** These remain deferred until a real user-facing package or workspace panel settings surface exists. When a package or workspace panel setting is introduced, add a Clay JS configuration API with Markdown docs, `user_facing_name`, key bindings, custom properties, `docs/index.md` link, and generated registry entry in the same change.
 
@@ -1181,7 +1181,7 @@ Focus areas:
 - Theme system.
 - Accessibility improvements.
 - Cross-platform UI polish, including platform-native file-open dialogs for macOS/Linux that reuse the Phase 18.8 command execution and Phase 18.12 selected-file grant/file-browser primitives rather than adding broad client filesystem authority.
-- Revisit Phase 15's deferred pixel-buffer/GPU snapshot coverage during UI hardening; if Masonry/winit now supports deterministic offscreen rendering, add pixel-accurate snapshots for shipped editor, SDUI, and mode/package compositions while keeping structural observability tests as fast headless coverage.
+- Revisit Phase 15's deferred pixel-buffer/GPU snapshot coverage during UI hardening; if Masonry/winit now supports deterministic offscreen rendering, add pixel-accurate snapshots for shipped editor, SDUI, and mode/package compositions while keeping structural observability tests as fast headless coverage. **Phase 20 outcome:** revisited Masonry 0.4 `TestHarness` / `assert_render_snapshot` and re-deferred pixel/GPU goldens with evidence — harness is CPU-forced (`use_cpu: true`) and not production-GPU-faithful; structural observability remains the hard gate (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`).
 - Multi-document behavior, including per-document mode selection, per-document status, dirty state, leases, and package manifest versions.
 - Selected-file save/conflict persistence for files opened through the Phase 18.12 single-file grant/file-browser path, including explicit dirty-state/persistence UX before save-after-open becomes user-facing.
 - Dedicated file-open/save/reload workflow documentation if selected-file save, save-as, file watchers, autosave, or conflict-resolution flows outgrow the Phase 9 module-level wiki.
@@ -1191,6 +1191,61 @@ Expected outcome:
 
 - Clay becomes usable for real editing sessions, not only architecture validation.
 - Daily-use features integrate with package modes and server authority instead of bypassing them.
+
+## User Package and Config segregation with defined ~/.config/clay structure
+
+## UI Revamp with modern aesthetic
+- Seggregate default theme packages
+- Modus operandi and Vivendi packages
+- Font setup review with Title hierarchy
+- Further structure definition. Rethink defaults
+
+## Markdown mode preview implementation with capabilities required for personal and work agent
+
+## Agentic AI with Prism
+- Prism upgrade with Web agent for search with Exa, Firecrawl, Brave search
+- Agentic web action
+- Web bridge
+
+## Terminal Emulator package
+
+## Phase 22: AI-Safe Mutation and Region Locks
+
+Support AI-generated edits without corrupting user state.
+
+Focus areas:
+
+- Make region locks first-class.
+- Require AI edit sessions to carry explicit document versions, behavior versions, mode/package primitive versions, ranges, and permission scopes.
+- Add preview/apply/reject flows.
+- Add conflict explanations.
+- Consider transaction logs and richer correction transactions.
+- Separate extension/agent permissions from direct user input.
+- Lock only the needed scope: range, document, behavior, mode, rendering primitive, or workspace.
+
+Expected outcome:
+
+- AI agents can propose or apply changes safely.
+- User edits and agent edits have explicit conflict boundaries.
+- AI-visible tools and mutation capabilities are documented and inspectable.
+
+## Coding agent
+
+## Personal Assistant Agent
+- Extends markdown mode for personal knowledge management
+- To do lists
+- Schedule management
+- Automation for daily tasks
+
+## Work Agent
+- Extends markdown mode for work management
+- Office CLI with GUI
+
+## Clay agent
+- Update wiki for AI agents and access in user device
+- Extension writing methodology and knowledge system for AI agents
+
+## UI update for managing agents
 
 ## Phase 21: Remote, Container, and Multi-Client Hardening
 
@@ -1216,25 +1271,7 @@ Expected outcome:
 - A host client can connect to a server running in a target development environment.
 - Clay can support local, container, and remote editing without changing the client authority model.
 
-## Phase 22: AI-Safe Mutation and Region Locks
 
-Support AI-generated edits without corrupting user state.
-
-Focus areas:
-
-- Make region locks first-class.
-- Require AI edit sessions to carry explicit document versions, behavior versions, mode/package primitive versions, ranges, and permission scopes.
-- Add preview/apply/reject flows.
-- Add conflict explanations.
-- Consider transaction logs and richer correction transactions.
-- Separate extension/agent permissions from direct user input.
-- Lock only the needed scope: range, document, behavior, mode, rendering primitive, or workspace.
-
-Expected outcome:
-
-- AI agents can propose or apply changes safely.
-- User edits and agent edits have explicit conflict boundaries.
-- AI-visible tools and mutation capabilities are documented and inspectable.
 
 ## Phase 23: Ecosystem and Repository Hardening
 

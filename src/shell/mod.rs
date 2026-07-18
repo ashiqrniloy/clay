@@ -16,7 +16,8 @@ pub(crate) use package_ui::{
 };
 pub(crate) use transient_menu::TransientMenuSession;
 pub(crate) use transient_menu::{
-    CompletionMenuAcceptAction, TransientMenuStatus, completion_result_to_menu_session,
+    CompletionMenuAcceptAction, TransientMenuAction, TransientMenuItem, TransientMenuSessionId,
+    TransientMenuStatus, completion_result_to_menu_session,
     language_intelligence_result_to_menu_session,
 };
 

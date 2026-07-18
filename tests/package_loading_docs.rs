@@ -2639,6 +2639,50 @@ fn package_ui_layout_authoring_contract_is_unified_across_package_sources() {
 }
 
 #[test]
+fn phase20_multi_document_and_recovery_package_ui_contract_is_documented() {
+    // Plan 055: Phase 20 multi-document sessions, dirty/save status, and
+    // recovery chrome are Clay-owned. Package authors must see explicit
+    // non-goals so they do not invent tabs, native save dialogs, or
+    // reconnect loops as package UI.
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    let slot_ui_wiki = read("docs/wiki/modules/slot-aware-package-ui.md");
+    let phase20_review =
+        read("docs/wiki/modules/phase20-daily-editing-product-hardening-primitive-review.md");
+
+    for phrase in [
+        "Phase 20 authoring contract: multi-document sessions, dirty/save status, and recovery chrome",
+        "Clay-owned",
+        "DocumentSessionStore",
+        "clientShowOpenDocuments",
+        "clientRequestResync",
+        "clientDismissRecovery",
+        "serverListDocuments",
+        "Dirty/save chrome",
+        "TransientMenuSession",
+        "package paint-path requirements",
+        "clipboard-contents APIs",
+        "arbitrary file writes",
+        "direct native file/save dialogs",
+        "Broader package/config/AI authority over those surfaces remains deferred",
+        "it does not own tabs, native save dialogs, or reconnect/resync loops",
+    ] {
+        assert!(
+            package_guide.contains(phrase),
+            "creating-packages.md must document the Phase 20 multi-document/recovery package UI contract with `{phrase}`"
+        );
+    }
+
+    assert!(
+        slot_ui_wiki.contains("Phase 20 multi-document / dirty-save / recovery chrome"),
+        "slot-aware-package-ui wiki must cross-link the Phase 20 package UI contract"
+    );
+    assert!(
+        phase20_review.contains("Phase 20 multi-document / dirty-save / recovery chrome contract"),
+        "Phase 20 primitive review must link the package authoring contract"
+    );
+}
+
+#[test]
 fn phase18_11_completion_provider_authoring_contract_documented_in_package_guide() {
     let package_guide = read("docs/reference/packages/creating-packages.md");
     let package_security = read("docs/reference/primitives/package-security.md");

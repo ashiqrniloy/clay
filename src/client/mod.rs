@@ -97,6 +97,10 @@ pub struct ClientSyncSnapshot {
 
 #[derive(Debug)]
 struct ClientSyncState {
+    /// Document currently owning live optimistic version tracking. Acks/rejects
+    /// for other document ids are ignored so backgrounded multi-doc sessions
+    /// cannot corrupt the active document's base version.
+    document_id: Option<DocumentId>,
     confirmed_version: DocumentVersion,
     optimistic_version: DocumentVersion,
     pending: VecDeque<PendingEdit>,
@@ -105,7 +109,12 @@ struct ClientSyncState {
 
 impl ClientSyncState {
     fn new(confirmed_version: DocumentVersion) -> Self {
+        Self::for_document(None, confirmed_version)
+    }
+
+    fn for_document(document_id: Option<DocumentId>, confirmed_version: DocumentVersion) -> Self {
         Self {
+            document_id,
             confirmed_version,
             optimistic_version: confirmed_version,
             pending: VecDeque::new(),
@@ -144,7 +153,15 @@ impl ClientSyncState {
         }
     }
 
-    fn acknowledge(&mut self, confirmed_version: DocumentVersion, transaction_id: TransactionId) {
+    fn acknowledge(
+        &mut self,
+        document_id: DocumentId,
+        confirmed_version: DocumentVersion,
+        transaction_id: TransactionId,
+    ) {
+        if self.document_id.is_some() && self.document_id != Some(document_id) {
+            return;
+        }
         self.confirmed_version = confirmed_version;
         if let Some(position) = self
             .pending
@@ -158,7 +175,10 @@ impl ClientSyncState {
         }
     }
 
-    fn reject(&mut self, transaction_id: TransactionId) {
+    fn reject(&mut self, document_id: DocumentId, transaction_id: TransactionId) {
+        if self.document_id.is_some() && self.document_id != Some(document_id) {
+            return;
+        }
         if let Some(position) = self
             .pending
             .iter()
@@ -173,6 +193,7 @@ impl ClientSyncState {
     }
 
     fn apply_resync_snapshot(&mut self, snapshot: ClientResyncSnapshot) {
+        self.document_id = Some(snapshot.document_id);
         self.confirmed_version = snapshot.version;
         self.optimistic_version = snapshot.version;
         self.pending.clear();
@@ -408,6 +429,47 @@ impl ClientEditQueue {
             })
     }
 
+    /// Request a server-first save for an open document. Never blocks paint.
+    pub(crate) fn enqueue_save_document(
+        &self,
+        document_id: DocumentId,
+        known_version: DocumentVersion,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::SaveDocument {
+            client_id: self.client_id,
+            document_id,
+            known_version,
+        })
+    }
+
+    /// Request a server-first reload. `force` discards dirty server text.
+    pub(crate) fn enqueue_reload_document(
+        &self,
+        document_id: DocumentId,
+        known_version: DocumentVersion,
+        force: bool,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::ReloadDocument {
+            client_id: self.client_id,
+            document_id,
+            known_version,
+            force,
+        })
+    }
+
+    /// Request a canonical document resync snapshot. Never blocks paint.
+    pub(crate) fn enqueue_request_resync(
+        &self,
+        document_id: DocumentId,
+        known_version: DocumentVersion,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::RequestResync {
+            document_id,
+            client_id: self.client_id,
+            known_version,
+        })
+    }
+
     fn take_selected_path_capability(&self) -> String {
         // Take the pending server-issued capability token (single-use). If none
         // is available yet, send an empty capability; the server rejects it
@@ -435,6 +497,19 @@ impl ClientEditQueue {
             .snapshot()
     }
 
+    #[cfg(test)]
+    pub(crate) fn acknowledge_for_test(
+        &self,
+        document_id: DocumentId,
+        confirmed_version: DocumentVersion,
+        transaction_id: TransactionId,
+    ) {
+        self.sync_state
+            .lock()
+            .expect("client sync state poisoned")
+            .acknowledge(document_id, confirmed_version, transaction_id);
+    }
+
     #[doc(hidden)]
     pub fn with_authority(mut self, client_id: ClientId, access: &DocumentAccess) -> Self {
         self.client_id = client_id;
@@ -451,12 +526,31 @@ impl ClientEditQueue {
     #[doc(hidden)]
     pub fn update_opened_document_authority(
         &mut self,
+        document_id: DocumentId,
         access: &DocumentAccess,
         confirmed_version: DocumentVersion,
     ) {
         self.lease_id = access.lease_id();
         *self.sync_state.lock().expect("client sync state poisoned") =
-            ClientSyncState::new(confirmed_version);
+            ClientSyncState::for_document(Some(document_id), confirmed_version);
+    }
+
+    pub fn install_document_sync_state(
+        &mut self,
+        document_id: DocumentId,
+        access: &DocumentAccess,
+        confirmed_version: DocumentVersion,
+        pending: Vec<PendingEdit>,
+    ) {
+        self.lease_id = access.lease_id();
+        let mut state = ClientSyncState::for_document(Some(document_id), confirmed_version);
+        for edit in pending {
+            state.pending.push_back(edit);
+        }
+        if let Some(last) = state.pending.back() {
+            state.optimistic_version = last.base_version.saturating_add(1);
+        }
+        *self.sync_state.lock().expect("client sync state poisoned") = state;
     }
 }
 
@@ -493,6 +587,15 @@ pub enum ClientConnectionEvent {
     RuntimeStateSnapshot(Box<crate::protocol::RuntimeStateSnapshot>),
     ResyncSnapshot(ClientResyncSnapshot),
     DocumentOpened {
+        metadata: DocumentMetadata,
+        text: String,
+    },
+    DocumentSaved {
+        document_id: DocumentId,
+        version: DocumentVersion,
+        dirty: bool,
+    },
+    DocumentReloaded {
         metadata: DocumentMetadata,
         text: String,
     },
@@ -856,7 +959,7 @@ async fn run_connection<S>(
                             let mut state = sync_state
                                 .lock()
                                 .expect("client sync state poisoned");
-                            state.acknowledge(confirmed_version, transaction_id);
+                            state.acknowledge(document_id, confirmed_version, transaction_id);
                             state.pending.len()
                         };
                         recorder.record_gauge("client.edit_queue.pending_depth", pending_depth as u64);
@@ -867,7 +970,7 @@ async fn run_connection<S>(
                             let mut state = sync_state
                                 .lock()
                                 .expect("client sync state poisoned");
-                            state.reject(transaction_id);
+                            state.reject(document_id, transaction_id);
                             state.confirmed_version
                         };
                         let should_resync = rejection_requests_resync(&reason);
@@ -893,17 +996,48 @@ async fn run_connection<S>(
                         let _ = events.send(ClientConnectionEvent::ResyncSnapshot(snapshot)).await;
                     }
                     Ok(ServerMessage::DocumentOpened { metadata, text }) => {
-                        sync_state
-                            .lock()
-                            .expect("client sync state poisoned")
-                            .apply_resync_snapshot(ClientResyncSnapshot {
-                                document_id: metadata.document_id,
-                                version: metadata.version,
-                                text: text.clone(),
-                                access: metadata.access.clone(),
-                                lease_id: metadata.lease_id,
-                            });
+                        // Multi-document: do not wipe live sync state here. The
+                        // editor widget retains the prior session and then
+                        // installs authority for the newly active document.
                         let _ = events.send(ClientConnectionEvent::DocumentOpened { metadata, text }).await;
+                    }
+                    Ok(ServerMessage::DocumentSaved {
+                        document_id,
+                        version,
+                        dirty,
+                    }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::DocumentSaved {
+                                document_id,
+                                version,
+                                dirty,
+                            })
+                            .await;
+                    }
+                    Ok(ServerMessage::DocumentReloaded { metadata, text }) => {
+                        // Only rewrite live sync state when the reloaded document
+                        // is the currently installed owner. Background sessions
+                        // are updated by the editor widget without touching the
+                        // active queue.
+                        {
+                            let mut state = sync_state
+                                .lock()
+                                .expect("client sync state poisoned");
+                            if state.document_id.is_none()
+                                || state.document_id == Some(metadata.document_id)
+                            {
+                                state.apply_resync_snapshot(ClientResyncSnapshot {
+                                    document_id: metadata.document_id,
+                                    version: metadata.version,
+                                    text: text.clone(),
+                                    access: metadata.access.clone(),
+                                    lease_id: metadata.lease_id,
+                                });
+                            }
+                        }
+                        let _ = events
+                            .send(ClientConnectionEvent::DocumentReloaded { metadata, text })
+                            .await;
                     }
                     Ok(ServerMessage::FileOperationFailed { code, message, workspace_root_id, document_id }) => {
                         let _ = events.send(ClientConnectionEvent::FileOperationFailed { code, message, workspace_root_id, document_id }).await;
@@ -1382,7 +1516,11 @@ mod tests {
         let (mut editor_queue, _receiver) = ClientEditQueue::bounded(1);
         let connection_queue = editor_queue.clone();
 
-        editor_queue.update_opened_document_authority(&DocumentAccess::Editable { lease_id: 8 }, 5);
+        editor_queue.update_opened_document_authority(
+            42,
+            &DocumentAccess::Editable { lease_id: 8 },
+            5,
+        );
 
         assert_eq!(connection_queue.sync_snapshot().confirmed_version, 5);
         assert_eq!(connection_queue.sync_snapshot().optimistic_version, 5);
@@ -2243,7 +2381,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_applies_document_opened_snapshot_from_selected_file() {
+    async fn client_forwards_document_opened_without_replacing_live_sync_state() {
         let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let metadata = crate::protocol::DocumentMetadata {
@@ -2326,9 +2464,13 @@ mod tests {
                 text: "# opened\n".to_string(),
             }
         );
+        // Multi-document: connection layer forwards DocumentOpened only. The
+        // editor widget retains the prior session and installs authority for
+        // the newly active document, so live sync stays on the initial doc
+        // until that install runs.
         let snapshot = session.edit_queue.sync_snapshot();
-        assert_eq!(snapshot.confirmed_version, 5);
-        assert_eq!(snapshot.optimistic_version, 5);
+        assert_eq!(snapshot.confirmed_version, 3);
+        assert_eq!(snapshot.optimistic_version, 3);
         assert!(snapshot.pending.is_empty());
         server_task.await.unwrap();
     }

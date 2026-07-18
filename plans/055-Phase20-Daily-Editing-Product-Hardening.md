@@ -385,7 +385,8 @@
     - Selected path still flows through existing `ClientMessage::OpenSelectedFile` / capability grant path (no sibling-directory authority).
     - Docs/smoke/wiki/API/platform matrix updated; registry regenerated; `cargo test file_dialog`, focused doc/smoke/inventory suites green.
 
-- [ ] Revisit Masonry pixel-buffer snapshot coverage and add or explicitly re-defer it
+- [x] Revisit Masonry pixel-buffer snapshot coverage and add or explicitly re-defer it
+  - Completed 2026-07-18: Investigated Masonry 0.4 `TestHarness` / `assert_render_snapshot` against Clay's GPU path. Evidence: harness hardcodes Vello `use_cpu: true` while production `masonry_winit` uses GPU (`use_cpu: false`); newer Vello/Parley/wgpu blocked on Masonry 0.4.0 being latest. User approved option 2 (re-defer). Decision: `decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`. Docs updated: `docs/development/ui-observability.md`, roadmap Phase 15/20 notes, Phase 20 primitive review gap 8, masonry-editor wiki. No `masonry_testing` dependency or golden PNGs landed; structural observability remains the hard CI gate.
   - Acceptance Criteria:
     - Functional: Investigate Masonry 0.4 `TestHarness` / `assert_render_snapshot` against Clay's `EditorWidget`/shell/SDUI compositions; either land a minimal deterministic snapshot suite for shipped editor/SDUI/mode compositions with fixed theme/typography/DPI inputs, or record evidence that Clay's custom Vello/Parley editor path still cannot use the harness reliably in CI and keep structural observability as the hard gate.
     - Performance: Snapshot tests remain opt-in or clearly separated from the fastest lib test path if expensive; structural tests stay the default fast layer.
@@ -419,7 +420,8 @@
     - Structural observability tests remain passing regardless.
     - `cargo test --test ui_snapshots` (if created) and `cargo test -p clay --lib masonry_sdui`
 
-- [ ] Implement multi-document session behavior with per-document mode, status, dirty state, leases, and manifest versions
+- [x] Implement multi-document session behavior with per-document mode, status, dirty state, leases, and manifest versions
+  - Completed 2026-07-18: Added `DocumentSessionStore` (`src/editor/document_session.rs`, bound 64) on `EditorWidget`; `DocumentOpened` stashes prior sessions instead of replace-on-open; `activate_document` restores local shadow/caret/history/dirty chrome; `clientShowOpenDocuments` opens a transient menu with dirty/active markers; connection sync acks are document-scoped so backgrounded sessions cannot corrupt the active base version. Tests: retain/switch, history restore, menu listing, session eviction. Docs/JS facade/inventory/registry updated.
   - Acceptance Criteria:
     - Functional: Opening a second file preserves the previous document session; users can switch active documents; each document retains mode selection, status, dirty state, lease/access, behavior/manifest generation metadata, caret/viewport, and pending-edit state according to the approved decision; server open-document registry remains authoritative for identity/leases; duplicate opens still follow read-only observer rules.
     - Performance: Document switch is local session activation plus any required server focus/status fetch; no full-text re-download when client already has the shadow; ordinary typing stays per-active-document ordered.
@@ -458,7 +460,8 @@
     - `cargo test -p clay --lib` multi-document session tests
     - Protocol/workspace list tests
 
-- [ ] Ship selected-file save/conflict persistence UX before save-after-open is user-facing
+- [x] Ship selected-file save/conflict persistence UX before save-after-open is user-facing
+  - Completed 2026-07-18: Forwarded `DocumentSaved`/`DocumentReloaded` into `ClientConnectionEvent`; active-document dirty chrome clears on clean save and reloads; bound `Ctrl+S` (`clay.documents.serverSaveDocument`) enqueues `ClientMessage::SaveDocument` (not a dead CommandIntent); `StaleFileMetadata`/`DirtyDocument` keep dirty text and open recovery `TransientMenuSession` (reload/keep/compare-later or save-first). Fixture + smoke docs updated; no client filesystem writes. Tests: dirty clear on save, stale/dirty conflict menus, reload text replace, save/reload protocol enqueue; workspace stale/dirty server tests remain green.
   - Acceptance Criteria:
     - Functional: Dirty state is visible in status/accessibility after accepted edits on selected-file and workspace documents; default save chord routes to `clay.documents.serverSaveDocument` (or a Clay-owned built-in wrapper) for the active document; stale-metadata conflicts preserve dirty text and present an explicit user choice (reload/overwrite-cancel/compare later) rather than silent overwrite; reload-of-dirty is blocked unless forced through the same recovery UX; save failures keep dirty true and show sanitized diagnostics.
     - Performance: Save/reload remain asynchronous server file IO; GUI stays responsive; no save work on the paint path.
@@ -493,7 +496,8 @@
     - Selected-file grant documents save through the same path as workspace-root documents.
     - `cargo test` workspace save/conflict + editor status integration tests
 
-- [ ] Add dedicated file-open/save/reload workflow documentation
+- [x] Add dedicated file-open/save/reload workflow documentation
+  - Completed 2026-07-18: `docs/development/file-open-save-reload-workflow.md` covers selected-file and workspace open, server-first save/reload, dirty-state lifecycle, stale-save and dirty-reload conflict recovery menus, capability tokens, Windows/Linux/macOS/other platform matrices, multi-document sessions, authority boundaries, and manual smoke steps. Linked from `docs/index.md`, `docs/development/launch-and-gui-smoke.md`, and `docs/wiki/modules/server-file-workspace.md`. All examples use Clay JS APIs and command IDs, not raw ops/protocol. Phase 20 non-goals explicitly stated. Smoke doc steps reviewed against implemented commands.
   - Acceptance Criteria:
     - Functional: Publish a dedicated workflow doc covering selected-file open, workspace open, save, save-as (if implemented), reload, dirty state, conflict resolution, cancellation, unsupported dialog platforms, and capability-token behavior; link it from `docs/index.md` and development smoke docs; update Phase 9 module wiki rather than overloading it if the flow has outgrown that page.
     - Performance: Documentation only; no runtime cost.
@@ -526,7 +530,8 @@
     - Doc-link/registry or development-doc link check if such a gate exists; otherwise manual index-link verification.
     - Smoke doc steps reviewed against implemented commands.
 
-- [ ] Add user-visible pending-edit, error, reconnect, and resync recovery UX
+- [x] Add user-visible pending-edit, error, reconnect, and resync recovery UX
+  - Completed 2026-07-18: Pending outbound depth visible via `SduiStatusObservation.pending_edit_count`; `EditRejected`/`ServerError`/`Disconnected`/`ConnectionError` update sanitized status/accessibility (not stderr-only); auto-resync classes keep connection-task `RequestResync` while showing "requesting resync"; actionable invalid-range/document + server errors open Resync/Dismiss menus; disconnect shows reconnect guidance + Dismiss without host-path leakage; `clay.editor.clientRequestResync` / `clientDismissRecovery` registered as client UI commands with JS facade/docs/inventory. Tests: pending count up/down, disconnect recovery, stale auto-resync status, actionable InvalidRange menu + explicit resync enqueue + resync clear.
   - Acceptance Criteria:
     - Functional: Pending outbound edits, edit rejections, disconnects, and resync requirements are visible in status/accessibility and, when user action is required, through explicit recovery prompts/commands (request resync, reopen document, dismiss); reconnect/resync no longer relies only on stderr; recovery actions reuse existing `RequestResync` / open / reload primitives.
     - Performance: Status updates are event-driven on the GUI thread; recovery commands are explicit and non-blocking for paint.
@@ -558,7 +563,8 @@
     - Actionable rejection surfaces recovery affordance without panicking.
     - `cargo test -p clay --lib masonry_editor`
 
-- [ ] Update the package UI/layout authoring contract for multi-document and recovery surfaces
+- [x] Update the package UI/layout authoring contract for multi-document and recovery surfaces
+  - Completed 2026-07-18: Added Phase 20 authoring contract to `docs/reference/packages/creating-packages.md` covering Clay-owned multi-document switcher (`DocumentSessionStore` / `clientShowOpenDocuments`), dirty/save status chrome, conflict + pending-edit/disconnect/resync recovery menus, and explicit package non-goals (no tabs, native save dialogs, clipboard-contents APIs, reconnect loops, paint-path session scans). Checklist/anti-patterns/UI-test guidance updated; cross-linked from slot-aware package UI wiki, Phase 20 primitive review, masonry-editor wiki, and package-ui-layout skill reference. Doc test `phase20_multi_document_and_recovery_package_ui_contract_is_documented` pins the contract.
   - Acceptance Criteria:
     - Functional: `docs/reference/packages/creating-packages.md` documents how packages interact (and do not interact) with multi-document sessions, dirty/save status, and recovery chrome; Clay remains owner of shell slots, document switcher, and native widgets; packages continue to contribute inert UI only.
     - Performance: No package paint-path requirements added.
@@ -588,7 +594,8 @@
     - Package docs/link tests if present (`tests/package_loading_docs.rs` or equivalent) still pass.
     - Manual review that the new section is linked/discoverable.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
+  - Completed 2026-07-18: Systematic audit of all 12 Phase 20 command/API IDs (`clay.editor.client{CopySelection,CutSelection,PasteClipboard,Undo,Redo,ShowOpenDocuments,RequestResync,DismissRecovery}`, `clay.documents.{serverSaveDocument,serverReloadDocument,clientOpenFileDialog}`, `clay.workspace.clientOpenFolderDialog`) confirmed complete against the full closed-allowlist registration pipeline: JS facades in `runtime/js/{editor,documents,workspace}.ts`, Markdown docs under `docs/reference/clay-js-api/`, `docs/index.md` links, `api-inventory.toml` entries, `clay_js_doc_registry.rs` entries, `clay_js_facade_layout.rs` entries, `is_runtime_bindable_command` + `command_routing_policy` in `keybindings.rs`, `ClientUiCommandResult` variants + binary routing tests in `main.rs`, `CLAY_FACADE_*` exports in `js_runtime.rs`, registry regenerated via `update-doc-registry`. Minor hygiene: `invert_edit_operation` tightened from `pub` to `pub(crate)`. All verification suites (facade layout 4, doc registry 34, primitives_docs 123, package_loading_docs 52, masonry_editor 65) green; clippy `-D warnings` clean.
   - Acceptance Criteria:
     - Functional: Every new/changed public programmatic capability from this plan (cut/paste command IDs, undo/redo command IDs, document activate/list helpers if public, save/conflict-related configuration/commands, file-dialog platform notes) has a Clay JS facade, Markdown doc, master-index link, generated registry entry, and lookup tags; server-side Rust functions that should not be public are `pub(crate)`/private.
     - Performance: API wrappers add no hot-path work; command-ID helpers remain synchronous and side-effect free where that is the existing pattern.
@@ -625,7 +632,8 @@
     - Doc registry freshness / Clay JS API coverage tests used by the repo
     - `cargo run --bin update-doc-registry` when docs change
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
+  - Completed 2026-07-18: Phase 20 configuration audit chose fixed bounded defaults + existing `bindKey` surfaces; no new `clay:configuration` APIs. Added dedicated `Phase 20 daily editing product hardening configuration review` to `docs/reference/clay-js-api/configuration.md` covering cut/paste/undo/redo/save/open/reload/open-documents/resync/dismiss bindings, compiled ceilings (`EDIT_HISTORY_MAX_DEPTH` 256, `EDIT_HISTORY_MAX_ENTRY_BYTES` 64 KiB, `CLIENT_DOCUMENT_SESSION_MAX` 64, a11y/contrast budgets), rejected hidden keys, and deferred package/config/AI authority. Restored Phase 18.12 review to file-browser-only scope with cross-link. Updated `bind-key.md` Phase 20 note + `Ctrl+S` examples, `configuration-runtime` wiki, and primitive-review link. Completed incomplete inventory rows for `clientShowOpenDocuments` / `clientRequestResync` / `clientDismissRecovery` (empty `custom_properties`, full required fields) and aligned their Markdown body sections. Coverage: `phase20_daily_editing_configuration_uses_existing_apis_and_compiled_ceilings`; registry regenerated; clay_js_api_inventory 58, clay_js_doc_registry 34, package_loading_docs/primitives Phase 20 needles green.
   - Acceptance Criteria:
     - Functional: Any behavior-changing settings introduced by Phase 20 (for example undo stack depth ceilings, default save bindings, recovery prompt toggles if configurable) are documented Clay JS APIs usable from `~/.config/clay/init.js`, not free-floating keys; key bindings for cut/paste/undo/redo/save/open are discoverable.
     - Performance: Configuration evaluation remains startup/reload-time work.
@@ -659,7 +667,8 @@
     - Configuration/API documentation coverage tests.
     - Guard tests rejecting undocumented behavior-changing keys if new settings are added.
 
-- [ ] Verify end-to-end daily-editing behavior on Linux and record platform matrices
+- [x] Verify end-to-end daily-editing behavior on Linux and record platform matrices
+  - Completed 2026-07-18: Linux-primary gates green (`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`). Fixed stale Phase 20 hot-path needle (`finish_edit_with_operation` → `apply_and_record_local_edit`) and extended paint-path guards to forbid clipboard/save/dialog work. Recorded Phase 20 platform capability + shortcut matrices (Linux/Windows/macOS/Other) and Linux verification evidence in `docs/development/launch-and-gui-smoke.md`; expanded `docs/development/file-open-save-reload-workflow.md` platform matrix with clipboard/IME/recovery rows. Aligned `file-browser-workflow` fixture with cut/paste/open-documents binds. Live `smoke-gui --config-fixture file-browser-workflow` boot observed `Ime::Enabled`/`Preedit`/`Disabled` and `EditAck` sync. Coverage: `phase20_daily_editing_platform_matrix_and_linux_verification_are_documented`; Windows/macOS remain documented checklists (not agent-executed this run).
   - Acceptance Criteria:
     - Functional: Automated tests cover clipboard cut/paste, undo/redo, IME unit paths, multi-document retain/switch, dirty/save/conflict, and recovery status; manual smoke covers Linux file-open dialog, IME composition with a real input method where available, save conflict, and multi-document switching; Windows/macOS matrices are documented for dialogs/shortcuts even if agent-run validation is Linux-primary.
     - Performance: Hot-path tests still assert no clipboard/save/JS work in paint; existing Phase 14/15 budgets remain non-regressed at advisory level.
@@ -691,7 +700,8 @@
     - Full Linux automated gate commands above.
     - Manual checklist execution notes captured in smoke docs or plan evidence.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
+  - Completed 2026-07-18: Verified all Phase 20 wiki pages are linked from index and have current content. Created dedicated `docs/wiki/modules/multi-document-sessions.md` (DocumentSessionStore, stash/switch, sync acks, eviction). Added undo/redo inverse-edit section to masonry-editor.md (EditHistory, bounded 256-entry stack, 64 KiB entry cap). Confirmed coverage: masonry-editor (clipboard, undo/redo, IME, multi-doc, save/conflict, pending-edit/recovery, pixel-snapshot stance), client-file-dialog (Linux/macOS/Windows), server-file-workspace (save/reload/conflict/atomic-save/capability-tokens), phase20 primitive review, editor-theme-registry (contrast verification), configuration-runtime (Phase 20 compiled budgets), slot-aware-package-ui (Phase 20 non-goals), end-to-end-file-browser-workflow (Phase 20 matrix), client-server-edit-ack flow (recovery diagnostics, resync clearing). All 17 manual_smoke_docs tests pass; all gates green.
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
     - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
@@ -725,10 +735,13 @@
 - Theme system delivery is intentionally out of scope for new architecture work because roadmap Phase 18.15 already owns it; Phase 20 only verifies and applies accessibility/theme polish.
 - Multi-client scaling, lease transfer/steal UX, remote/container transport, and hard CI latency threshold promotion remain Phase 21+ work even if multi-document local sessions land here.
 - Autosave, generic file watchers, and full save-as flows are included only if they fit the selected-file persistence UX without outgrowing this phase; otherwise they are documented as follow-ups in the dedicated workflow doc and Further Actions.
-- Pixel snapshots may remain deferred after the required Masonry harness revisit if Clay's custom editor path cannot produce deterministic CI goldens; structural observability stays mandatory in that case.
+- Pixel snapshots are re-deferred after the Masonry harness revisit: `TestHarness` is CPU-forced (`use_cpu: true`) and not production-GPU-faithful; structural observability stays mandatory (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`).
 - Package/configuration/AI authority over clipboard, filesystem, shell, network, and raw ops is intentionally not finalized in Phase 20; a later decision must establish it. Phase 20 ships Clay-owned user commands without inventing those surfaces.
 
 ## Further Actions
+
+- Promote pixel/GPU snapshots only when a CI offscreen target can run the production GPU path (`use_cpu: false`) or an explicitly accepted GPU-faithful alternative, with pinned fonts/theme/DPI and golden workflow (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`).
+- Adopt newer Vello/Parley/wgpu for GPU gains only after a Masonry release bumps transitive deps (blocked on Masonry 0.4.0 today).
 
 - Establish package/configuration/AI authority for clipboard, filesystem, shell, network, and raw ops in a dedicated later decision before exposing those surfaces.
 - After remaining Phase 20 tasks complete, record additional improvements, rationale, and priority here.

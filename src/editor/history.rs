@@ -119,7 +119,7 @@ impl EditHistory {
 }
 
 /// Build the inverse of a forward operation using the pre-edit prior text.
-pub fn invert_edit_operation(forward: &EditOperation, prior_text: &str) -> EditOperation {
+pub(crate) fn invert_edit_operation(forward: &EditOperation, prior_text: &str) -> EditOperation {
     match forward {
         EditOperation::Insert { byte_offset, text } => EditOperation::Delete {
             start: *byte_offset,

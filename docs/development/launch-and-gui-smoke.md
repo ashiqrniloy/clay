@@ -4,6 +4,8 @@ Use these command-first launch paths to validate Clay's current GUI and client/s
 
 ## Quick Commands
 
+For detailed platform matrices, capability tokens, conflict recovery menus, and save/reload internals, see [File Open, Save, and Reload Workflow](file-open-save-reload-workflow.md).
+
 From the repository root:
 
 ```bash
@@ -24,7 +26,8 @@ cargo run -- smoke-gui --config-fixture markdown-mode
 cargo run -- smoke-gui --config-fixture windows-markdown-open
 
 # End-to-end file browser workflow smoke: loads Rust/TypeScript/JavaScript packages
-# and binds folder picker, fuzzy open, browser toggle, and copy-selection commands.
+# and binds folder picker, fuzzy open, browser toggle, save, copy/cut/paste, and
+# open-documents switcher commands.
 cargo run -- smoke-gui --config-fixture file-browser-workflow
 
 # Foreground default server, useful for watching server diagnostics.
@@ -59,7 +62,7 @@ Markdown end-user baseline invariants:
 - **Editor-only Markdown main slot.** The Markdown package occupies the mandatory `main` slot of `PaneSlotLayout` and does not publish a package-owned default `PanelContribution` (side panel, preview panel, or status panel) on load. This invariant is about package-published Markdown panels only; it does not forbid the Clay-owned Workspace file browser used by the app-level file-browser workflow.
 - **Fixed panels resize the editor.** Any accepted visible fixed panel in `left`, `right`, `top`, or `bottom` consumes `PaneSlotLayout` geometry and reduces/clips the editor `main` rect; transient overlays may cover content by design and do not consume fixed slot geometry.
 - **Optional preview only on demand.** An optional Markdown preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`; it appears only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
-- **Selected-file open is edit-only.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Saving a file picked through the dialog is out of scope until a later phase; close or discard the smoke document after editing.
+- **Selected-file open supports save/conflict UX.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Dirty edits surface in status/accessibility; bind `Ctrl+S` to `clay.documents.serverSaveDocument` for server-first save. Stale on-disk metadata and dirty-reload conflicts open a recovery menu (reload / keep edits / compare later) instead of silently overwriting.
 
 Timing and authority boundaries for the baseline:
 
@@ -73,8 +76,10 @@ The GUI status line and accessibility label should make the connection state vis
 - `Connected — Editable`: the client has the editable document lease.
 - `Connected — Read-only Observer`: the client is attached but cannot edit because another client owns the editable lease.
 - `Local Fallback`: no server was reachable for `cargo run -- client`, so the GUI opened with local-only state.
-- `Disconnected`: the connection was lost after a connected session.
+- `Disconnected`: the connection was lost after a connected session. Status/accessibility include reconnect guidance (restart Clay); a Dismiss recovery menu is available. Raw transport strings/host paths are not shown.
 - Version text such as `v12`: the latest known server-confirmed document version after a snapshot, resync, or edit acknowledgement.
+- `Pending edits: N`: outbound optimistic edits not yet acknowledged; increments on local enqueue and decrements after ack/rejection/resync.
+- `Recovery: …`: sanitized recovery summary from an active recovery menu or actionable sync/file diagnostic (edit rejection, disconnect, save conflict).
 - `Runtime clay.runtime.<code>: <safe message>`: server-side JavaScript configuration/runtime diagnostics reached the GUI status path. The message should be actionable but must not include absolute local paths, source snippets, secrets, tokens, or environment dumps.
 
 Typing remains local and optimistic. Editor input must not wait for IPC acknowledgements, server work, runtime diagnostics, or full-document synchronization; acknowledgements, resyncs, and runtime diagnostic status updates arrive asynchronously and update status when available.
@@ -314,7 +319,12 @@ The fixture at `tests/fixtures/configuration/file-browser-workflow/init.js` is e
 
 ```js
 import { bindKey } from "clay:keybindings";
-import { clientCopySelection, clientCutSelection, clientPasteClipboard } from "clay:editor";
+import {
+  clientCopySelection,
+  clientCutSelection,
+  clientPasteClipboard,
+  clientShowOpenDocuments,
+} from "clay:editor";
 import { loadPackage } from "clay:packages";
 import { clientOpenFolderDialog } from "clay:workspace";
 
@@ -325,9 +335,11 @@ await loadPackage("@clay/javascript");
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
 bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
+bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 ```
 
 #### Product `cargo run` configuration path
@@ -345,7 +357,9 @@ This is the regression-checked product path on Linux/GNOME. The shifted-characte
 - `Ctrl+Shift+O` opens the native folder picker (shifted-character case-insensitive routing).
 - Selecting a folder adds it as a server-validated workspace root and refreshes the file browser.
 - Clicking nested files such as `src/main.rs` (`.rs`), `main.ts` (`.ts`), `main.js` (`.js`), and `.md` opens them through the generic open-document path; the row identity and action source now match for nested paths.
-- Opening a second file replaces the editor buffer with the new file's snapshot (second-file replacement).
+- Opening a second file retains the prior document session; use `clay.editor.clientShowOpenDocuments` to switch with dirty/active markers.
+- Dirty edits show a `Dirty` marker in status/accessibility; configured `Ctrl+S` (`clay.documents.serverSaveDocument`) saves through server file IO and clears dirty on success.
+- Stale on-disk save conflicts and dirty-reload conflicts open a recovery menu (reload / keep edits / compare later or save first) rather than silently overwriting.
 - The file browser keeps working after opening a Markdown file and after any `clay.parse.open_activation_timeout` diagnostic (Clay-owned workspace browser state is no longer replaced by open-time runtime SDUI).
 - The file browser scrolls when there are many rows and the scroll direction matches wheel/trackpad intent (positive deltas reveal later rows; no inversion).
 - The editor shows a slim vertical scrollbar thumb for long files, scrolls through them without snapping back to the caret after each wheel event, and stays non-overlapping with the file browser.
@@ -353,7 +367,7 @@ This is the regression-checked product path on Linux/GNOME. The shifted-characte
 - Selecting text and pressing `Ctrl+C` (or `Ctrl+Shift+C`) copies only the selected UTF-8 text to the OS clipboard; a collapsed selection is a no-op.
 - Copy selection is write-only for the current native editor selection; cut (`Ctrl+X` / `Ctrl+Shift+X`) and paste (`Ctrl+V` / `Ctrl+Shift+V`) are separate explicit user commands.
 
-Typing, paint, layout, pointer, and scroll stay client-local/non-blocking throughout; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling. Security and authority are unchanged from the fixture path: selected-folder grants are server-validated, file opens are root-relative or selected-file validated, and clipboard copy is write-only. Cut and paste are additional explicit user-mediated client commands.
+Typing, paint, layout, pointer, and scroll stay client-local/non-blocking throughout; directory listing, folder dialogs, file opens, language parsing/decorations, clipboard writes, and save/reload IO happen only after explicit user action or background scheduling. Security and authority are unchanged from the fixture path: selected-folder grants are server-validated, file opens are root-relative or selected-file validated, and clipboard copy is write-only. Cut and paste are additional explicit user-mediated client commands.
 
 Manual Linux verification:
 
@@ -365,11 +379,75 @@ Manual Linux verification:
 6. Click directory rows such as `workspace/` or `src/` and confirm the browser navigates with `clay.workspace.openDirectory`, shows a `../` parent row for non-root directories, and stays inside the selected workspace root.
 7. Open `tests/fixtures/configuration/file-browser-workflow/workspace/main.rs`, `main.ts`, and `main.js` (or equivalent files under the selected folder). The file opens through the generic open-document path, activates the Rust/TypeScript/JavaScript language package when matched, and decorations/status/completions may arrive asynchronously. Confirm visible syntax highlighting appears as distinct token-family background tints.
 8. Select text in an opened file and press the native copy shortcut (`Ctrl+C` on Linux/Windows, `Cmd+C` on macOS) or the configured `Ctrl+Shift+C` route. Confirm only the selected UTF-8 text is copied to the OS clipboard; a collapsed selection is a no-op. Then verify cut (`Ctrl+X`) deletes after copying and paste (`Ctrl+V`) inserts or replaces as an ordinary local edit. Where an input method is available (for example ibus/fcitx on Linux), confirm IME preedit paints as an underlined overlay without changing saved document text until commit, and that Escape/focus loss cancels unfinished composition.
-9. Type a small edit and scroll. File-browser and editor scroll directions must match wheel/trackpad intent, long files must scroll without snapping back to the caret, and ordinary typing, paint, layout, pointer, and scroll must remain client-local/non-blocking; directory listing, folder dialogs, file opens, language parsing/decorations, and clipboard writes happen only after explicit user action or background scheduling.
+9. Type a small edit and confirm the status chrome shows `Dirty`. While the edit is still outbound, status may also show `Pending edits: N` until acknowledgement. Press configured `Ctrl+S` (`clay.documents.serverSaveDocument`) and confirm dirty clears after a successful save. To exercise conflict UX, change the on-disk file externally while the buffer is dirty, then save again: Clay must keep the dirty buffer and open a recovery menu with reload / keep edits / compare later (no silent overwrite). A dirty reload without force must offer save-first / discard-and-reload / keep edits. Sync recovery is GUI-visible: edit rejections and disconnects update status/accessibility (not stderr-only); bindable `clay.editor.clientRequestResync` / `clay.editor.clientDismissRecovery` cover explicit resync and dismiss.
+10. Type another small edit and scroll. File-browser and editor scroll directions must match wheel/trackpad intent, long files must scroll without snapping back to the caret, and ordinary typing, paint, layout, pointer, and scroll must remain client-local/non-blocking; directory listing, folder dialogs, file opens, language parsing/decorations, clipboard writes, and save/reload IO happen only after explicit user action or background scheduling.
 
 Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, or invent package clipboard-contents APIs. Copy selection is write-only and limited to the current native editor selection; cut/paste are separate Clay-owned user-mediated client commands.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/file-browser bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/cut/paste/file-browser/open-documents bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
+
+### Phase 20 daily-editing platform matrix and Linux verification
+
+Phase 20 daily-editing verification is Linux-primary (CI and agent-run). Windows and macOS rows document dialogs/shortcuts for host validation even when those hosts are not exercised in the current run.
+
+#### Platform capability matrix
+
+| Capability | Linux | Windows | macOS | Other |
+|---|---|---|---|---|
+| Native file-open dialog | xdg-desktop-portal `OpenFile` | COM `IFileOpenDialog` | `NSOpenPanel` | `Unsupported` diagnostic |
+| Native folder dialog | xdg-desktop-portal (`directory=true`) | COM `IFileOpenDialog` | `NSOpenPanel` directory mode | `Unsupported` diagnostic |
+| Clipboard copy/cut/paste | `arboard` + native `Ctrl+C`/`X`/`V` | `arboard` + native `Ctrl+C`/`X`/`V` | `arboard` + native `Cmd+C`/`X`/`V` | same client sink; no dialog dependency |
+| Undo / redo | native `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same as Linux | native `Cmd+Z` / `Cmd+Shift+Z` | client inverse-edit stack |
+| IME preedit / commit | Masonry `Ime::{Preedit,Commit}` (ibus/fcitx when available) | OS IME via winit/Masonry | OS IME via winit/Masonry | preedit paint-only until commit |
+| Save / reload / conflict menus | server-first; bind `Ctrl+S` in `init.js` | same | same (`Cmd` bindings via `init.js` if desired) | no client filesystem write |
+| Multi-document retain/switch | `DocumentSessionStore` + `clientShowOpenDocuments` | same | same | bound to 64 sessions |
+| Pending-edit / disconnect / resync recovery | status + recovery menus | same | same | no stderr-only recovery |
+| Pixel/GPU snapshots | re-deferred (CPU `TestHarness` ≠ production GPU) | same | same | structural observability stays mandatory |
+
+#### Shortcut matrix (native editor chords)
+
+| Action | Linux / Windows | macOS | Optional `init.js` bindKey |
+|---|---|---|---|
+| Copy selection | `Ctrl+C` | `Cmd+C` | `Ctrl+Shift+C` → `clientCopySelection` |
+| Cut selection | `Ctrl+X` | `Cmd+X` | `Ctrl+Shift+X` → `clientCutSelection` |
+| Paste clipboard | `Ctrl+V` | `Cmd+V` | `Ctrl+Shift+V` → `clientPasteClipboard` |
+| Undo | `Ctrl+Z` | `Cmd+Z` | `clientUndo` |
+| Redo | `Ctrl+Shift+Z` or `Ctrl+Y` | `Cmd+Shift+Z` | `clientRedo` |
+| Save active document | none hardcoded | none hardcoded | `Ctrl+S` → `serverSaveDocument` |
+| Open file dialog | none hardcoded | none hardcoded | `Ctrl+O` → `clientOpenFileDialog` |
+| Open folder dialog | none hardcoded | none hardcoded | `Ctrl+Shift+O` → `clientOpenFolderDialog` |
+| Show open documents | none hardcoded | none hardcoded | `Ctrl+Shift+E` → `clientShowOpenDocuments` |
+| Request resync / dismiss recovery | none hardcoded | none hardcoded | `clientRequestResync` / `clientDismissRecovery` |
+
+Native copy/cut/paste/undo/redo use the primary modifier (`Ctrl` on Linux/Windows, `Cmd` on macOS) through `is_primary_character_shortcut` in `src/masonry_editor.rs`. Save, open dialogs, open-documents switcher, and recovery actions require explicit `bindKey` configuration (see the file-browser-workflow fixture).
+
+#### Linux verification evidence (Plan 055 Task 17)
+
+Host: Linux/GNOME (`XDG_CURRENT_DESKTOP=GNOME`), Wayland + X11 display, `xdg-desktop-portal` active, `ibus` present for IME smoke when an input method is configured.
+
+Automated Linux gates (required):
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+```
+
+Recorded result for this task: all three commands pass on Linux. Automated coverage includes clipboard cut/paste, undo/redo inverse edits, IME preedit unit paths, multi-document retain/switch, dirty/save/conflict recovery menus, pending-edit/disconnect/resync recovery, capability-token/workspace authorization, and hot-path guards that keep clipboard/save/JS work off ordinary paint.
+
+Live boot check: `cargo run -- smoke-gui --config-fixture file-browser-workflow` opens the GUI on Linux and observes `Ime::Enabled` / empty `Ime::Preedit` / `Ime::Disabled` plus ordinary `EditAck` sync while typing. Interactive portal file-open, save-conflict, multi-document switcher, and full CJK composition remain on the manual checklist below (not fully automatable from this agent session).
+
+Manual Linux checklist (interactive; extends the end-to-end file browser workflow above):
+
+1. `cargo run -- smoke-gui --config-fixture file-browser-workflow`
+2. `Ctrl+O` opens the portal file picker; cancel is a non-error no-op; selecting a Markdown file opens through the selected-file grant path.
+3. Cut/paste/undo/redo via native chords; optional fixture binds (`Ctrl+Shift+X`/`V`) route the same client UI commands.
+4. With ibus/fcitx available, compose CJK/accented text: preedit underlines without changing canonical text; commit inserts once; Escape/focus loss cancels composition.
+5. Dirty → `Ctrl+S` save clears dirty; external on-disk change while dirty opens the stale-save recovery menu; dirty reload without force offers save-first.
+6. Open a second file, confirm the prior session is retained, then `Ctrl+Shift+E` (`clientShowOpenDocuments`) switches with dirty/active markers.
+7. Confirm pending-edit count and disconnect/resync recovery appear in status/accessibility (not stderr-only).
+
+Windows/macOS host checklists remain the dialog/shortcut rows above plus the Phase 19 Windows Markdown open-dialog smoke and [File Open, Save, and Reload Workflow](file-open-save-reload-workflow.md) platform steps. Agent-run validation does not claim those hosts were executed in this Linux-primary run.
 
 ### Phase 19 Windows Markdown open-dialog smoke contract
 
@@ -378,7 +456,7 @@ The Phase 19 Windows Markdown open-dialog smoke still documents the Windows nati
 Phase 19 starts from this baseline:
 
 - Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `clay.documents.clientOpenFileDialog` client UI command, native file-open backends on Windows (Shell COM), Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) that filter for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
-- Save exists for Phase 9 workspace documents, but saving a file picked through the Phase 19 dialog is not part of this manual smoke contract.
+- Save exists for Phase 9 workspace documents. Phase 20 selected-file save/conflict UX (dirty chrome, `Ctrl+S` → `clay.documents.serverSaveDocument`, recovery menus) is covered in the end-to-end file-browser workflow smoke above; this Phase 19 Windows matrix remains focused on dialog open + edit.
 
 The in-scope manual Windows 11 smoke scenario is edit-only:
 

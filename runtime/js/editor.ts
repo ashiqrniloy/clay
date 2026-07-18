@@ -11,6 +11,9 @@ export type ClientCutSelectionCommandId = "clay.editor.clientCutSelection";
 export type ClientPasteClipboardCommandId = "clay.editor.clientPasteClipboard";
 export type ClientUndoCommandId = "clay.editor.clientUndo";
 export type ClientRedoCommandId = "clay.editor.clientRedo";
+export type ClientShowOpenDocumentsCommandId = "clay.editor.clientShowOpenDocuments";
+export type ClientRequestResyncCommandId = "clay.editor.clientRequestResync";
+export type ClientDismissRecoveryCommandId = "clay.editor.clientDismissRecovery";
 
 export interface EditResult {
   accepted: boolean;
@@ -154,4 +157,16 @@ export function clientUndo(): ClientUndoCommandId {
 
 export function clientRedo(): ClientRedoCommandId {
   return "clay.editor.clientRedo";
+}
+
+export function clientShowOpenDocuments(): ClientShowOpenDocumentsCommandId {
+  return "clay.editor.clientShowOpenDocuments";
+}
+
+export function clientRequestResync(): ClientRequestResyncCommandId {
+  return "clay.editor.clientRequestResync";
+}
+
+export function clientDismissRecovery(): ClientDismissRecoveryCommandId {
+  return "clay.editor.clientDismissRecovery";
 }

@@ -1,0 +1,117 @@
+---
+id: clay.editor.clientShowOpenDocuments
+kind: clay-js-api
+js_module: "clay:editor"
+js_export: clientShowOpenDocuments
+js_facade: runtime/js/editor.ts::clientShowOpenDocuments
+backing_rust: src/masonry_editor.rs::EditorWidget::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_editor.rs::EditorWidget::activate_document
+deno_op: op_clay_keybindings_bind_key
+deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
+name: clientShowOpenDocuments
+user_facing_name: Show Open Documents
+summary: Return the stable bindable command ID for listing retained open-document sessions and activating one without re-downloading text.
+owner: client
+phase: Phase 20
+visibility: public
+permissions: []
+key_bindings: []
+custom_properties: []
+security: Bindable client UI command ID only; after explicit user routing it opens a transient menu over already-retained client sessions and activates a chosen DocumentId locally, and this API does not grant filesystem/workspace expansion, package/configuration/AI document mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
+agent_guidance: Use `clay.editor.clientShowOpenDocuments` only as a documented command ID for `bindKey`; do not invent client filesystem authority, tab hosts with package-owned native widgets, or raw Deno ops. Prefer `serverListDocuments` for server-authoritative open-registry metadata.
+lookup_tags: [editor, multi-document, sessions, documents, keybindings, js-api]
+app_visible: true
+help_visible: true
+stability: runtime-backed-command
+async: false
+---
+
+# clientShowOpenDocuments
+
+## Summary
+
+Return the stable bindable command ID for listing retained open-document sessions and activating one without re-downloading text.
+
+## Description
+
+`clientShowOpenDocuments` is the public Clay JS API descriptor for **Show Open Documents**. It returns the stable command ID `clay.editor.clientShowOpenDocuments` so configuration, help, and agents can name the multi-document switcher without hard-coding Rust UI.
+
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. The menu opens later only after an explicit user key/command route reaches the native editor widget. Selecting an item activates `clay.editor.clientActivateDocument` with a `documentId` argument, restoring that retained client session's shadow text, caret/selection, viewport, history, and dirty chrome locally. The server remains open-registry/lease/dirty authority; this command does not expand workspace grants or re-download text for sessions the client already retains.
+
+Opening a second file through the normal `DocumentOpened` path retains the previous session automatically (bound at 64 total sessions including the active document).
+
+## When to use
+
+Use this API when a user wants a bindable chord that opens the open-documents switcher in `~/.config/clay/init.js`.
+
+## JavaScript usage
+
+```ts
+import { clientShowOpenDocuments } from "clay:editor";
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
+```
+
+## Example
+
+```ts
+// ~/.config/clay/init.js
+import { clientShowOpenDocuments } from "clay:editor";
+import { bindKey } from "clay:keybindings";
+import { serverListDocuments } from "clay:documents";
+
+bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
+
+// Server-authoritative metadata (leases/dirty/path) remains available separately:
+const documents = await serverListDocuments();
+```
+
+## Options
+
+No options are accepted. Session retention ceilings and eviction policy are not configurable through this API in Phase 20.
+
+## Key bindings
+
+No native default shortcut is assigned. Bind with `bindKey` when desired.
+
+## Custom properties
+
+None.
+
+## Return and async behavior
+
+Returns the string `"clay.editor.clientShowOpenDocuments"`. Synchronous. No IPC.
+
+## Errors
+
+This helper does not throw. If no document has been opened yet, the editor command is a no-op. Missing retained sessions selected from a stale menu produce a sanitized runtime diagnostic.
+
+## Permissions and security
+
+Bindable client UI command ID only. Does not grant filesystem, workspace expansion, package/configuration/AI document authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Display names in the menu are basename-sanitized.
+
+## Agent guidance
+
+Use `clay.editor.clientShowOpenDocuments` only as a documented command ID for `bindKey`. For server open-registry inspection use `serverListDocuments`. Do not invent tab widgets, client filesystem reads, or raw ops.
+
+## Backing implementation
+
+- JS facade: `runtime/js/editor.ts::clientShowOpenDocuments`
+- Editor menu: `src/masonry_editor.rs::EditorWidget::show_open_documents_menu`
+- Activate path: `src/masonry_editor.rs::EditorWidget::activate_document`
+- Session store: `src/editor/document_session.rs::DocumentSessionStore`
+- Keybinding allowlist: `src/server/ops/keybindings.rs`
+
+## Stability notes
+
+Runtime-backed Phase 20 client UI command. Activate-by-id remains an internal menu argument (`documentId`) rather than a separate options-taking Clay JS helper in this phase.
+
+## Lookup metadata
+
+- Stable ID: `clay.editor.clientShowOpenDocuments`
+- User-facing name: Show Open Documents
+- Kind: `clay-js-api`
+- Module/export: `clay:editor` / `clientShowOpenDocuments`
+- Default key bindings: none
+- Custom properties: none
+- Tags: `[editor, multi-document, sessions, documents, keybindings, js-api]`

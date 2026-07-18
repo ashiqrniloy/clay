@@ -1,0 +1,224 @@
+//! Bounded client multi-document session store (Phase 20).
+//!
+//! Server `WorkspaceState` remains the open-registry / lease / dirty authority.
+//! This store retains local shadow editor state so opening another file no
+//! longer destroys the previous session, and so activate-by-id can restore
+//! caret/viewport/history without re-downloading text.
+
+use std::collections::{HashMap, VecDeque};
+
+use crate::client::PendingEdit;
+use crate::perf::budgets::CLIENT_DOCUMENT_SESSION_MAX;
+use crate::protocol::{DocumentId, DocumentVersion};
+
+use super::surface::EditorSurface;
+
+/// Snapshot of one inactive (or about-to-become-inactive) document session.
+#[derive(Debug)]
+pub(crate) struct RetainedDocumentSession {
+    pub(crate) surface: EditorSurface,
+    pub(crate) dirty: bool,
+    pub(crate) document_display_name: Option<String>,
+    pub(crate) confirmed_version: DocumentVersion,
+    pub(crate) pending: Vec<PendingEdit>,
+    /// Monotonic activation stamp for LRU eviction among inactive sessions.
+    pub(crate) last_activated_order: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DocumentSessionStore {
+    sessions: HashMap<DocumentId, RetainedDocumentSession>,
+    /// LRU order of inactive document ids (front = oldest / evict first).
+    lru: VecDeque<DocumentId>,
+    activation_clock: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionListEntry {
+    pub(crate) document_id: DocumentId,
+    pub(crate) display_name: String,
+    pub(crate) dirty: bool,
+    pub(crate) active: bool,
+}
+
+impl DocumentSessionStore {
+    pub(crate) fn len(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.sessions.is_empty()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn contains(&self, document_id: DocumentId) -> bool {
+        self.sessions.contains_key(&document_id)
+    }
+
+    pub(crate) fn get_mut(
+        &mut self,
+        document_id: DocumentId,
+    ) -> Option<&mut RetainedDocumentSession> {
+        self.sessions.get_mut(&document_id)
+    }
+
+    /// Insert or replace a retained session. Returns a sanitized eviction notice
+    /// when an inactive LRU session was dropped to stay within the ceiling.
+    pub(crate) fn insert(
+        &mut self,
+        document_id: DocumentId,
+        mut session: RetainedDocumentSession,
+    ) -> Option<String> {
+        self.activation_clock = self.activation_clock.saturating_add(1);
+        session.last_activated_order = self.activation_clock;
+        self.touch_lru(document_id);
+        self.sessions.insert(document_id, session);
+        self.evict_if_needed()
+    }
+
+    pub(crate) fn remove(&mut self, document_id: DocumentId) -> Option<RetainedDocumentSession> {
+        self.lru.retain(|id| *id != document_id);
+        self.sessions.remove(&document_id)
+    }
+
+    /// Mark `document_id` as most-recently-activated without requiring a full
+    /// re-insert (used when the active document stays active).
+    #[allow(dead_code)]
+    pub(crate) fn touch_active(&mut self, document_id: DocumentId) {
+        if self.sessions.contains_key(&document_id) {
+            self.activation_clock = self.activation_clock.saturating_add(1);
+            if let Some(session) = self.sessions.get_mut(&document_id) {
+                session.last_activated_order = self.activation_clock;
+            }
+            self.touch_lru(document_id);
+        }
+    }
+
+    pub(crate) fn list_with_active(
+        &self,
+        active_document_id: DocumentId,
+        active_display_name: Option<&str>,
+        active_dirty: bool,
+    ) -> Vec<SessionListEntry> {
+        let mut entries = Vec::with_capacity(self.sessions.len().saturating_add(1));
+        entries.push(SessionListEntry {
+            document_id: active_document_id,
+            display_name: active_display_name
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("doc {active_document_id}")),
+            dirty: active_dirty,
+            active: true,
+        });
+        let mut inactive: Vec<_> = self
+            .sessions
+            .iter()
+            .map(|(&document_id, session)| SessionListEntry {
+                document_id,
+                display_name: session
+                    .document_display_name
+                    .clone()
+                    .unwrap_or_else(|| format!("doc {document_id}")),
+                dirty: session.dirty,
+                active: false,
+            })
+            .collect();
+        inactive.sort_by(|a, b| {
+            a.display_name
+                .cmp(&b.display_name)
+                .then(a.document_id.cmp(&b.document_id))
+        });
+        entries.extend(inactive);
+        entries
+    }
+
+    fn touch_lru(&mut self, document_id: DocumentId) {
+        self.lru.retain(|id| *id != document_id);
+        self.lru.push_back(document_id);
+    }
+
+    fn evict_if_needed(&mut self) -> Option<String> {
+        // Active document is never stored in this map; ceiling applies to retained
+        // inactive sessions only. Total client sessions ≈ retained + 1 active.
+        let max_retained = CLIENT_DOCUMENT_SESSION_MAX.saturating_sub(1).max(1);
+        let mut notice = None;
+        while self.sessions.len() > max_retained {
+            let Some(evict_id) = self.lru.pop_front() else {
+                break;
+            };
+            if self.sessions.remove(&evict_id).is_some() {
+                notice = Some(format!(
+                    "Closed least-recently used document session (doc {evict_id}) to stay within the open-document limit."
+                ));
+            }
+        }
+        notice
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::DocumentAccess;
+
+    fn sample_session(document_id: DocumentId, name: &str) -> RetainedDocumentSession {
+        let mut surface = EditorSurface::default();
+        surface.load_snapshot(
+            document_id,
+            1,
+            format!("text-{document_id}"),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        RetainedDocumentSession {
+            surface,
+            dirty: false,
+            document_display_name: Some(name.to_string()),
+            confirmed_version: 1,
+            pending: Vec::new(),
+            last_activated_order: 0,
+        }
+    }
+
+    #[test]
+    fn insert_retains_and_lists_inactive_sessions() {
+        let mut store = DocumentSessionStore::default();
+        assert!(store.insert(10, sample_session(10, "a.md")).is_none());
+        assert!(store.insert(11, sample_session(11, "b.md")).is_none());
+        assert_eq!(store.len(), 2);
+        let list = store.list_with_active(12, Some("c.md"), true);
+        assert_eq!(list.len(), 3);
+        assert!(list[0].active);
+        assert_eq!(list[0].document_id, 12);
+        assert!(list.iter().any(|e| e.document_id == 10 && !e.active));
+    }
+
+    #[test]
+    fn eviction_drops_least_recently_touched_inactive_session() {
+        let mut store = DocumentSessionStore::default();
+        let max_retained = CLIENT_DOCUMENT_SESSION_MAX.saturating_sub(1).max(1);
+        for id in 1..=max_retained {
+            assert!(
+                store
+                    .insert(id as DocumentId, sample_session(id as DocumentId, "x"))
+                    .is_none()
+            );
+        }
+        let notice = store.insert(
+            (max_retained as DocumentId) + 1,
+            sample_session((max_retained as DocumentId) + 1, "newest"),
+        );
+        assert!(notice.is_some(), "expected eviction notice");
+        assert!(!store.contains(1), "oldest session should be evicted");
+        assert!(store.contains((max_retained as DocumentId) + 1));
+        assert_eq!(store.len(), max_retained);
+    }
+
+    #[test]
+    fn remove_returns_retained_surface_text() {
+        let mut store = DocumentSessionStore::default();
+        store.insert(7, sample_session(7, "note.md"));
+        let restored = store.remove(7).expect("session");
+        assert_eq!(restored.surface.visible_text(), "text-7");
+        assert_eq!(restored.document_display_name.as_deref(), Some("note.md"));
+        assert!(!store.contains(7));
+    }
+}

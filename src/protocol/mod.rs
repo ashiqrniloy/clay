@@ -735,6 +735,14 @@ impl RuntimeDiagnostic {
             message: message.into(),
         }
     }
+
+    pub fn warning(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warning,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 /// Wire form of one inert text-style override declared by a theme package

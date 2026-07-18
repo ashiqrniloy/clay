@@ -203,6 +203,50 @@ impl AppDriver for Driver {
                             }
                         });
                 }
+                ClientUiCommandResult::ShowOpenDocuments => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>()
+                                && editor.widget.show_open_documents_menu()
+                            {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        });
+                }
+                ClientUiCommandResult::RequestResync => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                                let mut changed = false;
+                                if let Some(diagnostic) =
+                                    editor.widget.request_resync_active_document()
+                                {
+                                    changed |= editor.widget.apply_connection_event(diagnostic);
+                                } else {
+                                    changed = true;
+                                }
+                                if changed {
+                                    editor.ctx.request_render();
+                                    editor.ctx.request_accessibility_update();
+                                }
+                            }
+                        });
+                }
+                ClientUiCommandResult::DismissRecovery => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>()
+                                && editor.widget.dismiss_recovery()
+                            {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        });
+                }
             },
         }
     }
@@ -222,6 +266,9 @@ enum ClientUiCommandResult {
     PasteClipboard,
     Undo,
     Redo,
+    ShowOpenDocuments,
+    RequestResync,
+    DismissRecovery,
 }
 
 fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
@@ -239,6 +286,9 @@ fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> Cli
         "clay.editor.clientPasteClipboard" => ClientUiCommandResult::PasteClipboard,
         "clay.editor.clientUndo" => ClientUiCommandResult::Undo,
         "clay.editor.clientRedo" => ClientUiCommandResult::Redo,
+        "clay.editor.clientShowOpenDocuments" => ClientUiCommandResult::ShowOpenDocuments,
+        "clay.editor.clientRequestResync" => ClientUiCommandResult::RequestResync,
+        "clay.editor.clientDismissRecovery" => ClientUiCommandResult::DismissRecovery,
         _ => ClientUiCommandResult::None,
     }
 }
@@ -1655,6 +1705,21 @@ mod tests {
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
         assert!(matches!(redo, ClientUiCommandResult::Redo));
+        let show = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientShowOpenDocuments".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+        assert!(matches!(show, ClientUiCommandResult::ShowOpenDocuments));
+        let resync = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientRequestResync".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+        assert!(matches!(resync, ClientUiCommandResult::RequestResync));
+        let dismiss = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+            command_id: "clay.editor.clientDismissRecovery".to_string(),
+            routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+        });
+        assert!(matches!(dismiss, ClientUiCommandResult::DismissRecovery));
     }
 
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]

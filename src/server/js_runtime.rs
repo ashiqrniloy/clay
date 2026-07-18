@@ -610,6 +610,9 @@ export function clientCutSelection() { return "clay.editor.clientCutSelection"; 
 export function clientPasteClipboard() { return "clay.editor.clientPasteClipboard"; }
 export function clientUndo() { return "clay.editor.clientUndo"; }
 export function clientRedo() { return "clay.editor.clientRedo"; }
+export function clientShowOpenDocuments() { return "clay.editor.clientShowOpenDocuments"; }
+export function clientRequestResync() { return "clay.editor.clientRequestResync"; }
+export function clientDismissRecovery() { return "clay.editor.clientDismissRecovery"; }
 "#;
 
 const CLAY_FACADE_THEME: &str = r#"
@@ -5651,7 +5654,11 @@ mod tests {
             "clay.workspace.clientOpenFolderDialog",
             "clay.workspace.openFuzzyFile",
             "clay.workspace.toggleFileBrowser",
+            "clay.documents.serverSaveDocument",
             "clay.editor.clientCopySelection",
+            "clay.editor.clientCutSelection",
+            "clay.editor.clientPasteClipboard",
+            "clay.editor.clientShowOpenDocuments",
         ] {
             assert!(
                 manifest
@@ -5664,6 +5671,9 @@ mod tests {
         for command_id in [
             "clay.workspace.clientOpenFolderDialog",
             "clay.editor.clientCopySelection",
+            "clay.editor.clientCutSelection",
+            "clay.editor.clientPasteClipboard",
+            "clay.editor.clientShowOpenDocuments",
         ] {
             assert!(manifest.commands.iter().any(|command| {
                 command.command_id == command_id

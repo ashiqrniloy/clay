@@ -39,6 +39,9 @@ pub const EDIT_HISTORY_MAX_DEPTH: usize = 256;
 // Max combined forward+inverse text bytes retained in one history entry.
 // Oversized edits clear history instead of retaining unbounded payloads.
 pub const EDIT_HISTORY_MAX_ENTRY_BYTES: usize = 64 * 1024;
+// Max retained client document sessions including the active document (Phase 20).
+// Aligned with `RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS`.
+pub const CLIENT_DOCUMENT_SESSION_MAX: usize = 64;
 // Edit acknowledgement payload budget.  Advisory: rkyv union-layout sizing means
 // the serialized size of `ServerMessage::EditAck` grows with the largest enum
 // variant.  128 bytes reflects the current union floor after adding completion

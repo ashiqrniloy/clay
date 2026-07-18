@@ -206,6 +206,9 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "clay.editor.clientPasteClipboard"
             | "clay.editor.clientUndo"
             | "clay.editor.clientRedo"
+            | "clay.editor.clientShowOpenDocuments"
+            | "clay.editor.clientRequestResync"
+            | "clay.editor.clientDismissRecovery"
             | "clay.language.hover"
             | "clay.language.goToDefinition"
             | "clay.language.codeActions"
@@ -239,6 +242,9 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "clay.editor.clientPasteClipboard"
             | "clay.editor.clientUndo"
             | "clay.editor.clientRedo"
+            | "clay.editor.clientShowOpenDocuments"
+            | "clay.editor.clientRequestResync"
+            | "clay.editor.clientDismissRecovery"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
@@ -343,7 +349,13 @@ mod tests {
 
     #[test]
     fn undo_redo_commands_are_runtime_bindable_client_ui_routes() {
-        for command in ["clay.editor.clientUndo", "clay.editor.clientRedo"] {
+        for command in [
+            "clay.editor.clientUndo",
+            "clay.editor.clientRedo",
+            "clay.editor.clientShowOpenDocuments",
+            "clay.editor.clientRequestResync",
+            "clay.editor.clientDismissRecovery",
+        ] {
             assert!(is_runtime_bindable_command(command));
             assert_eq!(
                 command_routing_policy(command).unwrap(),
