@@ -1062,13 +1062,12 @@ mod tests {
                 .count(),
             2
         );
-        assert_eq!(
-            snapshots
-                .iter()
-                .filter(|snapshot| snapshot.name == SYNTAX_EDIT_TO_PUBLISH)
-                .count(),
-            1
-        );
+        let edit_to_publish = snapshots
+            .iter()
+            .filter(|snapshot| snapshot.name == SYNTAX_EDIT_TO_PUBLISH)
+            .collect::<Vec<_>>();
+        assert_eq!(edit_to_publish.len(), 1);
+        eprintln!("edit_to_publish={:?}", edit_to_publish[0].value);
     }
 
     #[tokio::test]

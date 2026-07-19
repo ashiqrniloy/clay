@@ -146,9 +146,9 @@ Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE
 7. sets parser/query timeouts from `timeoutMs`
 8. reuses a consecutive cached `Tree` only when document, stable window identity, and implied old-window length match; converts the server-relative exact edit to Tree-sitter `InputEdit`, applies `Tree::edit`, and passes the edited tree to `Parser::parse`
 9. computes `old_tree.changed_ranges(&new_tree)`, unions those ranges with explicit accepted-edit invalidations, clamps to the visible bounded window, expands by at most one UTF-8 scalar at each edge, and deterministically sorts/merges overlaps
-10. queries the resulting affected envelope once with `QueryCursor::set_byte_range`; full/open/viewport or incompatible-cache fallback explicitly queries the bounded visible window, while intersecting captures retain their whole token/comment/string range
+10. converts affected (changed+invalidated) ranges into a shared 128-byte UTF-8-safe replacement-chunk grid via `replacement_ranges`; queries the full envelope covering every touched replacement chunk once with `QueryCursor::set_byte_range` — so query coverage and replacement coverage are identical; intersecting captures retain their whole token/comment/string range and are clipped at exact chunk boundaries; full/open/viewport or incompatible-cache fallback explicitly queries the bounded visible window
 11. maps the complete capture result to inert `DecorationSpan` values with package provenance
-12. divides the affected window into stable 128-byte output ranges, splitting broad spans at boundaries, and orders chunks intersecting explicit invalidations before adjacent chunks
+12. constructs complete `DecorationSet` members from the same replacement-chunk grid (not the original affected ranges), so every published chunk carries complete authoritative capture state for exactly the UTF-8-safe range it replaces; orders chunks intersecting explicit invalidations before adjacent chunks
 13. validates every `DecorationSet`, enforces `DECORATION_PAYLOAD_BUDGET_BYTES`, and inserts each set into `SyntaxChunkCache` for near-viewport/LRU budget enforcement
 14. returns one decoration-only `IncrementalParseUpdate::decoration_updates` batch; the coordinator validates all members atomically and the connection streams normal `DecorationSet` messages
 15. leaves `diagnostic_update` empty because parser recovery nodes from bounded fragments are not analyzer authority; explicit analyzers own diagnostic publication
@@ -169,7 +169,7 @@ The handler does not load arbitrary paths, fetch network resources, run package 
 
 The runtime [`clay:syntax.serverRegisterSyntaxGrammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) facade/op registers the same inert grammar contract declared in `package.json` during the package load entry. User config still uses only one-line `loadPackage` calls; it does not perform manual primitive registration or raw op calls.
 
-Native scheduling submits one bounded parse window per document/version/window rather than decoration-chunk parser jobs. One query/capture pass now retains complete mapped output and fans it into validated 128-byte sets, so dense capture overflow no longer truncates after 32 spans. Viewport-change requests schedule one missing stable window as the user scrolls; output chunk count changes only transport/cache work, never parser/query invocation count.
+Native scheduling submits one bounded parse window per document/version/window rather than decoration-chunk parser jobs. One query/capture pass queries the full envelope covering a shared 128-byte replacement-chunk grid (`replacement_ranges`) and fans complete mapped output into validated 128-byte sets built from the same grid — so query coverage and replacement coverage are identical, and dense capture overflow no longer truncates after 32 spans. Viewport-change requests schedule one missing stable window as the user scrolls; output chunk count changes only transport/cache work, never parser/query invocation count.
 
 ## Tests
 
@@ -211,7 +211,7 @@ Coverage:
 - engine-neutral `SyntaxCapture` to `TokenType`/`Modifiers` vocabulary mapping with unmapped captures left unstyled
 - Tree-sitter highlight query capture extraction into bounded decoration spans
 - direct first-party capture mapping for code/prose `TokenType` families and declaration/bold/italic modifiers, plus legacy style-token compatibility
-- exact cached-tree edits for consecutive stable-window versions, changed-range querying, whole keyword/comment/string recovery, newline-sensitive line comments, UTF-8-safe range merging, and bounded full fallback
+- exact cached-tree edits for consecutive stable-window versions, complete-replacement-chunk-grid querying (query coverage == replacement coverage via `replacement_ranges`), whole keyword/comment/string recovery, newline-sensitive line comments, UTF-8-safe range merging, same-word narrow-syntax provisional inheritance (Unicode alphanumeric/underscore extends, whitespace/newline/punctuation stops), and bounded full fallback
 - `first_party_package_queries_keep_authoritative_token_boundaries`: real Rust, TypeScript, TSX, JavaScript, and Markdown package queries preserve complete authoritative keyword/prose-heading, declaration/identifier, and punctuation captures after exact incremental edits; keyword removal drops only the affected capture
 - `first_party_package_queries_keep_broad_captures_continuous`: real line/block comments, raw/template multiline strings, Markdown prose, code spans, and fenced code blocks retain their complete capture range after incremental edits; package grammar boundaries, not whitespace/idle heuristics, define correction
 - first-party valid and invalid grammar fixtures remain decoration-only and never masquerade as analyzer diagnostics

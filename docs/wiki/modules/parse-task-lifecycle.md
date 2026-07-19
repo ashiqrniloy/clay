@@ -81,7 +81,7 @@ IncrementalParseUpdate {
 }
 ```
 
-`ParseInputEdit` holds canonical old/new byte and point endpoints. A consecutive matching stable window permits `Tree::edit` plus one incremental parse; its old/new changed ranges union explicit invalidations before one affected-envelope capture query. One capture result may fan out into 128-byte `DecorationSet` members, but member count never adds parser jobs.
+`ParseInputEdit` holds canonical old/new byte and point endpoints. A consecutive matching stable window permits `Tree::edit` plus one incremental parse; its old/new changed ranges union explicit invalidations, then `replacement_ranges` converts them into a shared 128-byte UTF-8-safe replacement-chunk grid, and the handler queries the full envelope covering every touched chunk once — so query coverage and replacement coverage are identical. One capture result fans out into 128-byte `DecorationSet` members built from the same grid, but member count never adds parser jobs.
 
 The client should receive only validated rendering/folding/diagnostic declarations it knows how to apply. Syntax tree deltas are server/cache metadata unless a later primitive explicitly exposes them.
 

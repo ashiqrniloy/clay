@@ -3900,6 +3900,134 @@ fn plan056_syntax_latency_configuration_stays_compiled_and_non_configurable() {
 }
 
 #[test]
+fn plan057_syntax_continuity_internals_reuse_existing_clay_js_apis() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+        .expect("read api inventory");
+    let configuration =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let review =
+        fs::read_to_string(root.join(
+            "docs/wiki/modules/low-latency-incremental-syntax-decoration-primitive-review.md",
+        ))
+        .expect("read low-latency syntax review");
+    let public_facades = [
+        fs::read_to_string(root.join("runtime/js/parse.ts")).expect("read parse facade"),
+        fs::read_to_string(root.join("runtime/js/syntax.ts")).expect("read syntax facade"),
+        fs::read_to_string(root.join("runtime/js/decorations.ts"))
+            .expect("read decorations facade"),
+    ]
+    .join("\n");
+    let implementation_sources = [
+        public_facades.clone(),
+        fs::read_to_string(root.join("runtime/js/configuration.ts"))
+            .expect("read configuration facade"),
+        fs::read_to_string(root.join("src/server/ops/configuration.rs"))
+            .expect("read configuration ops"),
+        inventory.clone(),
+        fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+            .expect("read generated API registry"),
+    ]
+    .join("\n");
+
+    // Existing three public surfaces remain the only ones.
+    for api in [
+        "clay.parse.serverRegisterParseHandler",
+        "clay.syntax.serverRegisterSyntaxGrammar",
+        "clay.decorations.serverPublishDecorations",
+    ] {
+        assert!(
+            inventory.contains(api),
+            "existing API inventory must retain {api}"
+        );
+    }
+
+    // Plan 057 internals must not become facade exports.
+    for internal in [
+        "replacement_ranges",
+        "decoration_sets_for_ranges",
+        "is_completion_word_character",
+        "same_word_suffix",
+        "edit_extent",
+        "setSyntaxSameWordBoundary",
+        "setSyntaxReplacementChunkGrid",
+        "setSyntaxWordInheritance",
+    ] {
+        assert!(
+            !public_facades.contains(internal),
+            "Plan 057 internal `{internal}` must not become a Clay JS facade export"
+        );
+    }
+
+    // Wiki audit must record Plan 057 findings.
+    for required in [
+        "Plan 057 likewise adds no caller-controlled Clay JS capability",
+        "replacement_ranges",
+        "same-word narrow-syntax provisional inheritance",
+        "do not receive facade exports",
+    ] {
+        assert!(
+            review.contains(required),
+            "wiki audit must record `{required}`"
+        );
+    }
+
+    // Configuration docs must record Plan 057 review.
+    for required in [
+        "Plan 057 syntax-decoration continuity and replacement correctness configuration review",
+        "does **not** promote a new user-facing `clay:configuration` API",
+        "remains the sole relevant user engine-selection surface",
+        "syntaxSameWordBoundary",
+        "syntaxReplacementChunkGrid",
+        "syntaxWordInheritance",
+        "syntaxChunkQueryCoverage",
+        "syntaxCompleteReplacement",
+        "syntaxUtf8ChunkGrid",
+    ] {
+        assert!(
+            configuration.contains(required),
+            "configuration review must record `{required}`"
+        );
+    }
+
+    // Wiki configuration audit must record Plan 057.
+    for required in [
+        "Plan 057 adds no `clay:configuration` surface",
+        "Complete authoritative replacement chunks",
+        "same-word narrow-syntax provisional inheritance",
+        "compiled correctness invariants",
+    ] {
+        assert!(
+            review.contains(required),
+            "wiki configuration audit must record `{required}`"
+        );
+    }
+
+    // Hidden Plan 057 configuration names must not reach facades/ops/inventory/registry.
+    for forbidden in [
+        "syntaxSameWordBoundary",
+        "syntaxReplacementChunkGrid",
+        "syntaxWordInheritance",
+        "syntaxCompletionWordCharacter",
+        "syntaxChunkQueryCoverage",
+        "syntaxProvisionalInheritance",
+        "syntaxCompleteReplacement",
+        "syntaxUtf8ChunkGrid",
+        "setSyntaxSameWordBoundary",
+        "setSyntaxReplacementChunkGrid",
+        "setSyntaxWordInheritance",
+        "setSyntaxChunkQueryCoverage",
+        "setSyntaxCompleteReplacement",
+    ] {
+        assert!(
+            !implementation_sources.contains(forbidden),
+            "hidden Plan 057 configuration `{forbidden}` must not reach a facade, op, inventory, or registry"
+        );
+    }
+}
+
+#[test]
 fn syntax_grammar_registration_api_has_public_facade_op_inventory_and_docs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))

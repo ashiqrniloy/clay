@@ -158,6 +158,32 @@ cargo bench --bench first_party_language_baselines first_party_incremental_edit 
 
 Deterministic coverage supplies the work-count evidence that Criterion intentionally does not print: one `syntax.parse.logical_work_items` item per accepted edit/version, one current-version parser invocation per stable window, changed-range query bytes, bounded fan-out via `syntax.decoration.chunks`, superseded-task cancellation, and one `syntax.edit_to_publish` sample for first current-version publication. `tests/performance_protocol.rs::syntax_pipeline_metrics_are_source_safe_and_retention_bounded`, `tests/parse_coordinator.rs`, and `tests/syntax_grammar.rs` passed in the full Linux run; malformed edits/ranges, stale versions, oversized payloads, wrong provenance, and generation replacement fail closed. Metrics remain numeric-only and never include source text or paths.
 
+## Plan 057 syntax-continuity Linux verification (2026-07-19)
+
+Plan 057 keeps parse scheduling unchanged while making replacement coverage complete and retaining same-word syntax locally. Linux host: kernel `7.1.3-43.stable`, `x86_64`; Rust/Cargo `1.96.1`. The five-language continuity work-count test records one parser call, one query range, and one emitted replacement member for each representative suffix edit:
+
+| Fixture | Parser calls | Query ranges | Queried bytes | Emitted members |
+| --- | ---: | ---: | ---: | ---: |
+| Rust | 1 | 1 | 20 | 1 |
+| TypeScript | 1 | 1 | 26 | 1 |
+| TSX | 1 | 1 | 26 | 1 |
+| JavaScript | 1 | 1 | 26 | 1 |
+| Markdown | 1 | 1 | 17 | 1 |
+
+`server::syntax::tests::first_party_continuity_edits_keep_one_bounded_parse_and_query` produces these deterministic counts from the real native descriptors and package queries. Each query remains below one 128-byte replacement chunk. `server::parse_coordinator::tests::accepted_native_edit_records_one_logical_item_and_one_latency_sample` records exactly one `syntax.edit_to_publish` duration for first current-version publication; the local instrumentation-plumbing sample was 140.268 µs. This single unit-scale sample is advisory, not a product threshold.
+
+The optimized parse-through-ready-decoration benchmark was rerun with 10 samples, 1 s warm-up, and 2 s measurement:
+
+| Fixture | Estimate | 95% interval | Throughput estimate |
+| --- | ---: | ---: | ---: |
+| Rust | 167.95 µs | 165.05–170.66 µs | 523.32 KiB/s |
+| TypeScript | 361.10 µs | 342.59–368.41 µs | 359.68 KiB/s |
+| TSX | 125.92 µs | 124.14–127.41 µs | 845.33 KiB/s |
+| JavaScript | 122.93 µs | 121.22–124.70 µs | 929.46 KiB/s |
+| Markdown | 199.86 µs | 166.32–215.06 µs | 346.92 KiB/s |
+
+Criterion reported no statistically significant performance change for any fixture. Wall-clock values remain machine-local and advisory; one-parse/query counts, payload/cache ceilings, stale-version rejection, and source-safe metric retention remain blocking deterministic gates.
+
 ## Phase 14 Performance Budgets and Guardrails
 
 Phase 14 splits budgets into two categories:

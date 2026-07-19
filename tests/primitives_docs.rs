@@ -2234,7 +2234,7 @@ fn plan056_final_wiki_records_one_parse_authoritative_decoration_flow() {
         (&lifecycle, "member count never adds parser jobs"),
         (&coordinator, "visible/changed-first `decoration_updates`"),
         (&syntax, "One query/capture pass"),
-        (&syntax, "stable 128-byte output ranges"),
+        (&syntax, "128-byte replacement-chunk grid"),
         (&decoration, "overlapping provisional keys"),
         (&editor, "strict-interior edits resize it"),
     ] {
@@ -2249,6 +2249,146 @@ fn plan056_final_wiki_records_one_parse_authoritative_decoration_flow() {
             && !coordinator.contains("optional `decoration_update`"),
         "wiki must not describe the superseded single-decoration update shape"
     );
+}
+
+#[test]
+fn plan057_final_wiki_records_complete_replacement_and_same_word_inheritance() {
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let review = fs::read_to_string(repository_path(
+        "docs/wiki/modules/low-latency-incremental-syntax-decoration-primitive-review.md",
+    ))
+    .expect("read low-latency syntax review");
+    let lifecycle =
+        fs::read_to_string(repository_path("docs/wiki/modules/parse-task-lifecycle.md"))
+            .expect("read parse task lifecycle wiki");
+    let syntax = fs::read_to_string(repository_path(
+        "docs/wiki/modules/syntax-grammar-registry.md",
+    ))
+    .expect("read syntax grammar registry wiki");
+    let decoration =
+        fs::read_to_string(repository_path("docs/wiki/modules/decoration-transport.md"))
+            .expect("read decoration transport wiki");
+    let editor = fs::read_to_string(repository_path("docs/wiki/modules/masonry-editor.md"))
+        .expect("read masonry editor wiki");
+    let parse_strategy = fs::read_to_string(repository_path(
+        "docs/reference/primitives/parse-update-strategy.md",
+    ))
+    .expect("read parse strategy");
+    let rendering_strategy = fs::read_to_string(repository_path(
+        "docs/reference/primitives/rendering-strategy.md",
+    ))
+    .expect("read rendering strategy");
+
+    // Wiki index must link the Plan 057 low-latency review.
+    assert!(
+        index.contains("Implemented parse/decor flow"),
+        "wiki index must retain implemented parse/decor flow link"
+    );
+
+    // Review page must contain Plan 057 implementation section.
+    for required in [
+        "Plan 057 Syntax-Decoration Continuity and Replacement Correctness",
+        "Narrow-span inheritance gap",
+        "Wider-than-queried authoritative replacement",
+        "Same-Word Narrow-Syntax Provisional Inheritance",
+        "Complete Authoritative Replacement Chunks",
+        "replacement_ranges",
+        "query coverage and replacement coverage are identical",
+        "is_completion_word_character",
+        "same_word_suffix",
+        "plan057_first_party_languages_keep_continuity_across_edit_boundaries",
+        "plan057_authoritative_queries_correct_inherited_code_keywords",
+        "rapid_local_versions_reject_stale_authority_without_losing_provisional_geometry",
+        "no statistically significant performance change",
+    ] {
+        assert!(
+            review.contains(required),
+            "Plan 057 wiki review must record `{required}`"
+        );
+    }
+
+    // Lifecycle page must describe complete replacement grid, not affected-envelope.
+    for required in [
+        "replacement_ranges",
+        "shared 128-byte UTF-8-safe replacement-chunk grid",
+        "query coverage and replacement coverage are identical",
+    ] {
+        assert!(
+            lifecycle.contains(required),
+            "parse-task-lifecycle wiki must record `{required}`"
+        );
+    }
+    assert!(
+        !lifecycle.contains("affected-envelope capture query"),
+        "lifecycle wiki must not describe superseded affected-envelope query"
+    );
+
+    // Syntax grammar registry must describe complete replacement grid and same-word inheritance.
+    for required in [
+        "replacement_ranges",
+        "query coverage and replacement coverage are identical",
+        "complete authoritative capture state for exactly the UTF-8-safe range it replaces",
+        "same-word narrow-syntax provisional inheritance",
+    ] {
+        assert!(
+            syntax.contains(required),
+            "syntax-grammar-registry wiki must record `{required}`"
+        );
+    }
+
+    // Decoration transport must describe complete replacement and same-word inheritance.
+    for required in [
+        "replacement_ranges",
+        "every published chunk carries complete authoritative capture state",
+        "same-word inheritance",
+    ] {
+        assert!(
+            decoration.contains(required),
+            "decoration-transport wiki must record `{required}`"
+        );
+    }
+
+    // Masonry editor must describe same-word narrow inheritance.
+    assert!(
+        editor.contains("same-word suffixes"),
+        "masonry-editor wiki must record same-word narrow inheritance"
+    );
+
+    // Primitives reference docs must describe complete replacement grid.
+    for (source, required) in [
+        (&parse_strategy, "replacement_ranges"),
+        (
+            &parse_strategy,
+            "query coverage and replacement coverage are identical",
+        ),
+        (
+            &parse_strategy,
+            "shared 128-byte UTF-8-safe replacement-chunk grid",
+        ),
+        (&rendering_strategy, "replacement_ranges"),
+        (
+            &rendering_strategy,
+            "query coverage and replacement coverage are identical",
+        ),
+        (&rendering_strategy, "clipped at exact chunk boundaries"),
+    ] {
+        assert!(
+            source.contains(required),
+            "reference docs must record `{required}`"
+        );
+    }
+
+    // Reference docs must not describe superseded affected-envelope-only query.
+    for source in [&parse_strategy, &rendering_strategy] {
+        assert!(
+            !source.contains("queried only over the UTF-8-safe visible intersection"),
+            "reference docs must not describe superseded visible-intersection-only query"
+        );
+        assert!(
+            !source.contains("bounded visible/changed envelope"),
+            "reference docs must not describe superseded bounded-visible-envelope query"
+        );
+    }
 }
 
 #[test]

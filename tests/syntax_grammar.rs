@@ -1,10 +1,11 @@
+use clay::editor::EditorSurface;
 use clay::packages::{
     modes::{DocumentClassificationInput, MajorModeActivation, ModePatternKind},
     record::{PackageRecord, PackageRecordRule, assemble_package_record},
 };
 use clay::protocol::{
-    DecorationSet, DocumentFontRole, Modifiers, ParseByteRange, ParseEditNotification,
-    ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot, TokenType,
+    DecorationSet, DocumentAccess, DocumentFontRole, Modifiers, ParseByteRange,
+    ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot, TokenType,
 };
 #[cfg(any(unix, windows))]
 use clay::server::{
@@ -643,6 +644,211 @@ fn single_edit_offsets(old_text: &str, new_text: &str) -> (usize, usize, usize) 
     assert!(old_text.is_char_boundary(start) && old_text.is_char_boundary(old_end));
     assert!(new_text.is_char_boundary(start) && new_text.is_char_boundary(new_end));
     (start, old_end, new_end)
+}
+
+#[cfg(any(unix, windows))]
+fn first_party_handler(
+    contribution_id: &str,
+    language: tree_sitter::Language,
+    query: &str,
+) -> TreeSitterSyntaxHandler {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry
+        .get(contribution_id)
+        .unwrap_or_else(|| panic!("first-party {contribution_id} contribution"))
+        .clone();
+    TreeSitterSyntaxHandler::new(contribution, language, query)
+        .unwrap_or_else(|error| panic!("first-party {contribution_id} query compiles: {error}"))
+}
+
+#[cfg(any(unix, windows))]
+fn first_party_rust_handler() -> TreeSitterSyntaxHandler {
+    first_party_handler(
+        "rust.rust",
+        tree_sitter_rust::LANGUAGE.into(),
+        include_str!("../packages/rust/queries/highlights.scm"),
+    )
+}
+
+#[cfg(any(unix, windows))]
+fn apply_initial_syntax_for(
+    handler: &TreeSitterSyntaxHandler,
+    package_prefix: &str,
+    language_id: &str,
+    text: &str,
+) -> EditorSurface {
+    let update = handler
+        .parse_sync(parse_notification_for(package_prefix, 1, text))
+        .expect("initial syntax parse");
+    assert_eq!(
+        update.syntax_tree_delta.as_deref(),
+        Some(format!("tree-sitter:{language_id}:full").as_str())
+    );
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        11,
+        1,
+        text.to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    for set in update.decoration_updates {
+        assert!(editor.apply_decoration_set(set));
+    }
+    editor
+}
+
+#[cfg(any(unix, windows))]
+fn apply_initial_syntax(handler: &TreeSitterSyntaxHandler, text: &str) -> EditorSurface {
+    apply_initial_syntax_for(handler, "rust", "rust", text)
+}
+
+#[cfg(any(unix, windows))]
+fn record_undecorated_ranges(
+    failures: &mut Vec<String>,
+    stage: &str,
+    editor: &EditorSurface,
+    expected: &[(&str, std::ops::Range<usize>)],
+) {
+    let painted = editor.visible_decoration_paint_ranges_for_test();
+    for (label, expected) in expected {
+        if !painted
+            .iter()
+            .any(|(range, _)| range.start <= expected.start && range.end >= expected.end)
+        {
+            failures.push(format!("{stage}: {label} {expected:?} was base-colored"));
+        }
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[derive(Clone, Copy)]
+enum ContinuityAction {
+    Insert(&'static str),
+    Newline,
+    Backspace,
+}
+
+#[cfg(any(unix, windows))]
+struct ContinuityCase {
+    label: &'static str,
+    package_prefix: &'static str,
+    contribution_id: &'static str,
+    language_id: &'static str,
+    language: fn() -> tree_sitter::Language,
+    query: &'static str,
+    old_text: &'static str,
+    new_text: &'static str,
+    caret: usize,
+    action: ContinuityAction,
+    continuous: &'static [(&'static str, &'static str)],
+    authoritative: &'static [(&'static str, &'static str)],
+}
+
+#[cfg(any(unix, windows))]
+fn expected_ranges(
+    text: &str,
+    needles: &'static [(&'static str, &'static str)],
+) -> Vec<(&'static str, std::ops::Range<usize>)> {
+    needles
+        .iter()
+        .map(|&(label, needle)| {
+            let start = text
+                .find(needle)
+                .unwrap_or_else(|| panic!("{label}: missing {needle:?} in {text:?}"));
+            (label, start..start + needle.len())
+        })
+        .collect()
+}
+
+#[cfg(any(unix, windows))]
+fn run_continuity_case(case: ContinuityCase) {
+    let handler = first_party_handler(case.contribution_id, (case.language)(), case.query);
+    let mut editor = apply_initial_syntax_for(
+        &handler,
+        case.package_prefix,
+        case.language_id,
+        case.old_text,
+    );
+    assert!(
+        editor.navigate_to_byte_offset(case.caret as u64),
+        "{}: caret",
+        case.label
+    );
+    assert!(
+        match case.action {
+            ContinuityAction::Insert(text) => editor.insert_text(text),
+            ContinuityAction::Newline => editor.insert_newline(),
+            ContinuityAction::Backspace => editor.backspace(),
+        },
+        "{}: local edit",
+        case.label
+    );
+    assert_eq!(editor.visible_text(), case.new_text, "{}: text", case.label);
+
+    let continuous = expected_ranges(case.new_text, case.continuous);
+    let mut failures = Vec::new();
+    record_undecorated_ranges(
+        &mut failures,
+        &format!("{} optimistic edit", case.label),
+        &editor,
+        &continuous,
+    );
+    assert!(editor.note_confirmed_version(11, 2), "{}: ack", case.label);
+    record_undecorated_ranges(
+        &mut failures,
+        &format!("{} acknowledgement", case.label),
+        &editor,
+        &continuous,
+    );
+
+    let (start, old_end, new_end) = single_edit_offsets(case.old_text, case.new_text);
+    let update = handler
+        .parse_sync(incremental_notification_for(
+            case.package_prefix,
+            case.old_text,
+            case.new_text,
+            start,
+            old_end,
+            new_end,
+        ))
+        .unwrap_or_else(|error| panic!("{}: incremental parse: {error}", case.label));
+    assert_eq!(
+        update.syntax_tree_delta.as_deref(),
+        Some(format!("tree-sitter:{}:incremental", case.language_id).as_str()),
+        "{}: cached tree",
+        case.label
+    );
+    assert!(
+        !update.decoration_updates.is_empty(),
+        "{}: authoritative members",
+        case.label
+    );
+    for (index, set) in update.decoration_updates.into_iter().enumerate() {
+        assert!(
+            editor.apply_decoration_set(set),
+            "{}: authoritative member {index}",
+            case.label
+        );
+        record_undecorated_ranges(
+            &mut failures,
+            &format!("{} authoritative member {index}", case.label),
+            &editor,
+            &continuous,
+        );
+    }
+    let authoritative = expected_ranges(case.new_text, case.authoritative);
+    record_undecorated_ranges(
+        &mut failures,
+        &format!("{} final authoritative state", case.label),
+        &editor,
+        &authoritative,
+    );
+
+    assert!(
+        failures.is_empty(),
+        "decoration continuity regressed:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -1772,7 +1978,7 @@ fn tree_sitter_handler_reuses_cached_tree_for_later_document_versions() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn incremental_keyword_completion_requeries_whole_capture_not_distant_syntax() {
+fn incremental_keyword_completion_republishes_complete_replacement_chunk() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
     let handler = TreeSitterSyntaxHandler::new(
@@ -1814,8 +2020,8 @@ fn incremental_keyword_completion_requeries_whole_capture_not_distant_syntax() {
     assert!(
         set.spans
             .iter()
-            .all(|span| span.byte_start != 0 || span.byte_end != 2),
-        "distant `fn` is not requeried"
+            .any(|span| span.byte_start == 0 && span.byte_end == 2),
+        "unchanged `fn` is missing from complete replacement chunk"
     );
 }
 
@@ -1957,6 +2163,727 @@ fn incremental_newline_shortens_line_comment_capture() {
 
     assert!(set.spans.iter().any(|span| {
         span.token_type == TokenType::Comment && span.byte_end == insertion as u64
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_function_suffix_stays_decorated_through_local_ack_and_authoritative_states() {
+    let handler = first_party_rust_handler();
+    let old_text = "fn main() {}\n";
+    let insertion = old_text.find("main").expect("function") + "main".len();
+    let mut new_text = old_text.to_string();
+    new_text.insert(insertion, 'x');
+    let mut editor = apply_initial_syntax(&handler, old_text);
+    let mut failures = Vec::new();
+
+    record_undecorated_ranges(
+        &mut failures,
+        "initial",
+        &editor,
+        &[("keyword", 0..2), ("function", 3..7)],
+    );
+    assert!(editor.navigate_to_byte_offset(insertion as u64));
+    assert!(editor.insert_text("x"));
+    record_undecorated_ranges(
+        &mut failures,
+        "optimistic local edit",
+        &editor,
+        &[("keyword", 0..2), ("grown function", 3..8)],
+    );
+    assert!(editor.note_confirmed_version(11, 2));
+    record_undecorated_ranges(
+        &mut failures,
+        "edit acknowledgement",
+        &editor,
+        &[("keyword", 0..2), ("grown function", 3..8)],
+    );
+
+    let update = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental syntax parse");
+    assert_eq!(
+        update.syntax_tree_delta.as_deref(),
+        Some("tree-sitter:rust:incremental")
+    );
+    for (index, set) in update.decoration_updates.into_iter().enumerate() {
+        assert!(editor.apply_decoration_set(set));
+        record_undecorated_ranges(
+            &mut failures,
+            &format!("authoritative member {index}"),
+            &editor,
+            &[("keyword", 0..2), ("grown function", 3..8)],
+        );
+    }
+
+    assert!(
+        failures.is_empty(),
+        "decoration continuity regressed:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_newline_keeps_unrelated_short_file_syntax_through_every_state() {
+    let handler = first_party_rust_handler();
+    let old_text = "fn main() { // note let hidden = 1;\n}\n";
+    let insertion = old_text.find(" let hidden").expect("comment suffix");
+    let mut new_text = old_text.to_string();
+    new_text.insert(insertion, '\n');
+    let comment_start = old_text.find("// note").expect("comment");
+    let brace = old_text.find('{').expect("opening brace");
+    let expected = [
+        ("keyword", 0..2),
+        ("function", 3..7),
+        ("punctuation", brace..brace + 1),
+        (
+            "comment prefix",
+            comment_start..comment_start + "// note".len(),
+        ),
+    ];
+    let mut editor = apply_initial_syntax(&handler, old_text);
+    let mut failures = Vec::new();
+
+    record_undecorated_ranges(&mut failures, "initial", &editor, &expected);
+    assert!(editor.navigate_to_byte_offset(insertion as u64));
+    assert!(editor.insert_newline());
+    record_undecorated_ranges(&mut failures, "optimistic newline", &editor, &expected);
+    assert!(editor.note_confirmed_version(11, 2));
+    record_undecorated_ranges(&mut failures, "edit acknowledgement", &editor, &expected);
+
+    let update = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental syntax parse");
+    assert_eq!(
+        update.syntax_tree_delta.as_deref(),
+        Some("tree-sitter:rust:incremental")
+    );
+    for (index, set) in update.decoration_updates.into_iter().enumerate() {
+        assert!(editor.apply_decoration_set(set));
+        record_undecorated_ranges(
+            &mut failures,
+            &format!("authoritative member {index}"),
+            &editor,
+            &expected,
+        );
+    }
+
+    assert!(
+        failures.is_empty(),
+        "decoration continuity regressed:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_first_party_languages_keep_continuity_across_edit_boundaries() {
+    let rust_query = include_str!("../packages/rust/queries/highlights.scm");
+    let typescript_query = include_str!("../packages/typescript/queries/highlights.scm");
+    let javascript_query = include_str!("../packages/javascript/queries/highlights.scm");
+    let markdown_query = include_str!("../packages/markdown/queries/highlights.scm");
+
+    for case in [
+        ContinuityCase {
+            label: "Rust word growth",
+            package_prefix: "rust",
+            contribution_id: "rust.rust",
+            language_id: "rust",
+            language: || tree_sitter_rust::LANGUAGE.into(),
+            query: rust_query,
+            old_text: "fn app() {}\n",
+            new_text: "fn application() {}\n",
+            caret: "fn app".len(),
+            action: ContinuityAction::Insert("lication"),
+            continuous: &[("keyword", "fn"), ("function", "application")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TypeScript word growth",
+            package_prefix: "typescript",
+            contribution_id: "typescript.typescript",
+            language_id: "typescript",
+            language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            query: typescript_query,
+            old_text: "function app() {}\n",
+            new_text: "function application() {}\n",
+            caret: "function app".len(),
+            action: ContinuityAction::Insert("lication"),
+            continuous: &[("keyword", "function"), ("function", "application")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TSX word growth",
+            package_prefix: "typescript",
+            contribution_id: "typescript.tsx",
+            language_id: "tsx",
+            language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
+            query: typescript_query,
+            old_text: "function app() {}\n",
+            new_text: "function application() {}\n",
+            caret: "function app".len(),
+            action: ContinuityAction::Insert("lication"),
+            continuous: &[("keyword", "function"), ("function", "application")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "JavaScript word growth",
+            package_prefix: "javascript",
+            contribution_id: "javascript.javascript",
+            language_id: "javascript",
+            language: || tree_sitter_javascript::LANGUAGE.into(),
+            query: javascript_query,
+            old_text: "function app() {}\n",
+            new_text: "function application() {}\n",
+            caret: "function app".len(),
+            action: ContinuityAction::Insert("lication"),
+            continuous: &[("keyword", "function"), ("function", "application")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Rust comment newline",
+            package_prefix: "rust",
+            contribution_id: "rust.rust",
+            language_id: "rust",
+            language: || tree_sitter_rust::LANGUAGE.into(),
+            query: rust_query,
+            old_text: "fn app() { // note hidden\n}\n",
+            new_text: "fn app() { // note\n hidden\n}\n",
+            caret: "fn app() { // note".len(),
+            action: ContinuityAction::Newline,
+            continuous: &[
+                ("keyword", "fn"),
+                ("function", "app"),
+                ("comment", "// note"),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TypeScript comment newline",
+            package_prefix: "typescript",
+            contribution_id: "typescript.typescript",
+            language_id: "typescript",
+            language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            query: typescript_query,
+            old_text: "function app() { // note hidden\n}\n",
+            new_text: "function app() { // note\n hidden\n}\n",
+            caret: "function app() { // note".len(),
+            action: ContinuityAction::Newline,
+            continuous: &[
+                ("keyword", "function"),
+                ("function", "app"),
+                ("comment", "// note"),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TSX comment newline",
+            package_prefix: "typescript",
+            contribution_id: "typescript.tsx",
+            language_id: "tsx",
+            language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
+            query: typescript_query,
+            old_text: "function app() { // note hidden\n}\n",
+            new_text: "function app() { // note\n hidden\n}\n",
+            caret: "function app() { // note".len(),
+            action: ContinuityAction::Newline,
+            continuous: &[
+                ("keyword", "function"),
+                ("function", "app"),
+                ("comment", "// note"),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "JavaScript comment newline",
+            package_prefix: "javascript",
+            contribution_id: "javascript.javascript",
+            language_id: "javascript",
+            language: || tree_sitter_javascript::LANGUAGE.into(),
+            query: javascript_query,
+            old_text: "function app() { // note hidden\n}\n",
+            new_text: "function app() { // note\n hidden\n}\n",
+            caret: "function app() { // note".len(),
+            action: ContinuityAction::Newline,
+            continuous: &[
+                ("keyword", "function"),
+                ("function", "app"),
+                ("comment", "// note"),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Rust string growth",
+            package_prefix: "rust",
+            contribution_id: "rust.rust",
+            language_id: "rust",
+            language: || tree_sitter_rust::LANGUAGE.into(),
+            query: rust_query,
+            old_text: "fn app() { let note = \"text\"; }\n",
+            new_text: "fn app() { let note = \"texts\"; }\n",
+            caret: "fn app() { let note = \"text".len(),
+            action: ContinuityAction::Insert("s"),
+            continuous: &[
+                ("keyword", "fn"),
+                ("function", "app"),
+                ("string", "\"texts\""),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TypeScript string growth",
+            package_prefix: "typescript",
+            contribution_id: "typescript.typescript",
+            language_id: "typescript",
+            language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            query: typescript_query,
+            old_text: "function app() { const note = \"text\"; }\n",
+            new_text: "function app() { const note = \"texts\"; }\n",
+            caret: "function app() { const note = \"text".len(),
+            action: ContinuityAction::Insert("s"),
+            continuous: &[
+                ("keyword", "function"),
+                ("function", "app"),
+                ("string", "\"texts\""),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TSX string growth",
+            package_prefix: "typescript",
+            contribution_id: "typescript.tsx",
+            language_id: "tsx",
+            language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
+            query: typescript_query,
+            old_text: "function app() { const note = \"text\"; }\n",
+            new_text: "function app() { const note = \"texts\"; }\n",
+            caret: "function app() { const note = \"text".len(),
+            action: ContinuityAction::Insert("s"),
+            continuous: &[
+                ("keyword", "function"),
+                ("function", "app"),
+                ("string", "\"texts\""),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "JavaScript string growth",
+            package_prefix: "javascript",
+            contribution_id: "javascript.javascript",
+            language_id: "javascript",
+            language: || tree_sitter_javascript::LANGUAGE.into(),
+            query: javascript_query,
+            old_text: "function app() { const note = \"text\"; }\n",
+            new_text: "function app() { const note = \"texts\"; }\n",
+            caret: "function app() { const note = \"text".len(),
+            action: ContinuityAction::Insert("s"),
+            continuous: &[
+                ("keyword", "function"),
+                ("function", "app"),
+                ("string", "\"texts\""),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Markdown paragraph growth",
+            package_prefix: "markdown",
+            contribution_id: "markdown.markdown",
+            language_id: "markdown",
+            language: || tree_sitter_md_025::LANGUAGE.into(),
+            query: markdown_query,
+            old_text: "Paragraph text.\n",
+            new_text: "Paragraph texts.\n",
+            caret: "Paragraph text".len(),
+            action: ContinuityAction::Insert("s"),
+            continuous: &[("paragraph", "Paragraph texts.")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Markdown code span growth",
+            package_prefix: "markdown",
+            contribution_id: "markdown.markdown",
+            language_id: "markdown",
+            language: || tree_sitter_md_025::LANGUAGE.into(),
+            query: markdown_query,
+            old_text: "`code`\n",
+            new_text: "`codes`\n",
+            caret: "`code".len(),
+            action: ContinuityAction::Insert("s"),
+            continuous: &[("code span", "`codes`")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Markdown prose newline",
+            package_prefix: "markdown",
+            contribution_id: "markdown.markdown",
+            language_id: "markdown",
+            language: || tree_sitter_md_025::LANGUAGE.into(),
+            query: markdown_query,
+            old_text: "# Heading\n\nParagraph text tail.\n",
+            new_text: "# Heading\n\nParagraph text\n tail.\n",
+            caret: "# Heading\n\nParagraph text".len(),
+            action: ContinuityAction::Newline,
+            continuous: &[
+                ("heading", "Heading"),
+                ("paragraph prefix", "Paragraph text"),
+            ],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Rust punctuation",
+            package_prefix: "rust",
+            contribution_id: "rust.rust",
+            language_id: "rust",
+            language: || tree_sitter_rust::LANGUAGE.into(),
+            query: rust_query,
+            old_text: "fn app() { }\n",
+            new_text: "fn app() { [] }\n",
+            caret: "fn app() { ".len(),
+            action: ContinuityAction::Insert("[] "),
+            continuous: &[("keyword", "fn"), ("function", "app")],
+            authoritative: &[("inserted punctuation", "[")],
+        },
+        ContinuityCase {
+            label: "TypeScript punctuation",
+            package_prefix: "typescript",
+            contribution_id: "typescript.typescript",
+            language_id: "typescript",
+            language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            query: typescript_query,
+            old_text: "function app() { }\n",
+            new_text: "function app() { [] }\n",
+            caret: "function app() { ".len(),
+            action: ContinuityAction::Insert("[] "),
+            continuous: &[("keyword", "function"), ("function", "app")],
+            authoritative: &[("inserted punctuation", "[")],
+        },
+        ContinuityCase {
+            label: "TSX punctuation",
+            package_prefix: "typescript",
+            contribution_id: "typescript.tsx",
+            language_id: "tsx",
+            language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
+            query: typescript_query,
+            old_text: "function app() { }\n",
+            new_text: "function app() { [] }\n",
+            caret: "function app() { ".len(),
+            action: ContinuityAction::Insert("[] "),
+            continuous: &[("keyword", "function"), ("function", "app")],
+            authoritative: &[("inserted punctuation", "[")],
+        },
+        ContinuityCase {
+            label: "JavaScript punctuation",
+            package_prefix: "javascript",
+            contribution_id: "javascript.javascript",
+            language_id: "javascript",
+            language: || tree_sitter_javascript::LANGUAGE.into(),
+            query: javascript_query,
+            old_text: "function app() { }\n",
+            new_text: "function app() { [] }\n",
+            caret: "function app() { ".len(),
+            action: ContinuityAction::Insert("[] "),
+            continuous: &[("keyword", "function"), ("function", "app")],
+            authoritative: &[("inserted punctuation", "[")],
+        },
+        ContinuityCase {
+            label: "Markdown punctuation",
+            package_prefix: "markdown",
+            contribution_id: "markdown.markdown",
+            language_id: "markdown",
+            language: || tree_sitter_md_025::LANGUAGE.into(),
+            query: markdown_query,
+            old_text: "`code`\nparagraph\n",
+            new_text: "`code`\n# paragraph\n",
+            caret: "`code`\n".len(),
+            action: ContinuityAction::Insert("# "),
+            continuous: &[("code span", "`code`")],
+            authoritative: &[("heading", "paragraph")],
+        },
+        ContinuityCase {
+            label: "Rust deletion",
+            package_prefix: "rust",
+            contribution_id: "rust.rust",
+            language_id: "rust",
+            language: || tree_sitter_rust::LANGUAGE.into(),
+            query: rust_query,
+            old_text: "fn appx() {}\n",
+            new_text: "fn app() {}\n",
+            caret: "fn appx".len(),
+            action: ContinuityAction::Backspace,
+            continuous: &[("keyword", "fn"), ("function", "app")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TypeScript deletion",
+            package_prefix: "typescript",
+            contribution_id: "typescript.typescript",
+            language_id: "typescript",
+            language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            query: typescript_query,
+            old_text: "function appx() {}\n",
+            new_text: "function app() {}\n",
+            caret: "function appx".len(),
+            action: ContinuityAction::Backspace,
+            continuous: &[("keyword", "function"), ("function", "app")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "TSX deletion",
+            package_prefix: "typescript",
+            contribution_id: "typescript.tsx",
+            language_id: "tsx",
+            language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
+            query: typescript_query,
+            old_text: "function appx() {}\n",
+            new_text: "function app() {}\n",
+            caret: "function appx".len(),
+            action: ContinuityAction::Backspace,
+            continuous: &[("keyword", "function"), ("function", "app")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "JavaScript deletion",
+            package_prefix: "javascript",
+            contribution_id: "javascript.javascript",
+            language_id: "javascript",
+            language: || tree_sitter_javascript::LANGUAGE.into(),
+            query: javascript_query,
+            old_text: "function appx() {}\n",
+            new_text: "function app() {}\n",
+            caret: "function appx".len(),
+            action: ContinuityAction::Backspace,
+            continuous: &[("keyword", "function"), ("function", "app")],
+            authoritative: &[],
+        },
+        ContinuityCase {
+            label: "Markdown deletion",
+            package_prefix: "markdown",
+            contribution_id: "markdown.markdown",
+            language_id: "markdown",
+            language: || tree_sitter_md_025::LANGUAGE.into(),
+            query: markdown_query,
+            old_text: "`codes`\n",
+            new_text: "`code`\n",
+            caret: "`codes".len(),
+            action: ContinuityAction::Backspace,
+            continuous: &[("code span", "`code`")],
+            authoritative: &[],
+        },
+    ] {
+        run_continuity_case(case);
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_authoritative_queries_correct_inherited_code_keywords() {
+    for (
+        label,
+        package_prefix,
+        contribution_id,
+        language_id,
+        language,
+        query,
+        old_text,
+        new_text,
+    ) in [
+        (
+            "Rust",
+            "rust",
+            "rust.rust",
+            "rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn app() { let value = 1; }\n",
+            "fn app() { letx value = 1; }\n",
+        ),
+        (
+            "TypeScript",
+            "typescript",
+            "typescript.typescript",
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function app() { const value = 1; }\n",
+            "function app() { constx value = 1; }\n",
+        ),
+        (
+            "TSX",
+            "typescript",
+            "typescript.tsx",
+            "tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function app() { const value = 1; }\n",
+            "function app() { constx value = 1; }\n",
+        ),
+        (
+            "JavaScript",
+            "javascript",
+            "javascript.javascript",
+            "javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "function app() { const value = 1; }\n",
+            "function app() { constx value = 1; }\n",
+        ),
+    ] {
+        let handler = first_party_handler(contribution_id, language, query);
+        let mut editor = apply_initial_syntax_for(&handler, package_prefix, language_id, old_text);
+        let keyword = if package_prefix == "rust" {
+            "let"
+        } else {
+            "const"
+        };
+        let insertion = old_text.find(keyword).expect("keyword") + keyword.len();
+        assert!(editor.navigate_to_byte_offset(insertion as u64));
+        assert!(editor.insert_text("x"));
+        let inherited = insertion - keyword.len()..insertion + 1;
+        let mut failures = Vec::new();
+        record_undecorated_ranges(
+            &mut failures,
+            "provisional correction input",
+            &editor,
+            &[("inherited keyword", inherited.clone())],
+        );
+        assert!(failures.is_empty(), "{label}: {}", failures.join("\n"));
+        assert!(editor.note_confirmed_version(11, 2));
+
+        let (start, old_end, new_end) = single_edit_offsets(old_text, new_text);
+        let update = handler
+            .parse_sync(incremental_notification_for(
+                package_prefix,
+                old_text,
+                new_text,
+                start,
+                old_end,
+                new_end,
+            ))
+            .unwrap_or_else(|error| panic!("{label}: correction parse: {error}"));
+        for set in update.decoration_updates {
+            assert!(
+                editor.apply_decoration_set(set),
+                "{label}: correction member"
+            );
+        }
+        let painted = editor.visible_decoration_paint_ranges_for_test();
+        assert!(
+            painted
+                .iter()
+                .all(|(range, _)| range.end <= inherited.start || range.start >= inherited.end),
+            "{label}: authoritative output retained provisional keyword geometry {painted:?}"
+        );
+        let function = new_text.find("app").expect("function");
+        assert!(
+            painted
+                .iter()
+                .any(|(range, _)| range.start <= function && range.end >= function + 3),
+            "{label}: correction cleared unrelated function decoration"
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_empty_authoritative_chunk_clears_only_fully_queried_range() {
+    let record = rust_record();
+    let handler = TreeSitterSyntaxHandler::new(
+        rust_contribution(&record),
+        rust_language(),
+        "(identifier) @keyword",
+    )
+    .expect("query compiles");
+
+    handler
+        .parse_sync(parse_notification(1, "value"))
+        .expect("initial parse");
+    let update = handler
+        .parse_sync(incremental_notification("value", "1", 0, 5, 1))
+        .expect("replacement parse");
+
+    assert_eq!(update.decoration_updates.len(), 1);
+    let set = &update.decoration_updates[0];
+    assert_eq!((set.viewport_byte_start, set.viewport_byte_end), (0, 1));
+    assert!(set.spans.is_empty());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_utf8_scalar_at_nominal_chunk_boundary_is_never_split() {
+    let record = rust_record();
+    let handler = TreeSitterSyntaxHandler::new(
+        rust_contribution(&record),
+        rust_language(),
+        "(identifier) @keyword",
+    )
+    .expect("query compiles");
+    let text = format!("{}éclair", " ".repeat(127));
+
+    let update = handler
+        .parse_sync(parse_notification(1, &text))
+        .expect("UTF-8 parse");
+
+    assert!(update.decoration_updates.len() >= 2);
+    assert!(update.decoration_updates.iter().all(|set| {
+        text.is_char_boundary(set.viewport_byte_start as usize)
+            && text.is_char_boundary(set.viewport_byte_end as usize)
+            && set.spans.iter().all(|span| {
+                text.is_char_boundary(span.byte_start as usize)
+                    && text.is_char_boundary(span.byte_end as usize)
+            })
+    }));
+    assert_eq!(update.decoration_updates[0].viewport_byte_end, 129);
+    assert_eq!(update.decoration_updates[1].viewport_byte_start, 129);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan057_changed_broad_capture_completely_fills_touched_replacement_chunk() {
+    let record = rust_record();
+    let handler = TreeSitterSyntaxHandler::new(
+        rust_contribution(&record),
+        rust_language(),
+        "(line_comment) @comment",
+    )
+    .expect("query compiles");
+    let old_text = format!("//{}\n", "a".repeat(300));
+    let insertion = 190;
+    let mut new_text = old_text.clone();
+    new_text.insert(insertion, 'b');
+
+    handler
+        .parse_sync(parse_notification(1, &old_text))
+        .expect("initial parse");
+    let update = handler
+        .parse_sync(incremental_notification(
+            &old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental broad capture parse");
+
+    assert_eq!(update.decoration_updates.len(), 1);
+    let set = &update.decoration_updates[0];
+    assert_eq!((set.viewport_byte_start, set.viewport_byte_end), (128, 256));
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Comment
+            && span.byte_start == set.viewport_byte_start
+            && span.byte_end == set.viewport_byte_end
     }));
 }
 
@@ -2391,7 +3318,7 @@ fn first_party_package_queries_keep_broad_captures_continuous() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn changed_decoration_chunk_is_ordered_before_adjacent_chunks() {
+fn changed_decoration_chunk_does_not_publish_untouched_adjacent_chunks() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
     let handler =
@@ -2415,7 +3342,7 @@ fn changed_decoration_chunk_is_ordered_before_adjacent_chunks() {
         ))
         .expect("incremental parse");
 
-    assert!(update.decoration_updates.len() >= 3);
+    assert_eq!(update.decoration_updates.len(), 1);
     let first = &update.decoration_updates[0];
     assert!(
         first.viewport_byte_start <= insertion as u64 && first.viewport_byte_end > insertion as u64

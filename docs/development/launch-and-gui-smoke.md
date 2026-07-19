@@ -318,6 +318,30 @@ For each Rust, TypeScript, TSX, JavaScript, and Markdown fixture, verify immedia
 
 The Linux full run passed `cargo test --all-targets`, including `syntax_grammar` (58 tests), `parse_coordinator` (29), `decoration_transport` (15), `performance_protocol` (19), `editor_performance_invariants` (22), and `language_intelligence` (31). Those suites cover exact token/capture transitions, stale and superseded result rejection, one parse per version/window, bounded fan-out, malformed/oversize/provenance failures, non-blocking local edits, syntax/semantic composition, and source-safe metric retention. See [Performance Fixtures and Baseline Workflow](performance.md#plan-056-low-latency-syntax-linux-verification-2026-07-19) for benchmark distributions and metric evidence.
 
+### Plan 057 syntax-continuity Linux smoke (2026-07-19)
+
+Run the first-party package fixture with profiling enabled:
+
+```bash
+cargo run -- smoke-gui --config-fixture language-packages --profile-perf
+```
+
+The Linux verification launched the native Wayland window successfully. A second X11-backed run (`WAYLAND_DISPLAY='' WINIT_UNIX_BACKEND=x11`) provided agent-observable framebuffer checkpoints while exercising the same managed server, workspace, package loading, editor, parse, transport, and paint paths. Both runs used the checked-in `language-packages` fixture and left package authority unchanged.
+
+Manual visual checkpoints used actual workspace files under the synthetic `tmp/src` smoke corpus. Rust opened with visible keyword/function/type/string/number/operator layers. In TypeScript, appending `x` to the already classified `greet` declaration kept the complete `greetx` run in the function color; pressing Enter after that declaration retained the earlier interface/type decorations and the later return/template-string/const decorations. The reported per-letter base-color flash and all-white newline regression were not observed. Screenshots were temporary local verification artifacts and were not committed.
+
+The repeatable matrix is `plan057_first_party_languages_keep_continuity_across_edit_boundaries`: real Rust, TypeScript, TSX, JavaScript, and Markdown grammar output flows through optimistic edit, acknowledgement, incremental parse, every authoritative member, and visible paint-range inspection. It covers declaration and code-string growth, code-comment and Markdown-prose newline, paragraph/code-span growth, punctuation, and deletion. `plan057_authoritative_queries_correct_inherited_code_keywords` covers server correction in all code grammars; `rapid_local_versions_reject_stale_authority_without_losing_provisional_geometry` covers superseded authority while provisional geometry remains valid. The UTF-8/128-byte replacement-boundary regression remains covered by `plan057_utf8_scalar_at_nominal_chunk_boundary_is_never_split`.
+
+Representative commands:
+
+```bash
+cargo test --test syntax_grammar plan057
+cargo test --test decoration_transport rapid_local_versions
+cargo bench --bench first_party_language_baselines first_party_incremental_edit -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+See [Performance Fixtures and Baseline Workflow](performance.md#plan-057-syntax-continuity-linux-verification-2026-07-19) for measured parser/query/member counts, `syntax.edit_to_publish` instrumentation, and advisory five-language timings.
+
 ### End-to-end file browser workflow smoke
 
 This smoke validates the six-step app workflow on Linux, Clay's primary development and CI host. The Plan 044 real-`cargo run` regressions are locked separately in [Manual File Browser Workflow Bug Contract](manual-file-browser-workflow-bug-contract.md).

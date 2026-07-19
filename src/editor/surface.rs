@@ -294,7 +294,10 @@ impl EditorDecorationState {
     }
 
     fn apply_edit(&mut self, operation: &EditOperation) -> bool {
-        let Some((start, end, inserted_len)) = edit_extent(operation) else {
+        let Some((start, end, inserted_text)) = edit_extent(operation) else {
+            return false;
+        };
+        let Ok(inserted_len) = inserted_text.len().try_into() else {
             return false;
         };
         let mut changed = false;
@@ -303,7 +306,7 @@ impl EditorDecorationState {
             let original_key_range = (chunk.key.byte_start, chunk.key.byte_end);
             chunk.spans.retain_mut(|span| {
                 let original = (span.byte_start, span.byte_end);
-                if !interpolate_decoration_span(span, start, end, inserted_len) {
+                if !interpolate_decoration_span(span, start, end, inserted_text, inserted_len) {
                     chunk_changed = true;
                     return false;
                 }
@@ -700,13 +703,11 @@ fn is_completion_word_character(character: char) -> bool {
     character == '_' || character.is_alphanumeric()
 }
 
-fn edit_extent(operation: &EditOperation) -> Option<(u64, u64, u64)> {
+fn edit_extent(operation: &EditOperation) -> Option<(u64, u64, &str)> {
     let extent = match operation {
-        EditOperation::Insert { byte_offset, text } => {
-            (*byte_offset, *byte_offset, text.len().try_into().ok()?)
-        }
-        EditOperation::Delete { start, end } => (*start, *end, 0),
-        EditOperation::Replace { start, end, text } => (*start, *end, text.len().try_into().ok()?),
+        EditOperation::Insert { byte_offset, text } => (*byte_offset, *byte_offset, text.as_str()),
+        EditOperation::Delete { start, end } => (*start, *end, ""),
+        EditOperation::Replace { start, end, text } => (*start, *end, text.as_str()),
     };
     (extent.0 <= extent.1).then_some(extent)
 }
@@ -715,9 +716,14 @@ fn interpolate_decoration_span(
     span: &mut DecorationSpan,
     edit_start: u64,
     edit_end: u64,
+    inserted_text: &str,
     inserted_len: u64,
 ) -> bool {
     let broad_syntax = span.kind == DecorationKind::Syntax && is_broad_token(span.token_type);
+    let same_word_suffix = span.kind == DecorationKind::Syntax
+        && !broad_syntax
+        && !inserted_text.is_empty()
+        && inserted_text.chars().all(is_completion_word_character);
     if edit_start == edit_end {
         if edit_start < span.byte_start {
             let Some((start, end)) = shift_range(span.byte_start, span.byte_end, inserted_len, 0)
@@ -741,7 +747,9 @@ fn interpolate_decoration_span(
                 span.byte_start = start;
                 span.byte_end = end;
             }
-        } else if edit_start < span.byte_end || (edit_start == span.byte_end && broad_syntax) {
+        } else if edit_start < span.byte_end
+            || (edit_start == span.byte_end && (broad_syntax || same_word_suffix))
+        {
             if span.kind != DecorationKind::Syntax {
                 return false;
             }
@@ -3101,22 +3109,94 @@ mod tests {
     }
 
     #[test]
-    fn optimistic_narrow_span_does_not_inherit_edge_insertions() {
+    fn optimistic_narrow_token_families_inherit_same_word_suffixes() {
+        for token_type in [
+            TokenType::Function,
+            TokenType::Type,
+            TokenType::Variable,
+            TokenType::Keyword,
+            TokenType::Number,
+        ] {
+            let mut editor = EditorSurface::default();
+            assert!(editor.decorations.apply_set(decoration_set(
+                1,
+                0,
+                12,
+                vec![syntax_span(2, 5, token_type)],
+            )));
+
+            assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+                byte_offset: 5,
+                text: "x2_".to_string(),
+            }));
+
+            let span = &editor.decorations.chunks[0].spans[0];
+            assert_eq!((span.byte_start, span.byte_end), (2, 8));
+        }
+    }
+
+    #[test]
+    fn optimistic_narrow_span_stops_at_non_word_boundaries() {
+        for text in [" ", "\t", "\n", "\"", "]", "/", "+"] {
+            let mut editor = EditorSurface::default();
+            assert!(editor.decorations.apply_set(decoration_set(
+                1,
+                0,
+                12,
+                vec![syntax_span(2, 5, TokenType::Keyword)],
+            )));
+
+            assert!(!editor.decorations.apply_edit(&EditOperation::Insert {
+                byte_offset: 5,
+                text: text.to_string(),
+            }));
+
+            let span = &editor.decorations.chunks[0].spans[0];
+            assert_eq!((span.byte_start, span.byte_end), (2, 5));
+        }
+    }
+
+    #[test]
+    fn optimistic_narrow_span_inherits_unicode_word_suffix() {
         let mut editor = EditorSurface::default();
         assert!(editor.decorations.apply_set(decoration_set(
             1,
             0,
             12,
-            vec![syntax_span(2, 5, TokenType::Keyword)],
+            vec![syntax_span(2, 5, TokenType::Variable)],
         )));
 
-        assert!(!editor.decorations.apply_edit(&EditOperation::Insert {
+        assert!(editor.decorations.apply_edit(&EditOperation::Insert {
             byte_offset: 5,
-            text: "x".to_string(),
+            text: "é".to_string(),
         }));
 
         let span = &editor.decorations.chunks[0].spans[0];
-        assert_eq!((span.byte_start, span.byte_end), (2, 5));
+        assert_eq!((span.byte_start, span.byte_end), (2, 7));
+    }
+
+    #[test]
+    fn optimistic_non_syntax_layers_do_not_inherit_same_word_suffixes() {
+        for kind in [
+            DecorationKind::Semantic,
+            DecorationKind::Diagnostic,
+            DecorationKind::SearchMatch,
+        ] {
+            let mut span = syntax_span(2, 5, TokenType::Variable);
+            span.kind = kind;
+            let mut set = decoration_set(1, 0, 12, vec![span]);
+            set.kind = kind;
+            let mut editor = EditorSurface::default();
+            assert!(editor.decorations.apply_set(set));
+
+            assert!(!editor.decorations.apply_edit(&EditOperation::Insert {
+                byte_offset: 5,
+                text: "x".to_string(),
+            }));
+
+            let span = &editor.decorations.chunks[0].spans[0];
+            assert_eq!((span.byte_start, span.byte_end), (2, 5));
+        }
     }
 
     #[test]

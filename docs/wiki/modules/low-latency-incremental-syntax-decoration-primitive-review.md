@@ -4,7 +4,9 @@
 
 - `plans/056-Low-Latency-Incremental-Syntax-Decoration.md`
 - `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md`
+- `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`
 - `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md`
+- `plans/057-Syntax-Decoration-Continuity-and-Replacement-Correctness.md`
 - `src/protocol/parse.rs`
 - `src/protocol/decorations.rs`
 - `src/server/document.rs`
@@ -119,15 +121,52 @@ Deterministic tests lock logical-work/fan-out separation, exact incremental clas
 
 Plan 056 adds no caller-controlled Clay JS capability. `ParseInputEdit`, stable window identity, coordinator coalescing, Tree-sitter reuse/query ranges, decoration fan-out, set-level replacement identity, and `EditorDecorationState` interpolation are server/protocol/client implementation details. They do not receive facade exports, raw ops, custom properties, hidden configuration keys, or per-keystroke callbacks.
 
+Plan 057 likewise adds no caller-controlled Clay JS capability. `replacement_ranges` (UTF-8-safe complete chunk grid), same-word narrow-syntax provisional inheritance (`is_completion_word_character` predicate, `same_word_suffix` flag in `interpolate_decoration_span`), and the shared 128-byte replacement chunk grid are compiled correctness internals. They do not receive facade exports, raw ops, custom properties, or configuration keys.
+
 Existing public package surfaces remain sufficient: [`clay.parse.serverRegisterParseHandler`](../../reference/clay-js-api/parse/server-register-parse-handler.md) declares a bounded server parser, [`clay.syntax.serverRegisterSyntaxGrammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) declares validated grammar metadata, and [`clay.decorations.serverPublishDecorations`](../../reference/clay-js-api/decorations/server-publish-decorations.md) publishes inert bounded spans. The parse facade may supply exact accepted-edit metadata to its already registered server-runtime handler, but packages cannot control scheduling, changed-range queries, output chunking, interpolation, or authoritative replacement. Existing provenance, permissions, current-version, and payload validation remain the authority boundary.
 
-`tests/rust_visibility_api_mapping.rs` requires public server Rust items to be mapped in the API inventory or explicitly marked non-JS infrastructure. `tests/clay_js_api_inventory.rs` verifies the existing facade/op/docs/inventory boundaries and rejects Plan 056 internals as facade exports. No new generated registry entry is needed because Plan 056 adds no Clay JS API metadata; the existing registry remains checked for freshness.
+`tests/rust_visibility_api_mapping.rs` requires public server Rust items to be mapped in the API inventory or explicitly marked non-JS infrastructure. `tests/clay_js_api_inventory.rs` verifies the existing facade/op/docs/inventory boundaries and rejects Plan 056 and Plan 057 internals as facade exports. No new generated registry entry is needed; the existing registry remains checked for freshness.
 
 ## Configuration Audit
 
 Plan 056 adds no `clay:configuration` surface. The stable-window cap, coalescing, fallback/query rules, payload/cache limits, 128-byte output splitting, and provisional interpolation are correctness and latency invariants, so users and packages cannot tune them through debounce, word-boundary, parse-window, chunk-size, interpolation, or client-parser keys. Existing [`clay.syntax.setSyntaxEnginePreference`](../../reference/clay-js-api/syntax/set-syntax-engine-preference.md) remains the sole relevant user choice: its documented `target`/`tier` selects an already validated engine, not scheduling policy.
 
+Plan 057 adds no `clay:configuration` surface. Complete authoritative replacement chunks (query coverage identical to replacement coverage, UTF-8-safe shared chunk grid), same-word narrow-syntax provisional inheritance (Unicode alphanumeric/underscore extends, whitespace/newline/punctuation stops), and unchanged broad-syntax edge behavior are compiled correctness invariants. No `syntaxSameWordBoundary`, `syntaxReplacementChunkGrid`, `syntaxWordInheritance`, `syntaxChunkQueryCoverage`, `syntaxCompleteReplacement`, or `syntaxUtf8ChunkGrid` key exists.
+
 Configuration remains outside keypress, text-edit, edit-acknowledgement, parse, publication, paint, layout, and scroll paths. The configuration reference records rejected hidden names and the API inventory test rejects them from configuration custom properties, facades, ops, inventory, and generated registry. No parser callback or external authority is introduced.
+
+## Plan 057 Syntax-Decoration Continuity and Replacement Correctness
+
+Plan 057 (`plans/057-Syntax-Decoration-Continuity-and-Replacement-Correctness.md`, superseding `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`) fixed two root-cause flickering defects discovered during manual testing after Plan 056 completed:
+
+1. **Narrow-span inheritance gap**: Plan 056 `interpolate_decoration_span` only extended broad syntax (Comment, String, Heading1-6, etc.) at token edges; narrow syntax (Keyword, Function, Type, Variable, Number) never inherited inserted characters, so every appended identifier/keyword character painted base-white until authoritative server output arrived.
+
+2. **Wider-than-queried authoritative replacement**: Plan 056 queried only the affected (changed+invalidated) envelope but published full 128-byte replacement chunks. Chunks containing syntax not covered by the query were published with empty spans, clearing all decoration in that range — especially visible after newline insertion.
+
+### Fix 1: Same-Word Narrow-Syntax Provisional Inheritance
+
+`interpolate_decoration_span` in `src/editor/surface.rs` now receives the inserted text content (not just byte length). For narrow syntax spans (kind == Syntax, not broad token family), insertion at `span.byte_end` extends the span only when inserted text is non-empty and every character satisfies `is_completion_word_character` (Unicode `is_alphanumeric()` or `_`). Whitespace, newline, punctuation, brackets, and operators stop inheritance immediately.
+
+Source: `src/editor/surface.rs` — `edit_extent` returns `Option<(u64, u64, &str)>`, `interpolate_decoration_span` computes `same_word_suffix` flag, `is_completion_word_character` predicate.
+
+Tests: `tests/syntax_grammar.rs` — `plan057_function_suffix_stays_decorated_through_local_ack_and_authoritative_states`; `tests/decoration_transport.rs` — `authoritative_syntax_corrects_inherited_suffix_without_clearing_unrelated_spans`; `src/editor/surface.rs` — `optimistic_narrow_token_families_inherit_same_word_suffixes`, `optimistic_narrow_span_stops_at_non_word_boundaries`, `optimistic_narrow_span_inherits_unicode_word_suffix`, `optimistic_non_syntax_layers_do_not_inherit_same_word_suffixes`.
+
+### Fix 2: Complete Authoritative Replacement Chunks
+
+`replacement_ranges` in `src/server/syntax.rs` converts affected (changed+invalidated) ranges into a shared 128-byte UTF-8-safe replacement-chunk grid. The handler queries the full envelope covering every touched replacement chunk, clips captures at exact chunk boundaries, and constructs `DecorationSet` members from the same grid — so query coverage and replacement coverage are identical. Only chunks that intersect the query envelope are published; untouched adjacent chunks are never emitted.
+
+Source: `src/server/syntax.rs` — `replacement_ranges` (shared grid), `decoration_sets_for_ranges` (takes `&[Range<usize>]` instead of single viewport), `parse_sync` computes `affected_ranges` → `replacement_ranges` → passes to `decorations_for_window`.
+
+Tests: `tests/syntax_grammar.rs` — `plan057_newline_keeps_unrelated_short_file_syntax_through_every_state`, `plan057_empty_authoritative_chunk_clears_only_fully_queried_range`, `plan057_utf8_scalar_at_nominal_chunk_boundary_is_never_split`, `plan057_changed_broad_capture_completely_fills_touched_replacement_chunk`; `src/server/syntax.rs` — `replacement_ranges_move_shared_chunk_boundaries_past_utf8_scalars`, `decoration_member_count_does_not_multiply_parse_or_query_invocations`.
+
+### Verification
+
+- `plan057_first_party_languages_keep_continuity_across_edit_boundaries`: 25 composed transition cases over real Rust/TypeScript/TSX/JavaScript/Markdown grammar fixtures covering declaration/string growth, comment/prose newline, paragraph/code-span growth, punctuation, and deletion.
+- `plan057_authoritative_queries_correct_inherited_code_keywords`: real grammar output corrects inherited keyword suffixes without collateral clearing.
+- `rapid_local_versions_reject_stale_authority_without_losing_provisional_geometry`: stale version 2 authority cannot erase version 3 inherited geometry.
+- `first_party_continuity_edits_keep_one_bounded_parse_and_query`: one parser call, one query range, one member per language for all five native descriptors.
+- Manual X11 smoke: TypeScript `greet` + `x` remained function-colored, Enter after declaration left syntax decorated, no all-white newline regression.
+- Criterion: no statistically significant performance change (Rust ~168 µs, TypeScript ~361 µs, TSX ~126 µs, JavaScript ~123 µs, Markdown ~200 µs).
 
 ## Rejected Alternatives
 

@@ -5,7 +5,7 @@ use clay::packages::record::assemble_package_record;
 use clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES;
 use clay::protocol::{
     BehaviorManifest, DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan,
-    DocumentAccess, ServerMessage, TokenType, codec::Codec,
+    DocumentAccess, Modifiers, ServerMessage, TokenType, codec::Codec,
 };
 use clay::server::decorations::{DecorationValidationError, validate_decoration_publication};
 use serde_json::json;
@@ -333,6 +333,194 @@ fn optimistic_comment_style_extends_until_authoritative_replacement() {
     .unwrap();
     assert!(editor.apply_decoration_set(empty));
     assert_eq!(editor.decoration_span_count(), 0);
+}
+
+#[test]
+fn authoritative_syntax_corrects_inherited_suffix_without_clearing_unrelated_spans() {
+    let package = decoration_package();
+    let initial = validate_decoration_publication(
+        &package,
+        3,
+        DecorationSet {
+            document_id: 7,
+            document_version: 3,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 8,
+            spans: vec![
+                DecorationSpan::from_vocabulary(
+                    0,
+                    4,
+                    DecorationKind::Syntax,
+                    TokenType::Function,
+                    Modifiers::NONE,
+                    70,
+                    provenance(),
+                ),
+                DecorationSpan::from_vocabulary(
+                    5,
+                    8,
+                    DecorationKind::Syntax,
+                    TokenType::Keyword,
+                    Modifiers::NONE,
+                    70,
+                    provenance(),
+                ),
+            ],
+        },
+    )
+    .unwrap();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "main let".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    assert!(editor.apply_decoration_set(initial));
+    assert!(editor.navigate_to_byte_offset(4));
+
+    assert!(editor.insert_text("x"));
+    let provisional = editor.visible_decoration_paint_ranges_for_test();
+    assert!(provisional.iter().any(|(range, _)| range == &(0..5)));
+    assert!(provisional.iter().any(|(range, _)| range == &(6..9)));
+    assert!(editor.note_confirmed_version(7, 4));
+
+    let authoritative = validate_decoration_publication(
+        &package,
+        4,
+        DecorationSet {
+            document_id: 7,
+            document_version: 4,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 9,
+            spans: vec![DecorationSpan::from_vocabulary(
+                6,
+                9,
+                DecorationKind::Syntax,
+                TokenType::Keyword,
+                Modifiers::NONE,
+                70,
+                provenance(),
+            )],
+        },
+    )
+    .unwrap();
+
+    assert!(editor.apply_decoration_set(authoritative));
+    assert_eq!(editor.decoration_span_count(), 1);
+    assert_eq!(
+        editor
+            .visible_decoration_paint_ranges_for_test()
+            .into_iter()
+            .map(|(range, _)| range)
+            .collect::<Vec<_>>(),
+        vec![6..9]
+    );
+}
+
+#[test]
+fn rapid_local_versions_reject_stale_authority_without_losing_provisional_geometry() {
+    let package = decoration_package();
+    let initial = validate_decoration_publication(
+        &package,
+        1,
+        DecorationSet {
+            document_id: 7,
+            document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 4,
+            spans: vec![DecorationSpan::from_vocabulary(
+                0,
+                4,
+                DecorationKind::Syntax,
+                TokenType::Function,
+                Modifiers::NONE,
+                70,
+                provenance(),
+            )],
+        },
+    )
+    .unwrap();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        1,
+        "main".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    assert!(editor.apply_decoration_set(initial));
+    assert!(editor.navigate_to_byte_offset(4));
+
+    assert!(editor.insert_text("x"));
+    assert!(editor.note_confirmed_version(7, 2));
+    assert!(editor.insert_text("y"));
+    assert!(editor.note_confirmed_version(7, 3));
+    assert!(
+        editor
+            .visible_decoration_paint_ranges_for_test()
+            .iter()
+            .any(|(range, _)| range == &(0..6))
+    );
+
+    let stale = validate_decoration_publication(
+        &package,
+        2,
+        DecorationSet {
+            document_id: 7,
+            document_version: 2,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 5,
+            spans: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert!(!editor.apply_decoration_set(stale));
+    assert!(
+        editor
+            .visible_decoration_paint_ranges_for_test()
+            .iter()
+            .any(|(range, _)| range == &(0..6))
+    );
+
+    let current = validate_decoration_publication(
+        &package,
+        3,
+        DecorationSet {
+            document_id: 7,
+            document_version: 3,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 6,
+            spans: vec![DecorationSpan::from_vocabulary(
+                0,
+                6,
+                DecorationKind::Syntax,
+                TokenType::Function,
+                Modifiers::NONE,
+                70,
+                provenance(),
+            )],
+        },
+    )
+    .unwrap();
+    assert!(editor.apply_decoration_set(current));
+    assert_eq!(
+        editor
+            .visible_decoration_paint_ranges_for_test()
+            .into_iter()
+            .map(|(range, _)| range)
+            .collect::<Vec<_>>(),
+        vec![0..6]
+    );
 }
 
 #[test]

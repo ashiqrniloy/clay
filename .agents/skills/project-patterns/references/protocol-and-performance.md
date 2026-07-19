@@ -39,9 +39,10 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 - Make UI-reactive server work cancellable and priority-aware.
 - Incremental syntax highlighting parses once per accepted document version/grammar stream over a stable bounded window, using exact edit metadata and changed-range queries; decoration transport/cache chunking must not multiply parser jobs over the same window.
 - Newer syntax versions cancel or coalesce superseded work, but the latest edit remains eligible immediately; do not use whitespace-only or idle-only parse scheduling.
-- Client decoration state may interpolate inert spans through optimistic edits for visual continuity, while server-issued current-version syntax remains authoritative and replaces affected token/range spans atomically. Parser token/capture boundaries—not letters or spaces alone—define authoritative transitions.
+- Client decoration state may interpolate inert spans through optimistic edits for visual continuity, while server-issued current-version syntax remains authoritative. Existing narrow syntax may inherit appended Unicode alphanumeric/underscore suffixes; whitespace, newline, punctuation, and structural edits end narrow-token inheritance.
+- Every authoritative decoration chunk must contain complete capture state for exactly the UTF-8-safe range it replaces. Expand changed-range query coverage to complete touched replacement chunks before publication; never publish a wider authoritative range than was fully queried.
 - Keep syntax beneath slower semantic layers, reject stale decoration versions, and add no client parser unless measured optimized server latency justifies a separate decision.
-- Low-latency syntax decoration decision source: `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md`.
+- Syntax continuity decision sources: `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md` and superseding `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`.
 - Keep background AI/indexing/file work from delaying input confirmations or UI-reactive work.
 
 ## Testing Guidance

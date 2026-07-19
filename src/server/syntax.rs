@@ -7,7 +7,7 @@ use std::{
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, Tree};
 
-const SYNTAX_DECORATION_CHUNK_BYTES: u64 = 128;
+const SYNTAX_DECORATION_CHUNK_BYTES: usize = 128;
 
 use crate::{
     packages::{
@@ -1151,24 +1151,17 @@ impl TreeSitterSyntaxHandler {
             return Err(TreeSitterSyntaxError::ParseTimedOut);
         };
 
-        let query_ranges = query_ranges(&notification, window, old_tree.as_ref(), &tree);
+        let affected_ranges = query_ranges(&notification, window, old_tree.as_ref(), &tree);
+        let replacement_ranges = replacement_ranges(&affected_ranges, &window.text);
         let decoration_updates =
-            self.decorations_for_window(&notification, window, &tree, &query_ranges)?;
-        let update_viewport = decoration_updates.iter().fold(
-            ParseByteRange::new(
-                window
-                    .byte_start
-                    .saturating_add(query_ranges.first().map_or(0, |range| range.start) as u64),
-                window
-                    .byte_start
-                    .saturating_add(query_ranges.last().map_or(0, |range| range.end) as u64),
-            ),
-            |range, set| {
-                ParseByteRange::new(
-                    range.start.min(set.viewport_byte_start),
-                    range.end.max(set.viewport_byte_end),
-                )
-            },
+            self.decorations_for_window(&notification, window, &tree, &replacement_ranges)?;
+        let update_viewport = ParseByteRange::new(
+            window
+                .byte_start
+                .saturating_add(replacement_ranges.first().map_or(0, |range| range.start) as u64),
+            window
+                .byte_start
+                .saturating_add(replacement_ranges.last().map_or(0, |range| range.end) as u64),
         );
         self.trees
             .lock()
@@ -1225,11 +1218,11 @@ impl TreeSitterSyntaxHandler {
         notification: &ParseEditNotification,
         window: &crate::protocol::ParseWindowSnapshot,
         tree: &Tree,
-        query_ranges: &[std::ops::Range<usize>],
+        replacement_ranges: &[std::ops::Range<usize>],
     ) -> Result<Vec<DecorationSet>, TreeSitterSyntaxError> {
-        let query_range = query_ranges
+        let query_range = replacement_ranges
             .first()
-            .map(|first| first.start..query_ranges.last().map_or(first.end, |last| last.end))
+            .map(|first| first.start..replacement_ranges.last().map_or(first.end, |last| last.end))
             .unwrap_or(0..0);
         let metadata =
             MetricMetadata::document(notification.document_id, notification.document_version);
@@ -1288,20 +1281,8 @@ impl TreeSitterSyntaxHandler {
             }
         }
 
-        let queried_viewport = ParseByteRange::new(
-            window.byte_start.saturating_add(query_range.start as u64),
-            window.byte_start.saturating_add(query_range.end as u64),
-        );
-        let output_viewport = syntax_captures
-            .iter()
-            .fold(queried_viewport, |range, capture| {
-                ParseByteRange::new(
-                    range.start.min(capture.byte_start),
-                    range.end.max(capture.byte_end),
-                )
-            });
         let spans = captures_to_decoration_spans(&self.contribution, syntax_captures)?;
-        let mut sets = decoration_sets_for_range(notification, window, output_viewport, spans);
+        let mut sets = decoration_sets_for_ranges(notification, window, replacement_ranges, spans);
         sets.sort_by_key(|set| {
             !notification.invalidated_ranges.iter().any(|range| {
                 range.intersects(ParseByteRange::new(
@@ -1445,6 +1426,36 @@ fn normalize_query_ranges(
     merged
 }
 
+fn replacement_ranges(
+    affected_ranges: &[std::ops::Range<usize>],
+    text: &str,
+) -> Vec<std::ops::Range<usize>> {
+    if affected_ranges.is_empty() || text.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    let mut chunk_start = 0;
+    for nominal_end in (SYNTAX_DECORATION_CHUNK_BYTES..text.len())
+        .step_by(SYNTAX_DECORATION_CHUNK_BYTES)
+        .chain(std::iter::once(text.len()))
+    {
+        let mut chunk_end = nominal_end;
+        while chunk_end < text.len() && !text.is_char_boundary(chunk_end) {
+            chunk_end += 1;
+        }
+        let chunk = chunk_start..chunk_end;
+        if affected_ranges
+            .iter()
+            .any(|affected| affected.start < chunk.end && chunk.start < affected.end)
+        {
+            ranges.push(chunk.clone());
+        }
+        chunk_start = chunk_end;
+    }
+    ranges
+}
+
 pub fn map_capture_to_vocabulary(
     contribution: &SyntaxGrammarContribution,
     capture: &SyntaxCapture,
@@ -1490,46 +1501,37 @@ fn captures_to_decoration_spans(
     Ok(spans)
 }
 
-fn decoration_sets_for_range(
+fn decoration_sets_for_ranges(
     notification: &ParseEditNotification,
     window: &crate::protocol::ParseWindowSnapshot,
-    output: ParseByteRange,
+    replacement_ranges: &[std::ops::Range<usize>],
     spans: Vec<DecorationSpan>,
 ) -> Vec<DecorationSet> {
-    if output.is_empty() {
-        return Vec::new();
-    }
-    let relative_start = output.start.saturating_sub(window.byte_start);
-    let mut chunk_start = window.byte_start.saturating_add(
-        (relative_start / SYNTAX_DECORATION_CHUNK_BYTES) * SYNTAX_DECORATION_CHUNK_BYTES,
-    );
-    let output_end = output.end.min(window.byte_end);
-    let mut sets = Vec::new();
-    while chunk_start < output_end {
-        let chunk_end = chunk_start
-            .saturating_add(SYNTAX_DECORATION_CHUNK_BYTES)
-            .min(window.byte_end);
-        let chunk_spans = spans
-            .iter()
-            .filter_map(|span| {
-                let mut span = span.clone();
-                span.byte_start = span.byte_start.max(chunk_start);
-                span.byte_end = span.byte_end.min(chunk_end);
-                (span.byte_start < span.byte_end).then_some(span)
-            })
-            .collect::<Vec<_>>();
-        sets.push(DecorationSet {
-            document_id: notification.document_id,
-            document_version: notification.document_version,
-            package_prefix: notification.package_prefix.clone(),
-            kind: DecorationKind::Syntax,
-            viewport_byte_start: chunk_start,
-            viewport_byte_end: chunk_end,
-            spans: chunk_spans,
-        });
-        chunk_start = chunk_end;
-    }
-    sets
+    replacement_ranges
+        .iter()
+        .map(|range| {
+            let chunk_start = window.byte_start.saturating_add(range.start as u64);
+            let chunk_end = window.byte_start.saturating_add(range.end as u64);
+            let chunk_spans = spans
+                .iter()
+                .filter_map(|span| {
+                    let mut span = span.clone();
+                    span.byte_start = span.byte_start.max(chunk_start);
+                    span.byte_end = span.byte_end.min(chunk_end);
+                    (span.byte_start < span.byte_end).then_some(span)
+                })
+                .collect();
+            DecorationSet {
+                document_id: notification.document_id,
+                document_version: notification.document_version,
+                package_prefix: notification.package_prefix.clone(),
+                kind: DecorationKind::Syntax,
+                viewport_byte_start: chunk_start,
+                viewport_byte_end: chunk_end,
+                spans: chunk_spans,
+            }
+        })
+        .collect()
 }
 
 impl crate::server::parse_coordinator::ParseHandler for TreeSitterSyntaxHandler {
@@ -1620,6 +1622,19 @@ mod tests {
     }
 
     #[test]
+    fn replacement_ranges_move_shared_chunk_boundaries_past_utf8_scalars() {
+        let text = format!("{}é{}", "a".repeat(127), "b".repeat(130));
+
+        let affected = 127..130;
+        let ranges = replacement_ranges(std::slice::from_ref(&affected), &text);
+
+        assert_eq!(ranges, vec![0..129, 129..256]);
+        assert!(ranges.iter().all(|range| {
+            text.is_char_boundary(range.start) && text.is_char_boundary(range.end)
+        }));
+    }
+
+    #[test]
     fn incremental_parse_queries_less_than_unchanged_window() {
         let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
             .iter()
@@ -1633,14 +1648,15 @@ mod tests {
         )
         .expect("Rust handler");
         handler.perf = perf.clone();
-        let old_text = "fn main() { le value = 1; let distant = 2; }\n";
-        let new_text = "fn main() { let value = 1; let distant = 2; }\n";
+        let suffix = " let distant = 2;".repeat(20);
+        let old_text = format!("fn main() {{ le value = 1;{suffix} }}\n");
+        let new_text = format!("fn main() {{ let value = 1;{suffix} }}\n");
         let insertion = old_text.find("le value").expect("partial keyword") + 2;
 
         handler
-            .parse_sync(notification(1, old_text))
+            .parse_sync(notification(1, &old_text))
             .expect("full parse");
-        let mut incremental = notification(2, new_text);
+        let mut incremental = notification(2, &new_text);
         incremental.invalidated_ranges =
             vec![ParseByteRange::new(insertion as u64, insertion as u64 + 1)];
         incremental.accepted_edit = Some(crate::protocol::ParseInputEdit {
@@ -1661,8 +1677,180 @@ mod tests {
         });
         assert!(matches!(
             queried_bytes,
-            Some(MetricValue::Bytes { bytes }) if bytes < new_text.len() as u64
+            Some(MetricValue::Bytes { bytes }) if bytes <= SYNTAX_DECORATION_CHUNK_BYTES as u64
+                && bytes < new_text.len() as u64
         ));
+    }
+
+    #[test]
+    fn decoration_member_count_does_not_multiply_parse_or_query_invocations() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "rust.rust")
+            .expect("Rust descriptor");
+        let perf = PerfRecorder::for_test(true);
+        let mut handler = TreeSitterSyntaxHandler::new(
+            contribution_from_native_descriptor(descriptor),
+            (descriptor.language)(),
+            "(identifier) @keyword",
+        )
+        .expect("Rust handler");
+        handler.perf = perf.clone();
+        let text = (0..80)
+            .map(|index| format!("let value_{index} = {index};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let update = handler
+            .parse_sync(notification(1, &text))
+            .expect("full parse");
+        let snapshots = perf.snapshots();
+
+        assert!(update.decoration_updates.len() > 1);
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_PARSE_INVOCATIONS)
+                .count(),
+            1
+        );
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_QUERY_RANGES)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn first_party_continuity_edits_keep_one_bounded_parse_and_query() {
+        for (id, old_text, new_text) in [
+            ("rust.rust", "fn app() {}\n", "fn application() {}\n"),
+            (
+                "typescript.typescript",
+                "function app() {}\n",
+                "function application() {}\n",
+            ),
+            (
+                "typescript.tsx",
+                "function app() {}\n",
+                "function application() {}\n",
+            ),
+            (
+                "javascript.javascript",
+                "function app() {}\n",
+                "function application() {}\n",
+            ),
+            (
+                "markdown.markdown",
+                "Paragraph text.\n",
+                "Paragraph texts.\n",
+            ),
+        ] {
+            let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+                .iter()
+                .find(|descriptor| descriptor.id == id)
+                .unwrap_or_else(|| panic!("{id} descriptor"));
+            let perf = PerfRecorder::for_test(true);
+            let mut handler = TreeSitterSyntaxHandler::new(
+                contribution_from_native_descriptor(descriptor),
+                (descriptor.language)(),
+                descriptor.highlights_query,
+            )
+            .unwrap_or_else(|error| panic!("{id} handler: {error}"));
+            handler.perf = perf.clone();
+
+            let prepare = |mut notification: ParseEditNotification| {
+                notification.package_prefix = descriptor.package_prefix.to_string();
+                notification.mode_id = descriptor.id.to_string();
+                notification.parse_windows[0].package_prefix =
+                    descriptor.package_prefix.to_string();
+                notification.parse_windows[0].mode_id = descriptor.id.to_string();
+                notification
+            };
+            handler
+                .parse_sync(prepare(notification(1, old_text)))
+                .unwrap_or_else(|error| panic!("{id} initial parse: {error}"));
+
+            let start = old_text
+                .bytes()
+                .zip(new_text.bytes())
+                .position(|(old, new)| old != new)
+                .unwrap_or_else(|| old_text.len().min(new_text.len()));
+            let mut old_end = old_text.len();
+            let mut new_end = new_text.len();
+            while old_end > start
+                && new_end > start
+                && old_text.as_bytes()[old_end - 1] == new_text.as_bytes()[new_end - 1]
+            {
+                old_end -= 1;
+                new_end -= 1;
+            }
+            let point = |text: &str, offset: usize| {
+                let prefix = &text[..offset];
+                crate::protocol::ParsePoint::new(
+                    prefix.bytes().filter(|byte| *byte == b'\n').count() as u64,
+                    prefix
+                        .rsplit_once('\n')
+                        .map_or(prefix.len(), |(_, tail)| tail.len()) as u64,
+                )
+            };
+            let mut incremental = prepare(notification(2, new_text));
+            incremental.invalidated_ranges =
+                vec![ParseByteRange::new(start as u64, new_end as u64)];
+            incremental.accepted_edit = Some(crate::protocol::ParseInputEdit {
+                base_document_version: 1,
+                document_version: 2,
+                start_byte: start as u64,
+                old_end_byte: old_end as u64,
+                new_end_byte: new_end as u64,
+                start_position: point(old_text, start),
+                old_end_position: point(old_text, old_end),
+                new_end_position: point(new_text, new_end),
+            });
+            incremental.parse_windows[0].incremental_edit = true;
+            let update = handler
+                .parse_sync(incremental)
+                .unwrap_or_else(|error| panic!("{id} incremental parse: {error}"));
+            let snapshots = perf.snapshots();
+            let parse_count = snapshots
+                .iter()
+                .filter(|snapshot| {
+                    snapshot.name == SYNTAX_PARSE_INVOCATIONS
+                        && snapshot.metadata.version == Some(2)
+                })
+                .count();
+            let query_bytes = snapshots
+                .iter()
+                .find_map(|snapshot| {
+                    (snapshot.name == SYNTAX_QUERY_BYTES && snapshot.metadata.version == Some(2))
+                        .then_some(&snapshot.value)
+                })
+                .and_then(|value| match value {
+                    MetricValue::Bytes { bytes } => Some(*bytes),
+                    _ => None,
+                })
+                .expect("incremental query bytes");
+            let query_count = snapshots
+                .iter()
+                .filter(|snapshot| {
+                    snapshot.name == SYNTAX_QUERY_RANGES && snapshot.metadata.version == Some(2)
+                })
+                .count();
+            let members = update.decoration_updates.len();
+
+            eprintln!(
+                "{id}: parses={parse_count}, query_ranges={query_count}, query_bytes={query_bytes}, members={members}"
+            );
+            assert_eq!(parse_count, 1, "{id}: parser calls");
+            assert_eq!(query_count, 1, "{id}: query calls");
+            assert!(
+                query_bytes <= SYNTAX_DECORATION_CHUNK_BYTES as u64,
+                "{id}: query bytes {query_bytes}"
+            );
+            assert_eq!(members, 1, "{id}: touched replacement members");
+        }
     }
 
     #[test]

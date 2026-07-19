@@ -18,3 +18,5 @@ fn main() {
     println!("{}", greet("world"));
     println!("distance: {}", p.distance_from_origin());
 }
+
+

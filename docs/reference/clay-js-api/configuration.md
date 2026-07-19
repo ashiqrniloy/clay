@@ -197,6 +197,16 @@ The stable-window cap, query/parse fallback rules, decoration payload/cache budg
 
 Configuration evaluation remains startup, package-load, reload, or explicit documented setting-change work. Keypress, text edits, edit acknowledgement, parse scheduling/publication, paint, layout, and scroll cannot run configuration JavaScript or dynamically raise parser/cache/payload limits. This review grants no parser callback, filesystem, network, shell, extension loading, AI mutation, raw-op, package, workspace, WASM, or client-side JavaScript authority.
 
+## Plan 057 syntax-decoration continuity and replacement correctness configuration review
+
+Plan 057 does **not** promote a new user-facing `clay:configuration` API. Complete authoritative replacement chunks (query coverage == replacement coverage, UTF-8-safe chunk grid), same-word narrow-syntax provisional inheritance (Unicode alphanumeric/underscore extends at token end, whitespace/newline/punctuation stops), and unchanged broad-syntax edge behavior are correctness fixes, not user policy choices.
+
+No configuration call is needed. [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) remains the sole relevant user engine-selection surface. The same-word boundary predicate (`is_alphanumeric()` or `_`) and the shared 128-byte replacement chunk grid are compiled invariants validated by tests.
+
+Hidden/ad hoc keys are invalid, including any of `syntaxSameWordBoundary`, `syntaxReplacementChunkGrid`, `syntaxWordInheritance`, `syntaxCompletionWordCharacter`, `syntaxChunkQueryCoverage`, `syntaxProvisionalInheritance`, `syntaxCompleteReplacement`, and `syntaxUtf8ChunkGrid`. No `clay.configuration.setSyntax*` API exists for these names.
+
+Configuration evaluation stays outside keypress, text-edit, edit-acknowledgement, parse, publication, paint, layout, and scroll paths. This review grants no parser callback, filesystem, network, shell, or client-side JavaScript authority.
+
 ## Phase 18.18 first-party language package configuration review
 
 Phase 18.18 promoted four first-party language packages from grammar-only metadata to full-mode contracts: Tier 1 native grammar with vocabulary styleMaps, expanded editor behavior (indent/electric/pairs/comment/autocomplete triggers), priority-0 base completion providers carrying bounded static keyword items, importable inert status items, and decoupled Markdown native-decoration-vs-package-JS-SDUI-preview. This review did **not** promote a new user-facing `clay:configuration` API.

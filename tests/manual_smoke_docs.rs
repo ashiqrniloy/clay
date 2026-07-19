@@ -184,6 +184,49 @@ fn plan056_linux_syntax_smoke_and_measurements_are_recorded() {
 }
 
 #[test]
+fn plan057_linux_syntax_continuity_smoke_and_measurements_are_recorded() {
+    let launch_doc = launch_smoke_doc();
+    let performance_doc = performance_doc();
+
+    for expected in [
+        "Plan 057 syntax-continuity Linux smoke (2026-07-19)",
+        "cargo run -- smoke-gui --config-fixture language-packages --profile-perf",
+        "appending `x` to the already classified `greet` declaration",
+        "complete `greetx` run in the function color",
+        "all-white newline regression were not observed",
+        "plan057_first_party_languages_keep_continuity_across_edit_boundaries",
+        "plan057_authoritative_queries_correct_inherited_code_keywords",
+        "rapid_local_versions_reject_stale_authority_without_losing_provisional_geometry",
+        "plan057_utf8_scalar_at_nominal_chunk_boundary_is_never_split",
+        "Rust, TypeScript, TSX, JavaScript, and Markdown",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "Plan 057 launch record must contain `{expected}`"
+        );
+    }
+
+    for expected in [
+        "Plan 057 syntax-continuity Linux verification (2026-07-19)",
+        "first_party_continuity_edits_keep_one_bounded_parse_and_query",
+        "accepted_native_edit_records_one_logical_item_and_one_latency_sample",
+        "140.268 µs",
+        "167.95 µs",
+        "361.10 µs",
+        "125.92 µs",
+        "122.93 µs",
+        "199.86 µs",
+        "no statistically significant performance change",
+        "machine-local and advisory",
+    ] {
+        assert!(
+            performance_doc.contains(expected),
+            "Plan 057 performance record must contain `{expected}`"
+        );
+    }
+}
+
+#[test]
 fn phase18_16_tiered_syntax_smoke_documents_engine_selection() {
     let launch_doc = launch_smoke_doc();
 
