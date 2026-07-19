@@ -1192,7 +1192,15 @@ Expected outcome:
 - Clay becomes usable for real editing sessions, not only architecture validation.
 - Daily-use features integrate with package modes and server authority instead of bypassing them.
 
+## Cockpit
+
+## File browser with dynamic root selection
+
+## Window management with splits and tabs
+
 ## User Package and Config segregation with defined ~/.config/clay structure
+
+## Handling config, key binding, theme, font from UI with config file override
 
 ## UI Revamp with modern aesthetic
 - Seggregate default theme packages
@@ -1200,7 +1208,6 @@ Expected outcome:
 - Font setup review with Title hierarchy
 - Further structure definition. Rethink defaults
 
-## Markdown mode preview implementation with capabilities required for personal and work agent
 
 ## Agentic AI with Prism
 - Prism upgrade with Web agent for search with Exa, Firecrawl, Brave search
@@ -1231,6 +1238,10 @@ Expected outcome:
 
 ## Coding agent
 
+## Markdown mode preview implementation with capabilities required for personal and work agent
+
+## PDF mode with links to md files
+
 ## Personal Assistant Agent
 - Extends markdown mode for personal knowledge management
 - To do lists
@@ -1240,6 +1251,12 @@ Expected outcome:
 ## Work Agent
 - Extends markdown mode for work management
 - Office CLI with GUI
+
+## Research Agent
+- Reference management
+- Show reference from source
+
+## Finance Agent
 
 ## Clay agent
 - Update wiki for AI agents and access in user device

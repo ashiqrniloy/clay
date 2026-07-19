@@ -5,7 +5,7 @@ use clay::{
     protocol::{DocumentAccess, ParseByteRange, ParseEditNotification, ParseWindowSnapshot},
     server::syntax::{SyntaxGrammarRegistry, TreeSitterSyntaxHandler},
 };
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tree_sitter::Language;
 
 struct LanguageFixture {
@@ -94,14 +94,18 @@ fn notification_with_text(
         mode_id: fixture.package.to_string(),
         viewport: ParseByteRange::new(0, text.len() as u64),
         invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+        accepted_edit: None,
         parse_windows: vec![ParseWindowSnapshot {
             document_id,
             document_version: version,
             package_prefix: fixture.package.to_string(),
             mode_id: fixture.package.to_string(),
+            window_id: 0,
             byte_start: 0,
             byte_end: text.len() as u64,
             base_line: 0,
+            base_column: 0,
+            incremental_edit: false,
             text: text.to_string(),
         }],
         memory_budget: None,
@@ -122,7 +126,13 @@ fn first_party_open_parse(c: &mut Criterion) {
                     let update = handler
                         .parse_sync(notification(fixture, document_id, 1))
                         .expect("fixture open parse succeeds");
-                    black_box(update.decoration_update.map_or(0, |set| set.spans.len()))
+                    black_box(
+                        update
+                            .decoration_updates
+                            .iter()
+                            .map(|set| set.spans.len())
+                            .sum::<usize>(),
+                    )
                 })
             },
         );
@@ -133,6 +143,7 @@ fn first_party_open_parse(c: &mut Criterion) {
 fn first_party_incremental_edit(c: &mut Criterion) {
     let mut group = c.benchmark_group("first_party_incremental_edit");
     for fixture in &fixtures() {
+        group.throughput(Throughput::Bytes(fixture.text.len() as u64));
         let handler = handler(fixture);
         handler
             .parse_sync(notification(fixture, 7, 1))
@@ -152,7 +163,14 @@ fn first_party_incremental_edit(c: &mut Criterion) {
                     let update = handler
                         .parse_sync(notification_with_text(fixture, 7, version, &edited))
                         .expect("incremental fixture parse succeeds");
-                    black_box(update.decoration_update.map_or(0, |set| set.spans.len()))
+                    black_box((
+                        update.syntax_tree_delta,
+                        update
+                            .decoration_updates
+                            .iter()
+                            .map(|set| set.spans.len())
+                            .sum::<usize>(),
+                    ))
                 })
             },
         );
@@ -166,8 +184,7 @@ fn first_party_decorated_scroll(c: &mut Criterion) {
         let decorations = handler(fixture)
             .parse_sync(notification(fixture, 7, 1))
             .expect("fixture parse succeeds")
-            .decoration_update
-            .expect("fixture emits decorations");
+            .decoration_updates;
         group.bench_with_input(
             BenchmarkId::from_parameter(fixture.label),
             fixture,
@@ -182,7 +199,9 @@ fn first_party_decorated_scroll(c: &mut Criterion) {
                             DocumentAccess::Editable { lease_id: 1 },
                         );
                         let _ = surface.update_visible_line_count_for_height(432.0);
-                        let _ = surface.apply_decoration_set(decorations.clone());
+                        for set in decorations.clone() {
+                            let _ = surface.apply_decoration_set(set);
+                        }
                         surface
                     },
                     |mut surface| {

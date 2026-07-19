@@ -1807,6 +1807,8 @@ mod runtime_outputs_tests {
         DecorationSet {
             document_id,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: crate::protocol::DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 0,
             spans: vec![],
@@ -2663,7 +2665,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                         viewport: ParseByteRange::new(0, 1),
                         invalidated_ranges: Vec::new(),
                         syntax_tree_delta: None,
-                        decoration_update: None,
+                        decoration_updates: Vec::new(),
                         diagnostic_update: None,
                     })
                 },
@@ -2809,7 +2811,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                         viewport: notification.viewport,
                         invalidated_ranges: notification.invalidated_ranges,
                         syntax_tree_delta: None,
-                        decoration_update: None,
+                        decoration_updates: Vec::new(),
                         diagnostic_update: None,
                     })
                 },
@@ -2833,6 +2835,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 mode_id: "markdown".to_string(),
                 viewport: ParseByteRange::new(0, 8),
                 invalidated_ranges: vec![ParseByteRange::new(0, 8)],
+                accepted_edit: None,
             })
             .unwrap();
         server.parse_coordinator.cancel_older_generations(2);

@@ -3,8 +3,8 @@ use clay::packages::{
     record::{PackageRecord, PackageRecordRule, assemble_package_record},
 };
 use clay::protocol::{
-    DocumentFontRole, Modifiers, ParseByteRange, ParseEditNotification, ParsePolicy,
-    ParseWindowSnapshot, TokenType,
+    DecorationSet, DocumentFontRole, Modifiers, ParseByteRange, ParseEditNotification,
+    ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot, TokenType,
 };
 #[cfg(any(unix, windows))]
 use clay::server::{
@@ -16,6 +16,35 @@ use clay::server::{
     },
 };
 use serde_json::{Value, json};
+
+trait DecorationUpdatesExt {
+    fn expect(self, message: &str) -> DecorationSet;
+    fn unwrap_or_else(self, fallback: impl FnOnce() -> DecorationSet) -> DecorationSet;
+    fn is_some(&self) -> bool;
+}
+
+impl DecorationUpdatesExt for Vec<DecorationSet> {
+    fn expect(self, message: &str) -> DecorationSet {
+        self.unwrap_or_else(|| panic!("{message}"))
+    }
+
+    fn unwrap_or_else(mut self, fallback: impl FnOnce() -> DecorationSet) -> DecorationSet {
+        if self.is_empty() {
+            return fallback();
+        }
+        let mut merged = self.remove(0);
+        for set in self {
+            merged.viewport_byte_start = merged.viewport_byte_start.min(set.viewport_byte_start);
+            merged.viewport_byte_end = merged.viewport_byte_end.max(set.viewport_byte_end);
+            merged.spans.extend(set.spans);
+        }
+        merged
+    }
+
+    fn is_some(&self) -> bool {
+        !self.is_empty()
+    }
+}
 
 fn grammar_package(prefix: &str, language_id: &str, extension: &str) -> Value {
     json!({
@@ -525,14 +554,18 @@ fn parse_notification_for(prefix: &str, version: u64, text: &str) -> ParseEditNo
         mode_id: prefix.to_string(),
         viewport: ParseByteRange::new(0, text.len() as u64),
         invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+        accepted_edit: None,
         parse_windows: vec![ParseWindowSnapshot {
             document_id: 11,
             document_version: version,
             package_prefix: prefix.to_string(),
             mode_id: prefix.to_string(),
+            window_id: 0,
             byte_start: 0,
             byte_end: text.len() as u64,
             base_line: 0,
+            base_column: 0,
+            incremental_edit: false,
             text: text.to_string(),
         }],
         memory_budget: None,
@@ -542,6 +575,74 @@ fn parse_notification_for(prefix: &str, version: u64, text: &str) -> ParseEditNo
 #[cfg(any(unix, windows))]
 fn parse_notification(version: u64, text: &str) -> ParseEditNotification {
     parse_notification_for("rust", version, text)
+}
+
+#[cfg(any(unix, windows))]
+fn point_at(text: &str, offset: usize) -> ParsePoint {
+    let prefix = &text[..offset];
+    ParsePoint::new(
+        prefix.bytes().filter(|byte| *byte == b'\n').count() as u64,
+        prefix
+            .rsplit_once('\n')
+            .map_or(prefix.len(), |(_, tail)| tail.len()) as u64,
+    )
+}
+
+#[cfg(any(unix, windows))]
+fn incremental_notification(
+    old_text: &str,
+    new_text: &str,
+    start: usize,
+    old_end: usize,
+    new_end: usize,
+) -> ParseEditNotification {
+    incremental_notification_for("rust", old_text, new_text, start, old_end, new_end)
+}
+
+#[cfg(any(unix, windows))]
+fn incremental_notification_for(
+    package_prefix: &str,
+    old_text: &str,
+    new_text: &str,
+    start: usize,
+    old_end: usize,
+    new_end: usize,
+) -> ParseEditNotification {
+    let mut notification = parse_notification_for(package_prefix, 2, new_text);
+    notification.invalidated_ranges = vec![ParseByteRange::new(start as u64, new_end as u64)];
+    notification.accepted_edit = Some(ParseInputEdit {
+        base_document_version: 1,
+        document_version: 2,
+        start_byte: start as u64,
+        old_end_byte: old_end as u64,
+        new_end_byte: new_end as u64,
+        start_position: point_at(old_text, start),
+        old_end_position: point_at(old_text, old_end),
+        new_end_position: point_at(new_text, new_end),
+    });
+    notification.parse_windows[0].incremental_edit = true;
+    notification
+}
+
+#[cfg(any(unix, windows))]
+fn single_edit_offsets(old_text: &str, new_text: &str) -> (usize, usize, usize) {
+    let start = old_text
+        .bytes()
+        .zip(new_text.bytes())
+        .position(|(old, new)| old != new)
+        .unwrap_or_else(|| old_text.len().min(new_text.len()));
+    let mut old_end = old_text.len();
+    let mut new_end = new_text.len();
+    while old_end > start
+        && new_end > start
+        && old_text.as_bytes()[old_end - 1] == new_text.as_bytes()[new_end - 1]
+    {
+        old_end -= 1;
+        new_end -= 1;
+    }
+    assert!(old_text.is_char_boundary(start) && old_text.is_char_boundary(old_end));
+    assert!(new_text.is_char_boundary(start) && new_text.is_char_boundary(new_end));
+    (start, old_end, new_end)
 }
 
 #[test]
@@ -883,7 +984,7 @@ fn manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow() {
             let update = handler
                 .parse_sync(parse_notification_for(package_dir, version, &source))
                 .unwrap_or_else(|error| panic!("{package_dir} fixture parses v{version}: {error}"));
-            let set = update.decoration_update.unwrap_or_else(|| {
+            let set = update.decoration_updates.unwrap_or_else(|| {
                 panic!("{package_dir} fixture publishes v{version} decorations")
             });
             assert_eq!(set.document_version, version);
@@ -954,7 +1055,7 @@ fn first_party_syntax_fixtures_produce_bounded_decoration_sets() {
             .parse_sync(parse_notification_for(package_dir, 1, &text))
             .unwrap_or_else(|error| panic!("{package_dir} fixture parses: {error}"));
         let set = update
-            .decoration_update
+            .decoration_updates
             .unwrap_or_else(|| panic!("{package_dir} fixture publishes decorations"));
 
         assert_eq!(set.document_version, 1);
@@ -1053,7 +1154,7 @@ fn first_party_language_fixtures_produce_themed_vocabulary_decorations() {
         let set = handler
             .parse_sync(parse_notification_for(package_dir, 1, &text))
             .unwrap_or_else(|error| panic!("{fixture} parses: {error}"))
-            .decoration_update
+            .decoration_updates
             .unwrap_or_else(|| panic!("{fixture} publishes decorations"));
 
         assert_eq!(set.document_version, 1);
@@ -1100,7 +1201,7 @@ fn rust_grammar_emits_vocabulary_tokens_through_stylemap() {
             "fn main() { let s = \"x\"; // comment\n}",
         ))
         .expect("Rust parses")
-        .decoration_update
+        .decoration_updates
         .expect("Rust decorations");
 
     for token_type in [
@@ -1188,7 +1289,7 @@ fn typescript_grammar_covers_ts_tsx_mts_and_cts_extensions() {
             .expect("TypeScript query compiles")
             .parse_sync(parse_notification_for("typescript", 1, &source))
             .expect("TypeScript fixture parses")
-            .decoration_update
+            .decoration_updates
             .expect("TypeScript decorations");
         assert!(set.spans.iter().any(|span| {
             span.token_type == TokenType::Function
@@ -1249,7 +1350,7 @@ fn javascript_grammar_covers_js_jsx_mjs_cjs_extensions() {
     .expect("JavaScript query compiles")
     .parse_sync(parse_notification_for("javascript", 1, &source))
     .expect("JavaScript fixture parses")
-    .decoration_update
+    .decoration_updates
     .expect("JavaScript decorations");
     assert!(set.spans.iter().any(|span| {
         span.token_type == TokenType::Function && span.modifiers.contains(Modifiers::DECLARATION)
@@ -1276,7 +1377,7 @@ fn markdown_grammar_emits_prose_vocabulary_tokens_with_modifiers() {
     let set = handler
         .parse_sync(parse_notification_for("markdown", 1, source))
         .expect("Markdown parses")
-        .decoration_update
+        .decoration_updates
         .expect("Markdown decorations");
 
     for token_type in [
@@ -1330,7 +1431,7 @@ fn markdown_decoration_renders_through_tier1_native_engine() {
                 "# heading\n\n> quote\n",
             ))
             .expect("native Markdown parse")
-            .decoration_update
+            .decoration_updates
             .expect("native Markdown decoration set");
 
     assert!(set.spans.iter().any(|span| {
@@ -1430,7 +1531,7 @@ fn tree_sitter_handler_extracts_highlight_captures_as_bounded_decorations() {
     let update = handler
         .parse_sync(parse_notification(1, text))
         .expect("tree-sitter parse succeeds");
-    let set = update.decoration_update.expect("syntax decorations");
+    let set = update.decoration_updates.expect("syntax decorations");
 
     assert_eq!(
         update.syntax_tree_delta.as_deref(),
@@ -1553,26 +1654,25 @@ fn scroll_sized_native_sources_produce_bounded_decorations() {
         let update = handler
             .parse_sync(parse_notification_for(prefix, 1, &source))
             .unwrap_or_else(|error| panic!("scroll-sized {label} parses: {error}"));
-        assert!(
-            rkyv::to_bytes::<rkyv::rancor::Error>(&update)
-                .expect("serialize bounded parse update")
-                .len()
-                <= clay::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
-            "{label}"
-        );
-        let set = update
-            .decoration_update
-            .unwrap_or_else(|| panic!("scroll-sized {label} decorations"));
-
-        assert!(!set.spans.is_empty(), "{label}");
-        assert_eq!(set.viewport_byte_end, source.len() as u64, "{label}");
-        assert!(
-            rkyv::to_bytes::<rkyv::rancor::Error>(&set)
-                .expect("serialize bounded decorations")
-                .len()
-                <= clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES,
-            "{label}"
-        );
+        assert!(!update.decoration_updates.is_empty(), "{label}");
+        for set in &update.decoration_updates {
+            assert!(
+                rkyv::to_bytes::<rkyv::rancor::Error>(set)
+                    .expect("serialize bounded decorations")
+                    .len()
+                    <= clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES,
+                "{label}"
+            );
+            let mut member = update.clone();
+            member.decoration_updates = vec![set.clone()];
+            assert!(
+                rkyv::to_bytes::<rkyv::rancor::Error>(&member)
+                    .expect("serialize bounded parse update")
+                    .len()
+                    <= clay::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+                "{label}"
+            );
+        }
     }
 }
 
@@ -1642,8 +1742,21 @@ fn tree_sitter_handler_reuses_cached_tree_for_later_document_versions() {
     let first = handler
         .parse_sync(parse_notification(1, "fn main() {}\n"))
         .expect("initial parse");
+    let second_text = "fn main() {\n  // changed\n}\n";
+    let mut second_notification = parse_notification(2, second_text);
+    second_notification.accepted_edit = Some(ParseInputEdit {
+        base_document_version: 1,
+        document_version: 2,
+        start_byte: 0,
+        old_end_byte: 13,
+        new_end_byte: second_text.len() as u64,
+        start_position: ParsePoint::new(0, 0),
+        old_end_position: ParsePoint::new(1, 0),
+        new_end_position: ParsePoint::new(3, 0),
+    });
+    second_notification.parse_windows[0].incremental_edit = true;
     let second = handler
-        .parse_sync(parse_notification(2, "fn main() {\n  // changed\n}\n"))
+        .parse_sync(second_notification)
         .expect("incremental parse");
 
     assert_eq!(
@@ -1655,6 +1768,681 @@ fn tree_sitter_handler_reuses_cached_tree_for_later_document_versions() {
         Some("tree-sitter:rust:incremental")
     );
     assert_eq!(handler.cached_tree_version(11), Some(2));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn incremental_keyword_completion_requeries_whole_capture_not_distant_syntax() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler = TreeSitterSyntaxHandler::new(
+        contribution,
+        rust_language(),
+        "\"fn\" @keyword\n(let_declaration \"let\" @keyword)",
+    )
+    .expect("query compiles");
+    let old_text = "fn main() { le value = 1; }\n";
+    let new_text = "fn main() { let value = 1; }\n";
+    let insertion = old_text.find("le").expect("partial keyword") + 2;
+
+    handler
+        .parse_sync(parse_notification(1, old_text))
+        .expect("initial parse");
+    let update = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental parse");
+    ParseCoordinator::new()
+        .validate_update(&update)
+        .expect("changed-range update metadata validates");
+    let set = update.decoration_updates.expect("changed decoration range");
+    let keyword_start = new_text.find("let").expect("completed keyword") as u64;
+
+    assert!(
+        set.spans.iter().any(|span| {
+            span.token_type == TokenType::Keyword
+                && span.byte_start == keyword_start
+                && span.byte_end == keyword_start + 3
+        }),
+        "completed keyword missing from {set:?}"
+    );
+    assert!(
+        set.spans
+            .iter()
+            .all(|span| span.byte_start != 0 || span.byte_end != 2),
+        "distant `fn` is not requeried"
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn incremental_comment_opener_requeries_containing_capture() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), rust_highlights_query())
+            .expect("query compiles");
+    let old_text = "fn main() { / note\nlet value = 1; }\n";
+    let slash = old_text.find('/').expect("slash");
+    let mut new_text = old_text.to_string();
+    new_text.insert(slash, '/');
+
+    handler
+        .parse_sync(parse_notification(1, old_text))
+        .expect("initial parse");
+    let set = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            &new_text,
+            slash,
+            slash,
+            slash + 1,
+        ))
+        .expect("incremental parse")
+        .decoration_updates
+        .expect("changed decoration range");
+    let comment_end = new_text.find('\n').expect("line end") as u64;
+
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Comment
+            && span.byte_start == slash as u64
+            && span.byte_end == comment_end
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn incremental_string_opener_requeries_complete_string_capture() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), rust_highlights_query())
+            .expect("query compiles");
+    let old_text = "fn main() { let value = note\"; }\n";
+    let insertion = old_text.find("note").expect("string text");
+    let mut new_text = old_text.to_string();
+    new_text.insert(insertion, '"');
+
+    handler
+        .parse_sync(parse_notification(1, old_text))
+        .expect("initial parse");
+    let set = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental parse")
+        .decoration_updates
+        .expect("changed decoration range");
+    let string_end = new_text.rfind('"').expect("string end") as u64 + 1;
+
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::String
+            && span.byte_start == insertion as u64
+            && span.byte_end == string_end
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn incremental_string_closer_requeries_complete_string_capture() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), rust_highlights_query())
+            .expect("query compiles");
+    let old_text = "fn main() { let value = \"note; }\n";
+    let insertion = old_text.find(';').expect("semicolon");
+    let mut new_text = old_text.to_string();
+    new_text.insert(insertion, '"');
+
+    handler
+        .parse_sync(parse_notification(1, old_text))
+        .expect("initial parse");
+    let set = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental parse")
+        .decoration_updates
+        .expect("changed decoration range");
+    let string_start = new_text.find('"').expect("string start") as u64;
+
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::String
+            && span.byte_start == string_start
+            && span.byte_end == insertion as u64 + 1
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn incremental_newline_shortens_line_comment_capture() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), rust_highlights_query())
+            .expect("query compiles");
+    let old_text = "fn main() { // note let hidden = 1;\n}\n";
+    let insertion = old_text.find(" let hidden").expect("comment suffix");
+    let mut new_text = old_text.to_string();
+    new_text.insert(insertion, '\n');
+
+    handler
+        .parse_sync(parse_notification(1, old_text))
+        .expect("initial parse");
+    let set = handler
+        .parse_sync(incremental_notification(
+            old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental parse")
+        .decoration_updates
+        .expect("changed decoration range");
+
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::Comment && span.byte_end == insertion as u64
+    }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn first_party_package_queries_keep_authoritative_token_boundaries() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    for (label, package_prefix, contribution_id, language, query, old_text, new_text, expected) in [
+        (
+            "rust keyword completion",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn main() { le value = 1; }\n",
+            "fn main() { let value = 1; }\n",
+            Some((TokenType::Keyword, "let")),
+        ),
+        (
+            "typescript keyword completion",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main() { con value = 1; }\n",
+            "function main() { const value = 1; }\n",
+            Some((TokenType::Keyword, "const")),
+        ),
+        (
+            "tsx keyword completion",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main() { con value = 1; }\n",
+            "function main() { const value = 1; }\n",
+            Some((TokenType::Keyword, "const")),
+        ),
+        (
+            "javascript keyword completion",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "function main() { con value = 1; }\n",
+            "function main() { const value = 1; }\n",
+            Some((TokenType::Keyword, "const")),
+        ),
+        (
+            "markdown heading transition",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            "# heading\n",
+            "## heading\n",
+            Some((TokenType::Heading2, "heading")),
+        ),
+        (
+            "rust identifier growth",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn app() {}\n",
+            "fn application() {}\n",
+            Some((TokenType::Function, "application")),
+        ),
+        (
+            "typescript identifier growth",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function app() {}\n",
+            "function application() {}\n",
+            Some((TokenType::Function, "application")),
+        ),
+        (
+            "tsx identifier growth",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function app() {}\n",
+            "function application() {}\n",
+            Some((TokenType::Function, "application")),
+        ),
+        (
+            "javascript identifier growth",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "function app() {}\n",
+            "function application() {}\n",
+            Some((TokenType::Function, "application")),
+        ),
+        (
+            "rust punctuation insertion",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn main()\n",
+            "fn main() {}\n",
+            Some((TokenType::Operator, "{")),
+        ),
+        (
+            "typescript punctuation insertion",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main()\n",
+            "function main() {}\n",
+            Some((TokenType::Operator, "{")),
+        ),
+        (
+            "tsx punctuation insertion",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main()\n",
+            "function main() {}\n",
+            Some((TokenType::Operator, "{")),
+        ),
+        (
+            "javascript punctuation insertion",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "function main()\n",
+            "function main() {}\n",
+            Some((TokenType::Operator, "{")),
+        ),
+        (
+            "markdown punctuation insertion",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            "heading\n",
+            "# heading\n",
+            Some((TokenType::Operator, "#")),
+        ),
+        (
+            "rust keyword removal",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn main() { let value = 1; }\n",
+            "fn main() { le value = 1; }\n",
+            None,
+        ),
+        (
+            "typescript keyword removal",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main() { const value = 1; }\n",
+            "function main() { con value = 1; }\n",
+            None,
+        ),
+        (
+            "tsx keyword removal",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main() { const value = 1; }\n",
+            "function main() { con value = 1; }\n",
+            None,
+        ),
+        (
+            "javascript keyword removal",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "function main() { const value = 1; }\n",
+            "function main() { con value = 1; }\n",
+            None,
+        ),
+    ] {
+        let contribution = registry
+            .get(contribution_id)
+            .unwrap_or_else(|| panic!("{label}: contribution is registered"))
+            .clone();
+        let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
+            .unwrap_or_else(|error| panic!("{label}: query compiles: {error}"));
+        let (start, old_end, new_end) = single_edit_offsets(old_text, new_text);
+
+        handler
+            .parse_sync(parse_notification_for(package_prefix, 1, old_text))
+            .unwrap_or_else(|error| panic!("{label}: initial parse: {error}"));
+        let update = handler
+            .parse_sync(incremental_notification_for(
+                package_prefix,
+                old_text,
+                new_text,
+                start,
+                old_end,
+                new_end,
+            ))
+            .unwrap_or_else(|error| panic!("{label}: authoritative parse: {error}"));
+        let expected_delta = format!(
+            "tree-sitter:{}:incremental",
+            contribution_id
+                .rsplit_once('.')
+                .map_or(contribution_id, |(_, id)| id)
+        );
+        assert_eq!(
+            update.syntax_tree_delta.as_deref(),
+            Some(expected_delta.as_str()),
+            "{label}: consecutive edit reuses cached tree"
+        );
+        let spans = update
+            .decoration_updates
+            .iter()
+            .flat_map(|set| &set.spans)
+            .collect::<Vec<_>>();
+
+        if let Some((token_type, text)) = expected {
+            let byte_start = new_text
+                .find(text)
+                .unwrap_or_else(|| panic!("{label}: {text}"));
+            assert!(
+                spans.iter().any(|span| {
+                    span.token_type == token_type
+                        && span.byte_start == byte_start as u64
+                        && span.byte_end == (byte_start + text.len()) as u64
+                }),
+                "{label}: expected complete {token_type:?} capture for {text:?}, got {spans:?}"
+            );
+        } else {
+            assert!(
+                spans.iter().all(|span| {
+                    span.token_type != TokenType::Keyword
+                        || span.byte_start > new_end as u64
+                        || span.byte_end <= start as u64
+                }),
+                "{label}: removed keyword remains decorated: {spans:?}"
+            );
+        }
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn first_party_package_queries_keep_broad_captures_continuous() {
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+
+    for (
+        label,
+        package_prefix,
+        contribution_id,
+        language,
+        query,
+        old_text,
+        new_text,
+        token_type,
+        text,
+    ) in [
+        (
+            "rust line comment",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn main() { // note\n}\n",
+            "fn main() { // notes\n}\n",
+            TokenType::Comment,
+            "// notes",
+        ),
+        (
+            "typescript block comment",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main() { /* note */ }\n",
+            "function main() { /* notes */ }\n",
+            TokenType::Comment,
+            "/* notes */",
+        ),
+        (
+            "tsx block comment",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "function main() { /* note */ }\n",
+            "function main() { /* notes */ }\n",
+            TokenType::Comment,
+            "/* notes */",
+        ),
+        (
+            "javascript block comment",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "function main() { /* note */ }\n",
+            "function main() { /* notes */ }\n",
+            TokenType::Comment,
+            "/* notes */",
+        ),
+        (
+            "rust raw multiline string",
+            "rust",
+            "rust.rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            "fn main() { let note = r#\"one\ntwo\"#; }\n",
+            "fn main() { let note = r#\"one\ntwos\"#; }\n",
+            TokenType::String,
+            "r#\"one\ntwos\"#",
+        ),
+        (
+            "typescript multiline template string",
+            "typescript",
+            "typescript.typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "const note = `one\ntwo`;\n",
+            "const note = `one\ntwos`;\n",
+            TokenType::String,
+            "`one\ntwos`",
+        ),
+        (
+            "tsx multiline template string",
+            "typescript",
+            "typescript.tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            "const note = `one\ntwo`;\n",
+            "const note = `one\ntwos`;\n",
+            TokenType::String,
+            "`one\ntwos`",
+        ),
+        (
+            "javascript multiline template string",
+            "javascript",
+            "javascript.javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            "const note = `one\ntwo`;\n",
+            "const note = `one\ntwos`;\n",
+            TokenType::String,
+            "`one\ntwos`",
+        ),
+        (
+            "markdown prose",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            "Paragraph text.\n",
+            "Paragraph texts.\n",
+            TokenType::Paragraph,
+            "Paragraph texts.",
+        ),
+        (
+            "markdown code span",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            "`code`\n",
+            "`codes`\n",
+            TokenType::CodeSpan,
+            "`codes`",
+        ),
+        (
+            "markdown code block",
+            "markdown",
+            "markdown.markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            "```rust\nfn main() {}\n```\n",
+            "```rust\nfn mains() {}\n```\n",
+            TokenType::CodeBlock,
+            "```rust\nfn mains() {}\n```",
+        ),
+    ] {
+        let contribution = registry
+            .get(contribution_id)
+            .unwrap_or_else(|| panic!("{label}: contribution is registered"))
+            .clone();
+        let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
+            .unwrap_or_else(|error| panic!("{label}: query compiles: {error}"));
+        let (start, old_end, new_end) = single_edit_offsets(old_text, new_text);
+
+        handler
+            .parse_sync(parse_notification_for(package_prefix, 1, old_text))
+            .unwrap_or_else(|error| panic!("{label}: initial parse: {error}"));
+        let update = handler
+            .parse_sync(incremental_notification_for(
+                package_prefix,
+                old_text,
+                new_text,
+                start,
+                old_end,
+                new_end,
+            ))
+            .unwrap_or_else(|error| panic!("{label}: authoritative parse: {error}"));
+        let byte_start = new_text
+            .find(text)
+            .unwrap_or_else(|| panic!("{label}: {text}"));
+
+        assert!(
+            update
+                .decoration_updates
+                .iter()
+                .flat_map(|set| &set.spans)
+                .any(|span| {
+                    span.token_type == token_type
+                        && span.byte_start == byte_start as u64
+                        && span.byte_end >= (byte_start + text.len()) as u64
+                }),
+            "{label}: expected complete {token_type:?} capture for {text:?}, got {:?}",
+            update.decoration_updates
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn changed_decoration_chunk_is_ordered_before_adjacent_chunks() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), "(line_comment) @comment")
+            .expect("query compiles");
+    let old_text = format!("// {}\n", "a".repeat(700));
+    let insertion = 400;
+    let mut new_text = old_text.clone();
+    new_text.insert(insertion, 'b');
+
+    handler
+        .parse_sync(parse_notification(1, &old_text))
+        .expect("initial parse");
+    let update = handler
+        .parse_sync(incremental_notification(
+            &old_text,
+            &new_text,
+            insertion,
+            insertion,
+            insertion + 1,
+        ))
+        .expect("incremental parse");
+
+    assert!(update.decoration_updates.len() >= 3);
+    let first = &update.decoration_updates[0];
+    assert!(
+        first.viewport_byte_start <= insertion as u64 && first.viewport_byte_end > insertion as u64
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn cached_tree_version_gap_uses_one_bounded_full_parse() {
+    let record = rust_record();
+    let contribution = rust_contribution(&record);
+    let handler =
+        TreeSitterSyntaxHandler::new(contribution, rust_language(), rust_highlights_query())
+            .expect("query compiles");
+
+    handler
+        .parse_sync(parse_notification(1, "fn one() {}\n"))
+        .expect("initial parse");
+    let update = handler
+        .parse_sync(parse_notification(3, "fn three() {}\n"))
+        .expect("bounded fallback parse");
+
+    assert_eq!(
+        update.syntax_tree_delta.as_deref(),
+        Some("tree-sitter:rust:full")
+    );
+    assert_eq!(handler.cached_tree_version(11), Some(3));
 }
 
 #[cfg(any(unix, windows))]
@@ -1689,7 +2477,7 @@ fn unmatched_grammar_captures_stay_unstyled_without_color_leak() {
     let set = handler
         .parse_sync(parse_notification(1, "fn main() {}"))
         .expect("parse succeeds")
-        .decoration_update
+        .decoration_updates
         .expect("decoration update");
 
     assert!(
@@ -1706,30 +2494,42 @@ fn unmatched_grammar_captures_stay_unstyled_without_color_leak() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn tree_sitter_handler_truncates_capture_output_to_transport_safe_limit() {
+fn dense_4k_capture_pass_fans_out_complete_bounded_decoration_sets() {
     let record = rust_record();
     let contribution = rust_contribution(&record);
     let handler =
         TreeSitterSyntaxHandler::new(contribution, rust_language(), "(identifier) @keyword")
             .expect("query compiles");
-    let text = (0..140)
+    let text = (0..190)
         .map(|index| format!("let value_{index} = {index};"))
         .collect::<Vec<_>>()
         .join("\n");
+    assert!(text.len() <= 4096);
 
-    let set = handler
+    let update = handler
         .parse_sync(parse_notification(1, &text))
-        .expect("capture overflow degrades to bounded decorations")
-        .decoration_update
-        .expect("bounded decoration update");
+        .expect("dense capture pass succeeds");
 
-    assert_eq!(set.spans.len(), 32);
+    assert!(update.decoration_updates.len() > 1);
     assert!(
-        rkyv::to_bytes::<rkyv::rancor::Error>(&set)
-            .expect("serialize bounded decorations")
-            .len()
-            <= clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES
+        update
+            .decoration_updates
+            .iter()
+            .map(|set| set.spans.len())
+            .sum::<usize>()
+            >= 190
     );
+    for set in &update.decoration_updates {
+        assert!(
+            rkyv::to_bytes::<rkyv::rancor::Error>(set)
+                .expect("serialize bounded decorations")
+                .len()
+                <= clay::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES
+        );
+    }
+    ParseCoordinator::new()
+        .validate_update(&update)
+        .expect("all fan-out members validate atomically");
 }
 
 #[cfg(any(unix, windows))]
@@ -1769,15 +2569,19 @@ async fn tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_sta
         mode_id: "rust".to_string(),
         viewport: ParseByteRange::new(0, text.len() as u64),
         invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+        accepted_edit: None,
     };
     let window = ParseWindowSnapshot {
         document_id: 11,
         document_version: 1,
         package_prefix: "rust".to_string(),
         mode_id: "rust".to_string(),
+        window_id: 0,
         byte_start: 0,
         byte_end: text.len() as u64,
         base_line: 0,
+        base_column: 0,
+        incremental_edit: false,
         text: text.to_string(),
     };
     coordinator
@@ -1794,7 +2598,7 @@ async fn tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_sta
         .expect("update published");
 
     assert_eq!(update.document_version, 1);
-    assert!(update.decoration_update.is_some());
+    assert!(update.decoration_updates.is_some());
     assert_eq!(coordinator.stats().published_updates, 1);
 }
 

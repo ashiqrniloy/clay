@@ -127,6 +127,7 @@ pub(crate) struct ClayOpState {
     last_parse_update_json: Mutex<Option<String>>,
     last_language_intelligence_result_json: Mutex<Option<String>>,
     behavior: Mutex<ActiveBehaviorManifest>,
+    configured_keymaps: Mutex<Vec<KeyBindingRule>>,
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
     ui: Mutex<crate::server::ui::PackageUiRegistry>,
@@ -201,6 +202,7 @@ impl ClayOpState {
             last_parse_update_json: Mutex::new(None),
             last_language_intelligence_result_json: Mutex::new(None),
             behavior: Mutex::new(ActiveBehaviorManifest::default()),
+            configured_keymaps: Mutex::new(Vec::new()),
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
             ui: Mutex::new(crate::server::ui::PackageUiRegistry::new()),
@@ -451,9 +453,26 @@ impl ClayOpState {
         replacement.keymaps.retain(|existing| {
             existing.context != rule.context || existing.sequence != rule.sequence
         });
-        replacement.keymaps.push(rule);
+        replacement.keymaps.push(rule.clone());
         replacement.manifest_id = "clay.runtime.configuration".to_string();
-        behavior.publish_replacement(replacement)
+        let manifest = behavior.publish_replacement(replacement)?;
+        drop(behavior);
+        if self
+            .runtime_context
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .configuration_evaluation
+        {
+            let mut configured = self
+                .configured_keymaps
+                .lock()
+                .expect("Clay runtime op state mutex poisoned");
+            configured.retain(|existing| {
+                existing.context != rule.context || existing.sequence != rule.sequence
+            });
+            configured.push(rule);
+        }
+        Ok(manifest)
     }
 
     pub(super) fn unbind_key(
@@ -470,7 +489,22 @@ impl ClayOpState {
             existing.context != *context || existing.sequence != vec![stroke.clone()]
         });
         replacement.manifest_id = "clay.runtime.configuration".to_string();
-        behavior.publish_replacement(replacement)
+        let manifest = behavior.publish_replacement(replacement)?;
+        drop(behavior);
+        if self
+            .runtime_context
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .configuration_evaluation
+        {
+            self.configured_keymaps
+                .lock()
+                .expect("Clay runtime op state mutex poisoned")
+                .retain(|existing| {
+                    existing.context != *context || existing.sequence != vec![stroke.clone()]
+                });
+        }
+        Ok(manifest)
     }
 
     pub(super) fn publish_decoration_set(&self, set: DecorationSet) {
@@ -607,6 +641,25 @@ impl ClayOpState {
         manifest.editor_rules = editor_rules;
         manifest.commands.extend(extra_commands);
         manifest.keymaps.extend(extra_keymaps);
+        for rule in self
+            .configured_keymaps
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .iter()
+            .cloned()
+        {
+            manifest.keymaps.retain(|existing| {
+                existing.context != rule.context || existing.sequence != rule.sequence
+            });
+            if !manifest
+                .commands
+                .iter()
+                .any(|command| command.command_id == rule.command_id)
+            {
+                manifest.commands.push(command_for_rule(&rule));
+            }
+            manifest.keymaps.push(rule);
+        }
         self.behavior
             .lock()
             .expect("Clay runtime op state mutex poisoned")

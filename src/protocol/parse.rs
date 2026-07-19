@@ -29,6 +29,76 @@ impl ParseByteRange {
     }
 }
 
+/// Zero-based parser-neutral row and byte-column position.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct ParsePoint {
+    pub row: u64,
+    pub column: u64,
+}
+
+impl ParsePoint {
+    pub const fn new(row: u64, column: u64) -> Self {
+        Self { row, column }
+    }
+
+    fn relative_to(self, base: Self) -> Option<Self> {
+        let row = self.row.checked_sub(base.row)?;
+        let column = if row == 0 {
+            self.column.checked_sub(base.column)?
+        } else {
+            self.column
+        };
+        Some(Self { row, column })
+    }
+}
+
+/// Exact server-accepted edit coordinates between consecutive document versions.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseInputEdit {
+    pub base_document_version: DocumentVersion,
+    pub document_version: DocumentVersion,
+    pub start_byte: u64,
+    pub old_end_byte: u64,
+    pub new_end_byte: u64,
+    pub start_position: ParsePoint,
+    pub old_end_position: ParsePoint,
+    pub new_end_position: ParsePoint,
+}
+
+impl ParseInputEdit {
+    pub fn is_valid(self) -> bool {
+        self.base_document_version.checked_add(1) == Some(self.document_version)
+            && self.start_byte <= self.old_end_byte
+            && self.start_byte <= self.new_end_byte
+            && self.start_position <= self.old_end_position
+            && self.start_position <= self.new_end_position
+    }
+
+    pub fn relative_to_window(self, window: &ParseWindowSnapshot) -> Option<Self> {
+        let base = window.base_point();
+        Some(Self {
+            start_byte: self.start_byte.checked_sub(window.byte_start)?,
+            old_end_byte: self.old_end_byte.checked_sub(window.byte_start)?,
+            new_end_byte: self.new_end_byte.checked_sub(window.byte_start)?,
+            start_position: self.start_position.relative_to(base)?,
+            old_end_position: self.old_end_position.relative_to(base)?,
+            new_end_position: self.new_end_position.relative_to(base)?,
+            ..self
+        })
+    }
+}
+
 /// Server-prepared, bounded document text supplied to package parsers.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ParseWindowSnapshot {
@@ -36,15 +106,25 @@ pub struct ParseWindowSnapshot {
     pub document_version: DocumentVersion,
     pub package_prefix: String,
     pub mode_id: String,
+    /// Stable identity retained across adjacent edits; currently the aligned byte anchor.
+    pub window_id: u64,
     pub byte_start: u64,
     pub byte_end: u64,
     pub base_line: u64,
+    pub base_column: u64,
+    /// True only when `ParseEditNotification::accepted_edit` is representable
+    /// against the retained previous-version window.
+    pub incremental_edit: bool,
     pub text: String,
 }
 
 impl ParseWindowSnapshot {
     pub fn byte_range(&self) -> ParseByteRange {
         ParseByteRange::new(self.byte_start, self.byte_end)
+    }
+
+    pub const fn base_point(&self) -> ParsePoint {
+        ParsePoint::new(self.base_line, self.base_column)
     }
 
     pub fn text_len_bytes(&self) -> usize {
@@ -132,6 +212,9 @@ pub struct ParseEditNotification {
     pub mode_id: String,
     pub viewport: ParseByteRange,
     pub invalidated_ranges: Vec<ParseByteRange>,
+    /// Exact canonical edit for accepted edit notifications; absent for open,
+    /// resync, and viewport-only work.
+    pub accepted_edit: Option<ParseInputEdit>,
     pub parse_windows: Vec<ParseWindowSnapshot>,
     pub memory_budget: Option<SyntaxMemoryBudget>,
 }
@@ -163,9 +246,57 @@ pub struct IncrementalParseUpdate {
     pub invalidated_ranges: Vec<ParseByteRange>,
     /// Bounded inert parser/cache metadata. The Rust client does not execute it.
     pub syntax_tree_delta: Option<String>,
-    /// Optional parse-produced decorations after handler-side shaping. Decoration
-    /// validation still runs before client publication.
-    pub decoration_update: Option<DecorationSet>,
+    /// Parse-produced decoration chunks shaped by one handler invocation.
+    /// Every member is independently bounded and validated before publication.
+    pub decoration_updates: Vec<DecorationSet>,
     /// Optional source-associated diagnostics validated atomically with this update.
     pub diagnostic_update: Option<DiagnosticSet>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_edit_and_stable_window_round_trip() {
+        let notification = ParseEditNotification {
+            document_id: 7,
+            document_version: 2,
+            behavior_version: 3,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            viewport: ParseByteRange::new(10, 17),
+            invalidated_ranges: vec![ParseByteRange::new(11, 12)],
+            accepted_edit: Some(ParseInputEdit {
+                base_document_version: 1,
+                document_version: 2,
+                start_byte: 11,
+                old_end_byte: 11,
+                new_end_byte: 12,
+                start_position: ParsePoint::new(2, 5),
+                old_end_position: ParsePoint::new(2, 5),
+                new_end_position: ParsePoint::new(2, 6),
+            }),
+            parse_windows: vec![ParseWindowSnapshot {
+                document_id: 7,
+                document_version: 2,
+                package_prefix: "rust".to_string(),
+                mode_id: "rust.rust".to_string(),
+                window_id: 10,
+                byte_start: 10,
+                byte_end: 17,
+                base_line: 2,
+                base_column: 4,
+                incremental_edit: true,
+                text: "aZb\néx".to_string(),
+            }],
+            memory_budget: None,
+        };
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&notification).unwrap();
+        let decoded =
+            rkyv::from_bytes::<ParseEditNotification, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded, notification);
+    }
 }

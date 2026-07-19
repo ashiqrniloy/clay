@@ -58,6 +58,8 @@ fn decoration_set_for_range(
     DecorationSet {
         document_id: 7,
         document_version,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: byte_start,
         viewport_byte_end: byte_end,
         spans: vec![DecorationSpan::from_style_token(
@@ -146,6 +148,8 @@ fn generic_decoration_publication_accepts_language_package_spans() {
     let set = DecorationSet {
         document_id: 11,
         document_version: 4,
+        package_prefix: "python".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 0,
         viewport_byte_end: 32,
         spans: vec![
@@ -209,6 +213,8 @@ fn markdown_representative_decoration_payload_fits_budget_and_client_applies() {
     let set = DecorationSet {
         document_id: 7,
         document_version: 3,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 0,
         viewport_byte_end: full_viewport_end,
         spans,
@@ -286,6 +292,93 @@ fn edit_ack_retains_current_chunks_and_rejects_older_publications() {
     assert_eq!(editor.decoration_span_count(), 1);
     assert_eq!(editor.decoration_state_version(), Some(4));
     assert!(!editor.apply_decoration_set(set));
+}
+
+#[test]
+fn optimistic_comment_style_extends_until_authoritative_replacement() {
+    let package = decoration_package();
+    let mut set = valid_set(3);
+    set.viewport_byte_end = 7;
+    set.spans[0].byte_end = 7;
+    set.spans[0].token_type = TokenType::Comment;
+    let set = validate_decoration_publication(&package, 3, set).unwrap();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "comment".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    assert!(editor.apply_decoration_set(set));
+    for _ in 0..3 {
+        assert!(editor.move_right());
+    }
+
+    assert!(editor.insert_text("x"));
+    assert_eq!(editor.visible_decoration_paint_ranges_for_test()[0].0, 0..8);
+    assert!(editor.note_confirmed_version(7, 4));
+    let empty = validate_decoration_publication(
+        &package,
+        4,
+        DecorationSet {
+            document_id: 7,
+            document_version: 4,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 7,
+            spans: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert!(editor.apply_decoration_set(empty));
+    assert_eq!(editor.decoration_span_count(), 0);
+}
+
+#[test]
+fn empty_syntax_chunk_clears_affected_range() {
+    let package = decoration_package();
+    let syntax = validate_decoration_publication(&package, 3, valid_set(3)).unwrap();
+    let empty = validate_decoration_publication(
+        &package,
+        3,
+        DecorationSet {
+            spans: Vec::new(),
+            ..syntax.clone()
+        },
+    )
+    .unwrap();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "hello markdown".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+
+    assert!(editor.apply_decoration_set(syntax));
+    assert!(editor.apply_decoration_set(empty));
+    assert_eq!(editor.decoration_span_count(), 0);
+}
+
+#[test]
+fn syntax_chunk_replacement_preserves_semantic_layer() {
+    let package = decoration_package();
+    let syntax = validate_decoration_publication(&package, 3, valid_set(3)).unwrap();
+    let mut semantic = syntax.clone();
+    semantic.kind = DecorationKind::Semantic;
+    semantic.spans[0].kind = DecorationKind::Semantic;
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "hello markdown".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+
+    assert!(editor.apply_decoration_set(semantic));
+    assert!(editor.apply_decoration_set(syntax));
+    assert_eq!(editor.decoration_span_count(), 2);
 }
 
 #[test]

@@ -313,11 +313,40 @@ mod platform {
     }
 
     fn open_dialog_via_portal(kind: OpenDialogKind) -> Result<Option<PathBuf>, String> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static HANDLE_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(1);
+
         let connection = Connection::session().map_err(|error| error.to_string())?;
         let proxy =
             FileChooserProxyBlocking::new(&connection).map_err(|error| error.to_string())?;
+        let sender = connection
+            .unique_name()
+            .ok_or_else(|| "D-Bus connection has no unique name".to_string())?
+            .as_str()
+            .trim_start_matches(':')
+            .replace('.', "_");
+        let token = format!(
+            "clay{}_{}",
+            std::process::id(),
+            HANDLE_TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let request_path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
+
+        // Subscribe before OpenFile: the portal may emit Response immediately after
+        // returning its Request handle.
+        let request = RequestProxyBlocking::builder(&connection)
+            .path(request_path.as_str())
+            .map_err(|error| error.to_string())?
+            .build()
+            .map_err(|error| error.to_string())?;
+        let mut responses = request
+            .receive_response()
+            .map_err(|error| error.to_string())?;
+
         let mut options = HashMap::new();
-        options.insert("modal", Value::from(true));
+        options.insert("handle_token", Value::from(token));
+        options.insert("modal", Value::from(false));
         match kind {
             OpenDialogKind::Folder => {
                 options.insert("directory", Value::from(true));
@@ -334,20 +363,24 @@ mod platform {
         let handle = proxy
             .open_file("", title, options)
             .map_err(|error| error.to_string())?;
-        let request = RequestProxyBlocking::builder(&connection)
-            .path(handle)
-            .map_err(|error| error.to_string())?
-            .build()
-            .map_err(|error| error.to_string())?;
-        let mut responses = request
-            .receive_response()
-            .map_err(|error| error.to_string())?;
+        if handle.as_str() != request_path {
+            return Err(format!(
+                "portal returned unexpected request handle {handle}; expected {request_path}"
+            ));
+        }
+
         let signal = responses
             .next()
             .ok_or_else(|| "portal response stream ended".to_string())?;
         let args = signal.args().map_err(|error| error.to_string())?;
-        if *args.response() != 0 {
-            return Ok(None);
+        match *args.response() {
+            0 => {}
+            1 => return Ok(None),
+            code => {
+                return Err(format!(
+                    "portal file chooser failed with response code {code}"
+                ));
+            }
         }
         let uris = args
             .results()

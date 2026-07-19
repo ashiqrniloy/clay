@@ -30,6 +30,9 @@ cargo run -- smoke-gui --config-fixture windows-markdown-open
 # open-documents switcher commands.
 cargo run -- smoke-gui --config-fixture file-browser-workflow
 
+# Stop and replace the default Linux server, wait for readiness, then exit.
+cargo run -- restart
+
 # Foreground default server, useful for watching server diagnostics.
 cargo run -- server
 
@@ -93,6 +96,10 @@ SDUI payload costs are validated by unit tests rather than default GUI smoke out
 ### Bare `cargo run`
 
 Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected. The Markdown package still publishes no default preview/status panel; Clay-owned Workspace file-browser chrome is controlled by workspace state and documented workspace commands, not by Markdown package loading.
+
+### `cargo run -- restart`
+
+On Linux, `restart` finds only server processes running the current Clay executable against the default endpoint, sends `SIGTERM`, escalates to `SIGKILL` after a two-second bound, starts a fresh background server through the existing shell-free child command, waits for the normal client handshake, then exits without opening another GUI. It does not stop Clay clients or isolated `smoke-gui` servers. Other platforms currently return an unsupported-command error.
 
 ### `cargo run -- smoke-gui`
 
@@ -296,6 +303,20 @@ Manual matrix:
 Fixtures contain only short synthetic source text—no secrets, real paths, or executable authority.
 
 Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover full-window vocabulary decoration chunks, analyzer-only range diagnostics, and no-hot-path behavior.
+
+### Plan 056 low-latency syntax Linux smoke (2026-07-19)
+
+Run the real GUI with first-party package loading and developer metric collection:
+
+```bash
+cargo run -- smoke-gui --config-fixture language-packages --profile-perf
+```
+
+On the Linux verification host this command started its managed local server, connected the client, installed the `language-packages` runtime fixture, and created a native window. The bounded smoke session was then stopped intentionally; managed smoke cleanup left no `clay-smoke-gui` server process. This boot check confirms the actual `cargo run` IPC/window path; the deterministic matrix below supplies repeatable edit assertions without relying on GUI automation.
+
+For each Rust, TypeScript, TSX, JavaScript, and Markdown fixture, verify immediate editable text, then make rapid keyword/identifier/punctuation/comment/string/prose/code edits and scroll while refresh is pending. Confirm complete current token captures after authoritative refresh, provisional broad-span continuity until replacement, syntax-plus-semantic layering, and that stale versions do not publish. Exercise save, undo/redo, and document switching through the existing Phase 20 file-browser workflow after opening more than one fixture.
+
+The Linux full run passed `cargo test --all-targets`, including `syntax_grammar` (58 tests), `parse_coordinator` (29), `decoration_transport` (15), `performance_protocol` (19), `editor_performance_invariants` (22), and `language_intelligence` (31). Those suites cover exact token/capture transitions, stale and superseded result rejection, one parse per version/window, bounded fan-out, malformed/oversize/provenance failures, non-blocking local edits, syntax/semantic composition, and source-safe metric retention. See [Performance Fixtures and Baseline Workflow](performance.md#plan-056-low-latency-syntax-linux-verification-2026-07-19) for benchmark distributions and metric evidence.
 
 ### End-to-end file browser workflow smoke
 

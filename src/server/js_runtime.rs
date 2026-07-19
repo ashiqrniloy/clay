@@ -140,6 +140,7 @@ const unavailable = (api) => { ops.op_clay_runtime_unavailable(api); };
 const parse = (json) => JSON.parse(json);
 export async function serverGetDocumentSnapshot(documentId) { void documentId; unavailable("clay.documents.serverGetDocumentSnapshot"); }
 export async function serverGetDocumentLease(documentId) { void documentId; unavailable("clay.documents.serverGetDocumentLease"); }
+export function clientOpenFileDialog() { return "clay.documents.clientOpenFileDialog"; }
 export async function serverOpenDocument(options) { return parse(await ops.op_clay_documents_open_document(JSON.stringify(options ?? null))); }
 export async function serverSaveDocument(options) { return parse(await ops.op_clay_documents_save_document(JSON.stringify(options ?? null))); }
 export async function serverReloadDocument(options) { return parse(await ops.op_clay_documents_reload_document(JSON.stringify(options ?? null))); }
@@ -2859,14 +2860,27 @@ fn parse_notification_json(notification: &ParseEditNotification) -> String {
         "mode": notification.mode_id,
         "viewport": range_json(notification.viewport),
         "invalidatedRanges": notification.invalidated_ranges.iter().map(|range| range_json(*range)).collect::<Vec<_>>(),
+        "acceptedEdit": notification.accepted_edit.map(|edit| serde_json::json!({
+            "baseDocumentVersion": edit.base_document_version,
+            "documentVersion": edit.document_version,
+            "startByte": edit.start_byte,
+            "oldEndByte": edit.old_end_byte,
+            "newEndByte": edit.new_end_byte,
+            "startPosition": { "row": edit.start_position.row, "column": edit.start_position.column },
+            "oldEndPosition": { "row": edit.old_end_position.row, "column": edit.old_end_position.column },
+            "newEndPosition": { "row": edit.new_end_position.row, "column": edit.new_end_position.column },
+        })),
         "parseWindows": notification.parse_windows.iter().map(|window| serde_json::json!({
             "documentId": window.document_id,
             "documentVersion": window.document_version,
             "packagePrefix": window.package_prefix,
             "mode": window.mode_id,
+            "windowId": window.window_id,
             "byteStart": window.byte_start,
             "byteEnd": window.byte_end,
             "baseLine": window.base_line,
+            "baseColumn": window.base_column,
+            "incrementalEdit": window.incremental_edit,
             "text": window.text,
         })).collect::<Vec<_>>(),
         "memoryBudget": notification.memory_budget.map(|budget| serde_json::json!({
@@ -2896,7 +2910,7 @@ fn parse_update_json(
         .get("viewport")
         .and_then(parse_range_value)
         .unwrap_or(fallback.viewport);
-    let spans = object
+    let spans: Option<Vec<DecorationSpan>> = object
         .get("spans")
         .and_then(serde_json::Value::as_array)
         .map(|values| {
@@ -2940,13 +2954,20 @@ fn parse_update_json(
             .get("syntaxTreeDelta")
             .and_then(serde_json::Value::as_str)
             .map(ToOwned::to_owned),
-        decoration_update: spans.map(|spans| DecorationSet {
-            document_id: fallback.document_id,
-            document_version: fallback.document_version,
-            viewport_byte_start: viewport.start,
-            viewport_byte_end: viewport.end,
-            spans,
-        }),
+        decoration_updates: spans
+            .map(|spans| DecorationSet {
+                document_id: fallback.document_id,
+                document_version: fallback.document_version,
+                package_prefix: registration.meta.package_prefix.clone(),
+                kind: spans
+                    .first()
+                    .map_or(DecorationKind::Syntax, |span| span.kind),
+                viewport_byte_start: viewport.start,
+                viewport_byte_end: viewport.end,
+                spans,
+            })
+            .into_iter()
+            .collect(),
         diagnostic_update: diagnostics,
     })
 }
@@ -3536,15 +3557,19 @@ mod tests {
             mode_id: "markdown".to_string(),
             viewport: ParseByteRange::new(0, text.len() as u64),
             invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+            accepted_edit: None,
         };
         let windows = vec![ParseWindowSnapshot {
             document_id: 1,
             document_version: 1,
             package_prefix: "markdown".to_string(),
             mode_id: "markdown".to_string(),
+            window_id: 0,
             byte_start: 0,
             byte_end: text.len() as u64,
             base_line: 0,
+            base_column: 0,
+            incremental_edit: false,
             text: text.to_string(),
         }];
         coordinator
@@ -3567,9 +3592,9 @@ mod tests {
         assert_eq!(update.package_prefix, "markdown");
         assert!(
             update
-                .decoration_update
-                .as_ref()
-                .is_some_and(|set| !set.spans.is_empty()),
+                .decoration_updates
+                .iter()
+                .any(|set| !set.spans.is_empty()),
             "markdown parser produced syntax decorations"
         );
     }
@@ -3620,6 +3645,7 @@ mod tests {
                 mode_id: "fixture".to_string(),
                 viewport: ParseByteRange::new(0, 8),
                 invalidated_ranges: vec![ParseByteRange::new(0, 1)],
+                accepted_edit: None,
             })
             .unwrap();
 
@@ -4842,6 +4868,7 @@ mod tests {
             mode_id: "loop".to_string(),
             viewport: ParseByteRange::new(0, 4),
             invalidated_ranges: vec![ParseByteRange::new(0, 4)],
+            accepted_edit: None,
             parse_windows: Vec::new(),
             memory_budget: None,
         };
@@ -6142,9 +6169,10 @@ mod tests {
                 r#"
                 import { bindKey, listKeyBindings } from "clay:keybindings";
                 import { listBehaviorRoutes } from "clay:behavior";
+                import { clientOpenFileDialog } from "clay:documents";
                 import { clientOpenFolderDialog } from "clay:workspace";
                 import { clientCopySelection } from "clay:editor";
-                const file = bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+                const file = bindKey("Ctrl+O", clientOpenFileDialog(), { scope: "editor" });
                 const folder = bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
                 const copy = bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
                 const bindings = listKeyBindings("editor");
@@ -6328,7 +6356,7 @@ mod tests {
             import { loadPackage } from "clay:packages";
 
             const loaded = [];
-            for (const specifier of ["@clay/rust", "@clay/typescript", "@clay/javascript"]) {
+            for (const specifier of ["@clay/rust", "@clay/typescript", "@clay/javascript", "@clay/markdown"]) {
               const summary = await loadPackage(specifier);
               loaded.push(`${summary.name}:${summary.apiPrefix}:${summary.modes.length}:${summary.permissions.join("+")}:${summary.contributions.syntaxGrammars}`);
             }
@@ -6345,7 +6373,7 @@ mod tests {
         assert_eq!(
             result.op_records,
             vec![
-                "@clay/rust:rust:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/typescript:typescript:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/javascript:javascript:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1"
+                "@clay/rust:rust:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/typescript:typescript:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/javascript:javascript:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1|@clay/markdown:markdown:1:mode-registration+mode-activation+command-registration+completion-provider+parse-document+render-decorations:1"
             ]
         );
     }

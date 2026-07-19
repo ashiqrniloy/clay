@@ -6,6 +6,14 @@ fn launch_smoke_doc() -> String {
     .expect("read docs/development/launch-and-gui-smoke.md")
 }
 
+fn performance_doc() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/development/performance.md"
+    ))
+    .expect("read docs/development/performance.md")
+}
+
 fn windows_doc() -> String {
     std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -126,6 +134,53 @@ fn phase18_10_manual_syntax_smoke_has_runnable_fixture_contract() {
             && !fixture.contains("Deno.core.ops"),
         "syntax-grammars smoke fixture must use only end-user loadPackage calls"
     );
+}
+
+#[test]
+fn plan056_linux_syntax_smoke_and_measurements_are_recorded() {
+    let launch_doc = launch_smoke_doc();
+    let performance_doc = performance_doc();
+
+    for expected in [
+        "Plan 056 low-latency syntax Linux smoke (2026-07-19)",
+        "cargo run -- smoke-gui --config-fixture language-packages --profile-perf",
+        "managed smoke cleanup left no `clay-smoke-gui` server process",
+        "rapid keyword/identifier/punctuation/comment/string/prose/code edits",
+        "syntax-plus-semantic layering",
+        "save, undo/redo, and document switching",
+        "syntax_grammar` (58 tests)",
+        "parse_coordinator` (29)",
+        "decoration_transport` (15)",
+        "performance_protocol` (19)",
+        "editor_performance_invariants` (22)",
+        "language_intelligence` (31)",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "Plan 056 launch record must contain `{expected}`"
+        );
+    }
+
+    for expected in [
+        "Plan 056 low-latency syntax Linux verification (2026-07-19)",
+        "cargo test --all-targets",
+        "cargo bench --no-run",
+        "first_party_incremental_edit",
+        "168.91 µs",
+        "356.50 µs",
+        "125.02 µs",
+        "124.91 µs",
+        "217.54 µs",
+        "syntax.parse.logical_work_items",
+        "syntax.edit_to_publish",
+        "syntax_pipeline_metrics_are_source_safe_and_retention_bounded",
+        "Metrics remain numeric-only and never include source text or paths",
+    ] {
+        assert!(
+            performance_doc.contains(expected),
+            "Plan 056 performance record must contain `{expected}`"
+        );
+    }
 }
 
 #[test]

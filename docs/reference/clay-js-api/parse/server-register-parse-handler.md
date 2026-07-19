@@ -77,6 +77,8 @@ Registers a token-backed server-side package parser. The facade keeps the JavaSc
 
 As of Phase 18.7 the public API is runtime-backed: a resolver-validated package load entry may pass `{ module, exportName }`, and the facade records the selected export in `globalThis.__clayParseHandlers[token]` after op-side validation returns the token. `ParseWindowSnapshot`, `ParseWindowRequest`, parse-window scheduling, cancellation state, and syntax-cache accounting remain internal Rust/protocol primitives; packages receive only Clay-supplied bounded window payloads through the approved server runtime path.
 
+Plan 056 keeps this registration API and its options unchanged. For consecutive accepted edits, Clay additionally supplies the registered server-runtime handler read-only exact edit/version/position metadata with its bounded window; open, resync, and viewport-only calls omit it. Package code cannot select stable windows, schedule parser tasks, query changed ranges, choose decoration chunk boundaries, interpolate client spans, or publish partial batch members. Those remain Clay-owned coordinator, syntax-handler, transport, and editor implementation details behind this existing facade.
+
 ## When to use
 
 Use this API during package load/activation when a mode package can parse an open document and produce inert parse/decorations data. Markdown uses this to register line-group/region parsing for headings, emphasis, inline code, fenced code blocks, and list markers. The API field is `parseUnit`; older planning docs used the plural label `parseUnits` for the same behavior-changing parse policy choice.

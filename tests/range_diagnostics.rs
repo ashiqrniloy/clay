@@ -368,6 +368,8 @@ fn diagnostics_compose_without_erasing_syntax_semantic_or_selection() {
     let decorations = DecorationSet {
         document_id: 7,
         document_version: 3,
+        package_prefix: "rust".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 0,
         viewport_byte_end: 64,
         spans: vec![DecorationSpan::from_style_token(

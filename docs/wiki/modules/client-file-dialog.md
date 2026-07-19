@@ -5,6 +5,7 @@
 - `src/client/file_dialog.rs`
 - `src/client/mod.rs`
 - `src/main.rs`
+- `src/server/js_runtime.rs`
 - `runtime/js/documents.ts`
 - `runtime/js/workspace.ts`
 - `docs/reference/clay-js-api/documents/client-open-file-dialog.md`
@@ -14,7 +15,7 @@
 
 ## Overview
 
-The client file dialog backend is the native UI half of Phase 19's file-open smoke path. A configured inert behavior route can produce `clay.documents.clientOpenFileDialog`; the native app driver handles that client UI command by calling `open_markdown_file_dialog()`. The authoritative public programmatic surface is the `clientOpenFileDialog()` command-ID facade documented in `docs/reference/clay-js-api/documents/client-open-file-dialog.md`; this wiki page explains the internal native dialog implementation behind that stable ID.
+The client file dialog backend is the native UI half of Phase 19's file-open smoke path. A configured inert behavior route can produce `clay.documents.clientOpenFileDialog`; the native app driver handles that client UI command by calling `open_markdown_file_dialog()`. The authoritative public programmatic surface is the `clientOpenFileDialog()` command-ID facade documented in `docs/reference/clay-js-api/documents/client-open-file-dialog.md`; this wiki page explains the internal native dialog implementation behind that stable ID. `runtime/js/documents.ts` and the embedded `CLAY_FACADE_DOCUMENTS` in `src/server/js_runtime.rs` must both export the function: configuration executes against the embedded facade, while the TypeScript file supplies the authored facade contract.
 
 The backend intentionally does only native user-mediated path picking: ask the user to pick a file or folder and return the selected path, cancellation, unsupported platform status, or a dialog error. It does not read file contents, scan directories, execute shell commands, open network listeners, or broaden server workspace authority. When a file path is selected, the app enqueues `ClientMessage::OpenSelectedFile`; the server canonicalizes and validates the path before creating a selected-file single-file grant and document snapshot. When a folder path is selected through `clay.workspace.clientOpenFolderDialog`, the app enqueues `ClientMessage::AddSelectedWorkspaceRoot`; the server consumes the same single-use selected-path capability, canonicalizes the directory, records it as a workspace root, and sends a refreshed file-browser `SduiSnapshot`.
 
@@ -34,7 +35,7 @@ On Windows, the backend uses the `windows` crate and Shell COM APIs:
 5. Show the modal dialog and map `ERROR_CANCELLED` to `Cancelled`.
 6. Convert `GetResult().GetDisplayName(SIGDN_FILESYSPATH)` to `PathBuf` and free the COM-allocated string.
 
-On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg-desktop-portal` over the D-Bus session bus through `zbus` (`org.freedesktop.portal.FileChooser.OpenFile`). File open passes Markdown/all-files filters as portal `filters` (`a(sa(us))`, with `*.*` normalized to `*`); folder open sets `directory=true`. Returned `file://` URIs are converted to paths. On macOS, both dialogs use `NSOpenPanel` (Markdown extension tokens plus `allowsOtherFileTypes` for the all-files fallback; folder mode chooses directories only). On platforms other than Windows/Linux/macOS, both dialogs return `Unsupported` so the app can report a status diagnostic without panicking.
+On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg-desktop-portal` over the D-Bus session bus through `zbus` (`org.freedesktop.portal.FileChooser.OpenFile`). File open passes Markdown/all-files filters as portal `filters` (`a(sa(us))`, with `*.*` normalized to `*`); folder open sets `directory=true`. The driver runs these portal calls on a background thread (Linux only) and re-enters the GUI via `EventLoopProxy` so the Wayland event loop keeps pumping (blocking OpenFile on the UI thread prevents the chooser from presenting). Requests subscribe to a predicted `handle_token` Request path before `OpenFile` to avoid the Response race, and response code `2` surfaces as `Failed` rather than silent cancel. Returned `file://` URIs are converted to paths. On macOS, both dialogs use `NSOpenPanel` (Markdown extension tokens plus `allowsOtherFileTypes` for the all-files fallback; folder mode chooses directories only). On platforms other than Windows/Linux/macOS, both dialogs return `Unsupported` so the app can report a status diagnostic without panicking.
 
 ## Invariants and Constraints
 
@@ -55,6 +56,7 @@ On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg
 - `src/main.rs::tests::file_dialog_cancellation_is_a_no_op`
 - `src/main.rs::tests::file_dialog_result_conversion_reports_selected_and_sanitized_failures`
 - `src/main.rs::tests::unsupported_platform_client_open_file_dialog_command_reports_status_diagnostic` on non-Windows/Linux/macOS targets
+- `src/server/js_runtime.rs::tests::configuration_binds_client_ui_file_folder_and_copy_commands` imports the embedded `clientOpenFileDialog()` and `clientOpenFolderDialog()` facades, preventing authored/embedded export drift
 - `src/client/mod.rs::tests::selected_file_open_request_emits_non_edit_message`
 - `src/client/mod.rs::tests::selected_folder_root_request_emits_non_edit_message`
 - `src/server/connection.rs::tests::connection_add_selected_workspace_root_sends_file_browser_snapshot`

@@ -37,6 +37,11 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 - Bound undo history at 256 entries per document and retained client document sessions at 64; clear a document's undo/redo on full resync/hard open-replace for that document.
 - Daily-editing semantics decision source: `decision-logs/2026-07-17-1841-phase20-daily-editing-semantics.md`.
 - Make UI-reactive server work cancellable and priority-aware.
+- Incremental syntax highlighting parses once per accepted document version/grammar stream over a stable bounded window, using exact edit metadata and changed-range queries; decoration transport/cache chunking must not multiply parser jobs over the same window.
+- Newer syntax versions cancel or coalesce superseded work, but the latest edit remains eligible immediately; do not use whitespace-only or idle-only parse scheduling.
+- Client decoration state may interpolate inert spans through optimistic edits for visual continuity, while server-issued current-version syntax remains authoritative and replaces affected token/range spans atomically. Parser token/capture boundaries—not letters or spaces alone—define authoritative transitions.
+- Keep syntax beneath slower semantic layers, reject stale decoration versions, and add no client parser unless measured optimized server latency justifies a separate decision.
+- Low-latency syntax decoration decision source: `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md`.
 - Keep background AI/indexing/file work from delaying input confirmations or UI-reactive work.
 
 ## Testing Guidance

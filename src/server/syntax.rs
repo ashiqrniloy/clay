@@ -7,17 +7,24 @@ use std::{
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, Tree};
 
-const MAX_SYNTAX_HIGHLIGHT_SPANS: usize = 32;
+const SYNTAX_DECORATION_CHUNK_BYTES: u64 = 128;
 
 use crate::{
     packages::{
         modes::{DocumentClassificationInput, MajorModeActivation},
         record::{PackageRecord, SyntaxGrammarContributionDescriptor},
     },
-    perf::budgets::{DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
+    perf::{
+        budgets::{DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
+        metrics::{
+            MetricMetadata, MetricValue, PerfRecorder, SYNTAX_PARSE_FULL, SYNTAX_PARSE_INCREMENTAL,
+            SYNTAX_PARSE_INVOCATIONS, SYNTAX_QUERY_BYTES, SYNTAX_QUERY_RANGES, global_recorder,
+        },
+    },
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentId,
-        IncrementalParseUpdate, Modifiers, ParseEditNotification, ParseUnit, TokenType,
+        IncrementalParseUpdate, Modifiers, ParseByteRange, ParseEditNotification, ParseUnit,
+        TokenType,
     },
     server::{
         decorations::{DecorationValidationError, SyntaxChunkCache, validate_decoration_set},
@@ -1019,6 +1026,7 @@ pub struct TreeSitterSyntaxHandler {
     highlights_query: Arc<Query>,
     trees: Arc<Mutex<HashMap<DocumentId, CachedSyntaxTree>>>,
     decoration_cache: Arc<Mutex<SyntaxChunkCache>>,
+    perf: PerfRecorder,
 }
 
 impl fmt::Debug for TreeSitterSyntaxHandler {
@@ -1036,7 +1044,7 @@ impl fmt::Debug for TreeSitterSyntaxHandler {
 #[derive(Debug, Clone)]
 struct CachedSyntaxTree {
     document_version: u64,
-    window_start: u64,
+    window_id: u64,
     tree: Tree,
 }
 
@@ -1064,6 +1072,7 @@ impl TreeSitterSyntaxHandler {
             highlights_query: Arc::new(query),
             trees: Arc::new(Mutex::new(HashMap::new())),
             decoration_cache: Arc::new(Mutex::new(SyntaxChunkCache::default())),
+            perf: global_recorder(),
         })
     }
 
@@ -1089,26 +1098,51 @@ impl TreeSitterSyntaxHandler {
             });
         }
 
-        let mut old_tree = self
-            .trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
-            .get(&notification.document_id)
-            .filter(|cached| {
-                cached.document_version < notification.document_version
-                    && cached.window_start == window.byte_start
-            })
-            .map(|cached| cached.tree.clone());
-        if let Some(old_tree) = &mut old_tree {
-            old_tree.edit(&InputEdit {
-                start_byte: 0,
-                old_end_byte: old_tree.root_node().end_byte(),
-                new_end_byte: window.text.len(),
-                start_position: Point::new(0, 0),
-                old_end_position: old_tree.root_node().end_position(),
-                new_end_position: end_point(&window.text),
-            });
-        }
+        let relative_edit = window
+            .incremental_edit
+            .then_some(notification.accepted_edit)
+            .flatten()
+            .and_then(|edit| edit.relative_to_window(window));
+        let expected_old_window_bytes = relative_edit.and_then(|edit| {
+            usize::try_from(
+                window.text.len() as i128 - (edit.new_end_byte as i128 - edit.old_end_byte as i128),
+            )
+            .ok()
+        });
+        let old_tree = relative_edit.and_then(|edit| {
+            let input_edit = input_edit(edit)?;
+            let mut tree = self
+                .trees
+                .lock()
+                .expect("syntax tree cache lock poisoned")
+                .get(&notification.document_id)
+                .filter(|cached| {
+                    cached.document_version.checked_add(1) == Some(notification.document_version)
+                        && cached.window_id == window.window_id
+                        && expected_old_window_bytes == Some(cached.tree.root_node().end_byte())
+                })?
+                .tree
+                .clone();
+            tree.edit(&input_edit);
+            Some(tree)
+        });
+
+        let metadata =
+            MetricMetadata::document(notification.document_id, notification.document_version);
+        self.perf.record_with_metadata(
+            SYNTAX_PARSE_INVOCATIONS,
+            MetricValue::Counter { amount: 1 },
+            metadata.clone(),
+        );
+        self.perf.record_with_metadata(
+            if old_tree.is_some() {
+                SYNTAX_PARSE_INCREMENTAL
+            } else {
+                SYNTAX_PARSE_FULL
+            },
+            MetricValue::Counter { amount: 1 },
+            metadata,
+        );
 
         let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
         #[allow(deprecated)]
@@ -1117,7 +1151,25 @@ impl TreeSitterSyntaxHandler {
             return Err(TreeSitterSyntaxError::ParseTimedOut);
         };
 
-        let decoration_update = self.decorations_for_window(&notification, window, &tree)?;
+        let query_ranges = query_ranges(&notification, window, old_tree.as_ref(), &tree);
+        let decoration_updates =
+            self.decorations_for_window(&notification, window, &tree, &query_ranges)?;
+        let update_viewport = decoration_updates.iter().fold(
+            ParseByteRange::new(
+                window
+                    .byte_start
+                    .saturating_add(query_ranges.first().map_or(0, |range| range.start) as u64),
+                window
+                    .byte_start
+                    .saturating_add(query_ranges.last().map_or(0, |range| range.end) as u64),
+            ),
+            |range, set| {
+                ParseByteRange::new(
+                    range.start.min(set.viewport_byte_start),
+                    range.end.max(set.viewport_byte_end),
+                )
+            },
+        );
         self.trees
             .lock()
             .expect("syntax tree cache lock poisoned")
@@ -1125,7 +1177,7 @@ impl TreeSitterSyntaxHandler {
                 notification.document_id,
                 CachedSyntaxTree {
                     document_version: notification.document_version,
-                    window_start: window.byte_start,
+                    window_id: window.window_id,
                     tree,
                 },
             );
@@ -1137,8 +1189,8 @@ impl TreeSitterSyntaxHandler {
             package_prefix: notification.package_prefix,
             mode_id: notification.mode_id,
             parse_unit: ParseUnit::Region,
-            viewport: notification.viewport,
-            invalidated_ranges: notification.invalidated_ranges,
+            viewport: update_viewport,
+            invalidated_ranges: vec![update_viewport],
             syntax_tree_delta: Some(format!(
                 "tree-sitter:{}:{}",
                 self.contribution.language_id,
@@ -1148,7 +1200,7 @@ impl TreeSitterSyntaxHandler {
                     "full"
                 }
             )),
-            decoration_update: Some(decoration_update),
+            decoration_updates,
             // Tree-sitter recovery nodes are unreliable on bounded viewport
             // fragments. Diagnostics remain reserved for explicit analyzers
             // (including future LSP packages), not syntax highlighting.
@@ -1173,88 +1225,224 @@ impl TreeSitterSyntaxHandler {
         notification: &ParseEditNotification,
         window: &crate::protocol::ParseWindowSnapshot,
         tree: &Tree,
-    ) -> Result<DecorationSet, TreeSitterSyntaxError> {
-        let relative_viewport_start = notification
-            .viewport
-            .start
-            .saturating_sub(window.byte_start)
-            .min(window.text.len() as u64) as usize;
-        let relative_viewport_end = notification
-            .viewport
-            .end
-            .saturating_sub(window.byte_start)
-            .min(window.text.len() as u64) as usize;
-
-        let mut cursor = QueryCursor::new();
-        #[allow(deprecated)]
-        cursor.set_timeout_micros(self.contribution.timeout_micros());
-        cursor.set_byte_range(relative_viewport_start..relative_viewport_end);
-        let mut captures = cursor.captures(
-            &self.highlights_query,
-            tree.root_node(),
-            window.text.as_bytes(),
+        query_ranges: &[std::ops::Range<usize>],
+    ) -> Result<Vec<DecorationSet>, TreeSitterSyntaxError> {
+        let query_range = query_ranges
+            .first()
+            .map(|first| first.start..query_ranges.last().map_or(first.end, |last| last.end))
+            .unwrap_or(0..0);
+        let metadata =
+            MetricMetadata::document(notification.document_id, notification.document_version);
+        self.perf.record_with_metadata(
+            SYNTAX_QUERY_RANGES,
+            MetricValue::Counter {
+                amount: u64::from(!query_range.is_empty()),
+            },
+            metadata.clone(),
         );
-        let capture_names = self.highlights_query.capture_names();
+        self.perf.record_with_metadata(
+            SYNTAX_QUERY_BYTES,
+            MetricValue::Bytes {
+                bytes: query_range.len() as u64,
+            },
+            metadata,
+        );
+
         let mut syntax_captures = Vec::new();
+        if !query_range.is_empty() {
+            let mut cursor = QueryCursor::new();
+            #[allow(deprecated)]
+            cursor.set_timeout_micros(self.contribution.timeout_micros());
+            cursor.set_byte_range(query_range.clone());
+            let mut captures = cursor.captures(
+                &self.highlights_query,
+                tree.root_node(),
+                window.text.as_bytes(),
+            );
+            let capture_names = self.highlights_query.capture_names();
 
-        loop {
-            captures.advance();
-            let Some((query_match, capture_index)) = captures.get() else {
-                break;
-            };
-            if syntax_captures.len() >= MAX_SYNTAX_HIGHLIGHT_SPANS {
-                break;
+            loop {
+                captures.advance();
+                let Some((query_match, capture_index)) = captures.get() else {
+                    break;
+                };
+                let capture = query_match.captures[*capture_index];
+                let capture_name = capture_names[capture.index as usize];
+                if !self.contribution.style_map.contains_key(capture_name) {
+                    continue;
+                }
+                let absolute_start = window
+                    .byte_start
+                    .saturating_add(capture.node.start_byte() as u64);
+                let absolute_end = window
+                    .byte_start
+                    .saturating_add(capture.node.end_byte() as u64);
+                if absolute_start >= absolute_end {
+                    continue;
+                }
+                syntax_captures.push(SyntaxCapture {
+                    byte_start: absolute_start,
+                    byte_end: absolute_end,
+                    capture_name: capture_name.to_string(),
+                });
             }
-            let capture = query_match.captures[*capture_index];
-            let capture_name = capture_names[capture.index as usize];
-            if !self.contribution.style_map.contains_key(capture_name) {
-                continue;
-            }
-            let absolute_start = window
-                .byte_start
-                .saturating_add(capture.node.start_byte() as u64);
-            let absolute_end = window
-                .byte_start
-                .saturating_add(capture.node.end_byte() as u64);
-            let byte_start = absolute_start.max(notification.viewport.start);
-            let byte_end = absolute_end.min(notification.viewport.end);
-            if byte_start >= byte_end {
-                continue;
-            }
-            syntax_captures.push(SyntaxCapture {
-                byte_start,
-                byte_end,
-                capture_name: capture_name.to_string(),
-            });
         }
 
-        let set = captures_to_decoration_set(&self.contribution, notification, syntax_captures)?;
-        let set = validate_decoration_set(notification.document_version, set, None)
-            .map_err(map_decoration_error)?;
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&set)
-            .map_err(|error| TreeSitterSyntaxError::DecorationInvalid(error.to_string()))?
-            .len();
-        if bytes > DECORATION_PAYLOAD_BUDGET_BYTES {
-            return Err(TreeSitterSyntaxError::PayloadBudgetExceeded {
-                bytes,
-                budget: DECORATION_PAYLOAD_BUDGET_BYTES,
+        let queried_viewport = ParseByteRange::new(
+            window.byte_start.saturating_add(query_range.start as u64),
+            window.byte_start.saturating_add(query_range.end as u64),
+        );
+        let output_viewport = syntax_captures
+            .iter()
+            .fold(queried_viewport, |range, capture| {
+                ParseByteRange::new(
+                    range.start.min(capture.byte_start),
+                    range.end.max(capture.byte_end),
+                )
             });
-        }
-        self.decoration_cache
+        let spans = captures_to_decoration_spans(&self.contribution, syntax_captures)?;
+        let mut sets = decoration_sets_for_range(notification, window, output_viewport, spans);
+        sets.sort_by_key(|set| {
+            !notification.invalidated_ranges.iter().any(|range| {
+                range.intersects(ParseByteRange::new(
+                    set.viewport_byte_start,
+                    set.viewport_byte_end,
+                ))
+            })
+        });
+        let mut cache = self
+            .decoration_cache
             .lock()
-            .expect("syntax decoration cache lock poisoned")
-            .insert_validated_set(&self.contribution.package_prefix, set.clone())
-            .map_err(map_decoration_error)?;
-        Ok(set)
+            .expect("syntax decoration cache lock poisoned");
+        for set in &mut sets {
+            *set = validate_decoration_set(notification.document_version, set.clone(), None)
+                .map_err(map_decoration_error)?;
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&*set)
+                .map_err(|error| TreeSitterSyntaxError::DecorationInvalid(error.to_string()))?
+                .len();
+            if bytes > DECORATION_PAYLOAD_BUDGET_BYTES {
+                return Err(TreeSitterSyntaxError::PayloadBudgetExceeded {
+                    bytes,
+                    budget: DECORATION_PAYLOAD_BUDGET_BYTES,
+                });
+            }
+            cache
+                .insert_validated_set(&self.contribution.package_prefix, set.clone())
+                .map_err(map_decoration_error)?;
+        }
+        Ok(sets)
     }
 }
 
-fn end_point(text: &str) -> Point {
-    let row = text.bytes().filter(|byte| *byte == b'\n').count();
-    let column = text
-        .rsplit_once('\n')
-        .map_or(text.len(), |(_, tail)| tail.len());
-    Point::new(row, column)
+fn input_edit(edit: crate::protocol::ParseInputEdit) -> Option<InputEdit> {
+    Some(InputEdit {
+        start_byte: usize::try_from(edit.start_byte).ok()?,
+        old_end_byte: usize::try_from(edit.old_end_byte).ok()?,
+        new_end_byte: usize::try_from(edit.new_end_byte).ok()?,
+        start_position: Point::new(
+            usize::try_from(edit.start_position.row).ok()?,
+            usize::try_from(edit.start_position.column).ok()?,
+        ),
+        old_end_position: Point::new(
+            usize::try_from(edit.old_end_position.row).ok()?,
+            usize::try_from(edit.old_end_position.column).ok()?,
+        ),
+        new_end_position: Point::new(
+            usize::try_from(edit.new_end_position.row).ok()?,
+            usize::try_from(edit.new_end_position.column).ok()?,
+        ),
+    })
+}
+
+fn query_ranges(
+    notification: &ParseEditNotification,
+    window: &crate::protocol::ParseWindowSnapshot,
+    old_tree: Option<&Tree>,
+    new_tree: &Tree,
+) -> Vec<std::ops::Range<usize>> {
+    let visible_start = notification
+        .viewport
+        .start
+        .saturating_sub(window.byte_start)
+        .min(window.text.len() as u64) as usize;
+    let visible_end = notification
+        .viewport
+        .end
+        .saturating_sub(window.byte_start)
+        .min(window.text.len() as u64) as usize;
+    let visible = visible_start..visible_end;
+    let Some(old_tree) = old_tree else {
+        return normalize_query_ranges([visible.clone()], &window.text, visible);
+    };
+
+    let changed = old_tree
+        .changed_ranges(new_tree)
+        .map(|range| range.start_byte..range.end_byte);
+    let explicit = notification.invalidated_ranges.iter().map(|range| {
+        range
+            .start
+            .saturating_sub(window.byte_start)
+            .min(window.text.len() as u64) as usize
+            ..range
+                .end
+                .saturating_sub(window.byte_start)
+                .min(window.text.len() as u64) as usize
+    });
+    normalize_query_ranges(changed.chain(explicit), &window.text, visible)
+}
+
+fn normalize_query_ranges(
+    ranges: impl IntoIterator<Item = std::ops::Range<usize>>,
+    text: &str,
+    visible: std::ops::Range<usize>,
+) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = ranges
+        .into_iter()
+        .filter_map(|range| {
+            let mut start = range.start.min(text.len()).max(visible.start);
+            let mut end = range.end.min(text.len()).min(visible.end);
+            if start > end {
+                return None;
+            }
+            while start > visible.start && !text.is_char_boundary(start) {
+                start -= 1;
+            }
+            while end < visible.end && !text.is_char_boundary(end) {
+                end += 1;
+            }
+            if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+                return None;
+            }
+            if start == end {
+                if end < visible.end {
+                    end += text[end..].chars().next()?.len_utf8();
+                } else if start > visible.start {
+                    start -= text[..start].chars().next_back()?.len_utf8();
+                }
+            } else {
+                if start > visible.start {
+                    start -= text[..start].chars().next_back()?.len_utf8();
+                }
+                if end < visible.end {
+                    end += text[end..].chars().next()?.len_utf8();
+                }
+            }
+            (start < end).then_some(start..end)
+        })
+        .collect::<Vec<_>>();
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        if let Some(previous) = merged
+            .last_mut()
+            .filter(|previous| range.start <= previous.end)
+        {
+            previous.end = previous.end.max(range.end);
+        } else {
+            merged.push(range);
+        }
+    }
+    merged
 }
 
 pub fn map_capture_to_vocabulary(
@@ -1277,11 +1465,10 @@ pub fn map_capture_to_vocabulary(
     })
 }
 
-fn captures_to_decoration_set(
+fn captures_to_decoration_spans(
     contribution: &SyntaxGrammarContribution,
-    notification: &ParseEditNotification,
     captures: Vec<SyntaxCapture>,
-) -> Result<DecorationSet, TreeSitterSyntaxError> {
+) -> Result<Vec<DecorationSpan>, TreeSitterSyntaxError> {
     let provenance = contribution.provenance();
     let mut spans = Vec::with_capacity(captures.len());
     for capture in captures {
@@ -1300,13 +1487,49 @@ fn captures_to_decoration_set(
             provenance: provenance.clone(),
         });
     }
-    Ok(DecorationSet {
-        document_id: notification.document_id,
-        document_version: notification.document_version,
-        viewport_byte_start: notification.viewport.start,
-        viewport_byte_end: notification.viewport.end,
-        spans,
-    })
+    Ok(spans)
+}
+
+fn decoration_sets_for_range(
+    notification: &ParseEditNotification,
+    window: &crate::protocol::ParseWindowSnapshot,
+    output: ParseByteRange,
+    spans: Vec<DecorationSpan>,
+) -> Vec<DecorationSet> {
+    if output.is_empty() {
+        return Vec::new();
+    }
+    let relative_start = output.start.saturating_sub(window.byte_start);
+    let mut chunk_start = window.byte_start.saturating_add(
+        (relative_start / SYNTAX_DECORATION_CHUNK_BYTES) * SYNTAX_DECORATION_CHUNK_BYTES,
+    );
+    let output_end = output.end.min(window.byte_end);
+    let mut sets = Vec::new();
+    while chunk_start < output_end {
+        let chunk_end = chunk_start
+            .saturating_add(SYNTAX_DECORATION_CHUNK_BYTES)
+            .min(window.byte_end);
+        let chunk_spans = spans
+            .iter()
+            .filter_map(|span| {
+                let mut span = span.clone();
+                span.byte_start = span.byte_start.max(chunk_start);
+                span.byte_end = span.byte_end.min(chunk_end);
+                (span.byte_start < span.byte_end).then_some(span)
+            })
+            .collect::<Vec<_>>();
+        sets.push(DecorationSet {
+            document_id: notification.document_id,
+            document_version: notification.document_version,
+            package_prefix: notification.package_prefix.clone(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: chunk_start,
+            viewport_byte_end: chunk_end,
+            spans: chunk_spans,
+        });
+        chunk_start = chunk_end;
+    }
+    sets
 }
 
 impl crate::server::parse_coordinator::ParseHandler for TreeSitterSyntaxHandler {
@@ -1331,11 +1554,172 @@ fn empty_update(notification: ParseEditNotification) -> IncrementalParseUpdate {
         viewport: notification.viewport,
         invalidated_ranges: notification.invalidated_ranges,
         syntax_tree_delta: None,
-        decoration_update: None,
+        decoration_updates: Vec::new(),
         diagnostic_update: None,
     }
 }
 
 fn map_decoration_error(error: DecorationValidationError) -> TreeSitterSyntaxError {
     TreeSitterSyntaxError::DecorationInvalid(format!("{error:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        perf::metrics::PerfRecorder,
+        protocol::{ParseByteRange, ParseWindowSnapshot},
+    };
+
+    fn notification(version: u64, text: &str) -> ParseEditNotification {
+        ParseEditNotification {
+            document_id: 7,
+            document_version: version,
+            behavior_version: 1,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            viewport: ParseByteRange::new(0, text.len() as u64),
+            invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+            accepted_edit: (version == 2).then_some(crate::protocol::ParseInputEdit {
+                base_document_version: 1,
+                document_version: 2,
+                start_byte: 0,
+                old_end_byte: 13,
+                new_end_byte: text.len() as u64,
+                start_position: crate::protocol::ParsePoint::new(0, 0),
+                old_end_position: crate::protocol::ParsePoint::new(1, 0),
+                new_end_position: crate::protocol::ParsePoint::new(1, 0),
+            }),
+            parse_windows: vec![ParseWindowSnapshot {
+                document_id: 7,
+                document_version: version,
+                package_prefix: "rust".to_string(),
+                mode_id: "rust.rust".to_string(),
+                window_id: 0,
+                byte_start: 0,
+                byte_end: text.len() as u64,
+                base_line: 0,
+                base_column: 0,
+                incremental_edit: version == 2,
+                text: text.to_string(),
+            }],
+            memory_budget: None,
+        }
+    }
+
+    #[test]
+    fn query_ranges_merge_and_expand_utf8_safe_empty_invalidations() {
+        let text = "aéz";
+
+        let ranges = normalize_query_ranges([0..1, 1..1, 1..3, 3..3], text, 0..text.len());
+
+        assert_eq!(ranges, vec![0..4]);
+        assert!(ranges.iter().all(|range| {
+            text.is_char_boundary(range.start) && text.is_char_boundary(range.end)
+        }));
+    }
+
+    #[test]
+    fn incremental_parse_queries_less_than_unchanged_window() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "rust.rust")
+            .expect("Rust descriptor");
+        let perf = PerfRecorder::for_test(true);
+        let mut handler = TreeSitterSyntaxHandler::new(
+            contribution_from_native_descriptor(descriptor),
+            (descriptor.language)(),
+            descriptor.highlights_query,
+        )
+        .expect("Rust handler");
+        handler.perf = perf.clone();
+        let old_text = "fn main() { le value = 1; let distant = 2; }\n";
+        let new_text = "fn main() { let value = 1; let distant = 2; }\n";
+        let insertion = old_text.find("le value").expect("partial keyword") + 2;
+
+        handler
+            .parse_sync(notification(1, old_text))
+            .expect("full parse");
+        let mut incremental = notification(2, new_text);
+        incremental.invalidated_ranges =
+            vec![ParseByteRange::new(insertion as u64, insertion as u64 + 1)];
+        incremental.accepted_edit = Some(crate::protocol::ParseInputEdit {
+            base_document_version: 1,
+            document_version: 2,
+            start_byte: insertion as u64,
+            old_end_byte: insertion as u64,
+            new_end_byte: insertion as u64 + 1,
+            start_position: crate::protocol::ParsePoint::new(0, insertion as u64),
+            old_end_position: crate::protocol::ParsePoint::new(0, insertion as u64),
+            new_end_position: crate::protocol::ParsePoint::new(0, insertion as u64 + 1),
+        });
+        handler.parse_sync(incremental).expect("incremental parse");
+
+        let queried_bytes = perf.snapshots().into_iter().find_map(|snapshot| {
+            (snapshot.name == SYNTAX_QUERY_BYTES && snapshot.metadata.version == Some(2))
+                .then_some(snapshot.value)
+        });
+        assert!(matches!(
+            queried_bytes,
+            Some(MetricValue::Bytes { bytes }) if bytes < new_text.len() as u64
+        ));
+    }
+
+    #[test]
+    fn native_parse_records_source_safe_work_classification_and_query_counts() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "rust.rust")
+            .expect("Rust descriptor");
+        let perf = PerfRecorder::for_test(true);
+        let mut handler = TreeSitterSyntaxHandler::new(
+            contribution_from_native_descriptor(descriptor),
+            (descriptor.language)(),
+            descriptor.highlights_query,
+        )
+        .expect("Rust handler");
+        handler.perf = perf.clone();
+
+        handler
+            .parse_sync(notification(1, "fn main() {}\n"))
+            .expect("full parse");
+        handler
+            .parse_sync(notification(2, "fn main() { let value = 1; }\n"))
+            .expect("incremental parse");
+
+        let snapshots = perf.snapshots();
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_PARSE_INVOCATIONS)
+                .count(),
+            2
+        );
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_PARSE_FULL)
+                .count(),
+            1
+        );
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_PARSE_INCREMENTAL)
+                .count(),
+            1
+        );
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_QUERY_RANGES)
+                .count(),
+            2
+        );
+        assert!(snapshots.iter().all(|snapshot| {
+            snapshot.metadata.document_id == Some(7)
+                && snapshot.metadata.version.is_some()
+                && snapshot.metadata.sanitized_path.is_none()
+        }));
+    }
 }

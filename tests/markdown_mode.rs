@@ -339,6 +339,8 @@ fn markdown_decoration_set(document_version: u64, viewport_end: u64) -> Decorati
     DecorationSet {
         document_id: 7,
         document_version,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 0,
         viewport_byte_end: viewport_end,
         spans,
@@ -356,7 +358,7 @@ fn markdown_parse_update(document_version: u64) -> IncrementalParseUpdate {
         viewport: ParseByteRange::new(0, 160),
         invalidated_ranges: vec![ParseByteRange::new(0, 80)],
         syntax_tree_delta: Some("decorations:viewport-spans=7".to_string()),
-        decoration_update: Some(markdown_decoration_set(document_version, 160)),
+        decoration_updates: vec![markdown_decoration_set(document_version, 160)],
         diagnostic_update: None,
     }
 }
@@ -1671,6 +1673,7 @@ async fn markdown_typing_does_not_wait_for_markdown_it_parse() {
             mode_id: "markdown".to_string(),
             viewport: ParseByteRange::new(0, 32),
             invalidated_ranges: vec![ParseByteRange::new(0, 8)],
+            accepted_edit: None,
         })
         .expect("Markdown parse scheduling must be accepted");
     let outcome = surface.command_with_event(EditorCommand::Insert("!"));

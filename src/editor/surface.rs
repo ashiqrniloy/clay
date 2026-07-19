@@ -21,7 +21,7 @@ use crate::protocol::{
     CompletionTrigger, DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan,
     DiagnosticChunkKey, DiagnosticSet, DiagnosticSpan, DocumentAccess, DocumentFontRole,
     DocumentId, DocumentVersion, EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule,
-    FontRole, KeyCode, KeyStroke, PairRule, compose_diagnostic_spans,
+    FontRole, KeyCode, KeyStroke, PairRule, TokenType, compose_diagnostic_spans,
 };
 use crate::shell::CompletionMenuAcceptAction;
 
@@ -210,6 +210,7 @@ struct EditorDecorationChunk {
     spans: Vec<DecorationSpan>,
     byte_size: usize,
     last_access: u64,
+    provisional: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -256,15 +257,29 @@ impl EditorDecorationState {
         let key = set.chunk_key(package_prefix);
         let viewport_start = set.viewport_byte_start;
         let viewport_end = set.viewport_byte_end;
-        self.remove_key(&key);
-        let last_access = self.next_access();
-        self.retained_bytes = self.retained_bytes.saturating_add(bytes);
-        self.chunks.push(EditorDecorationChunk {
-            key,
-            spans: set.spans,
-            byte_size: bytes,
-            last_access,
+        self.retain_chunks(|chunk| {
+            chunk.key != key
+                && !(chunk.provisional
+                    && chunk.key.package_prefix == key.package_prefix
+                    && chunk.key.kind == key.kind
+                    && ranges_intersect(
+                        chunk.key.byte_start,
+                        chunk.key.byte_end,
+                        key.byte_start,
+                        key.byte_end,
+                    ))
         });
+        if !set.spans.is_empty() {
+            let last_access = self.next_access();
+            self.retained_bytes = self.retained_bytes.saturating_add(bytes);
+            self.chunks.push(EditorDecorationChunk {
+                key,
+                spans: set.spans,
+                byte_size: bytes,
+                last_access,
+                provisional: false,
+            });
+        }
         self.evict_outside_near_viewport(viewport_start, viewport_end);
         self.evict_lru_until_budget();
         true
@@ -282,45 +297,47 @@ impl EditorDecorationState {
         let Some((start, end, inserted_len)) = edit_extent(operation) else {
             return false;
         };
-        let removed_len = end.saturating_sub(start);
         let mut changed = false;
         for chunk in &mut self.chunks {
+            let mut chunk_changed = false;
+            let original_key_range = (chunk.key.byte_start, chunk.key.byte_end);
             chunk.spans.retain_mut(|span| {
-                if span.byte_end <= start {
-                    return true;
+                let original = (span.byte_start, span.byte_end);
+                if !interpolate_decoration_span(span, start, end, inserted_len) {
+                    chunk_changed = true;
+                    return false;
                 }
-                if span.byte_start >= end {
-                    let Some(byte_start) = span
-                        .byte_start
-                        .checked_sub(removed_len)
-                        .and_then(|offset| offset.checked_add(inserted_len))
-                    else {
-                        changed = true;
-                        return false;
-                    };
-                    let Some(byte_end) = span
-                        .byte_end
-                        .checked_sub(removed_len)
-                        .and_then(|offset| offset.checked_add(inserted_len))
-                    else {
-                        changed = true;
-                        return false;
-                    };
-                    changed |= byte_start != span.byte_start || byte_end != span.byte_end;
-                    span.byte_start = byte_start;
-                    span.byte_end = byte_end;
-                    return true;
-                }
-                changed = true;
-                false
+                chunk_changed |= original != (span.byte_start, span.byte_end);
+                true
             });
+            if let Some((byte_start, byte_end)) = interpolate_range(
+                chunk.key.byte_start,
+                chunk.key.byte_end,
+                start,
+                end,
+                inserted_len,
+            ) {
+                chunk.key.byte_start = byte_start;
+                chunk.key.byte_end = byte_end;
+            }
+            for span in &chunk.spans {
+                chunk.key.byte_start = chunk.key.byte_start.min(span.byte_start);
+                chunk.key.byte_end = chunk.key.byte_end.max(span.byte_end);
+            }
+            chunk.provisional |=
+                chunk_changed || original_key_range != (chunk.key.byte_start, chunk.key.byte_end);
+            changed |= chunk_changed;
         }
+        self.retain_chunks(|chunk| !chunk.spans.is_empty());
         changed
     }
 
     fn confirm_version(&mut self, document_id: DocumentId, version: DocumentVersion) {
         if self.document_id == document_id {
             self.document_version = version;
+            for chunk in &mut self.chunks {
+                chunk.key.document_version = version;
+            }
         }
     }
 
@@ -348,10 +365,6 @@ impl EditorDecorationState {
     fn next_access(&mut self) -> u64 {
         self.access_counter = self.access_counter.saturating_add(1);
         self.access_counter
-    }
-
-    fn remove_key(&mut self, key: &DecorationChunkKey) {
-        self.retain_chunks(|chunk| &chunk.key != key);
     }
 
     fn evict_outside_near_viewport(&mut self, viewport_start: u64, viewport_end: u64) {
@@ -688,15 +701,179 @@ fn is_completion_word_character(character: char) -> bool {
 }
 
 fn edit_extent(operation: &EditOperation) -> Option<(u64, u64, u64)> {
-    match operation {
+    let extent = match operation {
         EditOperation::Insert { byte_offset, text } => {
-            Some((*byte_offset, *byte_offset, text.len().try_into().ok()?))
+            (*byte_offset, *byte_offset, text.len().try_into().ok()?)
         }
-        EditOperation::Delete { start, end } => Some((*start, *end, 0)),
-        EditOperation::Replace { start, end, text } => {
-            Some((*start, *end, text.len().try_into().ok()?))
+        EditOperation::Delete { start, end } => (*start, *end, 0),
+        EditOperation::Replace { start, end, text } => (*start, *end, text.len().try_into().ok()?),
+    };
+    (extent.0 <= extent.1).then_some(extent)
+}
+
+fn interpolate_decoration_span(
+    span: &mut DecorationSpan,
+    edit_start: u64,
+    edit_end: u64,
+    inserted_len: u64,
+) -> bool {
+    let broad_syntax = span.kind == DecorationKind::Syntax && is_broad_token(span.token_type);
+    if edit_start == edit_end {
+        if edit_start < span.byte_start {
+            let Some((start, end)) = shift_range(span.byte_start, span.byte_end, inserted_len, 0)
+            else {
+                return false;
+            };
+            span.byte_start = start;
+            span.byte_end = end;
+        } else if edit_start == span.byte_start {
+            if broad_syntax {
+                let Some(end) = span.byte_end.checked_add(inserted_len) else {
+                    return false;
+                };
+                span.byte_end = end;
+            } else {
+                let Some((start, end)) =
+                    shift_range(span.byte_start, span.byte_end, inserted_len, 0)
+                else {
+                    return false;
+                };
+                span.byte_start = start;
+                span.byte_end = end;
+            }
+        } else if edit_start < span.byte_end || (edit_start == span.byte_end && broad_syntax) {
+            if span.kind != DecorationKind::Syntax {
+                return false;
+            }
+            let Some(end) = span.byte_end.checked_add(inserted_len) else {
+                return false;
+            };
+            span.byte_end = end;
         }
+        return true;
     }
+
+    if span.byte_end <= edit_start {
+        return true;
+    }
+    if span.byte_start >= edit_end {
+        let Some((start, end)) = shift_range(
+            span.byte_start,
+            span.byte_end,
+            inserted_len,
+            edit_end - edit_start,
+        ) else {
+            return false;
+        };
+        span.byte_start = start;
+        span.byte_end = end;
+        return true;
+    }
+    if span.kind != DecorationKind::Syntax {
+        return false;
+    }
+
+    let survives_left = span.byte_start < edit_start;
+    let survives_right = span.byte_end > edit_end;
+    match (survives_left, survives_right) {
+        (true, true) => {
+            let Some(end) = shift_offset(
+                span.byte_end,
+                inserted_len,
+                edit_end.saturating_sub(edit_start),
+            ) else {
+                return false;
+            };
+            span.byte_end = end;
+        }
+        (true, false) => {
+            span.byte_end = if broad_syntax {
+                let Some(end) = edit_start.checked_add(inserted_len) else {
+                    return false;
+                };
+                end
+            } else {
+                edit_start
+            };
+        }
+        (false, true) => {
+            let Some(end) = shift_offset(
+                span.byte_end,
+                inserted_len,
+                edit_end.saturating_sub(edit_start),
+            ) else {
+                return false;
+            };
+            span.byte_start = if broad_syntax {
+                edit_start
+            } else {
+                let Some(start) = edit_start.checked_add(inserted_len) else {
+                    return false;
+                };
+                start
+            };
+            span.byte_end = end;
+        }
+        (false, false) => return false,
+    }
+    span.byte_start < span.byte_end
+}
+
+fn interpolate_range(
+    start: u64,
+    end: u64,
+    edit_start: u64,
+    edit_end: u64,
+    inserted_len: u64,
+) -> Option<(u64, u64)> {
+    if end <= edit_start {
+        return Some((start, end));
+    }
+    if start >= edit_end {
+        return shift_range(start, end, inserted_len, edit_end - edit_start);
+    }
+    let start = if start < edit_start {
+        start
+    } else {
+        edit_start
+    };
+    let end = if end > edit_end {
+        shift_offset(end, inserted_len, edit_end - edit_start)?
+    } else {
+        edit_start.checked_add(inserted_len)?
+    };
+    (start < end).then_some((start, end))
+}
+
+fn shift_range(start: u64, end: u64, added: u64, removed: u64) -> Option<(u64, u64)> {
+    Some((
+        shift_offset(start, added, removed)?,
+        shift_offset(end, added, removed)?,
+    ))
+}
+
+fn shift_offset(offset: u64, added: u64, removed: u64) -> Option<u64> {
+    offset.checked_sub(removed)?.checked_add(added)
+}
+
+const fn is_broad_token(token_type: TokenType) -> bool {
+    matches!(
+        token_type,
+        TokenType::Comment
+            | TokenType::String
+            | TokenType::Regexp
+            | TokenType::Heading1
+            | TokenType::Heading2
+            | TokenType::Heading3
+            | TokenType::Heading4
+            | TokenType::Heading5
+            | TokenType::Heading6
+            | TokenType::Quote
+            | TokenType::CodeBlock
+            | TokenType::CodeSpan
+            | TokenType::Link
+            | TokenType::Paragraph
+    )
 }
 
 fn shift_snippet_offset(offset: usize, removed_len: usize, inserted_len: usize) -> Option<usize> {
@@ -2747,6 +2924,36 @@ mod tests {
         }
     }
 
+    fn decoration_set(
+        version: u64,
+        viewport_start: u64,
+        viewport_end: u64,
+        spans: Vec<DecorationSpan>,
+    ) -> DecorationSet {
+        DecorationSet {
+            document_id: 1,
+            document_version: version,
+            package_prefix: "test".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: viewport_start,
+            viewport_byte_end: viewport_end,
+            spans,
+        }
+    }
+
+    fn syntax_span(byte_start: u64, byte_end: u64, token_type: TokenType) -> DecorationSpan {
+        let mut span = span(
+            byte_start,
+            byte_end,
+            DecorationKind::Syntax,
+            None,
+            70,
+            Modifiers::NONE,
+        );
+        span.token_type = token_type;
+        span
+    }
+
     fn snippet_completion_action(insert_text: &str) -> CompletionMenuAcceptAction {
         CompletionMenuAcceptAction {
             request_id: 1,
@@ -2785,6 +2992,8 @@ mod tests {
         assert!(editor.apply_decoration_set(DecorationSet {
             document_id: 1,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 9,
             spans: vec![span(
@@ -2817,6 +3026,8 @@ mod tests {
         assert!(editor.apply_decoration_set(DecorationSet {
             document_id: 1,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 9,
             spans: vec![span(
@@ -2839,6 +3050,235 @@ mod tests {
     }
 
     #[test]
+    fn optimistic_interior_utf8_insert_extends_syntax_span() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            12,
+            vec![syntax_span(2, 5, TokenType::Keyword)],
+        )));
+
+        assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+            byte_offset: 3,
+            text: "🦀".to_string(),
+        }));
+
+        let span = &editor.decorations.chunks[0].spans[0];
+        assert_eq!((span.byte_start, span.byte_end), (2, 9));
+        assert!(editor.decorations.chunks[0].provisional);
+    }
+
+    #[test]
+    fn optimistic_broad_token_families_inherit_edge_insertions() {
+        for token_type in [
+            TokenType::Comment,
+            TokenType::String,
+            TokenType::Paragraph,
+            TokenType::CodeBlock,
+            TokenType::CodeSpan,
+        ] {
+            let mut editor = EditorSurface::default();
+            assert!(editor.decorations.apply_set(decoration_set(
+                1,
+                0,
+                12,
+                vec![syntax_span(2, 6, token_type)],
+            )));
+
+            assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+                byte_offset: 2,
+                text: "/".to_string(),
+            }));
+            assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+                byte_offset: 7,
+                text: "\n".to_string(),
+            }));
+
+            let span = &editor.decorations.chunks[0].spans[0];
+            assert_eq!((span.byte_start, span.byte_end), (2, 8));
+        }
+    }
+
+    #[test]
+    fn optimistic_narrow_span_does_not_inherit_edge_insertions() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            12,
+            vec![syntax_span(2, 5, TokenType::Keyword)],
+        )));
+
+        assert!(!editor.decorations.apply_edit(&EditOperation::Insert {
+            byte_offset: 5,
+            text: "x".to_string(),
+        }));
+
+        let span = &editor.decorations.chunks[0].spans[0];
+        assert_eq!((span.byte_start, span.byte_end), (2, 5));
+    }
+
+    #[test]
+    fn optimistic_replace_resizes_syntax_but_invalidates_semantic_overlap() {
+        let mut syntax = syntax_span(2, 8, TokenType::Variable);
+        let mut semantic = syntax.clone();
+        semantic.kind = DecorationKind::Semantic;
+        let mut editor = EditorSurface::default();
+        assert!(
+            editor
+                .decorations
+                .apply_set(decoration_set(1, 0, 12, vec![syntax, semantic],))
+        );
+
+        assert!(editor.decorations.apply_edit(&EditOperation::Replace {
+            start: 4,
+            end: 6,
+            text: "x".to_string(),
+        }));
+
+        let spans = &editor.decorations.chunks[0].spans;
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].byte_start, spans[0].byte_end), (2, 7));
+        syntax = spans[0].clone();
+        assert_eq!(syntax.kind, DecorationKind::Syntax);
+    }
+
+    #[test]
+    fn optimistic_delete_shrinks_only_surviving_syntax_geometry() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            12,
+            vec![syntax_span(2, 10, TokenType::String)],
+        )));
+
+        assert!(
+            editor
+                .decorations
+                .apply_edit(&EditOperation::Delete { start: 4, end: 7 })
+        );
+
+        let span = &editor.decorations.chunks[0].spans[0];
+        assert_eq!((span.byte_start, span.byte_end), (2, 7));
+    }
+
+    #[test]
+    fn optimistic_edit_shifts_unaffected_non_syntax_layers() {
+        let mut editor = EditorSurface::default();
+        for (index, kind) in [
+            DecorationKind::Semantic,
+            DecorationKind::Diagnostic,
+            DecorationKind::SearchMatch,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let start = 10 + index as u64 * 3;
+            let mut span = syntax_span(start, start + 2, TokenType::Variable);
+            span.kind = kind;
+            let mut set = decoration_set(1, start, start + 2, vec![span]);
+            set.kind = kind;
+            assert!(editor.decorations.apply_set(set));
+        }
+
+        assert!(
+            editor
+                .decorations
+                .apply_edit(&EditOperation::Delete { start: 2, end: 4 })
+        );
+
+        let ranges = editor
+            .decorations
+            .chunks
+            .iter()
+            .map(|chunk| {
+                let span = &chunk.spans[0];
+                (span.kind, span.byte_start, span.byte_end)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ranges,
+            vec![
+                (DecorationKind::Semantic, 8, 10),
+                (DecorationKind::Diagnostic, 11, 13),
+                (DecorationKind::SearchMatch, 14, 16),
+            ]
+        );
+    }
+
+    #[test]
+    fn current_authoritative_chunks_replace_overlapping_provisional_ranges() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            8,
+            vec![syntax_span(0, 8, TokenType::Comment)],
+        )));
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            8,
+            16,
+            vec![syntax_span(8, 16, TokenType::Comment)],
+        )));
+        assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+            byte_offset: 8,
+            text: "x".to_string(),
+        }));
+        editor.decorations.confirm_version(1, 2);
+
+        assert!(
+            editor
+                .decorations
+                .apply_set(decoration_set(2, 0, 8, Vec::new()))
+        );
+        assert_eq!(editor.decoration_span_count(), 1);
+        assert!(
+            editor
+                .decorations
+                .apply_set(decoration_set(2, 8, 16, Vec::new()))
+        );
+        assert_eq!(editor.decoration_span_count(), 0);
+    }
+
+    #[test]
+    fn reversed_edit_is_ignored_and_snapshot_replacement_clears_provisional_state() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "comment".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            7,
+            vec![syntax_span(0, 7, TokenType::Comment)],
+        )));
+        assert!(
+            !editor
+                .decorations
+                .apply_edit(&EditOperation::Delete { start: 5, end: 2 })
+        );
+        assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+            byte_offset: 3,
+            text: "x".to_string(),
+        }));
+
+        editor.load_snapshot(
+            2,
+            1,
+            "other".to_string(),
+            DocumentAccess::Editable { lease_id: 2 },
+        );
+
+        assert_eq!(editor.decoration_span_count(), 0);
+    }
+
+    #[test]
     fn overlapping_style_runs_resolve_deterministically_and_merge_adjacent_runs() {
         let mut editor = EditorSurface::default();
         editor.load_snapshot(
@@ -2850,6 +3290,8 @@ mod tests {
         assert!(editor.apply_decoration_set(DecorationSet {
             document_id: 1,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 5,
             spans: vec![
@@ -2903,6 +3345,8 @@ mod tests {
         assert!(editor.apply_decoration_set(DecorationSet {
             document_id: 1,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 1_000,
             spans,
@@ -2925,6 +3369,8 @@ mod tests {
         assert!(editor.apply_decoration_set(DecorationSet {
             document_id: 1,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: text.len() as u64,
             spans: vec![
@@ -2960,6 +3406,8 @@ mod tests {
         assert!(editor.apply_decoration_set(DecorationSet {
             document_id: 1,
             document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Diagnostic,
             viewport_byte_start: 0,
             viewport_byte_end: 3,
             spans: vec![

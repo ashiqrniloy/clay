@@ -38,6 +38,7 @@ pub enum DecorationValidationError {
     PackageProvenanceMismatch {
         index: usize,
     },
+    SetPackageProvenanceMismatch,
     PayloadBudgetExceeded {
         bytes: usize,
         budget: usize,
@@ -89,6 +90,11 @@ pub fn validate_decoration_set(
     if set.viewport_byte_start > set.viewport_byte_end {
         return Err(DecorationValidationError::InvalidViewportRange);
     }
+    if set.package_prefix.is_empty()
+        || package.is_some_and(|package| set.package_prefix != package.manifest.clay.api_prefix)
+    {
+        return Err(DecorationValidationError::SetPackageProvenanceMismatch);
+    }
 
     for (index, span) in set.spans.iter().enumerate() {
         if span.byte_start >= span.byte_end {
@@ -122,14 +128,15 @@ pub fn validate_decoration_set(
                 });
             }
         }
-        if let Some(package) = package {
-            let provenance = &span.provenance;
-            if provenance.package_name != package.manifest.name
-                || provenance.package_version != package.manifest.version
-                || provenance.package_prefix != package.manifest.clay.api_prefix
-            {
-                return Err(DecorationValidationError::PackageProvenanceMismatch { index });
-            }
+        let provenance = &span.provenance;
+        if provenance.package_prefix != set.package_prefix
+            || package.is_some_and(|package| {
+                provenance.package_name != package.manifest.name
+                    || provenance.package_version != package.manifest.version
+                    || provenance.package_prefix != package.manifest.clay.api_prefix
+            })
+        {
+            return Err(DecorationValidationError::PackageProvenanceMismatch { index });
         }
     }
 
@@ -376,6 +383,8 @@ mod tests {
         DecorationSet {
             document_id: 7,
             document_version,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: byte_start,
             viewport_byte_end: byte_start + 64,
             spans: vec![DecorationSpan::from_style_token(

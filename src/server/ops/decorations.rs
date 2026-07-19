@@ -58,6 +58,10 @@ pub(super) fn op_clay_decorations_publish_decorations(
     let set = DecorationSet {
         document_id: document_id as DocumentId,
         document_version: document_version as DocumentVersion,
+        package_prefix: package.manifest.clay.api_prefix.clone(),
+        kind: spans
+            .first()
+            .map_or(crate::protocol::DecorationKind::Syntax, |span| span.kind),
         viewport_byte_start,
         viewport_byte_end,
         spans,

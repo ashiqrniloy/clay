@@ -26,7 +26,13 @@ use clay::{
             SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
             SYNTAX_CACHE_BUDGET_BYTES,
         },
-        metrics::{PerfConfig, install_global_recorder},
+        metrics::{
+            MetricMetadata, MetricValue, PERF_SNAPSHOT_CAPACITY, PerfConfig, PerfRecorder,
+            SYNTAX_CANCELLED_SUPERSEDED, SYNTAX_DECORATION_CHUNKS, SYNTAX_EDIT_TO_PUBLISH,
+            SYNTAX_LOGICAL_WORK_ITEMS, SYNTAX_PARSE_FULL, SYNTAX_PARSE_INCREMENTAL,
+            SYNTAX_PARSE_INVOCATIONS, SYNTAX_QUERY_BYTES, SYNTAX_QUERY_RANGES,
+            install_global_recorder,
+        },
     },
     protocol::{
         BehaviorManifest, ClientMessage, CompletionItem, CompletionProvenance,
@@ -102,7 +108,7 @@ fn markdown_parse_update_from_notification(
         viewport: notification.viewport,
         invalidated_ranges: notification.invalidated_ranges,
         syntax_tree_delta: Some("windowed:visible".to_string()),
-        decoration_update: None,
+        decoration_updates: Vec::new(),
         diagnostic_update: None,
     }
 }
@@ -111,6 +117,8 @@ fn decoration_set_for_payload() -> DecorationSet {
     DecorationSet {
         document_id: 7,
         document_version: 3,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 8 * 1024 * 1024,
         viewport_byte_end: 8 * 1024 * 1024 + DECORATION_NEAR_VIEWPORT_GUARD_BYTES,
         spans: vec![DecorationSpan::from_style_token(
@@ -306,9 +314,11 @@ fn combined_parse_update_stays_within_incremental_payload_budget() {
         viewport: ParseByteRange::new(0, 4096),
         invalidated_ranges: vec![ParseByteRange::new(8, 9)],
         syntax_tree_delta: None,
-        decoration_update: Some(DecorationSet {
+        decoration_updates: vec![DecorationSet {
             document_id: 7,
             document_version: 3,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 4096,
             spans: vec![DecorationSpan::from_style_token(
@@ -319,7 +329,7 @@ fn combined_parse_update_stays_within_incremental_payload_budget() {
                 10,
                 provenance.clone(),
             )],
-        }),
+        }],
         diagnostic_update: Some(DiagnosticSet {
             document_id: 7,
             document_version: 3,
@@ -459,6 +469,40 @@ fn parse_window_policy_keeps_large_file_snapshot_budget_bounded() {
     assert!(!budget.is_exceeded());
 }
 
+#[test]
+fn syntax_pipeline_metrics_are_source_safe_and_retention_bounded() {
+    let recorder = PerfRecorder::for_test(true);
+    let names = [
+        SYNTAX_LOGICAL_WORK_ITEMS,
+        SYNTAX_PARSE_INVOCATIONS,
+        SYNTAX_PARSE_INCREMENTAL,
+        SYNTAX_PARSE_FULL,
+        SYNTAX_QUERY_RANGES,
+        SYNTAX_QUERY_BYTES,
+        SYNTAX_DECORATION_CHUNKS,
+        SYNTAX_CANCELLED_SUPERSEDED,
+        SYNTAX_EDIT_TO_PUBLISH,
+    ];
+    for index in 0..=PERF_SNAPSHOT_CAPACITY {
+        recorder.record_with_metadata(
+            names[index % names.len()],
+            MetricValue::Counter { amount: 1 },
+            MetricMetadata::document(7, 3),
+        );
+    }
+
+    let snapshots = recorder.snapshots();
+    assert_eq!(snapshots.len(), PERF_SNAPSHOT_CAPACITY);
+    assert!(snapshots.iter().all(|snapshot| {
+        snapshot.metadata == MetricMetadata::document(7, 3)
+            && snapshot.metadata.sanitized_path.is_none()
+    }));
+    let debug = format!("{snapshots:?}");
+    assert!(!debug.contains("source text"));
+    assert!(!debug.contains("/home/"));
+    assert!(!debug.contains("clipboard"));
+}
+
 #[tokio::test]
 async fn markdown_large_file_typing_does_not_wait_for_windowed_parse() {
     let coordinator = ParseCoordinator::new();
@@ -497,15 +541,19 @@ async fn markdown_large_file_typing_does_not_wait_for_windowed_parse() {
                 mode_id: "markdown".to_string(),
                 viewport: ParseByteRange::new(byte_start, byte_start + 4096),
                 invalidated_ranges: vec![ParseByteRange::new(byte_start, byte_start + 32)],
+                accepted_edit: None,
             },
             vec![ParseWindowSnapshot {
                 document_id: 7,
                 document_version: 1,
                 package_prefix: "markdown".to_string(),
                 mode_id: "markdown".to_string(),
+                window_id: byte_start,
                 byte_start,
                 byte_end: byte_start + window_text.len() as u64,
                 base_line: 0,
+                base_column: 0,
+                incremental_edit: false,
                 text: window_text,
             }],
             Some(ParsePolicy::new(
@@ -587,15 +635,19 @@ async fn valid_to_invalid_edit_keeps_local_typing_non_blocking() {
                 mode_id: "markdown".to_string(),
                 viewport: ParseByteRange::new(0, window_end),
                 invalidated_ranges: vec![ParseByteRange::new(0, window_end)],
+                accepted_edit: None,
             },
             vec![ParseWindowSnapshot {
                 document_id: 7,
                 document_version: 1,
                 package_prefix: "markdown".to_string(),
                 mode_id: "markdown".to_string(),
+                window_id: 0,
                 byte_start: 0,
                 byte_end: window_end,
                 base_line: 0,
+                base_column: 0,
+                incremental_edit: false,
                 text: window_text,
             }],
             Some(ParsePolicy::new(
@@ -675,23 +727,23 @@ fn first_party_decoration_payloads_stay_within_budget_per_language() {
         let update = handler
             .parse_sync(parse_notification_for_fixture(package, 1, text))
             .unwrap_or_else(|error| panic!("parse {label}: {error}"));
-        let decoration_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(
-            update
-                .decoration_update
-                .as_ref()
-                .unwrap_or_else(|| panic!("{label} emits decorations")),
-        )
-        .unwrap_or_else(|error| panic!("serialize {label} decorations: {error}"))
-        .len();
-        let update_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&update)
-            .unwrap_or_else(|error| panic!("serialize {label} update: {error}"))
-            .len();
-
-        eprintln!(
-            "{label}: decoration={decoration_bytes}B/{DECORATION_PAYLOAD_BUDGET_BYTES}B update={update_bytes}B/{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES}B"
+        assert!(
+            !update.decoration_updates.is_empty(),
+            "{label} emits decorations"
         );
-        assert!(decoration_bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
-        assert!(update_bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
+        for decoration in &update.decoration_updates {
+            let decoration_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(decoration)
+                .unwrap_or_else(|error| panic!("serialize {label} decorations: {error}"))
+                .len();
+            let mut member = update.clone();
+            member.decoration_updates = vec![decoration.clone()];
+            let update_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&member)
+                .unwrap_or_else(|error| panic!("serialize {label} update: {error}"))
+                .len();
+
+            assert!(decoration_bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
+            assert!(update_bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
+        }
         assert!(text.len() <= SYNTAX_CACHE_BUDGET_BYTES);
     }
 }
@@ -709,14 +761,18 @@ fn parse_notification_for_fixture(
         mode_id: package.to_string(),
         viewport: ParseByteRange::new(0, text.len() as u64),
         invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+        accepted_edit: None,
         parse_windows: vec![ParseWindowSnapshot {
             document_id: 77,
             document_version: version,
             package_prefix: package.to_string(),
             mode_id: package.to_string(),
+            window_id: 0,
             byte_start: 0,
             byte_end: text.len() as u64,
             base_line: 0,
+            base_column: 0,
+            incremental_edit: false,
             text: text.to_string(),
         }],
         memory_budget: Some(SyntaxMemoryBudget::new(
@@ -752,7 +808,7 @@ async fn first_party_open_parse_does_not_block_initial_render_per_language() {
                         viewport: notification.viewport,
                         invalidated_ranges: notification.invalidated_ranges,
                         syntax_tree_delta: None,
-                        decoration_update: None,
+                        decoration_updates: Vec::new(),
                         diagnostic_update: None,
                     })
                 },
@@ -777,6 +833,7 @@ async fn first_party_open_parse_does_not_block_initial_render_per_language() {
                     mode_id: package.to_string(),
                     viewport: ParseByteRange::new(0, text.len() as u64),
                     invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
+                    accepted_edit: None,
                 },
                 parse_notification_for_fixture(package, 1, text).parse_windows,
                 Some(ParsePolicy::new(

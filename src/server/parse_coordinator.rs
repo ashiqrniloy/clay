@@ -4,17 +4,25 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
-    perf::budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
+    perf::{
+        budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
+        metrics::{
+            MetricMetadata, MetricValue, PerfRecorder, SYNTAX_CANCELLED_SUPERSEDED,
+            SYNTAX_DECORATION_CHUNKS, SYNTAX_EDIT_TO_PUBLISH, SYNTAX_LOGICAL_WORK_ITEMS,
+            global_recorder,
+        },
+    },
     protocol::{
         BehaviorVersion, DocumentId, DocumentVersion, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot, RuntimeDiagnostic,
-        SyntaxMemoryBudget,
+        ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseUnit,
+        ParseWindowSnapshot, RuntimeDiagnostic, SyntaxMemoryBudget,
     },
     server::{decorations::validate_decoration_set, diagnostics::validate_diagnostic_set},
 };
@@ -57,6 +65,7 @@ pub enum ParseCoordinatorError {
     InvalidatedRangeInvalid {
         index: usize,
     },
+    InvalidAcceptedEdit,
     InvalidParsePolicy,
     InvalidWindowRange {
         index: usize,
@@ -125,6 +134,7 @@ pub struct ParseScheduleRequest {
     pub mode_id: String,
     pub viewport: ParseByteRange,
     pub invalidated_ranges: Vec<ParseByteRange>,
+    pub accepted_edit: Option<ParseInputEdit>,
 }
 
 impl ParseScheduleRequest {
@@ -147,6 +157,7 @@ impl ParseScheduleRequest {
             mode_id: self.mode_id,
             viewport,
             invalidated_ranges,
+            accepted_edit: self.accepted_edit,
             parse_windows: Vec::new(),
             memory_budget: None,
         }
@@ -165,6 +176,7 @@ pub struct ParseCoordinatorStats {
 #[derive(Clone)]
 pub struct ParseCoordinator {
     inner: Arc<Mutex<ParseCoordinatorInner>>,
+    perf: PerfRecorder,
     updates_tx: mpsc::UnboundedSender<IncrementalParseUpdate>,
     updates_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<IncrementalParseUpdate>>>,
     diagnostics_tx: mpsc::UnboundedSender<RuntimeDiagnostic>,
@@ -173,9 +185,16 @@ pub struct ParseCoordinator {
 
 struct ParseCoordinatorInner {
     handlers: HashMap<HandlerKey, RegisteredParseHandler>,
-    active_tasks: HashMap<TaskKey, JoinHandle<()>>,
+    active_tasks: HashMap<TaskKey, ActiveParseTask>,
     current_versions: HashMap<DocumentId, DocumentVersion>,
+    accepted_native_edits: HashMap<DocumentId, (DocumentVersion, Instant, bool)>,
     stats: ParseCoordinatorStats,
+}
+
+struct ActiveParseTask {
+    handle: JoinHandle<()>,
+    document_version: DocumentVersion,
+    native_edit: bool,
 }
 
 struct RegisteredParseHandler {
@@ -197,7 +216,7 @@ struct HandlerKeyWithDocument {
     document_id: DocumentId,
     package_prefix: String,
     mode_id: String,
-    viewport_start: u64,
+    window_id: Option<u64>,
 }
 
 impl ParseCoordinator {
@@ -209,8 +228,10 @@ impl ParseCoordinator {
                 handlers: HashMap::new(),
                 active_tasks: HashMap::new(),
                 current_versions: HashMap::new(),
+                accepted_native_edits: HashMap::new(),
                 stats: ParseCoordinatorStats::default(),
             })),
+            perf: global_recorder(),
             updates_tx,
             updates_rx: Arc::new(tokio::sync::Mutex::new(updates_rx)),
             diagnostics_tx,
@@ -309,12 +330,7 @@ impl ParseCoordinator {
             })
             .cloned()
             .collect();
-        for task_key in stale_task_keys {
-            if let Some(task) = inner.active_tasks.remove(&task_key) {
-                task.abort();
-                inner.stats.cancelled_superseded_tasks += 1;
-            }
-        }
+        abort_tasks(&mut inner, stale_task_keys, &self.perf);
         inner.handlers.insert(
             key,
             RegisteredParseHandler {
@@ -337,7 +353,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.generation_id == generation_id)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys);
+        abort_tasks(&mut inner, task_keys, &self.perf);
     }
 
     /// After a successful runtime-generation commit, remove every handler and
@@ -354,7 +370,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.generation_id < active_generation)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys);
+        abort_tasks(&mut inner, task_keys, &self.perf);
         drop(inner);
         self.drain_pending_outputs();
     }
@@ -373,7 +389,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.package_prefix == package_prefix)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys);
+        abort_tasks(&mut inner, task_keys, &self.perf);
     }
 
     /// Drop already-queued parse updates/diagnostics without waiting. Used by
@@ -409,24 +425,67 @@ impl ParseCoordinator {
         generations
     }
 
-    pub(crate) fn cancel_document_handler_tasks(
+    pub(crate) fn record_native_edit_accepted(
         &self,
         document_id: DocumentId,
-        package_prefix: &str,
-        mode_id: &str,
+        document_version: DocumentVersion,
     ) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-        let task_keys = inner
-            .active_tasks
-            .keys()
-            .filter(|key| {
-                key.document_id == document_id
-                    && key.package_prefix == package_prefix
-                    && key.mode_id == mode_id
-            })
-            .cloned()
-            .collect();
-        abort_tasks(&mut inner, task_keys);
+        if !self.perf.is_enabled() {
+            return;
+        }
+        self.inner
+            .lock()
+            .expect("parse coordinator lock poisoned")
+            .accepted_native_edits
+            .insert(document_id, (document_version, Instant::now(), false));
+        self.perf.record_with_metadata(
+            SYNTAX_LOGICAL_WORK_ITEMS,
+            MetricValue::Counter { amount: 1 },
+            MetricMetadata::document(document_id, document_version),
+        );
+    }
+
+    fn record_native_publication(&self, update: &IncrementalParseUpdate) {
+        if !update
+            .syntax_tree_delta
+            .as_deref()
+            .is_some_and(|delta| delta.starts_with("tree-sitter:"))
+        {
+            return;
+        }
+        let metadata = MetricMetadata::document(update.document_id, update.document_version);
+        if !update.decoration_updates.is_empty() {
+            self.perf.record_with_metadata(
+                SYNTAX_DECORATION_CHUNKS,
+                MetricValue::Counter {
+                    amount: update.decoration_updates.len() as u64,
+                },
+                metadata.clone(),
+            );
+        }
+        let started = {
+            let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            inner
+                .accepted_native_edits
+                .get_mut(&update.document_id)
+                .and_then(|(version, started, published)| {
+                    if *version == update.document_version && !*published {
+                        *published = true;
+                        Some(*started)
+                    } else {
+                        None
+                    }
+                })
+        };
+        if let Some(started) = started {
+            self.perf.record_with_metadata(
+                SYNTAX_EDIT_TO_PUBLISH,
+                MetricValue::Duration {
+                    nanos: started.elapsed().as_nanos(),
+                },
+                metadata,
+            );
+        }
     }
 
     /// Schedule parse work after an edit/viewport change has already been
@@ -458,12 +517,13 @@ impl ParseCoordinator {
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
         };
+        let window_id = parse_windows.first().map(|window| window.window_id);
         let task_key = TaskKey {
             generation_id: 0,
             document_id: request.document_id,
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
-            viewport_start: request.viewport.start,
+            window_id: window_id.or(Some(request.viewport.start)),
         };
         let mut notification = request.into_notification();
         if let Some(policy) = policy {
@@ -471,8 +531,9 @@ impl ParseCoordinator {
                 Some(SyntaxMemoryBudget::new(policy.memory_budget_bytes, 0));
         }
         notification.parse_windows = parse_windows;
+        let notification_document_version = notification.document_version;
 
-        let (handler, task_key) = {
+        let (handler, task_key, native_edit) = {
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
             let registered = inner.handlers.get(&handler_key).ok_or_else(|| {
                 ParseCoordinatorError::HandlerNotRegistered {
@@ -486,37 +547,89 @@ impl ParseCoordinator {
                 ..task_key
             };
 
+            if inner
+                .active_tasks
+                .get(&task_key)
+                .is_some_and(|task| task.document_version == notification.document_version)
+            {
+                return Ok(());
+            }
+            if let Some(current_version) = inner.current_versions.get(&notification.document_id)
+                && *current_version > notification.document_version
+            {
+                return Err(ParseCoordinatorError::StaleDocumentVersion {
+                    result_version: notification.document_version,
+                    current_version: *current_version,
+                });
+            }
             inner
                 .current_versions
                 .insert(notification.document_id, notification.document_version);
-            if let Some(previous) = inner.active_tasks.remove(&task_key) {
-                previous.abort();
-                inner.stats.cancelled_superseded_tasks += 1;
-            }
+            let superseded = inner
+                .active_tasks
+                .iter()
+                .filter(|(key, task)| {
+                    key.generation_id == task_key.generation_id
+                        && key.document_id == task_key.document_id
+                        && key.package_prefix == task_key.package_prefix
+                        && key.mode_id == task_key.mode_id
+                        && (*key == &task_key
+                            || task.document_version < notification.document_version)
+                })
+                .map(|(key, _)| key.clone())
+                .collect();
+            abort_tasks(&mut inner, superseded, &self.perf);
+            let native_edit = inner
+                .accepted_native_edits
+                .get(&notification.document_id)
+                .is_some_and(|(version, _, _)| *version == notification.document_version);
             inner.stats.scheduled_tasks += 1;
-            (handler, task_key)
+            (handler, task_key, native_edit)
         };
 
         let coordinator = self.clone();
         let spawned_task_key = task_key.clone();
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
+            if start_rx.await.is_err() {
+                return;
+            }
             let result = handler.parse(notification).await;
-            coordinator.finish_task(spawned_task_key, result);
+            coordinator.finish_task(spawned_task_key, notification_document_version, result);
         });
 
         self.inner
             .lock()
             .expect("parse coordinator lock poisoned")
             .active_tasks
-            .insert(task_key, task);
+            .insert(
+                task_key,
+                ActiveParseTask {
+                    handle: task,
+                    document_version: notification_document_version,
+                    native_edit,
+                },
+            );
+        let _ = start_tx.send(());
         Ok(())
     }
 
     fn finish_task(
         &self,
         task_key: TaskKey,
+        task_version: DocumentVersion,
         result: Result<IncrementalParseUpdate, ParseCoordinatorError>,
     ) {
+        if self
+            .inner
+            .lock()
+            .expect("parse coordinator lock poisoned")
+            .active_tasks
+            .get(&task_key)
+            .is_none_or(|task| task.document_version != task_version)
+        {
+            return;
+        }
         let Ok(update) = result else {
             let error = result.expect_err("parse result error present");
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
@@ -542,6 +655,7 @@ impl ParseCoordinator {
                 inner.active_tasks.remove(&task_key);
                 inner.stats.published_updates += 1;
                 drop(inner);
+                self.record_native_publication(&update);
                 let _ = self.updates_tx.send(update);
             }
             Err(ParseCoordinatorError::StaleDocumentVersion { .. }) => {
@@ -609,7 +723,7 @@ impl ParseCoordinator {
                 current_version,
             });
         }
-        if let Some(decorations) = &update.decoration_update {
+        for decorations in &update.decoration_updates {
             if decorations.document_id != update.document_id
                 || decorations.document_version != update.document_version
             {
@@ -618,8 +732,8 @@ impl ParseCoordinator {
                     parse_version: update.document_version,
                 });
             }
-            if decorations.viewport_byte_start != update.viewport.start
-                || decorations.viewport_byte_end != update.viewport.end
+            if decorations.viewport_byte_start < update.viewport.start
+                || decorations.viewport_byte_end > update.viewport.end
                 || decorations
                     .spans
                     .iter()
@@ -652,14 +766,13 @@ impl ParseCoordinator {
                 },
             )?;
         }
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(update)
-            .map_err(|_| ParseCoordinatorError::SerializationFailed)?
-            .len();
-        if bytes > INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES {
-            return Err(ParseCoordinatorError::PayloadBudgetExceeded {
-                bytes,
-                budget: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
-            });
+        let mut bounded_update = update.clone();
+        let decoration_updates = std::mem::take(&mut bounded_update.decoration_updates);
+        validate_update_payload(&bounded_update)?;
+        for decoration in decoration_updates {
+            bounded_update.decoration_updates.push(decoration);
+            validate_update_payload(&bounded_update)?;
+            bounded_update.decoration_updates.clear();
         }
         Ok(())
     }
@@ -679,6 +792,19 @@ impl ParseCoordinator {
             .stats
             .clone()
     }
+}
+
+fn validate_update_payload(update: &IncrementalParseUpdate) -> Result<(), ParseCoordinatorError> {
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(update)
+        .map_err(|_| ParseCoordinatorError::SerializationFailed)?
+        .len();
+    if bytes > INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES {
+        return Err(ParseCoordinatorError::PayloadBudgetExceeded {
+            bytes,
+            budget: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        });
+    }
+    Ok(())
 }
 
 fn parse_failure_diagnostic(
@@ -703,13 +829,28 @@ fn parse_failure_diagnostic(
     )
 }
 
-fn abort_tasks(inner: &mut ParseCoordinatorInner, task_keys: Vec<TaskKey>) {
+fn abort_tasks(inner: &mut ParseCoordinatorInner, task_keys: Vec<TaskKey>, perf: &PerfRecorder) {
     for task_key in task_keys {
         if let Some(task) = inner.active_tasks.remove(&task_key) {
-            task.abort();
+            task.handle.abort();
+            if task.native_edit {
+                record_superseded_cancellation(perf, task_key.document_id, task.document_version);
+            }
             inner.stats.cancelled_superseded_tasks += 1;
         }
     }
+}
+
+fn record_superseded_cancellation(
+    perf: &PerfRecorder,
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+) {
+    perf.record_with_metadata(
+        SYNTAX_CANCELLED_SUPERSEDED,
+        MetricValue::Counter { amount: 1 },
+        MetricMetadata::document(document_id, document_version),
+    );
 }
 
 impl Default for ParseCoordinator {
@@ -735,6 +876,12 @@ fn validate_request_ranges(request: &ParseScheduleRequest) -> Result<(), ParseCo
         if !range.is_valid() {
             return Err(ParseCoordinatorError::InvalidatedRangeInvalid { index });
         }
+    }
+    if request
+        .accepted_edit
+        .is_some_and(|edit| !edit.is_valid() || edit.document_version != request.document_version)
+    {
+        return Err(ParseCoordinatorError::InvalidAcceptedEdit);
     }
     Ok(())
 }
@@ -773,6 +920,7 @@ fn validate_window_snapshots(
             || snapshot.document_version != request.document_version
             || snapshot.package_prefix != request.package_prefix
             || snapshot.mode_id != request.mode_id
+            || snapshot.window_id != snapshot.byte_start
         {
             return Err(ParseCoordinatorError::WindowMetadataMismatch { index });
         }
@@ -802,6 +950,13 @@ fn validate_window_snapshots(
                 budget: max_window_bytes,
             });
         }
+        if snapshot.incremental_edit
+            && !request
+                .accepted_edit
+                .is_some_and(|edit| edit_fits_window(edit, snapshot, actual, max_window_bytes))
+        {
+            return Err(ParseCoordinatorError::InvalidAcceptedEdit);
+        }
         total_bytes = total_bytes.saturating_add(actual);
     }
 
@@ -813,4 +968,137 @@ fn validate_window_snapshots(
     }
 
     Ok(())
+}
+
+fn edit_fits_window(
+    edit: ParseInputEdit,
+    window: &ParseWindowSnapshot,
+    current_window_bytes: usize,
+    max_window_bytes: usize,
+) -> bool {
+    let Some(relative) = edit.relative_to_window(window) else {
+        return false;
+    };
+    let delta = relative.new_end_byte as i128 - relative.old_end_byte as i128;
+    let old_window_bytes = current_window_bytes as i128 - delta;
+    if !(0..=max_window_bytes as i128).contains(&old_window_bytes)
+        || relative.old_end_byte > old_window_bytes as u64
+        || relative.new_end_byte > current_window_bytes as u64
+    {
+        return false;
+    }
+    point_at_window_offset(window, relative.start_byte) == Some(edit.start_position)
+        && point_at_window_offset(window, relative.new_end_byte) == Some(edit.new_end_position)
+}
+
+fn point_at_window_offset(window: &ParseWindowSnapshot, offset: u64) -> Option<ParsePoint> {
+    let offset = usize::try_from(offset).ok()?;
+    let prefix = window.text.get(..offset)?;
+    let newline_count = prefix.bytes().filter(|byte| *byte == b'\n').count() as u64;
+    if newline_count == 0 {
+        Some(ParsePoint::new(
+            window.base_line,
+            window.base_column + offset as u64,
+        ))
+    } else {
+        Some(ParsePoint::new(
+            window.base_line + newline_count,
+            prefix.rsplit_once('\n')?.1.len() as u64,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        perf::metrics::PerfRecorder,
+        protocol::{DecorationSet, ParseUnit},
+    };
+
+    #[test]
+    fn accepted_native_edit_records_one_logical_item_and_one_latency_sample() {
+        let perf = PerfRecorder::for_test(true);
+        let mut coordinator = ParseCoordinator::new();
+        coordinator.perf = perf.clone();
+        coordinator.record_native_edit_accepted(7, 2);
+        let update = IncrementalParseUpdate {
+            document_id: 7,
+            document_version: 2,
+            behavior_version: 1,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            parse_unit: ParseUnit::Region,
+            viewport: ParseByteRange::new(0, 1),
+            invalidated_ranges: vec![ParseByteRange::new(0, 1)],
+            syntax_tree_delta: Some("tree-sitter:rust:incremental".to_string()),
+            decoration_updates: vec![DecorationSet {
+                document_id: 7,
+                document_version: 2,
+                package_prefix: "rust".to_string(),
+                kind: crate::protocol::DecorationKind::Syntax,
+                viewport_byte_start: 0,
+                viewport_byte_end: 1,
+                spans: Vec::new(),
+            }],
+            diagnostic_update: None,
+        };
+
+        coordinator.record_native_publication(&update);
+        coordinator.record_native_publication(&update);
+
+        let snapshots = perf.snapshots();
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_LOGICAL_WORK_ITEMS)
+                .count(),
+            1
+        );
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_DECORATION_CHUNKS)
+                .count(),
+            2
+        );
+        assert_eq!(
+            snapshots
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_EDIT_TO_PUBLISH)
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn superseded_native_task_records_only_document_version_metadata() {
+        let perf = PerfRecorder::for_test(true);
+        let coordinator = ParseCoordinator::new();
+        let task_key = TaskKey {
+            generation_id: 1,
+            document_id: 7,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            window_id: Some(0),
+        };
+        let mut inner = coordinator
+            .inner
+            .lock()
+            .expect("parse coordinator lock poisoned");
+        inner.active_tasks.insert(
+            task_key.clone(),
+            ActiveParseTask {
+                handle: tokio::spawn(std::future::pending()),
+                document_version: 3,
+                native_edit: true,
+            },
+        );
+        abort_tasks(&mut inner, vec![task_key], &perf);
+        drop(inner);
+
+        let snapshot = perf.snapshots().pop().expect("cancellation metric");
+        assert_eq!(snapshot.name, SYNTAX_CANCELLED_SUPERSEDED);
+        assert_eq!(snapshot.metadata, MetricMetadata::document(7, 3));
+    }
 }

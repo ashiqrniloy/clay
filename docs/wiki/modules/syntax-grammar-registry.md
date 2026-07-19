@@ -144,15 +144,14 @@ Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE
 5. selects the viewport-intersecting `ParseWindowSnapshot`
 6. enforces the contribution `maxWindowBytes` before parsing
 7. sets parser/query timeouts from `timeoutMs`
-8. reuses a cached prior `Tree` for later document versions on the same window, applying a whole-window `InputEdit` before incremental reparsing so stale recovery nodes cannot survive changed text
-9. extracts query captures with `QueryCursor::set_byte_range`
-10. maps captures to inert `DecorationSpan` values with package provenance
-11. leaves `diagnostic_update` empty because parser recovery nodes from bounded fragments are not analyzer authority
-12. caps each 256-byte decoration viewport chunk at the transport-safe syntax span limit
-13. validates each resulting `DecorationSet` with the existing decoration validator
-14. enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion or publication
-15. inserts validated sets into the existing `SyntaxChunkCache` for near-viewport/LRU budget enforcement
-16. returns decoration-only `IncrementalParseUpdate` chunks; explicit analyzers own future diagnostic publication
+8. reuses a consecutive cached `Tree` only when document, stable window identity, and implied old-window length match; converts the server-relative exact edit to Tree-sitter `InputEdit`, applies `Tree::edit`, and passes the edited tree to `Parser::parse`
+9. computes `old_tree.changed_ranges(&new_tree)`, unions those ranges with explicit accepted-edit invalidations, clamps to the visible bounded window, expands by at most one UTF-8 scalar at each edge, and deterministically sorts/merges overlaps
+10. queries the resulting affected envelope once with `QueryCursor::set_byte_range`; full/open/viewport or incompatible-cache fallback explicitly queries the bounded visible window, while intersecting captures retain their whole token/comment/string range
+11. maps the complete capture result to inert `DecorationSpan` values with package provenance
+12. divides the affected window into stable 128-byte output ranges, splitting broad spans at boundaries, and orders chunks intersecting explicit invalidations before adjacent chunks
+13. validates every `DecorationSet`, enforces `DECORATION_PAYLOAD_BUDGET_BYTES`, and inserts each set into `SyntaxChunkCache` for near-viewport/LRU budget enforcement
+14. returns one decoration-only `IncrementalParseUpdate::decoration_updates` batch; the coordinator validates all members atomically and the connection streams normal `DecorationSet` messages
+15. leaves `diagnostic_update` empty because parser recovery nodes from bounded fragments are not analyzer authority; explicit analyzers own diagnostic publication
 
 Capture extraction is engine-neutral after parse: Tree-sitter and future web-tree-sitter adapters produce `SyntaxCapture { byte_start, byte_end, capture_name }` records. `map_capture_to_vocabulary` is the one shared capture-to-vocabulary mapper. Direct entries copy closed `token_type` + `modifiers` and emit scope-less spans; legacy entries are normalized through `TokenType::classify_style_token` and preserve the validated original token as `scope`. Extraction skips absent mappings, while direct calls remain fallible. Native and WASM tiers feed the same `DecorationSpan` construction path.
 
@@ -160,7 +159,7 @@ Capture extraction is engine-neutral after parse: Tree-sitter and future web-tre
 
 Tree-sitter `ERROR` and `MISSING` nodes are recovery artifacts, not correctness judgments. Bounded viewport parsing can create such nodes at otherwise valid fragment boundaries, so native syntax handlers never convert them into `DiagnosticSet` squiggles. First-party language packages remain decoration-only until an explicit analyzer, including future LSP packages, publishes diagnostics through the generic validated diagnostic facade. This keeps highlighting, diagnostic authority, and language-specific analysis separate without callbacks or language-name branches.
 
-The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a validated `DecorationSet`. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. A classified grammar-backed mode with no Tier 3 JS handler treats `ParseCoordinatorError::HandlerNotRegistered` as the normal native/WASM path rather than publishing `clay.parse.open_activation_failed`; registered-handler failures and invalid results still publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives decoration updates and any separately authorized analyzer diagnostics through their normal transport paths; no package code runs in the Rust client.
+The handler publishes only through the existing parse/decor path: `ParseCoordinator::schedule_parse_with_windows` executes the handler in background work, validates stale document versions and payload budgets, then emits an `IncrementalParseUpdate` containing a fully validated `decoration_updates` batch. The existing `SyntaxChunkCache` enforces `SYNTAX_CACHE_BUDGET_BYTES` retention policy for validated syntax chunks. Open-time parse scheduling is non-blocking: document follow-up messages return after enqueue, while parsed decorations arrive later through the coordinator update channel. A classified grammar-backed mode with no Tier 3 JS handler treats `ParseCoordinatorError::HandlerNotRegistered` as the normal native/WASM path rather than publishing `clay.parse.open_activation_failed`; registered-handler failures and invalid results still publish sanitized `RuntimeDiagnostic` values via the coordinator diagnostic channel instead of blocking open or leaking parser details. The client still receives decoration updates and any separately authorized analyzer diagnostics through their normal transport paths; no package code runs in the Rust client.
 
 ## Hot Path and Security Boundary
 
@@ -170,7 +169,7 @@ The handler does not load arbitrary paths, fetch network resources, run package 
 
 The runtime [`clay:syntax.serverRegisterSyntaxGrammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) facade/op registers the same inert grammar contract declared in `package.json` during the package load entry. User config still uses only one-line `loadPackage` calls; it does not perform manual primitive registration or raw op calls.
 
-Native query output is capped at 32 spans per decoration chunk. Capture overflow truncates to bounded inert output instead of failing the entire parse, keeping both the decoration set and its containing `IncrementalParseUpdate` within their transport budgets. Viewport-change requests replenish bounded chunks as the user scrolls.
+Native scheduling submits one bounded parse window per document/version/window rather than decoration-chunk parser jobs. One query/capture pass now retains complete mapped output and fans it into validated 128-byte sets, so dense capture overflow no longer truncates after 32 spans. Viewport-change requests schedule one missing stable window as the user scrolls; output chunk count changes only transport/cache work, never parser/query invocation count.
 
 ## Tests
 
@@ -212,12 +211,16 @@ Coverage:
 - engine-neutral `SyntaxCapture` to `TokenType`/`Modifiers` vocabulary mapping with unmapped captures left unstyled
 - Tree-sitter highlight query capture extraction into bounded decoration spans
 - direct first-party capture mapping for code/prose `TokenType` families and declaration/bold/italic modifiers, plus legacy style-token compatibility
-- cached-tree reuse for later document versions with whole-window `InputEdit` correctness
+- exact cached-tree edits for consecutive stable-window versions, changed-range querying, whole keyword/comment/string recovery, newline-sensitive line comments, UTF-8-safe range merging, and bounded full fallback
+- `first_party_package_queries_keep_authoritative_token_boundaries`: real Rust, TypeScript, TSX, JavaScript, and Markdown package queries preserve complete authoritative keyword/prose-heading, declaration/identifier, and punctuation captures after exact incremental edits; keyword removal drops only the affected capture
+- `first_party_package_queries_keep_broad_captures_continuous`: real line/block comments, raw/template multiline strings, Markdown prose, code spans, and fenced code blocks retain their complete capture range after incremental edits; package grammar boundaries, not whitespace/idle heuristics, define correction
 - first-party valid and invalid grammar fixtures remain decoration-only and never masquerade as analyzer diagnostics
 - Tier 2 host-side highlighting remains separate from explicit analyzer diagnostic publication
 - invalid query fail-closed behavior and unmapped-capture no-color-leak behavior
 - parse-window budget enforcement before parsing
-- transport-safe capture caps across contiguous 256-byte decoration viewport chunks
+- one native parse task per stable window/version across first-party languages
+- dense 4 KiB capture output fans out completely into independently payload-bounded sets without parser amplification
+- visible/changed output ordering, atomic invalid-member rejection, and syntax/semantic chunk-key separation
 - parse coordinator publication through existing `IncrementalParseUpdate`/`DecorationSet` path
 
 ## Related

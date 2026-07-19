@@ -1057,6 +1057,8 @@ fn semantic_span_refines_syntax_while_syntax_chunk_remains_theme_resolved() {
         DecorationSet {
             document_id: 7,
             document_version: 3,
+            package_prefix: "syntaxpkg".to_string(),
+            kind: DecorationKind::Syntax,
             viewport_byte_start: 0,
             viewport_byte_end: 12,
             spans: vec![DecorationSpan::from_vocabulary(
@@ -1078,6 +1080,8 @@ fn semantic_span_refines_syntax_while_syntax_chunk_remains_theme_resolved() {
         DecorationSet {
             document_id: 7,
             document_version: 3,
+            package_prefix: "semanticpkg".to_string(),
+            kind: DecorationKind::Semantic,
             viewport_byte_start: 0,
             viewport_byte_end: 12,
             spans: vec![DecorationSpan::from_vocabulary(
@@ -1139,6 +1143,8 @@ fn semantic_publication_rejects_stale_invalid_forged_and_oversize_payloads() {
     let valid = DecorationSet {
         document_id: 7,
         document_version: 3,
+        package_prefix: "semanticpkg".to_string(),
+        kind: DecorationKind::Semantic,
         viewport_byte_start: 0,
         viewport_byte_end: 32,
         spans: vec![DecorationSpan::from_vocabulary(
@@ -1220,6 +1226,8 @@ fn language_server_permission_does_not_bypass_render_decorations() {
     let set = DecorationSet {
         document_id: 7,
         document_version: 1,
+        package_prefix: "lspbridge".to_string(),
+        kind: DecorationKind::Semantic,
         viewport_byte_start: 0,
         viewport_byte_end: 8,
         spans: vec![DecorationSpan::from_vocabulary(

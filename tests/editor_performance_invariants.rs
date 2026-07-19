@@ -169,11 +169,22 @@ fn parse_window_snapshot_primitive_uses_bounded_rope_slicing() {
         fs::read_to_string("src/server/document.rs").expect("document source readable");
     let parse_source = fs::read_to_string("src/server/parse_coordinator.rs")
         .expect("parse coordinator source readable");
+    let connection_source =
+        fs::read_to_string("src/server/connection.rs").expect("connection source readable");
+    let edit_refresh = connection_source
+        .split("async fn refresh_native_syntax_after_edit(")
+        .nth(1)
+        .expect("native edit refresh")
+        .split("async fn schedule_open_parse(")
+        .next()
+        .expect("bounded native edit refresh body");
 
     assert!(document_source.contains("byte_slice(start..end).to_string()"));
     assert!(document_source.contains("validate_parse_snapshot_range"));
+    assert!(document_source.contains("parse_window_after_edit"));
     assert!(parse_source.contains("schedule_parse_with_windows"));
-    assert!(parse_source.contains("previous.abort()"));
+    assert!(parse_source.contains("task.handle.abort()"));
+    assert!(!edit_refresh.contains(".text()"));
 }
 
 #[test]

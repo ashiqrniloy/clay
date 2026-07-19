@@ -3763,6 +3763,143 @@ fn phase20_rust_public_functions_have_api_mappings_or_internal_visibility() {
 /// This test pins that they remain documented as intentionally non-configurable
 /// and absent from the runtime-backed configuration inventory.
 #[test]
+fn plan056_syntax_latency_internals_reuse_existing_clay_js_apis() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+        .expect("read api inventory");
+    let parse_docs = fs::read_to_string(
+        root.join("docs/reference/clay-js-api/parse/server-register-parse-handler.md"),
+    )
+    .expect("read parse API docs");
+    let review =
+        fs::read_to_string(root.join(
+            "docs/wiki/modules/low-latency-incremental-syntax-decoration-primitive-review.md",
+        ))
+        .expect("read low-latency syntax review");
+    let public_facades = [
+        fs::read_to_string(root.join("runtime/js/parse.ts")).expect("read parse facade"),
+        fs::read_to_string(root.join("runtime/js/syntax.ts")).expect("read syntax facade"),
+        fs::read_to_string(root.join("runtime/js/decorations.ts"))
+            .expect("read decorations facade"),
+    ]
+    .join("\n");
+
+    for api in [
+        "clay.parse.serverRegisterParseHandler",
+        "clay.syntax.serverRegisterSyntaxGrammar",
+        "clay.decorations.serverPublishDecorations",
+    ] {
+        assert!(
+            inventory.contains(api),
+            "existing API inventory must retain {api}"
+        );
+    }
+    assert!(
+        parse_docs.contains("Plan 056 keeps this registration API and its options unchanged"),
+        "parse API docs must state that accepted-edit metadata adds no caller control"
+    );
+    for internal in [
+        "ParseInputEdit",
+        "scheduleParseWithWindows",
+        "setSyntaxDecorationChunkBytes",
+        "interpolateDecorationSpan",
+    ] {
+        assert!(
+            !public_facades.contains(internal),
+            "Plan 056 internal `{internal}` must not become a Clay JS facade export"
+        );
+    }
+    for required in [
+        "Clay JS API Audit",
+        "adds no caller-controlled Clay JS capability",
+        "Existing public package surfaces remain sufficient",
+        "No new generated registry entry is needed",
+    ] {
+        assert!(review.contains(required), "audit must record `{required}`");
+    }
+}
+
+#[test]
+fn plan056_syntax_latency_configuration_stays_compiled_and_non_configurable() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configuration =
+        fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration overview");
+    let review =
+        fs::read_to_string(root.join(
+            "docs/wiki/modules/low-latency-incremental-syntax-decoration-primitive-review.md",
+        ))
+        .expect("read low-latency syntax review");
+    let implementation_sources = [
+        fs::read_to_string(root.join("runtime/js/configuration.ts"))
+            .expect("read configuration facade"),
+        fs::read_to_string(root.join("src/server/ops/configuration.rs"))
+            .expect("read configuration ops"),
+        fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+            .expect("read API inventory"),
+        fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+            .expect("read generated API registry"),
+    ]
+    .join("\n");
+
+    for required in [
+        "Plan 056 low-latency syntax configuration review",
+        "does **not** promote a new user-facing `clay:configuration` API",
+        "remains the only relevant user engine-selection surface",
+        "syntaxDebounceMs",
+        "syntaxWordBoundaryOnly",
+        "syntaxParseWindowBytes",
+        "syntaxDecorationChunkBytes",
+        "clientSyntaxParser",
+        "cannot run configuration JavaScript or dynamically raise parser/cache/payload limits",
+    ] {
+        assert!(
+            configuration.contains(required),
+            "configuration review must record `{required}`"
+        );
+    }
+    for required in [
+        "Configuration Audit",
+        "adds no `clay:configuration` surface",
+        "sole relevant user choice",
+        "outside keypress, text-edit, edit-acknowledgement, parse, publication, paint, layout, and scroll paths",
+    ] {
+        assert!(
+            review.contains(required),
+            "wiki audit must record `{required}`"
+        );
+    }
+
+    let syntax_preference = inventory_entries()
+        .into_iter()
+        .find(|entry| entry.get("id") == "clay.syntax.setSyntaxEnginePreference")
+        .expect("syntax engine preference remains documented");
+    assert_eq!(
+        inventory_custom_property_names(syntax_preference.get("custom_properties")),
+        vec!["target".to_string(), "tier".to_string()],
+        "syntax engine selection exposes only target and tier"
+    );
+
+    for forbidden in [
+        "syntaxDebounceMs",
+        "syntaxWordBoundaryOnly",
+        "syntaxParseWindowBytes",
+        "syntaxDecorationChunkBytes",
+        "syntaxInterpolation",
+        "clientSyntaxParser",
+        "setSyntaxDebounce",
+        "setSyntaxWindow",
+        "setSyntaxChunkSize",
+        "setClientSyntaxParser",
+    ] {
+        assert!(
+            !implementation_sources.contains(forbidden),
+            "hidden Plan 056 configuration `{forbidden}` must not reach a facade, op, inventory, or registry"
+        );
+    }
+}
+
+#[test]
 fn syntax_grammar_registration_api_has_public_facade_op_inventory_and_docs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let inventory = fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))

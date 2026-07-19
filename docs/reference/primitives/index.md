@@ -6,6 +6,12 @@ This directory is the Phase 16 architecture source for package- and mode-control
 
 The Phase 18.10 grammar metadata baseline remains documented in [Creating Clay Packages](../packages/creating-packages.md#phase-1810-authoring-contract-grammar-only-syntax-packages). The syntax primitive is tiered behind one generic grammar-to-vocabulary path: **Tier 1** compiled first-party native `tree-sitter-*` descriptors, **Tier 2** package-root-confined web-tree-sitter WASM/query assets selected only by explicit user preference, and **Tier 3** server-side package-JavaScript fallback handlers. `setSyntaxEnginePreference` is evaluated at init/package-load/open/reclassification time; captures map to `TokenType` + `Modifiers`, open is non-blocking, and failures publish sanitized `RuntimeDiagnostic` values such as `clay.parse.open_failed`. Parse/query work stays outside keypress, paint, layout, scroll, pointer, and text-event hot paths and remains bounded by parse/decor/cache budgets. Runtime performs no network fetch, shell/package-manager build, native-library load, or client-side JavaScript execution; third-party grammar trust remains deferred to Phase 23.
 
+## Plan 056 low-latency syntax contract
+
+The implemented path accepts one canonical `ParseInputEdit` for each consecutive document version and stable bounded window. `TreeSitterSyntaxHandler` reuses the matching Tree-sitter tree, applies `Tree::edit`, reparses once, and queries the UTF-8-safe envelope formed from `Tree::changed_ranges` plus explicit invalidations intersected with the visible range. One parse/capture pass produces complete captures and fans them into stable 128-byte `DecorationSet` outputs; output chunk count never creates parser jobs. Changed/visible chunks publish first, every member is validated atomically, and empty syntax chunks remain authoritative replacements.
+
+`EditorDecorationState` interpolates validated inert syntax spans through optimistic edits, with generic broad-token edge inheritance and authoritative current-version replacement. Package grammar captures—not whitespace, idle, caret movement, or a language-specific scheduler branch—define whole-token and comment/string/prose/code boundaries. First-party packages remain opt-in through one explicit `await loadPackage("@clay/<language>")` line in `~/.config/clay/init.js`; no copied manifest or manual parser/decorator registration is required.
+
 ## Documents
 
 - [Existing Primitive Audit](audit.md) — existing behavior manifest, SDUI, configuration, document/workspace, editor, and observability primitives.

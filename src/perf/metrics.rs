@@ -9,6 +9,18 @@ use std::{
 pub const PERF_PROFILE_ENV: &str = "CLAY_PERF_PROFILE";
 /// Developer CLI flag accepted by smoke/client/server workflows to enable profiling.
 pub const PERF_PROFILE_FLAG: &str = "--profile-perf";
+/// Maximum retained developer metric snapshots per recorder.
+pub const PERF_SNAPSHOT_CAPACITY: usize = 4_096;
+
+pub const SYNTAX_LOGICAL_WORK_ITEMS: &str = "syntax.parse.logical_work_items";
+pub const SYNTAX_PARSE_INVOCATIONS: &str = "syntax.parse.invocations";
+pub const SYNTAX_PARSE_INCREMENTAL: &str = "syntax.parse.incremental";
+pub const SYNTAX_PARSE_FULL: &str = "syntax.parse.full";
+pub const SYNTAX_QUERY_RANGES: &str = "syntax.query.ranges";
+pub const SYNTAX_QUERY_BYTES: &str = "syntax.query.bytes";
+pub const SYNTAX_DECORATION_CHUNKS: &str = "syntax.decoration.chunks";
+pub const SYNTAX_CANCELLED_SUPERSEDED: &str = "syntax.parse.cancelled_superseded";
+pub const SYNTAX_EDIT_TO_PUBLISH: &str = "syntax.edit_to_publish";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerfConfig {
@@ -196,14 +208,14 @@ impl PerfRecorder {
 
     fn record(&self, name: &'static str, value: MetricValue, metadata: MetricMetadata) {
         if let Some(inner) = &self.inner {
-            inner
-                .lock()
-                .expect("perf recorder poisoned")
-                .push(MetricSnapshot {
+            push_snapshot(
+                &mut inner.lock().expect("perf recorder poisoned"),
+                MetricSnapshot {
                     name,
                     value,
                     metadata,
-                });
+                },
+            );
         }
     }
 }
@@ -241,16 +253,16 @@ impl PerfScope {
     pub fn finish(mut self) -> Option<Duration> {
         let elapsed = self.start.take().map(|start| start.elapsed());
         if let (Some(duration), Some(inner)) = (elapsed, &self.inner) {
-            inner
-                .lock()
-                .expect("perf recorder poisoned")
-                .push(MetricSnapshot {
+            push_snapshot(
+                &mut inner.lock().expect("perf recorder poisoned"),
+                MetricSnapshot {
                     name: self.name,
                     value: MetricValue::Duration {
                         nanos: duration.as_nanos(),
                     },
                     metadata: self.metadata.clone(),
-                });
+                },
+            );
         }
         elapsed
     }
@@ -264,16 +276,22 @@ impl Drop for PerfScope {
         let Some(inner) = &self.inner else {
             return;
         };
-        inner
-            .lock()
-            .expect("perf recorder poisoned")
-            .push(MetricSnapshot {
+        push_snapshot(
+            &mut inner.lock().expect("perf recorder poisoned"),
+            MetricSnapshot {
                 name: self.name,
                 value: MetricValue::Duration {
                     nanos: start.elapsed().as_nanos(),
                 },
                 metadata: self.metadata.clone(),
-            });
+            },
+        );
+    }
+}
+
+fn push_snapshot(snapshots: &mut Vec<MetricSnapshot>, snapshot: MetricSnapshot) {
+    if snapshots.len() < PERF_SNAPSHOT_CAPACITY {
+        snapshots.push(snapshot);
     }
 }
 

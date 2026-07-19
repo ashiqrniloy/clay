@@ -101,7 +101,62 @@ cargo run -- smoke-gui --profile-perf
 
 The initial recorder captures sanitized, typed snapshots for scoped durations, counters, gauges, and byte sizes around editor visible extraction/local edits, layout rebuild/cache decisions, paint preparation, native SDUI snapshot/update application, client edit queue depth and acknowledgements, protocol codec payload sizes/oversized frames, server document edit acknowledgement, and server-side runtime/configuration evaluation. Snapshot metadata is numeric where possible (`document_id`, versions, client/transaction IDs) and path metadata is redacted to a basename-only form; document contents, JavaScript source bodies, secrets, and absolute user paths must not be recorded.
 
-Benchmark and test helpers can construct `PerfRecorder::for_test(true)` directly to assert expected metric names without relying on process environment. The no-op default remains the production path when `CLAY_PERF_PROFILE`/`--profile-perf` is absent.
+Benchmark and test helpers can construct `PerfRecorder::for_test(true)` directly to assert expected metric names without relying on process environment. The no-op default remains the production path when `CLAY_PERF_PROFILE`/`--profile-perf` is absent. Enabled recorders retain at most `PERF_SNAPSHOT_CAPACITY` (4096) metadata-only snapshots; later events are dropped rather than growing profiling memory without bound.
+
+### Incremental syntax work and latency metrics
+
+Native syntax observability separates one accepted edit from parser/query work and decoration fan-out:
+
+| Metric | Meaning |
+| --- | --- |
+| `syntax.parse.logical_work_items` | One server-accepted native syntax edit for a document/version. |
+| `syntax.parse.invocations` | Actual Tree-sitter parser calls. Before one-parse refactoring this may exceed logical work because output chunks still schedule sibling jobs. |
+| `syntax.parse.full` / `syntax.parse.incremental` | Parser invocation classification according to cached-tree reuse. |
+| `syntax.query.ranges` / `syntax.query.bytes` | Query ranges and bytes submitted to Tree-sitter. |
+| `syntax.decoration.chunks` | Validated native decoration chunks accepted for publication, independent of parser calls. |
+| `syntax.parse.cancelled_superseded` | Aborted superseded task count with the cancelled task's document/version. |
+| `syntax.edit_to_publish` | Accepted-edit to first current-version native decoration publication duration. One sample is retained per accepted document/version even when multiple chunks publish. |
+
+All syntax metrics carry only numeric document IDs, document versions, counts, byte counts, and durations. They contain no document text, captures, query text, clipboard data, package code, or paths. Collection occurs in server background parse/publication paths, never Masonry paint or text-event handlers.
+
+Use deterministic work-count tests as blocking gates:
+
+```text
+cargo test --lib server::syntax::tests
+cargo test --lib server::parse_coordinator::tests
+cargo test --test performance_protocol syntax_pipeline_metrics
+```
+
+Use the existing five-language Criterion fixture for advisory latency and throughput distributions:
+
+```text
+cargo bench --bench first_party_language_baselines first_party_incremental_edit -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench first_party_language_baselines --no-run
+```
+
+`first_party_incremental_edit` covers Rust, TypeScript, TSX, JavaScript, and Markdown and measures parse-through-ready-decoration work while reporting fixture-byte throughput. Wall-clock values remain machine-local and advisory until a stable CI baseline is established; work-count and retention assertions are deterministic.
+
+## Plan 056 low-latency syntax Linux verification (2026-07-19)
+
+Linux host: kernel `7.1.3-43.stable`, `x86_64`; Rust/Cargo `1.96.1`. Required Linux gates passed: `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, and `cargo bench --no-run`.
+
+The five-language incremental benchmark was run locally with 10 samples, 1 s warm-up, and 2 s measurement. It measures one native handler parse/capture pass through ready bounded `DecorationSet` members; values are local/advisory, not CI thresholds.
+
+| Fixture | Median | 95% interval | Throughput median |
+| --- | ---: | ---: | ---: |
+| Rust | 168.91 µs | 168.12–169.57 µs | 520.34 KiB/s |
+| TypeScript | 356.50 µs | 338.27–363.57 µs | 364.33 KiB/s |
+| TSX | 125.02 µs | 124.40–126.03 µs | 851.41 KiB/s |
+| JavaScript | 124.91 µs | 123.54–126.39 µs | 914.74 KiB/s |
+| Markdown | 217.54 µs | 178.80–234.92 µs | 318.72 KiB/s |
+
+Command:
+
+```bash
+cargo bench --bench first_party_language_baselines first_party_incremental_edit -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+Deterministic coverage supplies the work-count evidence that Criterion intentionally does not print: one `syntax.parse.logical_work_items` item per accepted edit/version, one current-version parser invocation per stable window, changed-range query bytes, bounded fan-out via `syntax.decoration.chunks`, superseded-task cancellation, and one `syntax.edit_to_publish` sample for first current-version publication. `tests/performance_protocol.rs::syntax_pipeline_metrics_are_source_safe_and_retention_bounded`, `tests/parse_coordinator.rs`, and `tests/syntax_grammar.rs` passed in the full Linux run; malformed edits/ranges, stale versions, oversized payloads, wrong provenance, and generation replacement fail closed. Metrics remain numeric-only and never include source text or paths.
 
 ## Phase 14 Performance Budgets and Guardrails
 

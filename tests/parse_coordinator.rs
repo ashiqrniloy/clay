@@ -12,7 +12,8 @@ use clay::{
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
         DiagnosticSeverity, DiagnosticSpan, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification, ParsePolicy, ParseUnit, ParseWindowSnapshot,
+        ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseUnit,
+        ParseWindowSnapshot,
     },
     server::parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
 };
@@ -53,6 +54,7 @@ fn request(version: u64) -> ParseScheduleRequest {
         mode_id: "markdown".to_string(),
         viewport: ParseByteRange::new(0, 64),
         invalidated_ranges: vec![ParseByteRange::new(20, 30), ParseByteRange::new(0, 5)],
+        accepted_edit: None,
     }
 }
 
@@ -62,9 +64,12 @@ fn parse_window(version: u64, start: u64, text: &str) -> ParseWindowSnapshot {
         document_version: version,
         package_prefix: "markdown".to_string(),
         mode_id: "markdown".to_string(),
+        window_id: start,
         byte_start: start,
         byte_end: start + text.len() as u64,
         base_line: 0,
+        base_column: start,
+        incremental_edit: false,
         text: text.to_string(),
     }
 }
@@ -84,7 +89,7 @@ fn update(version: u64) -> IncrementalParseUpdate {
         viewport: ParseByteRange::new(0, 64),
         invalidated_ranges: vec![ParseByteRange::new(0, 5)],
         syntax_tree_delta: Some("heading".to_string()),
-        decoration_update: None,
+        decoration_updates: Vec::new(),
         diagnostic_update: None,
     }
 }
@@ -123,6 +128,8 @@ fn markdown_decoration_update(version: u64) -> DecorationSet {
     DecorationSet {
         document_id: 7,
         document_version: version,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 0,
         viewport_byte_end: 64,
         spans: vec![
@@ -195,6 +202,153 @@ async fn superseded_parse_task_is_cancelled() {
 }
 
 #[tokio::test]
+async fn same_native_window_and_version_is_scheduled_once_across_viewports() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler_calls = Arc::clone(&calls);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            move |notification: ParseEditNotification| {
+                let handler_calls = Arc::clone(&handler_calls);
+                async move {
+                    handler_calls.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    Ok(update(notification.document_version))
+                }
+            },
+        )
+        .unwrap();
+    let window = parse_window(1, 0, &"x".repeat(64));
+    let mut first = request(1);
+    first.viewport = ParseByteRange::new(0, 32);
+    let mut second = request(1);
+    second.viewport = ParseByteRange::new(32, 64);
+
+    coordinator
+        .schedule_parse_with_windows(first, vec![window.clone()], Some(parse_policy(4096, 8192)))
+        .unwrap();
+    coordinator
+        .schedule_parse_with_windows(second, vec![window], Some(parse_policy(4096, 8192)))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(coordinator.stats().scheduled_tasks, 1);
+}
+
+#[tokio::test]
+async fn rapid_native_versions_cancel_superseded_work_and_publish_latest() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            move |notification: ParseEditNotification| {
+                let started_tx = started_tx.clone();
+                async move {
+                    started_tx.send(notification.document_version).unwrap();
+                    if notification.document_version < 10 {
+                        std::future::pending::<()>().await;
+                    }
+                    Ok(update(notification.document_version))
+                }
+            },
+        )
+        .unwrap();
+
+    for version in 1..=10 {
+        coordinator
+            .schedule_parse_with_windows(
+                request(version),
+                vec![parse_window(version, 0, "latest")],
+                Some(parse_policy(4096, 8192)),
+            )
+            .unwrap();
+        assert_eq!(started_rx.recv().await, Some(version));
+    }
+
+    let parsed = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed.document_version, 10);
+    assert_eq!(coordinator.stats().cancelled_superseded_tasks, 9);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), coordinator.next_update())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn native_work_for_two_documents_runs_independently() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                if notification.document_id == 7 {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Ok(IncrementalParseUpdate {
+                    document_id: notification.document_id,
+                    document_version: notification.document_version,
+                    behavior_version: notification.behavior_version,
+                    package_prefix: notification.package_prefix,
+                    mode_id: notification.mode_id,
+                    parse_unit: ParseUnit::LineGroup,
+                    viewport: notification.viewport,
+                    invalidated_ranges: notification.invalidated_ranges,
+                    syntax_tree_delta: None,
+                    decoration_updates: Vec::new(),
+                    diagnostic_update: None,
+                })
+            },
+        )
+        .unwrap();
+
+    coordinator
+        .schedule_parse_with_windows(
+            request(1),
+            vec![parse_window(1, 0, "first")],
+            Some(parse_policy(4096, 8192)),
+        )
+        .unwrap();
+    let mut second_request = request(1);
+    second_request.document_id = 8;
+    let mut second_window = parse_window(1, 0, "second");
+    second_window.document_id = 8;
+    coordinator
+        .schedule_parse_with_windows(
+            second_request,
+            vec![second_window],
+            Some(parse_policy(4096, 8192)),
+        )
+        .unwrap();
+
+    let first = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = tokio::time::timeout(Duration::from_secs(1), coordinator.next_update())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((first.document_id, second.document_id), (8, 7));
+    assert_eq!(coordinator.stats().cancelled_superseded_tasks, 0);
+}
+
+#[tokio::test]
 async fn generic_parse_request_metadata_supports_token_stream_adapters() {
     let coordinator = ParseCoordinator::new();
     let package = package_with_identity("@clay/python", "python", "python", &["parse-document"]);
@@ -218,7 +372,7 @@ async fn generic_parse_request_metadata_supports_token_stream_adapters() {
                         viewport: notification.viewport,
                         invalidated_ranges: notification.invalidated_ranges,
                         syntax_tree_delta: Some("token-stream:visible-ranges-first".to_string()),
-                        decoration_update: None,
+                        decoration_updates: Vec::new(),
                         diagnostic_update: None,
                     })
                 }
@@ -235,6 +389,7 @@ async fn generic_parse_request_metadata_supports_token_stream_adapters() {
             mode_id: "python".to_string(),
             viewport: ParseByteRange::new(0, 32),
             invalidated_ranges: vec![ParseByteRange::new(80, 96), ParseByteRange::new(8, 16)],
+            accepted_edit: None,
         })
         .unwrap();
 
@@ -253,6 +408,147 @@ async fn generic_parse_request_metadata_supports_token_stream_adapters() {
         vec![ParseByteRange::new(8, 16), ParseByteRange::new(80, 96)],
         "viewport-intersecting invalidated ranges should be delivered first without parser-specific fields"
     );
+}
+
+#[tokio::test]
+async fn exact_accepted_edit_and_window_relative_points_reach_handler() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            move |notification: ParseEditNotification| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(notification.clone()).unwrap();
+                    Ok(update(notification.document_version))
+                }
+            },
+        )
+        .unwrap();
+    let edit = ParseInputEdit {
+        base_document_version: 1,
+        document_version: 2,
+        start_byte: 11,
+        old_end_byte: 11,
+        new_end_byte: 12,
+        start_position: ParsePoint::new(2, 5),
+        old_end_position: ParsePoint::new(2, 5),
+        new_end_position: ParsePoint::new(2, 6),
+    };
+    let mut request = request(2);
+    request.viewport = ParseByteRange::new(10, 17);
+    request.invalidated_ranges = vec![ParseByteRange::new(11, 12)];
+    request.accepted_edit = Some(edit);
+    let window = ParseWindowSnapshot {
+        document_id: 7,
+        document_version: 2,
+        package_prefix: "markdown".to_string(),
+        mode_id: "markdown".to_string(),
+        window_id: 10,
+        byte_start: 10,
+        byte_end: 17,
+        base_line: 2,
+        base_column: 4,
+        incremental_edit: true,
+        text: "aZb\néx".to_string(),
+    };
+
+    coordinator
+        .schedule_parse_with_windows(request, vec![window.clone()], Some(parse_policy(64, 1024)))
+        .unwrap();
+    let notification = rx.recv().await.unwrap();
+
+    assert_eq!(notification.accepted_edit, Some(edit));
+    assert_eq!(
+        edit.relative_to_window(&window),
+        Some(ParseInputEdit {
+            start_byte: 1,
+            old_end_byte: 1,
+            new_end_byte: 2,
+            start_position: ParsePoint::new(0, 1),
+            old_end_position: ParsePoint::new(0, 1),
+            new_end_position: ParsePoint::new(0, 2),
+            ..edit
+        })
+    );
+}
+
+#[test]
+fn malformed_or_out_of_window_incremental_edit_is_rejected() {
+    let edit = ParseInputEdit {
+        base_document_version: 1,
+        document_version: 2,
+        start_byte: 11,
+        old_end_byte: 11,
+        new_end_byte: 12,
+        start_position: ParsePoint::new(2, 5),
+        old_end_position: ParsePoint::new(2, 5),
+        new_end_position: ParsePoint::new(2, 6),
+    };
+    let window = ParseWindowSnapshot {
+        document_id: 7,
+        document_version: 2,
+        package_prefix: "markdown".to_string(),
+        mode_id: "markdown".to_string(),
+        window_id: 10,
+        byte_start: 10,
+        byte_end: 17,
+        base_line: 2,
+        base_column: 4,
+        incremental_edit: true,
+        text: "aZb\néx".to_string(),
+    };
+
+    let mut mismatched_identity = window.clone();
+    mismatched_identity.window_id = 9;
+    let mut valid_request = request(2);
+    valid_request.accepted_edit = Some(edit);
+    assert_eq!(
+        ParseCoordinator::new()
+            .schedule_parse_with_windows(
+                valid_request,
+                vec![mismatched_identity],
+                Some(parse_policy(64, 1024)),
+            )
+            .unwrap_err(),
+        ParseCoordinatorError::WindowMetadataMismatch { index: 0 }
+    );
+
+    for invalid_edit in [
+        ParseInputEdit {
+            document_version: 3,
+            ..edit
+        },
+        ParseInputEdit {
+            new_end_position: ParsePoint::new(9, 9),
+            ..edit
+        },
+        ParseInputEdit {
+            start_byte: 9,
+            old_end_byte: 9,
+            new_end_byte: 10,
+            start_position: ParsePoint::new(2, 3),
+            old_end_position: ParsePoint::new(2, 3),
+            new_end_position: ParsePoint::new(2, 4),
+            ..edit
+        },
+    ] {
+        let mut invalid_request = request(2);
+        invalid_request.accepted_edit = Some(invalid_edit);
+        assert_eq!(
+            ParseCoordinator::new()
+                .schedule_parse_with_windows(
+                    invalid_request,
+                    vec![window.clone()],
+                    Some(parse_policy(64, 1024)),
+                )
+                .unwrap_err(),
+            ParseCoordinatorError::InvalidAcceptedEdit
+        );
+    }
 }
 
 #[test]
@@ -299,7 +595,7 @@ fn markdown_parse_update_accepts_valid_decoration_payload() {
     let coordinator = ParseCoordinator::new();
     coordinator.schedule_parse(request(4)).unwrap_err();
     let parsed = IncrementalParseUpdate {
-        decoration_update: Some(markdown_decoration_update(4)),
+        decoration_updates: vec![markdown_decoration_update(4)],
         diagnostic_update: None,
         ..update(4)
     };
@@ -317,9 +613,9 @@ async fn parse_update_accepts_matching_decoration_and_diagnostic_side_channels()
             "markdown",
             |notification: ParseEditNotification| async move {
                 Ok(IncrementalParseUpdate {
-                    decoration_update: Some(markdown_decoration_update(
+                    decoration_updates: vec![markdown_decoration_update(
                         notification.document_version,
-                    )),
+                    )],
                     diagnostic_update: Some(markdown_diagnostic_update(
                         notification.document_version,
                     )),
@@ -335,7 +631,7 @@ async fn parse_update_accepts_matching_decoration_and_diagnostic_side_channels()
         .unwrap()
         .unwrap();
 
-    assert!(parsed.decoration_update.is_some());
+    assert!(!parsed.decoration_updates.is_empty());
     assert!(parsed.diagnostic_update.is_some());
 }
 
@@ -351,9 +647,9 @@ async fn invalid_diagnostic_rejects_parse_update_without_partial_publication() {
                 let mut diagnostics = markdown_diagnostic_update(notification.document_version);
                 diagnostics.spans[0].byte_end = 128;
                 Ok(IncrementalParseUpdate {
-                    decoration_update: Some(markdown_decoration_update(
+                    decoration_updates: vec![markdown_decoration_update(
                         notification.document_version,
-                    )),
+                    )],
                     diagnostic_update: Some(diagnostics),
                     ..update(notification.document_version)
                 })
@@ -377,6 +673,40 @@ async fn invalid_diagnostic_rejects_parse_update_without_partial_publication() {
 }
 
 #[tokio::test]
+async fn invalid_decoration_batch_member_rejects_whole_update() {
+    let coordinator = ParseCoordinator::new();
+    let package = package_with_permissions(&["parse-document"]);
+    coordinator
+        .register_handler(
+            &package,
+            "markdown",
+            |notification: ParseEditNotification| async move {
+                let valid = markdown_decoration_update(notification.document_version);
+                let mut invalid = valid.clone();
+                invalid.spans[0].byte_end = invalid.viewport_byte_end + 1;
+                Ok(IncrementalParseUpdate {
+                    decoration_updates: vec![valid, invalid],
+                    ..update(notification.document_version)
+                })
+            },
+        )
+        .unwrap();
+
+    coordinator.schedule_parse(request(4)).unwrap();
+    let diagnostic = tokio::time::timeout(Duration::from_secs(1), coordinator.next_diagnostic())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(diagnostic.code, "clay.parse.open_failed");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), coordinator.next_update())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn superseded_parse_publishes_neither_diagnostics_nor_decorations() {
     let coordinator = ParseCoordinator::new();
     let package = package_with_permissions(&["parse-document"]);
@@ -389,9 +719,9 @@ async fn superseded_parse_publishes_neither_diagnostics_nor_decorations() {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                 }
                 Ok(IncrementalParseUpdate {
-                    decoration_update: Some(markdown_decoration_update(
+                    decoration_updates: vec![markdown_decoration_update(
                         notification.document_version,
-                    )),
+                    )],
                     diagnostic_update: Some(markdown_diagnostic_update(
                         notification.document_version,
                     )),
@@ -420,7 +750,7 @@ async fn superseded_parse_publishes_neither_diagnostics_nor_decorations() {
 fn markdown_parse_update_rejects_decoration_version_mismatch() {
     let coordinator = ParseCoordinator::new();
     let parsed = IncrementalParseUpdate {
-        decoration_update: Some(markdown_decoration_update(99)),
+        decoration_updates: vec![markdown_decoration_update(99)],
         diagnostic_update: None,
         ..update(4)
     };

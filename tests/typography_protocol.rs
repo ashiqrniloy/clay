@@ -80,6 +80,8 @@ fn decoration_font_role_is_limited_to_syntax_and_semantic_layers() {
     let set = DecorationSet {
         document_id: 1,
         document_version: 1,
+        package_prefix: "test".to_string(),
+        kind: DecorationKind::Diagnostic,
         viewport_byte_start: 0,
         viewport_byte_end: 4,
         spans: vec![diagnostic],

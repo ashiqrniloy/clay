@@ -61,6 +61,11 @@ pub enum EditorAction {
     ExitRequested,
     ClientConnection(ClientConnectionEvent),
     ClientUiCommand(ClientUiCommandRoute),
+    /// Native file dialog finished on a background thread (Linux portal must not
+    /// block the Wayland/UI event loop or the chooser never appears).
+    OpenSelectedFile(std::path::PathBuf),
+    /// Native folder dialog finished on a background thread.
+    OpenSelectedFolder(std::path::PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1509,6 +1514,19 @@ impl EditorWidget {
         self.paste_from_clipboard_with(&mut clipboard)
     }
 
+    /// Paste already-fetched clipboard text (Masonry `TextEvent::ClipboardPaste`).
+    ///
+    /// `masonry_winit` intercepts Ctrl/Cmd+V and delivers `ClipboardPaste` instead of a
+    /// keyboard event, so this path is the production native-paste entry point.
+    fn paste_provided_clipboard_text(&mut self, text: &str) -> ClipboardCommandOutcome {
+        let _ = self.editor.cancel_composition();
+        let outcome = self.editor.paste_text_with_event(text);
+        ClipboardCommandOutcome {
+            changed: self.apply_local_edit_outcome(outcome),
+            diagnostic: None,
+        }
+    }
+
     fn paste_from_clipboard_with(
         &mut self,
         clipboard: &mut impl ClipboardSink,
@@ -1525,11 +1543,7 @@ impl EditorWidget {
                 );
             }
         };
-        let outcome = self.editor.paste_text_with_event(&text);
-        ClipboardCommandOutcome {
-            changed: self.apply_local_edit_outcome(outcome),
-            diagnostic: None,
-        }
+        self.paste_provided_clipboard_text(&text)
     }
 
     pub fn undo(&mut self) -> bool {
@@ -2284,6 +2298,8 @@ impl Widget for EditorWidget {
                         ctx.set_handled();
                     }
                     Key::Character(_) if is_paste_shortcut(key_event) => {
+                        // Alternate path for tests / non-winit hosts. Production
+                        // masonry_winit converts Ctrl/Cmd+V into ClipboardPaste.
                         let outcome = self.paste_from_system_clipboard();
                         if let Some(event) = outcome.diagnostic {
                             ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
@@ -2317,6 +2333,19 @@ impl Widget for EditorWidget {
                     }
                     _ => {}
                 }
+            }
+            // masonry_winit intercepts Ctrl/Cmd+V and emits ClipboardPaste with the
+            // clipboard contents instead of forwarding a Keyboard event.
+            TextEvent::ClipboardPaste(text) => {
+                let outcome = self.paste_provided_clipboard_text(text);
+                if let Some(event) = outcome.diagnostic {
+                    ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(event));
+                }
+                if outcome.changed {
+                    ctx.request_render();
+                    ctx.request_accessibility_update();
+                }
+                ctx.set_handled();
             }
             TextEvent::Ime(ime) => {
                 use masonry::core::Ime;
@@ -3097,6 +3126,31 @@ mod tests {
 
         assert_eq!(outcome, ClipboardCommandOutcome::unchanged());
         assert_eq!(widget.editor.visible_text(), "alpha");
+    }
+
+    #[test]
+    fn paste_provided_clipboard_text_inserts_without_rereading_system_clipboard() {
+        // masonry_winit delivers Ctrl/Cmd+V as TextEvent::ClipboardPaste(text).
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            7,
+            12,
+            "alpha".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+
+        let inserted = widget.paste_provided_clipboard_text("XY\nZ");
+        assert!(inserted.changed);
+        assert_eq!(inserted.diagnostic, None);
+        assert_eq!(widget.editor.visible_text(), "XY\nZalpha");
+
+        widget.editor.set_selection_for_test(0, 2);
+        let replaced = widget.paste_provided_clipboard_text("Q");
+        assert!(replaced.changed);
+        assert_eq!(widget.editor.visible_text(), "Q\nZalpha");
     }
 
     #[test]

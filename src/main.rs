@@ -31,6 +31,9 @@ const WINDOW_HEIGHT: f64 = 600.0;
 
 struct Driver {
     editor_widget_id: WidgetId,
+    window_id: WindowId,
+    /// Present in the live app; unit tests that only check action targeting may omit it.
+    proxy: Option<EventLoopProxy>,
 }
 
 impl Driver {
@@ -40,6 +43,55 @@ impl Driver {
         // shell/root source while the container boundary is settling.
         self.editor_widget_id
     }
+
+    fn spawn_native_dialog_command(&self, command: clay::client::ClientUiCommandRoute) {
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        let window_id = self.window_id;
+        let editor_widget_id = self.editor_widget_id;
+        let _ = std::thread::Builder::new()
+            .name("clay-native-dialog".into())
+            .spawn(move || {
+                let result = handle_client_ui_command(&command);
+                let action = match result {
+                    ClientUiCommandResult::None => return,
+                    ClientUiCommandResult::SelectedFile(path) => {
+                        EditorAction::OpenSelectedFile(path)
+                    }
+                    ClientUiCommandResult::SelectedFolder(path) => {
+                        EditorAction::OpenSelectedFolder(path)
+                    }
+                    ClientUiCommandResult::ConnectionEvent(event) => {
+                        EditorAction::ClientConnection(event)
+                    }
+                    ClientUiCommandResult::CopySelection
+                    | ClientUiCommandResult::CutSelection
+                    | ClientUiCommandResult::PasteClipboard
+                    | ClientUiCommandResult::Undo
+                    | ClientUiCommandResult::Redo
+                    | ClientUiCommandResult::ShowOpenDocuments
+                    | ClientUiCommandResult::RequestResync
+                    | ClientUiCommandResult::DismissRecovery => {
+                        // Native dialog commands only produce path/diagnostic outcomes.
+                        return;
+                    }
+                };
+                let _ = proxy.send_event(MasonryUserEvent::Action(
+                    window_id,
+                    Box::new(action),
+                    editor_widget_id,
+                ));
+            });
+    }
+}
+
+fn is_linux_portal_dialog_command(command_id: &str) -> bool {
+    cfg!(target_os = "linux")
+        && matches!(
+            command_id,
+            "clay.documents.clientOpenFileDialog" | "clay.workspace.clientOpenFolderDialog"
+        )
 }
 
 impl AppDriver for Driver {
@@ -78,6 +130,44 @@ impl AppDriver for Driver {
                         }
                     });
             }
+            EditorAction::ClientUiCommand(command)
+                if is_linux_portal_dialog_command(&command.command_id) =>
+            {
+                // Blocking the Wayland event loop prevents the portal chooser from presenting.
+                self.spawn_native_dialog_command(command);
+            }
+            EditorAction::OpenSelectedFile(path) => {
+                let editor_widget_id = self.editor_action_target(widget_id);
+                ctx.render_root(window_id)
+                    .edit_widget(editor_widget_id, |mut widget| {
+                        if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                            let changed = editor
+                                .widget
+                                .request_selected_file_open(path)
+                                .is_some_and(|event| editor.widget.apply_connection_event(event));
+                            if changed {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        }
+                    });
+            }
+            EditorAction::OpenSelectedFolder(path) => {
+                let editor_widget_id = self.editor_action_target(widget_id);
+                ctx.render_root(window_id)
+                    .edit_widget(editor_widget_id, |mut widget| {
+                        if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                            let changed = editor
+                                .widget
+                                .request_selected_workspace_root(path)
+                                .is_some_and(|event| editor.widget.apply_connection_event(event));
+                            if changed {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        }
+                    });
+            }
             EditorAction::ClientUiCommand(command) => match handle_client_ui_command(&command) {
                 ClientUiCommandResult::None => {}
                 ClientUiCommandResult::ConnectionEvent(event) => {
@@ -94,6 +184,8 @@ impl AppDriver for Driver {
                         });
                 }
                 ClientUiCommandResult::SelectedFile(path) => {
+                    // Dialog commands are handled asynchronously above; keep this
+                    // arm so non-dialog callers/tests still map cleanly if reused.
                     let editor_widget_id = self.editor_action_target(widget_id);
                     ctx.render_root(window_id)
                         .edit_widget(editor_widget_id, |mut widget| {
@@ -333,6 +425,9 @@ enum ClayCommand {
     Client {
         endpoint: IpcEndpoint,
     },
+    Restart {
+        endpoint: IpcEndpoint,
+    },
     Server {
         endpoint: IpcEndpoint,
         configuration_root: Option<PathBuf>,
@@ -396,7 +491,7 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
+const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay restart\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay restart          Stop and replace the default background server on Linux, then exit.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchDiagnostic {
@@ -527,6 +622,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             configuration_root,
         } => run_server(endpoint, configuration_root),
         ClayCommand::Client { endpoint } => run_client(endpoint, false),
+        ClayCommand::Restart { endpoint } => run_restart(endpoint),
         ClayCommand::Auto { endpoint } => run_client(endpoint, true),
         ClayCommand::SmokeGui {
             endpoint,
@@ -572,6 +668,17 @@ fn parse_command(args: Vec<OsString>) -> Result<ClayCommand, CliError> {
         "server" | "--server" => parse_server_subcommand(args),
         "client" | "--client" => parse_endpoint_subcommand("client", args)
             .map(|endpoint| ClayCommand::Client { endpoint }),
+        "restart" => {
+            if let Some(extra) = args.next() {
+                return Err(CliError::new(format!(
+                    "unexpected argument for 'restart': {}",
+                    extra.to_string_lossy()
+                )));
+            }
+            Ok(ClayCommand::Restart {
+                endpoint: default_endpoint(),
+            })
+        }
         "smoke-gui" | "smoke" | "--smoke-gui" => parse_smoke_gui_subcommand(args),
         "perf-fixture" => parse_perf_fixture_subcommand(args),
         "package" => parse_package_subcommand(args),
@@ -1039,6 +1146,124 @@ fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<()
     run_editor(editor_widget, events, &runtime)
 }
 
+#[cfg(target_os = "linux")]
+fn run_restart(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    let stopped = stop_default_linux_servers(&endpoint)?;
+    if stopped > 0 {
+        eprintln!("stopped {stopped} Clay server process(es)");
+    }
+
+    start_background_server(&endpoint)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    drop(runtime.block_on(connect_with_retry(&endpoint))?);
+    eprintln!("Clay server restarted at {endpoint}");
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_restart(_endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    Err(CliError::new("'restart' is currently supported only on Linux").into())
+}
+
+#[cfg(target_os = "linux")]
+fn stop_default_linux_servers(endpoint: &IpcEndpoint) -> Result<usize, std::io::Error> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::time::Instant;
+
+    const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
+    let executable = std::env::current_exe()?;
+    let endpoint_arg = endpoint.as_child_arg();
+    let mut pids = Vec::new();
+
+    for entry in std::fs::read_dir("/proc")? {
+        let Ok(entry) = entry else { continue };
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if linux_process_is_default_server(pid, &executable, endpoint_arg.as_bytes()) {
+            pids.push(pid);
+        }
+    }
+
+    for &pid in &pids {
+        signal_linux_process(pid, libc::SIGTERM)?;
+    }
+
+    let deadline = Instant::now() + STOP_TIMEOUT;
+    while Instant::now() < deadline
+        && pids
+            .iter()
+            .any(|&pid| linux_process_uses_executable(pid, &executable))
+    {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    for &pid in &pids {
+        if linux_process_uses_executable(pid, &executable) {
+            signal_linux_process(pid, libc::SIGKILL)?;
+        }
+    }
+
+    Ok(pids.len())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_is_default_server(pid: u32, executable: &Path, endpoint: &[u8]) -> bool {
+    if !linux_process_uses_executable(pid, executable) {
+        return false;
+    }
+    let Ok(command_line) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    linux_command_line_is_default_server(&command_line, endpoint)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_uses_executable(pid: u32, executable: &Path) -> bool {
+    let Ok(process_executable) = std::fs::read_link(format!("/proc/{pid}/exe")) else {
+        return false;
+    };
+    process_executable == executable
+        || process_executable
+            .to_string_lossy()
+            .strip_suffix(" (deleted)")
+            .is_some_and(|path| Path::new(path) == executable)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_command_line_is_default_server(command_line: &[u8], endpoint: &[u8]) -> bool {
+    let mut args = command_line.split(|byte| *byte == 0);
+    let _executable = args.next();
+    if !matches!(args.next(), Some(b"server") | Some(b"--server")) {
+        return false;
+    }
+    match args.next() {
+        None | Some(b"") | Some(b"--config-fixture") => true,
+        Some(argument) => argument == endpoint,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn signal_linux_process(pid: u32, signal: libc::c_int) -> Result<(), std::io::Error> {
+    // SAFETY: kill receives a PID discovered under /proc and a fixed signal constant.
+    if unsafe { libc::kill(pid as libc::pid_t, signal) } == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
 fn run_smoke_gui(
     endpoint: IpcEndpoint,
     configuration_root: Option<PathBuf>,
@@ -1230,12 +1455,13 @@ fn run_editor(
         .with_title(WINDOW_TITLE)
         .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
     let event_loop = EventLoop::with_user_event().build()?;
+    let proxy = event_loop.create_proxy();
 
     if let Some(events) = events {
         spawn_client_connection_event_bridge(
             runtime,
             events,
-            event_loop.create_proxy(),
+            proxy.clone(),
             window_id,
             editor_widget_id,
         );
@@ -1248,7 +1474,11 @@ fn run_editor(
             window_attributes,
             root_widget.erased(),
         )],
-        Driver { editor_widget_id },
+        Driver {
+            editor_widget_id,
+            window_id,
+            proxy: Some(proxy),
+        },
         default_property_set(),
     )?;
 
@@ -1297,12 +1527,14 @@ mod tests {
 
     #[cfg(not(windows))]
     use super::handle_client_ui_command;
+    #[cfg(target_os = "linux")]
+    use super::linux_command_line_is_default_server;
     use super::{
         ClayCommand, ClientUiCommandResult, Driver, FixtureKind, LaunchDiagnostic,
         LaunchReadinessFailure, SelectedPathKind, background_server_command,
         client_dialog_result_to_command_result, connect_with_retry, connect_with_retry_while,
-        connection_event_user_event, extract_profile_perf_flag, managed_server_command,
-        parse_command,
+        connection_event_user_event, extract_profile_perf_flag, is_linux_portal_dialog_command,
+        managed_server_command, parse_command,
     };
     use clay::client::{ClientBootstrapError, ClientConnectionEvent};
     use clay::editor::{EditorSurface, is_printable_text};
@@ -1325,6 +1557,15 @@ mod tests {
             parse_command(vec!["client".into()]).expect("client parses"),
             ClayCommand::Client { .. }
         ));
+    }
+
+    #[test]
+    fn parses_restart_subcommand() {
+        assert!(matches!(
+            parse_command(vec!["restart".into()]).expect("restart parses"),
+            ClayCommand::Restart { .. }
+        ));
+        assert!(parse_command(vec!["restart".into(), "extra".into()]).is_err());
     }
 
     #[test]
@@ -1379,12 +1620,14 @@ mod tests {
             vec![],
             vec!["server".into()],
             vec!["client".into()],
+            vec!["restart".into()],
             vec!["smoke-gui".into()],
         ] {
             let command = parse_command(args).expect("mode parses with default endpoint");
             match command {
                 ClayCommand::Auto { endpoint }
                 | ClayCommand::Client { endpoint }
+                | ClayCommand::Restart { endpoint }
                 | ClayCommand::Server { endpoint, .. }
                 | ClayCommand::SmokeGui { endpoint, .. } => {
                     assert!(!endpoint.to_string().is_empty())
@@ -1404,11 +1647,17 @@ mod tests {
     fn default_server_and_clients_use_same_platform_endpoint() {
         let expected = default_endpoint();
 
-        for args in [vec![], vec!["server".into()], vec!["client".into()]] {
+        for args in [
+            vec![],
+            vec!["server".into()],
+            vec!["client".into()],
+            vec!["restart".into()],
+        ] {
             let command = parse_command(args).expect("default launch mode parses");
             let endpoint = match command {
                 ClayCommand::Auto { endpoint }
                 | ClayCommand::Client { endpoint }
+                | ClayCommand::Restart { endpoint }
                 | ClayCommand::Server { endpoint, .. } => endpoint,
                 ClayCommand::SmokeGui { .. } => {
                     panic!("default smoke endpoint must remain isolated")
@@ -1423,6 +1672,29 @@ mod tests {
             };
             assert_eq!(endpoint, expected);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn restart_matches_only_default_server_command_lines() {
+        let endpoint = b"/run/user/1000/clay.sock";
+
+        assert!(linux_command_line_is_default_server(
+            b"/tmp/clay\0server\0/run/user/1000/clay.sock\0",
+            endpoint
+        ));
+        assert!(linux_command_line_is_default_server(
+            b"/tmp/clay\0server\0",
+            endpoint
+        ));
+        assert!(!linux_command_line_is_default_server(
+            b"/tmp/clay\0server\0/tmp/smoke.sock\0",
+            endpoint
+        ));
+        assert!(!linux_command_line_is_default_server(
+            b"/tmp/clay\0client\0/run/user/1000/clay.sock\0",
+            endpoint
+        ));
     }
 
     #[test]
@@ -1764,11 +2036,29 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_native_dialog_commands_use_non_blocking_driver_path() {
+        assert!(is_linux_portal_dialog_command(
+            "clay.documents.clientOpenFileDialog"
+        ));
+        assert!(is_linux_portal_dialog_command(
+            "clay.workspace.clientOpenFolderDialog"
+        ));
+        assert!(!is_linux_portal_dialog_command(
+            "clay.editor.clientCopySelection"
+        ));
+    }
+
     #[test]
     fn driver_routes_editor_actions_to_shell_editor_child() {
         let editor_widget_id = WidgetId::next();
         let shell_or_source_widget_id = WidgetId::next();
-        let driver = Driver { editor_widget_id };
+        let driver = Driver {
+            editor_widget_id,
+            window_id: WindowId::next(),
+            proxy: None,
+        };
 
         assert_eq!(
             driver.editor_action_target(shell_or_source_widget_id),

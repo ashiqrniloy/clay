@@ -187,6 +187,16 @@ Configuration evaluation and preference lookup happen only during startup, packa
 
 This API grants no filesystem, network, shell, package-manager, native-library, extension loading, AI mutation, workspace, package enable/disable, arbitrary third-party grammar, raw-op, WASM artifact, native-widget, client-runtime, client-side JavaScript, raw CSS/color, or parser callback authority. It only records user-initiated engine preference for already-validated first-party syntax packages; packages cannot silently promote themselves over native tier.
 
+## Plan 056 low-latency syntax configuration review
+
+Plan 056 does **not** promote a new user-facing `clay:configuration` API. One parse/capture pass per stable window/version, coordinator coalescing, Tree-sitter reuse and changed-range querying, 128-byte decoration fan-out, empty authoritative replacement chunks, and optimistic span interpolation are correctness and latency internals, not user policy choices.
+
+No configuration call is needed for normal syntax behavior. [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) remains the only relevant user engine-selection surface, with documented `target` and `tier` properties; it selects an already-validated engine tier but does not tune scheduling. Existing package parser registration fields remain package metadata validated at load time, not `init.js` latency controls.
+
+The stable-window cap, query/parse fallback rules, decoration payload/cache budgets, output chunk size, cancellation/coalescing, and interpolation policy remain compiled and validated by Clay. Hidden/ad hoc keys are invalid, including `syntaxDebounceMs`, `syntaxWordBoundaryOnly`, `syntaxParseWindowBytes`, `syntaxDecorationChunkBytes`, `syntaxInterpolation`, and `clientSyntaxParser`; no `clay.configuration.setSyntaxDebounce`, `clay.configuration.setSyntaxWindow`, `clay.configuration.setSyntaxChunkSize`, or `clay.configuration.setClientSyntaxParser` API exists.
+
+Configuration evaluation remains startup, package-load, reload, or explicit documented setting-change work. Keypress, text edits, edit acknowledgement, parse scheduling/publication, paint, layout, and scroll cannot run configuration JavaScript or dynamically raise parser/cache/payload limits. This review grants no parser callback, filesystem, network, shell, extension loading, AI mutation, raw-op, package, workspace, WASM, or client-side JavaScript authority.
+
 ## Phase 18.18 first-party language package configuration review
 
 Phase 18.18 promoted four first-party language packages from grammar-only metadata to full-mode contracts: Tier 1 native grammar with vocabulary styleMaps, expanded editor behavior (indent/electric/pairs/comment/autocomplete triggers), priority-0 base completion providers carrying bounded static keyword items, importable inert status items, and decoupled Markdown native-decoration-vs-package-JS-SDUI-preview. This review did **not** promote a new user-facing `clay:configuration` API.

@@ -14,7 +14,7 @@ This document is architecture-only. It introduces no runtime code in Phase 16.
 
 | Path | Primitive | Status | Existing/New | Payload budget | Owner and validation |
 | --- | --- | --- | --- | --- | --- |
-| Inline decorations | `DecorationUpdate` containing `DecorationSpan` records | Planned for Phase 17/18 | New protocol/client render hook | `DECORATION_PAYLOAD_BUDGET_BYTES` | Package code may produce spans server-side; server validates schema, byte ranges, document version, provenance, priority, and payload size before sending to the client. |
+| Inline decorations | `DecorationSet` chunks carried by `IncrementalParseUpdate::decoration_updates` | Implemented Phase 18.16/Plan 056 | Existing protocol/client render hook | `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` | Package/native grammar code produces spans server-side; one parse/capture pass fans out complete captures into stable 128-byte sets, and the server validates every member's schema, byte ranges, document version, provenance, priority, and payload before streaming normal decoration messages. |
 | Layout hints | `LayoutHintUpdate` or fields inside render-intent declarations | Planned/deferred until a concrete consumer needs it | New declaration shape | `DECORATION_PAYLOAD_BUDGET_BYTES` for editor-adjacent hints; `SDUI_*` budgets when represented as SDUI | Server validates bounded hint values; client maps them to known local layout affordances only. |
 | Block/inline render intents | `RenderIntent` records for known intents such as preview block, code block adornment, emphasis band, or inline badge | Planned/deferred | New declaration shape, may share `DecorationUpdate` envelope initially | `DECORATION_PAYLOAD_BUDGET_BYTES` | Server validates intent kind/version and strips unknown executable data. Client renders only Rust-known intent kinds. |
 | Panels/status/preview UI | `SduiTree` / `SduiTreeUpdate` | Exists/extend | Reuses `src/protocol/sdui.rs`, `src/masonry_sdui.rs`, and `clay.sdui.*` APIs | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | Server validates inert SDUI trees; client applies snapshots/updates via `SduiNativeState::apply_snapshot` and `SduiNativeState::apply_update`. |
@@ -177,7 +177,7 @@ All package rendering flows through validated server-produced declarations. The 
 
 ## Phase 18.5 Large-File Decoration-Cache Primitive
 
-The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates one viewport-bounded `DecorationSet`, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code now treats each validated `DecorationSet` as a versioned decoration chunk.
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates bounded `DecorationSet` chunks, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code treats each validated `DecorationSet` as a versioned decoration chunk; Plan 056 emits stable 128-byte chunks from one parse/capture pass rather than scheduling parser work per chunk.
 
 Implemented reusable primitives:
 
@@ -193,7 +193,7 @@ Security and performance rules:
 - Paint consumes already-applied local spans only; cache eviction, chunk validation, parser execution, and package JavaScript remain outside paint, keypress, scroll, layout, and text-event handlers.
 - Rust cache/renderer primitives do not branch on Markdown syntax or markdown-it token names; package adapters translate language-specific parser output to generic decoration chunks before publication.
 
-## Phase 18.16 Tiered Syntax Capture and Vocabulary Validation
+## Phase 18.16/Plan 056 Tiered Syntax Capture and Vocabulary Validation
 
 `SyntaxGrammarContribution` packages and native first-party descriptors translate captures from Tier 1 native tree-sitter, Tier 2 web-tree-sitter, or Tier 3 package-JS adapters through one `Background` no-hot-path parse/decor path before any `DecorationSet` reaches the client. `setSyntaxEnginePreference` selects a tier only at init/package-load/open/reclassification time; package load order cannot silently replace Tier 1. The package declares a `styleMap` such as:
 
@@ -206,13 +206,16 @@ Security and performance rules:
 }
 ```
 
-The shared mapper converts the selected style token to the Phase 18.15 `TokenType` + `Modifiers` axes and preserves package scope/provenance. Validation runs outside paint/key/text hot paths and remains bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` plus the shared `SYNTAX_CACHE_BUDGET_BYTES` syntax-chunk cache:
+The shared mapper converts the selected style token to the Phase 18.15 `TokenType` + `Modifiers` axes and preserves package scope/provenance. For a consecutive accepted edit, the matching stable-window tree is edited exactly once, parsed once, and queried only over the UTF-8-safe visible intersection of Tree-sitter changed ranges plus explicit invalidations. Complete intersecting captures survive the query envelope, so grammar-owned token/comment/string/prose/code boundaries remain authoritative.
+
+One capture result is split into stable 128-byte `DecorationSet` outputs. Changed/visible-intersecting sets are ordered first; output chunk count does not increase parser/query invocation count. Each member is validated for package/layer identity, document/version/range/provenance, decoration payload, and enclosing incremental-update budget before any member publishes. Empty syntax sets clear their exact authoritative range. `EditorDecorationState` may interpolate validated inert spans while a current result is pending; current authoritative package/layer sets replace affected provisional ranges.
+
+Validation runs outside paint/key/text hot paths and remains bounded by `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, and the shared `SYNTAX_CACHE_BUDGET_BYTES` syntax-chunk cache:
 
 1. Package metadata validation rejects raw CSS, raw color strings, unknown style tokens, native handles, raw ops, client JavaScript, and external/traversing grammar/query paths. Tier 2 assets must be package-root-confined `./grammars/*.wasm` and `./queries/*.scm` files.
 2. Native descriptor/query construction and the web-tree-sitter host adapter compile/cache query state outside hot paths. Package-JS fallback handlers remain behind the existing server-issued parse-handler token.
 3. The engine-neutral capture mapper rejects any capture without a `styleMap` entry, returning an actionable diagnostic such as an unmapped `@function` capture. It never contains language-name branches.
-4. Viewport parse/highlight execution clamps spans to the requested viewport and rejects capture output above the per-viewport cap before serialization/publication.
-5. `DecorationSet` validation and `DECORATION_PAYLOAD_BUDGET_BYTES` checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport. Open itself returns before this work completes; failures become sanitized `RuntimeDiagnostic` values such as `clay.parse.open_failed`.
+4. `DecorationSet` validation and payload checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport. Open itself returns before this work completes; failures become sanitized `RuntimeDiagnostic` values such as `clay.parse.open_failed`.
 
 Invalid or unsupported queries, artifacts, or captures fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar. Runtime performs no network fetch, shell/package-manager build, native-library load, or client-side JavaScript execution.
 

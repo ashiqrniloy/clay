@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use crop::Rope;
 
@@ -8,8 +8,8 @@ use crate::perf::{
 };
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentVersion, EditOperation, EditRejection, LeaseId,
-    LockOwner, ParseByteRange, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode,
-    RegionLockConflict, RegionLockId, ServerMessage, TransactionId,
+    LockOwner, ParseByteRange, ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot,
+    ProtocolErrorCode, RegionLockConflict, RegionLockId, ServerMessage, TransactionId,
 };
 use crate::server::locks::ranges_overlap;
 
@@ -34,6 +34,14 @@ enum AffectedRange {
     Span { start: u64, end: u64 },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RetainedParseWindow {
+    version: DocumentVersion,
+    window_id: u64,
+    byte_start: u64,
+    byte_end: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct DocumentState {
     document_id: DocumentId,
@@ -45,6 +53,7 @@ pub(crate) struct DocumentState {
     dirty: bool,
     region_locks: Vec<RegionLock>,
     next_region_lock_id: RegionLockId,
+    retained_parse_windows: HashMap<(String, String), RetainedParseWindow>,
 }
 
 impl DocumentState {
@@ -59,6 +68,7 @@ impl DocumentState {
             dirty: false,
             region_locks: Vec::new(),
             next_region_lock_id: 1,
+            retained_parse_windows: HashMap::new(),
         }
     }
 
@@ -158,78 +168,132 @@ impl DocumentState {
         transaction_id: TransactionId,
         operation: EditOperation,
     ) -> ServerMessage {
+        self.apply_edit_with_parse_input(
+            document_id,
+            client_id,
+            lease_id,
+            base_version,
+            transaction_id,
+            operation,
+        )
+        .0
+    }
+
+    pub(crate) fn apply_edit_with_parse_input(
+        &mut self,
+        document_id: DocumentId,
+        client_id: ClientId,
+        lease_id: Option<LeaseId>,
+        base_version: DocumentVersion,
+        transaction_id: TransactionId,
+        operation: EditOperation,
+    ) -> (ServerMessage, Option<ParseInputEdit>) {
         let recorder = global_recorder();
         let _scope = recorder.scope_with_metadata(
             "server.document.apply_edit",
             MetricMetadata::transaction(document_id, client_id, transaction_id, base_version),
         );
         if document_id != self.document_id {
-            return ServerMessage::EditRejected {
-                document_id,
-                transaction_id,
-                reason: EditRejection::InvalidDocument { document_id },
-            };
+            return (
+                ServerMessage::EditRejected {
+                    document_id,
+                    transaction_id,
+                    reason: EditRejection::InvalidDocument { document_id },
+                },
+                None,
+            );
         }
 
         if base_version < self.version {
-            return ServerMessage::EditRejected {
-                document_id: self.document_id,
-                transaction_id,
-                reason: EditRejection::StaleVersion {
-                    client_base_version: base_version,
-                    server_version: self.version,
+            return (
+                ServerMessage::EditRejected {
+                    document_id: self.document_id,
+                    transaction_id,
+                    reason: EditRejection::StaleVersion {
+                        client_base_version: base_version,
+                        server_version: self.version,
+                    },
                 },
-            };
+                None,
+            );
         }
 
         if base_version > self.version {
-            return ServerMessage::EditRejected {
-                document_id: self.document_id,
-                transaction_id,
-                reason: EditRejection::FutureVersion {
-                    client_base_version: base_version,
-                    server_version: self.version,
+            return (
+                ServerMessage::EditRejected {
+                    document_id: self.document_id,
+                    transaction_id,
+                    reason: EditRejection::FutureVersion {
+                        client_base_version: base_version,
+                        server_version: self.version,
+                    },
                 },
-            };
+                None,
+            );
         }
 
         if let Err(reason) = self.validate_lease(client_id, lease_id) {
-            return ServerMessage::EditRejected {
-                document_id: self.document_id,
-                transaction_id,
-                reason,
-            };
+            return (
+                ServerMessage::EditRejected {
+                    document_id: self.document_id,
+                    transaction_id,
+                    reason,
+                },
+                None,
+            );
         }
 
         let affected_range = match self.affected_range(&operation) {
             Ok(range) => range,
             Err(message) => {
-                return ServerMessage::EditRejected {
-                    document_id: self.document_id,
-                    transaction_id,
-                    reason: EditRejection::InvalidRange { message },
-                };
+                return (
+                    ServerMessage::EditRejected {
+                        document_id: self.document_id,
+                        transaction_id,
+                        reason: EditRejection::InvalidRange { message },
+                    },
+                    None,
+                );
             }
         };
 
         if let Some(conflict) = self.region_lock_conflict(affected_range) {
-            return ServerMessage::EditRejected {
-                document_id: self.document_id,
-                transaction_id,
-                reason: EditRejection::RegionLocked { conflict },
-            };
+            return (
+                ServerMessage::EditRejected {
+                    document_id: self.document_id,
+                    transaction_id,
+                    reason: EditRejection::RegionLocked { conflict },
+                },
+                None,
+            );
         }
 
+        let parse_input = match self.parse_input_edit(base_version, &operation) {
+            Ok(edit) => edit,
+            Err(message) => {
+                return (
+                    ServerMessage::EditRejected {
+                        document_id: self.document_id,
+                        transaction_id,
+                        reason: EditRejection::InvalidRange { message },
+                    },
+                    None,
+                );
+            }
+        };
         self.apply_operation(operation);
         self.version += 1;
         self.last_transaction_id = Some(transaction_id);
         self.dirty = true;
         recorder.record_counter("server.document.edit_ack", 1);
-        ServerMessage::EditAck {
-            document_id: self.document_id,
-            confirmed_version: self.version,
-            transaction_id,
-        }
+        (
+            ServerMessage::EditAck {
+                document_id: self.document_id,
+                confirmed_version: self.version,
+                transaction_id,
+            },
+            Some(parse_input),
+        )
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
@@ -271,20 +335,90 @@ impl DocumentState {
             .map_err(|_| "parse snapshot start is too large".to_string())?;
         let end = usize::try_from(range.end)
             .map_err(|_| "parse snapshot end is too large".to_string())?;
+        let base = self.parse_point(start);
         Ok(ParseWindowSnapshot {
             document_id: self.document_id,
             document_version: self.version,
             package_prefix: package_prefix.to_string(),
             mode_id: mode_id.to_string(),
+            window_id: range.start,
             byte_start: range.start,
             byte_end: range.end,
-            base_line: if self.text.byte_len() == 0 {
-                0
-            } else {
-                self.text.line_of_byte(start) as u64
-            },
+            base_line: base.row,
+            base_column: base.column,
+            incremental_edit: false,
             text: self.text.byte_slice(start..end).to_string(),
         })
+    }
+
+    pub(crate) fn parse_window_after_edit(
+        &mut self,
+        package_prefix: &str,
+        mode_id: &str,
+        policy: ParsePolicy,
+        edit: ParseInputEdit,
+    ) -> Result<Option<ParseWindowSnapshot>, String> {
+        if self.text.byte_len() == 0 {
+            self.retained_parse_windows
+                .remove(&(package_prefix.to_string(), mode_id.to_string()));
+            return Ok(None);
+        }
+        if !edit.is_valid() || edit.document_version != self.version {
+            return Err("parse input edit version or range is invalid".to_string());
+        }
+
+        let key = (package_prefix.to_string(), mode_id.to_string());
+        let retained = self.retained_parse_windows.get(&key).copied();
+        let transformed_end = retained.and_then(|window| {
+            if window.version != edit.base_document_version
+                || edit.start_byte < window.byte_start
+                || edit.old_end_byte > window.byte_end
+            {
+                return None;
+            }
+            shift_offset(
+                window.byte_end,
+                edit.new_end_byte as i128 - edit.old_end_byte as i128,
+            )
+            .filter(|end| {
+                *end <= self.text.byte_len() as u64
+                    && end.saturating_sub(window.byte_start) <= policy.max_window_bytes
+            })
+            .map(|end| (window, end))
+        });
+
+        let (window_id, start, end, incremental_edit) = if let Some((window, end)) = transformed_end
+        {
+            (window.window_id, window.byte_start, end, true)
+        } else {
+            let nominal_bytes = (policy.max_window_bytes / 2).max(1);
+            let identity_offset = edit
+                .start_byte
+                .min((self.text.byte_len() as u64).saturating_sub(1));
+            let anchor = identity_offset / nominal_bytes * nominal_bytes;
+            let start = self.floor_char_boundary(anchor)?;
+            let end = self.floor_char_boundary(
+                start
+                    .saturating_add(nominal_bytes)
+                    .min(self.text.byte_len() as u64),
+            )?;
+            (start, start, end, false)
+        };
+        let range = ParseByteRange::new(start, end);
+        let mut snapshot =
+            self.parse_window_snapshot(package_prefix, mode_id, range, policy.max_window_bytes)?;
+        snapshot.window_id = window_id;
+        snapshot.incremental_edit = incremental_edit;
+        self.retained_parse_windows.insert(
+            key,
+            RetainedParseWindow {
+                version: self.version,
+                window_id,
+                byte_start: start,
+                byte_end: end,
+            },
+        );
+        Ok(Some(snapshot))
     }
 
     #[cfg_attr(
@@ -352,8 +486,52 @@ impl DocumentState {
         if self.text != text {
             self.text = Rope::from(text);
             self.version = self.version.saturating_add(1);
+            self.retained_parse_windows.clear();
         }
         self.dirty = false;
+    }
+
+    fn parse_input_edit(
+        &self,
+        base_document_version: DocumentVersion,
+        operation: &EditOperation,
+    ) -> Result<ParseInputEdit, String> {
+        let (start_byte, old_end_byte, inserted_text) = match operation {
+            EditOperation::Insert { byte_offset, text } => {
+                (*byte_offset, *byte_offset, text.as_str())
+            }
+            EditOperation::Delete { start, end } => (*start, *end, ""),
+            EditOperation::Replace { start, end, text } => (*start, *end, text.as_str()),
+        };
+        let start = self.validate_boundary(start_byte)?;
+        let old_end = self.validate_boundary(old_end_byte)?;
+        let inserted_bytes = u64::try_from(inserted_text.len())
+            .map_err(|_| "inserted text length is too large".to_string())?;
+        let new_end_byte = start_byte
+            .checked_add(inserted_bytes)
+            .ok_or_else(|| "inserted text end is too large".to_string())?;
+        let start_position = self.parse_point(start);
+        let document_version = base_document_version
+            .checked_add(1)
+            .ok_or_else(|| "document version is too large".to_string())?;
+        Ok(ParseInputEdit {
+            base_document_version,
+            document_version,
+            start_byte,
+            old_end_byte,
+            new_end_byte,
+            start_position,
+            old_end_position: self.parse_point(old_end),
+            new_end_position: point_after_text(start_position, inserted_text),
+        })
+    }
+
+    fn parse_point(&self, byte_offset: usize) -> ParsePoint {
+        let row = self.text.line_of_byte(byte_offset);
+        ParsePoint::new(
+            row as u64,
+            (byte_offset - self.text.byte_of_line(row)) as u64,
+        )
     }
 
     fn apply_operation(&mut self, operation: EditOperation) {
@@ -555,6 +733,25 @@ impl DocumentState {
     }
 }
 
+fn point_after_text(start: ParsePoint, text: &str) -> ParsePoint {
+    match text.rsplit_once('\n') {
+        Some((before_last_newline, trailing)) => ParsePoint::new(
+            start.row
+                + before_last_newline
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count() as u64
+                + 1,
+            trailing.len() as u64,
+        ),
+        None => ParsePoint::new(start.row, start.column + text.len() as u64),
+    }
+}
+
+fn shift_offset(offset: u64, delta: i128) -> Option<u64> {
+    u64::try_from(offset as i128 + delta).ok()
+}
+
 impl RegionLock {
     fn overlaps(&self, affected_range: AffectedRange) -> bool {
         match affected_range {
@@ -588,8 +785,8 @@ impl Default for DocumentState {
 mod tests {
     use super::DocumentState;
     use crate::protocol::{
-        DocumentAccess, EditOperation, EditRejection, LockOwner, ParseByteRange, ParsePolicy,
-        RegionLockConflict, ServerMessage,
+        DocumentAccess, EditOperation, EditRejection, LockOwner, ParseByteRange, ParseInputEdit,
+        ParsePoint, ParsePolicy, RegionLockConflict, ServerMessage,
     };
 
     #[test]
@@ -658,6 +855,135 @@ mod tests {
             }
         );
         assert_eq!(document.text.to_string(), "HiClay 🌎");
+    }
+
+    #[test]
+    fn accepted_edits_record_exact_utf8_and_newline_coordinates() {
+        for (operation, expected) in [
+            (
+                EditOperation::Insert {
+                    byte_offset: 4,
+                    text: "β\nQ".to_string(),
+                },
+                ParseInputEdit {
+                    base_document_version: 1,
+                    document_version: 2,
+                    start_byte: 4,
+                    old_end_byte: 4,
+                    new_end_byte: 8,
+                    start_position: ParsePoint::new(1, 0),
+                    old_end_position: ParsePoint::new(1, 0),
+                    new_end_position: ParsePoint::new(2, 1),
+                },
+            ),
+            (
+                EditOperation::Delete { start: 1, end: 4 },
+                ParseInputEdit {
+                    base_document_version: 1,
+                    document_version: 2,
+                    start_byte: 1,
+                    old_end_byte: 4,
+                    new_end_byte: 1,
+                    start_position: ParsePoint::new(0, 1),
+                    old_end_position: ParsePoint::new(1, 0),
+                    new_end_position: ParsePoint::new(0, 1),
+                },
+            ),
+            (
+                EditOperation::Replace {
+                    start: 4,
+                    end: 7,
+                    text: "ok\n".to_string(),
+                },
+                ParseInputEdit {
+                    base_document_version: 1,
+                    document_version: 2,
+                    start_byte: 4,
+                    old_end_byte: 7,
+                    new_end_byte: 7,
+                    start_position: ParsePoint::new(1, 0),
+                    old_end_position: ParsePoint::new(1, 3),
+                    new_end_position: ParsePoint::new(2, 0),
+                },
+            ),
+        ] {
+            let mut document = DocumentState::new(
+                7,
+                "aé\nxyz".to_string(),
+                DocumentAccess::Editable { lease_id: 1 },
+            );
+            document.acquire_access(0);
+            let (response, parse_input) =
+                document.apply_edit_with_parse_input(7, 0, Some(1), 1, 12, operation);
+
+            assert!(matches!(response, ServerMessage::EditAck { .. }));
+            assert_eq!(parse_input, Some(expected));
+        }
+    }
+
+    #[test]
+    fn adjacent_edits_retain_window_identity_and_crossing_edit_falls_back() {
+        let mut document = DocumentState::new(
+            7,
+            "a".repeat(10_000),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        document.acquire_access(0);
+        let policy = ParsePolicy::new(4_096, 0, 30 * 1024 * 1024, 50);
+
+        let (_, first_edit) = document.apply_edit_with_parse_input(
+            7,
+            0,
+            Some(1),
+            1,
+            12,
+            EditOperation::Insert {
+                byte_offset: 3_000,
+                text: "x".to_string(),
+            },
+        );
+        let first = document
+            .parse_window_after_edit("rust", "rust.rust", policy, first_edit.unwrap())
+            .unwrap()
+            .unwrap();
+        let (_, second_edit) = document.apply_edit_with_parse_input(
+            7,
+            0,
+            Some(1),
+            2,
+            13,
+            EditOperation::Insert {
+                byte_offset: 3_001,
+                text: "y".to_string(),
+            },
+        );
+        let second = document
+            .parse_window_after_edit("rust", "rust.rust", policy, second_edit.unwrap())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(second.window_id, first.window_id);
+        assert_eq!(second.byte_start, first.byte_start);
+        assert!(second.incremental_edit);
+        assert!(second.text_len_bytes() <= policy.max_window_bytes as usize);
+
+        let (_, crossing_edit) = document.apply_edit_with_parse_input(
+            7,
+            0,
+            Some(1),
+            3,
+            14,
+            EditOperation::Delete {
+                start: 4_000,
+                end: 5_000,
+            },
+        );
+        let fallback = document
+            .parse_window_after_edit("rust", "rust.rust", policy, crossing_edit.unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(!fallback.incremental_edit);
+        assert!(fallback.text_len_bytes() <= policy.max_window_bytes as usize);
     }
 
     #[test]

@@ -9,7 +9,9 @@ pub struct DecorationProvenance {
 }
 
 /// Known inert decoration kinds. The client maps these to native styles only.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+)]
 pub enum DecorationKind {
     Syntax,
     Semantic,
@@ -375,6 +377,7 @@ pub struct DecorationChunkKey {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
     pub package_prefix: String,
+    pub kind: DecorationKind,
     pub byte_start: u64,
     pub byte_end: u64,
 }
@@ -384,6 +387,10 @@ pub struct DecorationChunkKey {
 pub struct DecorationSet {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
+    /// Set-level ownership keeps empty authoritative replacement chunks keyed.
+    pub package_prefix: String,
+    /// Replacement/cache layer, retained even when `spans` is empty.
+    pub kind: DecorationKind,
     pub viewport_byte_start: u64,
     pub viewport_byte_end: u64,
     pub spans: Vec<DecorationSpan>,
@@ -395,15 +402,14 @@ impl DecorationSet {
             document_id: self.document_id,
             document_version: self.document_version,
             package_prefix: package_prefix.into(),
+            kind: self.kind,
             byte_start: self.viewport_byte_start,
             byte_end: self.viewport_byte_end,
         }
     }
 
     pub fn package_prefix(&self) -> Option<&str> {
-        self.spans
-            .first()
-            .map(|span| span.provenance.package_prefix.as_str())
+        (!self.package_prefix.is_empty()).then_some(self.package_prefix.as_str())
     }
 
     pub fn sorted_viewport_first(mut self) -> Self {

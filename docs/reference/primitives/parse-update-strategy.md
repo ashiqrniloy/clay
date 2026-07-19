@@ -40,40 +40,43 @@ A future parse coordinator should enqueue compact edit notifications after the s
 ```text
 ParseEditNotification {
   document_id,
-  client_id,
-  package_prefix,
-  active_mode_id,
-  base_version,
   document_version,
   behavior_version,
-  edit_range_before,
-  edit_range_after,
-  inserted_text_preview,   // bounded; enough for line-oriented parsers
-  invalidated_byte_ranges,
-  viewport_byte_start,
-  viewport_byte_end,
+  package_prefix,
+  mode_id,
+  viewport,
+  invalidated_ranges,
+  accepted_edit: Option<ParseInputEdit>,
+  parse_windows: [ParseWindowSnapshot],
+  memory_budget,
+}
+
+ParseInputEdit {
+  base_document_version,
+  document_version,
+  start_byte, old_end_byte, new_end_byte,
+  start_position, old_end_position, new_end_position,
 }
 ```
 
 Rules:
 
-- `document_id`, `base_version`, `document_version`, and `behavior_version` preserve per-document ordering and stale-result rejection.
-- `inserted_text_preview` is bounded and may be omitted for large inserts; the parser can request a bounded region snapshot through a future server API if a declared permission and budget allow it.
-- `viewport_byte_start` and `viewport_byte_end` let the background task prioritize visible results first.
-- Notifications must fit within `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` or be split by invalidated region.
+- `ParseInputEdit` is server-canonical metadata for one consecutive accepted version. Open, resync, and viewport-only notifications carry no fabricated edit.
+- `ParseWindowSnapshot` is a UTF-8-safe bounded slice with stable `window_id`, absolute byte bounds, base point, and `incremental_edit`; it is the only parser text input.
+- `document_id`, versions, provenance, and window metadata preserve ordering and stale-result rejection. `accepted_edit.relative_to_window` produces Tree-sitter-relative coordinates only when the edit fits the retained window.
+- `viewport` and `invalidated_ranges` prioritize current output. Notifications and all returned members remain within `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` and the decoration budget; output chunking never creates additional parse notifications.
 
 ## Parse Task Lifecycle
 
 Parse task lifecycle is server-side and cancellable:
 
 1. `src/server/document.rs::DocumentState::apply_edit` accepts an edit, updates the canonical rope, and increments `DocumentVersion`.
-2. A future coordinator receives the accepted edit metadata and creates `ParseEditNotification { document_id, edit, base_version, document_version, viewport_byte_start, viewport_byte_end }`.
-3. The coordinator spawns or reuses a background task for `(document_id, package_prefix, active_mode_id)`.
-4. The task invokes the package parse handler through the server-side `deno_core` runtime; conceptually `package.onEdit(notification)` or a future `clay.parse.serverRegisterParseHandler` handler returns `Promise<ParseResult>`.
-5. If a newer document version arrives before the promise resolves, the coordinator cancels or marks the older task stale.
-6. If the task exceeds its package/configured timeout, the coordinator cancels it and records a runtime diagnostic.
-7. The server validates the returned syntax/decorator data, filters it to the viewport byte range, and packages it as `DecorationUpdate` or related inert payloads.
-8. The server publishes validated results to connected clients outside paint/text-event handlers.
+2. The connection derives one canonical `ParseInputEdit`, retains a stable bounded window when possible, and submits one `ParseEditNotification` to `ParseCoordinator`.
+3. The coordinator spawns one start-gated task for a new version/window, coalesces duplicate same-version/window requests, and supersedes older work for the same document/package/mode stream while preserving concurrency across unrelated documents.
+4. The native handler reuses a matching cached tree with `Tree::edit`, parses once, unions `Tree::changed_ranges` with explicit invalidations, and queries the bounded visible/changed envelope.
+5. The handler maps complete captures into `IncrementalParseUpdate::decoration_updates`, splitting them into stable 128-byte sets in changed/visible-first order. Output chunk count does not multiply parse/query invocations.
+6. If a newer document version arrives before completion, the coordinator cancels or marks the older task stale; matching-version active-task state is checked again before publication.
+7. The server validates every decoration member atomically against document/version/provenance/range and payload budgets, then publishes ordinary inert `DecorationSet` messages outside paint/text-event handlers.
 
 A task result is publishable only when its `document_version` matches the current server version or an explicitly accepted compatible version window. Older results are discarded before client delivery.
 
@@ -102,7 +105,7 @@ ParseResult {
   parse_unit,
   invalidated_byte_ranges,
   syntax_tree_delta,       // optional compact tree/update summary
-  decoration_update,       // optional DecorationUpdate-compatible payload
+  decoration_updates,     // bounded DecorationSet members from one handler invocation
   folding_ranges,          // optional bounded range list
   diagnostics,             // optional bounded diagnostic spans
 }
@@ -163,15 +166,17 @@ No code is added in Phase 16, but later phases should attach parsing at these bo
 
 This split keeps `DocumentState` focused on canonical document mutation, `ClayJsRuntimeService` focused on constrained JavaScript execution, and a new coordinator focused on scheduling and parse-result policy.
 
-## Phase 18.16 Tiered Syntax Grammar Parse/Highlight Path
+## Phase 18.16/Plan 056 Tiered Syntax Grammar Parse/Highlight Path
 
-`SyntaxGrammarContribution` reuses this background parse strategy across three engine tiers. Tier 1 uses compiled first-party `tree-sitter-*` grammar data registered as static descriptors. Tier 2 uses the shared host-side web-tree-sitter adapter for resolver-validated package-root-confined `tree-sitter-wasm` and `.scm` assets. Tier 3 retains existing package-JS parse handlers for grammar-less languages, Markdown-specific behavior, or an explicit `javascript` preference. Every tier produces capture records for the same capture-to-Phase 18.15 `TokenType` + `Modifiers` mapper and bounded `DecorationSet` output.
+`SyntaxGrammarContribution` reuses this background parse strategy across three engine tiers. Tier 1 uses compiled first-party `tree-sitter-*` grammar data registered as static descriptors. Tier 2 uses the shared host-side web-tree-sitter adapter for resolver-validated package-root-confined `tree-sitter-wasm` and `.scm` assets. Tier 3 retains package-JS parse handlers for grammar-less languages, Markdown-specific behavior, or an explicit `javascript` preference. Every tier produces capture records for the same capture-to-Phase 18.15 `TokenType` + `Modifiers` mapper and bounded `DecorationSet` output.
+
+For consecutive accepted versions, `ParseCoordinator` carries one exact `ParseInputEdit` into one stable bounded window. A matching Tree-sitter tree receives `Tree::edit`, the parser runs once, and `old_tree.changed_ranges(&new_tree)` is unioned with explicit invalidations. The normalized UTF-8-safe affected envelope is clamped to the visible window and queried once with `QueryCursor::set_byte_range`; intersecting captures retain their complete grammar-owned boundaries. Open/full/viewport fallback has no accepted edit and queries the bounded visible range explicitly.
+
+One parse/capture result becomes `IncrementalParseUpdate::decoration_updates`: complete captures are split into stable 128-byte output sets, with sets intersecting explicit invalidations published before adjacent sets. The coordinator validates all members atomically, including per-member decoration and incremental-update payload budgets. Empty syntax sets are authoritative replacements. Output fan-out and ordinary `DecorationSet` transport/cache work never create sibling parser jobs or multiply parse/query invocation metrics.
 
 Package load validates grammar metadata, paths, style maps, permissions, provenance, and budgets. At document open/reload/reclassification/package-load time, Clay selects syntax independently of major mode. `setSyntaxEnginePreference(target, tier)` is the only user override and accepts `native`, `wasm`, or `javascript`/`js`; package load order cannot silently replace a native descriptor. A document can remain editable as `core.code` or `core.text` while syntax is selected, and no grammar/fallback selection leaves major-mode editability unchanged.
 
-Open scheduling is enqueue-only: text and the initial mode state return before parse completion. Handler errors, timeouts, invalid updates, and budget failures are sanitized into `RuntimeDiagnostic` values such as `clay.parse.open_failed` through `ParseCoordinator::finish_task`; they do not block open or leak paths/source text. Native highlight capture overflow degrades separately to a transport-safe bounded prefix sized for both the decoration and incremental-update envelopes instead of failing the entire set. Later visible ranges arrive as deduplicated metadata-only `DecorationViewportRequest` messages; the server slices already-open canonical text into UTF-8-safe policy-bounded windows, and decorations return through the background update channel with stale-version checks.
-
-Tree-sitter and package parse/highlight work runs through `ParseCoordinator` as `Background` no-hot-path work: it is cancellable, stale-version rejecting, viewport-prioritized, and bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`. The Rust client receives only inert validated `DecorationSet` spans; no grammar package JavaScript, parser/query compilation, native artifact loading, filesystem/network/shell/AI/raw-op authority, or full-document IPC runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. Tier 2 runtime assets are local/resolver-validated; no runtime download, shell/package-manager build, or native-library load occurs.
+Open scheduling is enqueue-only: text and the initial mode state return before parse completion. Handler errors, timeouts, invalid updates, and budget failures are sanitized into `RuntimeDiagnostic` values such as `clay.parse.open_failed` through `ParseCoordinator::finish_task`; they do not block open or leak paths/source text. The client may interpolate already-validated inert syntax spans through optimistic edits, then replace affected package/layer ranges with current authoritative sets. Tree-sitter and package parse/highlight work remains `Background`, cancellable, stale-version rejecting, viewport-prioritized, and bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; no grammar package JavaScript, parser/query compilation, native artifact loading, filesystem/network/shell/AI/raw-op authority, or full-document IPC runs in editor hot paths. Tier 2 runtime assets are local/resolver-validated; no runtime download, shell/package-manager build, or native-library load occurs.
 
 ## Security Rules
 

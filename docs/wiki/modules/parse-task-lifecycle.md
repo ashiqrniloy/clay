@@ -32,11 +32,11 @@ The canonical public design is `docs/reference/primitives/parse-update-strategy.
 
 The implemented parse flow operates after the server accepts an edit/open, not before local paint:
 
-1. `src/server/document.rs::DocumentState::apply_edit` accepts an edit, updates the canonical rope, and increments the server document version.
+1. `src/server/document.rs::DocumentState::apply_edit_with_parse_input` derives an exact `ParseInputEdit` from the validated canonical rope, then updates the rope and increments the server document version. Open/resync/viewport work has no fabricated edit.
 2. `src/server/parse_coordinator.rs` receives compact accepted-edit, open-time, or viewport metadata. It does not receive or send full-document snapshots for ordinary edits.
-3. The coordinator enqueues a `ParseEditNotification` for the active `(document_id, package_prefix, mode)` stream with the new document version, behavior version, invalidated byte ranges, latest viewport range, and optional bounded `ParseWindowSnapshot`s.
-4. The coordinator spawns a background task that invokes the package parse handler through `src/server/js_runtime.rs`, the constrained persistent `deno_core` boundary. JS-backed handlers are looked up by a server-issued token stored during package load; the public op payload still rejects executable callback fields. The task key includes the handler's runtime generation.
-5. If a newer edit, viewport request, runtime generation replacement, or package-scoped revocation arrives, the coordinator aborts superseded tasks for the affected `(generation_id, document_id, package_prefix, mode_id)` key and keeps only the latest active package/generation authoritative. `ParseCoordinator::cancel_older_generations` is the post-commit reload cleanup path; `ParseCoordinator::cancel_package` withdraws package-owned handlers and active tasks through the same abort path as `cancel_generation`. Queued updates are drained so late old-generation results cannot publish.
+3. The coordinator enqueues a `ParseEditNotification` for the active `(document_id, package_prefix, mode)` stream with the current document version, optional exact accepted edit, invalidated byte ranges, latest viewport range, and bounded `ParseWindowSnapshot`s carrying a stable `window_id` when parse text is needed.
+4. The coordinator start-gates a background task that invokes a registered native or runtime-backed package parse handler. JS-backed handlers are looked up by a server-issued token stored during package load; the public op payload still rejects executable callback fields. Native task identity includes runtime generation, document, package/mode grammar stream, and stable parse-window identity—not decoration destination ranges. Duplicate same-version/window requests coalesce before spawn.
+5. If a newer edit, viewport request, runtime generation replacement, or package-scoped revocation arrives, the coordinator aborts superseded tasks for the affected stream and keeps only the latest active package/generation authoritative. Newer versions supersede older work even when stable window identity changes; other documents and grammars remain independent. `ParseCoordinator::cancel_older_generations` is the post-commit reload cleanup path; `ParseCoordinator::cancel_package` withdraws package-owned handlers and active tasks through the same abort path as `cancel_generation`. Queued updates are drained so late old-generation results cannot publish.
 6. If the handler exceeds its timeout, `RuntimeCommand::Parse` uses the smaller of the runtime service timeout and the handler's registered `timeoutMs`, terminates the isolate, returns `clay.runtime.timeout`, increments `ParseCoordinatorStats.failed_tasks`, and publishes no partial update.
 7. Returned parse data is validated for active runtime generation, package provenance, declared permission, version, byte ranges, known schema values, payload size, viewport filtering, and parse-produced decoration payload budgets.
 8. The server publishes validated inert results through implemented decoration publication (`DecorationSet`) or future folding, diagnostic, or related protocol messages. The client applies those updates outside paint/text-event handlers.
@@ -58,18 +58,13 @@ The coordinator now implements compact `rkyv`-serializable shapes in `src/protoc
 ```text
 ParseEditNotification {
   document_id,
-  client_id,
   package_prefix,
   active_mode_id,
-  base_version,
   document_version,
-  behavior_version,
-  edit_range_before,
-  edit_range_after,
-  inserted_text_preview,
-  invalidated_byte_ranges,
-  viewport_byte_start,
-  viewport_byte_end,
+  viewport,
+  accepted_edit: Option<ParseInputEdit>,
+  invalidated_ranges,
+  parse_windows: Vec<ParseWindowSnapshot { window_id, text, ... }>,
 }
 ```
 
@@ -77,16 +72,16 @@ ParseEditNotification {
 IncrementalParseUpdate {
   document_id,
   document_version,
-  behavior_version,
   package_prefix,
   mode_id,
-  parse_unit,
   viewport,
   invalidated_ranges,
   syntax_tree_delta,
-  decoration_update,
+  decoration_updates: Vec<DecorationSet>,
 }
 ```
+
+`ParseInputEdit` holds canonical old/new byte and point endpoints. A consecutive matching stable window permits `Tree::edit` plus one incremental parse; its old/new changed ranges union explicit invalidations before one affected-envelope capture query. One capture result may fan out into 128-byte `DecorationSet` members, but member count never adds parser jobs.
 
 The client should receive only validated rendering/folding/diagnostic declarations it knows how to apply. Syntax tree deltas are server/cache metadata unless a later primitive explicitly exposes them.
 
@@ -97,7 +92,7 @@ Parsing is `Background` work:
 - It must not participate in the `ClientFirstPredictable` keypress-to-local-paint path.
 - Queues are bounded per document and per package.
 - Visible viewport ranges are prioritized first, adjacent ranges second, and off-viewport cache refresh last.
-- Newer document versions supersede older overlapping tasks.
+- Newer document versions supersede older tasks in the same document/package/mode stream; duplicate same-version/stable-window work coalesces.
 - Newer runtime generations replace handler tokens and cancel old-generation in-flight tasks; package disable/revoke removes package-owned handlers and cancels in-flight tasks for that package prefix.
 - Slow parse handlers degrade decoration freshness only; they do not prevent local text from appearing.
 
@@ -115,7 +110,7 @@ When package parsing lags:
 
 - The server may send a `no-decoration-update` acknowledgement for the current version.
 - The client retains last validated decorations for unaffected ranges.
-- Edited regions may temporarily fall back to plain/default mode styling.
+- Edited syntax may remain provisionally styled only where generic inert-span interpolation is safe; structural or non-syntax overlap waits for authoritative current-version output.
 - Diagnostics and semantic spans may be stale temporarily, then replaced or cleared when a current result arrives.
 - No fallback path executes package JavaScript in the client.
 

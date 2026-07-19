@@ -113,6 +113,8 @@ fn markdown_decoration_set(document_version: u64, viewport_end: u64) -> Decorati
     DecorationSet {
         document_id: 7,
         document_version,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
         viewport_byte_start: 0,
         viewport_byte_end: viewport_end,
         spans,
@@ -157,9 +159,12 @@ fn parse_window_snapshot_for_size(document_bytes: usize) -> ParseWindowSnapshot 
         document_version: 3,
         package_prefix: "markdown".to_string(),
         mode_id: "markdown".to_string(),
+        window_id: byte_start,
         byte_start,
         byte_end: byte_start + text.len() as u64,
         base_line: 0,
+        base_column: 0,
+        incremental_edit: false,
         text,
     }
 }
@@ -175,7 +180,7 @@ fn markdown_parse_update(document_version: u64) -> IncrementalParseUpdate {
         viewport: ParseByteRange::new(0, 160),
         invalidated_ranges: vec![ParseByteRange::new(0, 80)],
         syntax_tree_delta: Some("decorations:viewport-spans=5".to_string()),
-        decoration_update: Some(markdown_decoration_set(document_version, 160)),
+        decoration_updates: vec![markdown_decoration_set(document_version, 160)],
         diagnostic_update: None,
     }
 }

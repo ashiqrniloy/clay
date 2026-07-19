@@ -1315,6 +1315,13 @@ fn phase18_16_tiered_engine_primitive_review() -> String {
     .expect("read Phase 18.16 tiered Tree-sitter syntax engine primitive review")
 }
 
+fn low_latency_incremental_syntax_decoration_primitive_review_doc() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/low-latency-incremental-syntax-decoration-primitive-review.md",
+    ))
+    .expect("read low-latency incremental syntax decoration primitive review")
+}
+
 fn phase18_16_5_typography_primitive_review() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/phase18.16.5-typography-primitive-review.md",
@@ -2155,6 +2162,161 @@ fn phase18_10_tree_sitter_grammar_primitive_review_records_inventory_and_gaps() 
     assert!(
         backlog.contains("SyntaxGrammarContribution"),
         "primitive backlog must contain the SyntaxGrammarContribution handoff row"
+    );
+}
+
+#[test]
+fn low_latency_incremental_syntax_decoration_primitive_review() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let review = low_latency_incremental_syntax_decoration_primitive_review_doc();
+
+    assert!(
+        wiki_index
+            .contains("modules/low-latency-incremental-syntax-decoration-primitive-review.md"),
+        "docs/wiki/index.md must link the low-latency syntax primitive review"
+    );
+
+    for required in [
+        "Primitive and Gap Matrix",
+        "`ParseCoordinator`",
+        "`ParseEditNotification`",
+        "`ParseWindowSnapshot`",
+        "`TreeSitterSyntaxHandler`",
+        "`SyntaxChunkCache`",
+        "`DecorationSet`",
+        "`EditorDecorationState`",
+        "Semantic layering",
+        "Baseline amplification was explicit",
+        "shared per-handler parser mutex",
+        "one native task per accepted document version/grammar/stable window",
+        "Same-version/window requests coalesce",
+        "unrelated documents remain independent",
+        "`old_tree.changed_ranges(&new_tree)`",
+        "bounded decoration fan-out",
+        "provisional interpolation",
+        "Clay JS API Audit",
+        "No language-specific Rust path or parallel parser scheduler is needed",
+        "Ordinary edit refresh must not copy or transmit a full large document",
+        "`parse-document`",
+        "`render-decorations`",
+        "No filesystem, network, shell, AI, raw-op, native-widget, package-manager, workspace-mutation, client-JavaScript",
+    ] {
+        assert!(
+            review.contains(required),
+            "low-latency syntax primitive review must record architecture evidence: {required}"
+        );
+    }
+}
+
+#[test]
+fn plan056_final_wiki_records_one_parse_authoritative_decoration_flow() {
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let lifecycle =
+        fs::read_to_string(repository_path("docs/wiki/modules/parse-task-lifecycle.md"))
+            .expect("read parse task lifecycle wiki");
+    let coordinator = fs::read_to_string(repository_path("docs/wiki/modules/parse-coordinator.md"))
+        .expect("read parse coordinator wiki");
+    let syntax = fs::read_to_string(repository_path(
+        "docs/wiki/modules/syntax-grammar-registry.md",
+    ))
+    .expect("read syntax grammar registry wiki");
+    let decoration =
+        fs::read_to_string(repository_path("docs/wiki/modules/decoration-transport.md"))
+            .expect("read decoration transport wiki");
+    let editor = fs::read_to_string(repository_path("docs/wiki/modules/masonry-editor.md"))
+        .expect("read masonry editor wiki");
+
+    for (page, required) in [
+        (&index, "Implemented parse/decor flow"),
+        (&lifecycle, "accepted_edit: Option<ParseInputEdit>"),
+        (&lifecycle, "decoration_updates: Vec<DecorationSet>"),
+        (&lifecycle, "member count never adds parser jobs"),
+        (&coordinator, "visible/changed-first `decoration_updates`"),
+        (&syntax, "One query/capture pass"),
+        (&syntax, "stable 128-byte output ranges"),
+        (&decoration, "overlapping provisional keys"),
+        (&editor, "strict-interior edits resize it"),
+    ] {
+        assert!(
+            page.contains(required),
+            "Plan 056 wiki must retain `{required}`"
+        );
+    }
+
+    assert!(
+        !lifecycle.contains("  decoration_update,\n")
+            && !coordinator.contains("optional `decoration_update`"),
+        "wiki must not describe the superseded single-decoration update shape"
+    );
+}
+
+#[test]
+fn low_latency_syntax_reference_docs_preserve_parse_and_fan_out_contract() {
+    let index = fs::read_to_string(repository_path("docs/reference/primitives/index.md"))
+        .expect("read primitive index");
+    let registry = fs::read_to_string(repository_path("docs/reference/primitives/registry.md"))
+        .expect("read primitive registry");
+    let parse = fs::read_to_string(repository_path(
+        "docs/reference/primitives/parse-update-strategy.md",
+    ))
+    .expect("read parse strategy");
+    let rendering = fs::read_to_string(repository_path(
+        "docs/reference/primitives/rendering-strategy.md",
+    ))
+    .expect("read rendering strategy");
+    let packages = fs::read_to_string(repository_path(
+        "docs/reference/packages/creating-packages.md",
+    ))
+    .expect("read package guide");
+
+    for (source, required) in [
+        (&index, "one canonical `ParseInputEdit`"),
+        (
+            &registry,
+            "one parse per stable version/window independent of output chunks",
+        ),
+        (
+            &parse,
+            "Output chunk count does not multiply parse/query invocations",
+        ),
+        (
+            &rendering,
+            "output chunk count does not increase parser/query invocation count",
+        ),
+        (
+            &packages,
+            "output chunk count never creates sibling parser jobs",
+        ),
+    ] {
+        assert!(
+            source.contains(required),
+            "reference docs must retain `{required}`"
+        );
+        assert!(
+            !source.contains("256-byte sibling parse jobs"),
+            "reference docs must not restore per-chunk parser work"
+        );
+    }
+
+    for required in [
+        "`old_tree.changed_ranges(&new_tree)`",
+        "QueryCursor::set_byte_range",
+        "stable 128-byte",
+        "validated atomically",
+        "provisionally interpolate",
+        "grammar boundaries",
+        "keypress, paint, layout, scroll, pointer, or text-event hot paths",
+    ] {
+        assert!(
+            parse.contains(required) || rendering.contains(required) || packages.contains(required),
+            "reference docs must explain implemented syntax contract: {required}"
+        );
+    }
+
+    assert!(
+        packages.contains("\"maxWindowBytes\": 4096"),
+        "package guide must retain 4 KiB bounded parse windows"
     );
 }
 

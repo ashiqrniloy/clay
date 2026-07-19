@@ -1150,7 +1150,12 @@ fn syntax_grammar_packages_document_explicit_init_js_loading() {
     let runtime = read("src/server/js_runtime.rs");
     let package_ops = read("src/server/ops/packages.rs");
 
-    for specifier in ["@clay/rust", "@clay/typescript", "@clay/javascript"] {
+    for specifier in [
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "@clay/markdown",
+    ] {
         for source in [&load_package_api, &package_guide, &syntax_wiki, &fixture] {
             assert!(
                 source.contains(&format!("loadPackage(\"{specifier}\")")),
@@ -1229,9 +1234,14 @@ fn syntax_grammar_configuration_review_uses_only_documented_clay_js_apis() {
     }
 
     assert!(
-        load_package_api.contains("await loadPackage(\"@clay/rust\");")
-            && load_package_api.contains("await loadPackage(\"@clay/typescript\");")
-            && load_package_api.contains("await loadPackage(\"@clay/javascript\");"),
+        [
+            "@clay/rust",
+            "@clay/typescript",
+            "@clay/javascript",
+            "@clay/markdown",
+        ]
+        .iter()
+        .all(|specifier| load_package_api.contains(&format!("await loadPackage(\"{specifier}\");"))),
         "loadPackage docs must remain the end-user syntax grammar configuration path"
     );
     assert!(

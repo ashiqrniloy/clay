@@ -18,7 +18,7 @@ use crate::{
         ClientId, ClientMessage, CompletionProvenance, CompletionRequest, CompletionResultSet,
         CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata,
         LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
-        LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParsePolicy,
+        LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParseInputEdit, ParsePolicy,
         ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
         SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
@@ -219,7 +219,7 @@ where
             // becomes required.
             update = parse_coordinator.next_update() => {
                 if let Some(update) = update {
-                    if let Some(set) = update.decoration_update {
+                    for set in update.decoration_updates {
                         codec
                             .write_server_message(&mut stream, &ServerMessage::DecorationSet(set))
                             .await?;
@@ -325,9 +325,9 @@ where
                 let target_document =
                     document_for_message(document_id, &document, &workspace).await;
                 let analysis_delta = document_analysis_delta(&operation);
-                let response = {
+                let (response, parse_input) = {
                     let mut document = target_document.lock().await;
-                    document.apply_edit(
+                    document.apply_edit_with_parse_input(
                         document_id,
                         client_id,
                         lease_id,
@@ -337,9 +337,12 @@ where
                     )
                 };
                 codec.write_server_message(&mut stream, &response).await?;
-                if let ServerMessage::EditAck {
-                    confirmed_version, ..
-                } = response
+                if let (
+                    ServerMessage::EditAck {
+                        confirmed_version, ..
+                    },
+                    Some(parse_input),
+                ) = (response, parse_input)
                 {
                     if matches!(
                         behavior_decision,
@@ -372,7 +375,7 @@ where
                         &parse_coordinator,
                         client_id,
                         document_id,
-                        byte_start,
+                        parse_input,
                     )
                     .await
                     {
@@ -429,9 +432,9 @@ where
                 let target_document =
                     document_for_message(document_id, &document, &workspace).await;
                 let analysis_delta = document_analysis_delta(&operation);
-                let response = {
+                let (response, parse_input) = {
                     let mut document = target_document.lock().await;
-                    document.apply_edit(
+                    document.apply_edit_with_parse_input(
                         document_id,
                         client_id,
                         lease_id,
@@ -441,9 +444,12 @@ where
                     )
                 };
                 codec.write_server_message(&mut stream, &response).await?;
-                if let ServerMessage::EditAck {
-                    confirmed_version, ..
-                } = response
+                if let (
+                    ServerMessage::EditAck {
+                        confirmed_version, ..
+                    },
+                    Some(parse_input),
+                ) = (response, parse_input)
                 {
                     if matches!(
                         behavior_decision,
@@ -476,7 +482,7 @@ where
                         &parse_coordinator,
                         client_id,
                         document_id,
-                        byte_start,
+                        parse_input,
                     )
                     .await
                     {
@@ -1978,7 +1984,7 @@ async fn refresh_native_syntax_after_edit(
     parse_coordinator: &ParseCoordinator,
     client_id: ClientId,
     document_id: DocumentId,
-    edit_start: u64,
+    accepted_edit: ParseInputEdit,
 ) -> Result<(), RuntimeDiagnostic> {
     let (metadata, document) = {
         let workspace = workspace.lock().await;
@@ -1990,10 +1996,6 @@ async fn refresh_native_syntax_after_edit(
         };
         (metadata, document)
     };
-    let text = document.lock().await.text();
-    if text.is_empty() {
-        return Ok(());
-    }
     let runtime = runtime_generation.current().await;
     let Some((meta, policy)) = runtime
         .service
@@ -2001,20 +2003,27 @@ async fn refresh_native_syntax_after_edit(
     else {
         return Ok(());
     };
-    let half_window = policy.max_window_bytes / 2;
-    let start = edit_start.saturating_sub(half_window);
-    let end = start
-        .saturating_add(policy.max_window_bytes)
-        .min(text.len() as u64);
-    schedule_parse_window(
+    let window = document
+        .lock()
+        .await
+        .parse_window_after_edit(&meta.package_prefix, &meta.mode_id, policy, accepted_edit)
+        .map_err(|message| {
+            RuntimeDiagnostic::error(
+                "clay.parse.window_failed",
+                format!("Parse window failed: {message}"),
+            )
+        })?;
+    let Some(window) = window else {
+        return Ok(());
+    };
+    parse_coordinator.record_native_edit_accepted(metadata.document_id, metadata.version);
+    schedule_parse_snapshot(
         parse_coordinator,
         &metadata,
-        &text,
         behavior.lock().await.version(),
-        &meta.package_prefix,
-        &meta.mode_id,
         policy,
-        ParseByteRange::new(start, end),
+        window,
+        Some(accepted_edit),
     )?;
     Ok(())
 }
@@ -2044,8 +2053,6 @@ async fn schedule_open_parse(
     )
 }
 
-const NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES: usize = 256;
-
 #[allow(clippy::too_many_arguments)]
 fn schedule_parse_window(
     parse_coordinator: &ParseCoordinator,
@@ -2074,53 +2081,76 @@ fn schedule_parse_window(
         return Ok(None);
     }
 
+    let prefix = &text[..window_start];
+    let base_line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u64;
+    let base_column = prefix
+        .rsplit_once('\n')
+        .map_or(prefix.len(), |(_, trailing)| trailing.len()) as u64;
     let window = ParseWindowSnapshot {
         document_id: metadata.document_id,
         document_version: metadata.version,
         package_prefix: package_prefix.to_string(),
         mode_id: mode_id.to_string(),
+        window_id: window_start as u64,
         byte_start: window_start as u64,
         byte_end: window_end as u64,
-        base_line: text[..window_start]
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count() as u64,
+        base_line,
+        base_column,
+        incremental_edit: false,
         text: text[window_start..window_end].to_string(),
     };
 
-    parse_coordinator.cancel_document_handler_tasks(metadata.document_id, package_prefix, mode_id);
-    let mut chunk_start = window_start;
-    while chunk_start < window_end {
-        let mut chunk_end = (chunk_start + NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES).min(window_end);
-        while !text.is_char_boundary(chunk_end) {
-            chunk_end -= 1;
-        }
-        let viewport = ParseByteRange::new(chunk_start as u64, chunk_end as u64);
-        let request = ParseScheduleRequest {
-            document_id: metadata.document_id,
-            document_version: metadata.version,
-            behavior_version,
-            package_prefix: package_prefix.to_string(),
-            mode_id: mode_id.to_string(),
-            viewport,
-            invalidated_ranges: vec![viewport],
-        };
-        match parse_coordinator.schedule_parse_with_windows(
-            request,
-            vec![window.clone()],
-            Some(policy),
-        ) {
-            Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => {}
-            Err(error) => {
-                return Err(RuntimeDiagnostic::error(
-                    "clay.parse.viewport_activation_failed",
-                    format!("Viewport parse scheduling failed: {error:?}"),
-                ));
-            }
-        }
-        chunk_start = chunk_end;
+    schedule_parse_snapshot(
+        parse_coordinator,
+        metadata,
+        behavior_version,
+        policy,
+        window,
+        None,
+    )
+}
+
+fn schedule_parse_snapshot(
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    behavior_version: u64,
+    policy: ParsePolicy,
+    window: ParseWindowSnapshot,
+    accepted_edit: Option<ParseInputEdit>,
+) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
+    let viewport = ParseByteRange::new(window.byte_start, window.byte_end);
+    let invalidated_ranges =
+        accepted_edit.map_or_else(|| vec![viewport], |edit| vec![edited_range(edit, viewport)]);
+    let request = ParseScheduleRequest {
+        document_id: metadata.document_id,
+        document_version: metadata.version,
+        behavior_version,
+        package_prefix: window.package_prefix.clone(),
+        mode_id: window.mode_id.clone(),
+        viewport,
+        invalidated_ranges,
+        accepted_edit,
+    };
+    match parse_coordinator.schedule_parse_with_windows(request, vec![window], Some(policy)) {
+        Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
+        Err(error) => Err(RuntimeDiagnostic::error(
+            "clay.parse.viewport_activation_failed",
+            format!("Viewport parse scheduling failed: {error:?}"),
+        )),
     }
-    Ok(None)
+}
+
+fn edited_range(edit: ParseInputEdit, window: ParseByteRange) -> ParseByteRange {
+    let start = edit.start_byte.clamp(window.start, window.end);
+    let mut end = edit.new_end_byte.clamp(start, window.end);
+    if start == end {
+        if end < window.end {
+            end += 1;
+        } else if start > window.start {
+            return ParseByteRange::new(start - 1, start);
+        }
+    }
+    ParseByteRange::new(start, end)
 }
 
 fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
@@ -3798,7 +3828,9 @@ await loadPackage("@clay/markdown");"#,
             .unwrap()
             .unwrap();
         let set = update
-            .decoration_update
+            .decoration_updates
+            .into_iter()
+            .next()
             .expect("background markdown decorations");
         assert_eq!(set.document_id, 2);
         assert!(
@@ -3817,7 +3849,7 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
-    async fn native_viewport_chunks_decorate_all_first_party_languages_beyond_first_lines() {
+    async fn native_windows_schedule_once_for_each_first_party_language() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let config_root = temp_workspace("viewport-native-decoration");
         fs::write(
@@ -3911,47 +3943,25 @@ await loadPackage("@clay/markdown");"#,
                 super::ParseByteRange::new(0, text.len() as u64),
             )
             .expect("opening viewport schedules");
-            let opening_end = text.len().min(policy.max_window_bytes as usize);
-            let chunk_count = opening_end.div_ceil(super::NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES);
-            let mut opening_ranges = Vec::with_capacity(chunk_count);
-            let mut latest_decorated_byte = 0;
-            for _ in 0..chunk_count {
-                let update = tokio::select! {
-                    update = coordinator.next_update() => update.expect("opening native update"),
-                    diagnostic = coordinator.next_diagnostic() => {
-                        panic!("opening viewport parse failed: {:?}", diagnostic)
-                    }
-                };
-                let set = update.decoration_update.expect("opening decorations");
-                latest_decorated_byte = latest_decorated_byte.max(
-                    set.spans
-                        .iter()
-                        .map(|span| span.byte_end)
-                        .max()
-                        .unwrap_or_default(),
-                );
-                opening_ranges.push((set.viewport_byte_start, set.viewport_byte_end));
-            }
-            opening_ranges.sort_unstable();
+            let opening_end = text.len().min(policy.max_window_bytes as usize) as u64;
+            let update = tokio::select! {
+                update = coordinator.next_update() => update.expect("opening native update"),
+                diagnostic = coordinator.next_diagnostic() => {
+                    panic!("opening viewport parse failed: {:?}", diagnostic)
+                }
+            };
             assert_eq!(
-                opening_ranges.first().map(|range| range.0),
-                Some(0),
+                (update.viewport.start, update.viewport.end),
+                (0, opening_end),
                 "{path}"
             );
-            assert_eq!(
-                opening_ranges.last().map(|range| range.1),
-                Some(opening_end as u64),
-                "{path}"
-            );
+            assert!(!update.decoration_updates.is_empty(), "{path}");
             assert!(
-                opening_ranges
-                    .windows(2)
-                    .all(|ranges| ranges[0].1 == ranges[1].0),
+                update
+                    .decoration_updates
+                    .iter()
+                    .any(|set| !set.spans.is_empty()),
                 "{path}"
-            );
-            assert!(
-                latest_decorated_byte > opening_end as u64 * 3 / 4,
-                "{path} decorations must extend beyond the first few lines"
             );
 
             let start = text.find(start_marker).expect("middle line marker") as u64;
@@ -3966,29 +3976,26 @@ await loadPackage("@clay/markdown");"#,
                 super::ParseByteRange::new(start, text.len() as u64),
             )
             .expect("nonzero viewport schedules");
-            let nonzero_bytes = (text.len() as u64 - start).min(policy.max_window_bytes) as usize;
-            let chunk_count = nonzero_bytes.div_ceil(super::NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES);
-            let mut saw_decorations = false;
-            for _ in 0..chunk_count {
-                let update = tokio::select! {
-                    update = coordinator.next_update() => update.expect("nonzero native update"),
-                    diagnostic = coordinator.next_diagnostic() => {
-                        panic!("nonzero viewport parse failed: {:?}", diagnostic)
-                    }
-                };
-                let set = update
-                    .decoration_update
-                    .expect("nonzero viewport decorations");
-                assert!(set.viewport_byte_start >= start, "{path}");
-                saw_decorations |= !set.spans.is_empty();
-                assert!(
-                    set.spans
-                        .iter()
-                        .all(|span| span.byte_start >= set.viewport_byte_start),
-                    "{path}"
-                );
-            }
-            assert!(saw_decorations, "{path}");
+            let update = tokio::select! {
+                update = coordinator.next_update() => update.expect("nonzero native update"),
+                diagnostic = coordinator.next_diagnostic() => {
+                    panic!("nonzero viewport parse failed: {:?}", diagnostic)
+                }
+            };
+            assert_eq!(update.viewport.start, start, "{path}");
+            assert_eq!(
+                update.viewport.end,
+                (start + policy.max_window_bytes).min(text.len() as u64),
+                "{path}"
+            );
+            assert!(!update.decoration_updates.is_empty(), "{path}");
+            assert!(
+                update.decoration_updates.iter().all(|set| set
+                    .spans
+                    .iter()
+                    .all(|span| span.byte_start >= set.viewport_byte_start)),
+                "{path}"
+            );
         }
 
         let _ = fs::remove_file(config_root.join("init.js"));
@@ -4055,34 +4062,20 @@ await loadPackage("@clay/markdown");"#,
         );
 
         let native_window = crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES;
-        let chunk_count = native_window.div_ceil(super::NATIVE_DECORATION_VIEWPORT_CHUNK_BYTES);
-        let mut ranges = Vec::with_capacity(chunk_count);
-        let mut saw_heading = false;
-        for _ in 0..chunk_count {
-            let update = timeout(Duration::from_secs(1), coordinator.next_update())
-                .await
-                .unwrap()
-                .unwrap();
-            let set = update.decoration_update.expect("background decorations");
-            assert_eq!(set.document_id, 2);
-            assert!(
-                set.spans
-                    .iter()
-                    .all(|span| span.byte_end <= native_window as u64)
-            );
-            saw_heading |= set
-                .spans
-                .iter()
-                .any(|span| span.token_type == TokenType::Heading1);
-            ranges.push((set.viewport_byte_start, set.viewport_byte_end));
-        }
-        ranges.sort_unstable();
-        assert_eq!(ranges.first().map(|range| range.0), Some(0));
+        let update = timeout(Duration::from_secs(1), coordinator.next_update())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.document_id, 2);
         assert_eq!(
-            ranges.last().map(|range| range.1),
-            Some(native_window as u64)
+            (update.viewport.start, update.viewport.end),
+            (0, native_window as u64)
         );
-        assert!(saw_heading);
+        assert!(update.decoration_updates.iter().any(|set| {
+            set.spans
+                .iter()
+                .any(|span| span.token_type == TokenType::Heading1)
+        }));
     }
 
     #[tokio::test]
