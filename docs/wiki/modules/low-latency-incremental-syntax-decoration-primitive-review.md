@@ -7,6 +7,8 @@
 - `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`
 - `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md`
 - `plans/057-Syntax-Decoration-Continuity-and-Replacement-Correctness.md`
+- `decision-logs/2026-07-19-2238-exact-range-provisional-decoration-replacement.md`
+- `plans/058-Exact-Range-Provisional-Decoration-Replacement.md`
 - `src/protocol/parse.rs`
 - `src/protocol/decorations.rs`
 - `src/server/document.rs`
@@ -123,6 +125,8 @@ Plan 056 adds no caller-controlled Clay JS capability. `ParseInputEdit`, stable 
 
 Plan 057 likewise adds no caller-controlled Clay JS capability. `replacement_ranges` (UTF-8-safe complete chunk grid), same-word narrow-syntax provisional inheritance (`is_completion_word_character` predicate, `same_word_suffix` flag in `interpolate_decoration_span`), and the shared 128-byte replacement chunk grid are compiled correctness internals. They do not receive facade exports, raw ops, custom properties, or configuration keys.
 
+Plan 058 likewise adds no caller-controlled Clay JS capability. `subtract_half_open_range`, `subtract_provisional_chunk`, `coalesce_local_residual`, `coalesce_compatible_spans`, and `decoration_chunk_byte_size` are private editor-surface functions performing exact half-open authoritative viewport subtraction and local provisional residual coalescing. They do not receive facade exports, raw ops, custom properties, or configuration keys.
+
 Existing public package surfaces remain sufficient: [`clay.parse.serverRegisterParseHandler`](../../reference/clay-js-api/parse/server-register-parse-handler.md) declares a bounded server parser, [`clay.syntax.serverRegisterSyntaxGrammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) declares validated grammar metadata, and [`clay.decorations.serverPublishDecorations`](../../reference/clay-js-api/decorations/server-publish-decorations.md) publishes inert bounded spans. The parse facade may supply exact accepted-edit metadata to its already registered server-runtime handler, but packages cannot control scheduling, changed-range queries, output chunking, interpolation, or authoritative replacement. Existing provenance, permissions, current-version, and payload validation remain the authority boundary.
 
 `tests/rust_visibility_api_mapping.rs` requires public server Rust items to be mapped in the API inventory or explicitly marked non-JS infrastructure. `tests/clay_js_api_inventory.rs` verifies the existing facade/op/docs/inventory boundaries and rejects Plan 056 and Plan 057 internals as facade exports. No new generated registry entry is needed; the existing registry remains checked for freshness.
@@ -132,6 +136,8 @@ Existing public package surfaces remain sufficient: [`clay.parse.serverRegisterP
 Plan 056 adds no `clay:configuration` surface. The stable-window cap, coalescing, fallback/query rules, payload/cache limits, 128-byte output splitting, and provisional interpolation are correctness and latency invariants, so users and packages cannot tune them through debounce, word-boundary, parse-window, chunk-size, interpolation, or client-parser keys. Existing [`clay.syntax.setSyntaxEnginePreference`](../../reference/clay-js-api/syntax/set-syntax-engine-preference.md) remains the sole relevant user choice: its documented `target`/`tier` selects an already validated engine, not scheduling policy.
 
 Plan 057 adds no `clay:configuration` surface. Complete authoritative replacement chunks (query coverage identical to replacement coverage, UTF-8-safe shared chunk grid), same-word narrow-syntax provisional inheritance (Unicode alphanumeric/underscore extends, whitespace/newline/punctuation stops), and unchanged broad-syntax edge behavior are compiled correctness invariants. No `syntaxSameWordBoundary`, `syntaxReplacementChunkGrid`, `syntaxWordInheritance`, `syntaxChunkQueryCoverage`, `syntaxCompleteReplacement`, or `syntaxUtf8ChunkGrid` key exists.
+
+Plan 058 adds no `clay:configuration` surface. Exact-range authoritative viewport subtraction (split provisional chunks into left/right residuals, install authoritative spans, coalesce compatible adjacent residuals) and bounded residual coalescing are compiled correctness invariants. No `syntaxExactRangeReplacement`, `syntaxProvisionalSubtraction`, `syntaxResidualCoalescing`, `syntaxSubtractionCoalescing`, `syntaxExactRangeSubtraction`, `syntaxProvisionalResidual`, or `syntaxCoalescingStrategy` key exists.
 
 Configuration remains outside keypress, text-edit, edit-acknowledgement, parse, publication, paint, layout, and scroll paths. The configuration reference records rejected hidden names and the API inventory test rejects them from configuration custom properties, facades, ops, inventory, and generated registry. No parser callback or external authority is introduced.
 
@@ -167,6 +173,33 @@ Tests: `tests/syntax_grammar.rs` — `plan057_newline_keeps_unrelated_short_file
 - `first_party_continuity_edits_keep_one_bounded_parse_and_query`: one parser call, one query range, one member per language for all five native descriptors.
 - Manual X11 smoke: TypeScript `greet` + `x` remained function-colored, Enter after declaration left syntax decorated, no all-white newline regression.
 - Criterion: no statistically significant performance change (Rust ~168 µs, TypeScript ~361 µs, TSX ~126 µs, JavaScript ~123 µs, Markdown ~200 µs).
+
+## Plan 058 Exact-Range Provisional Decoration Replacement
+
+Plan 058 (`plans/058-Exact-Range-Provisional-Decoration-Replacement.md`, superseding `decision-logs/2026-07-19-2238-exact-range-provisional-decoration-replacement.md`) fixed a per-letter downstream whiteness defect discovered after Plan 057 completed: the client optimistically shifts retained provisional chunk geometry by `inserted_len` on every edit, but the server re-anchors authoritative chunks to the fixed 128-byte replacement grid, creating an ever-growing gap between the authoritative chunk end and the next retained provisional chunk start — each typed byte exposed one additional undecorated byte in following code.
+
+### Fix: Exact-Range Authoritative Viewport Subtraction
+
+`apply_set` in `src/editor/surface.rs` no longer deletes entire overlapping provisional chunks. Instead:
+
+1. **Subtract**: `subtract_half_open_range` computes the left/right residual byte ranges outside the authoritative viewport and `subtract_provisional_chunk` splits a crossing provisional chunk into left and right `DecorationResidualSide` fragments, preserving spans whose byte ranges lie outside authority.
+2. **Install**: Authoritative spans are inserted inside the authority viewport, replacing any prior overlapping decoration.
+3. **Coalesce**: `coalesce_local_residual` merges fragmented residual chunks with adjacent compatible provisional chunks; `coalesce_compatible_spans` merges adjacent spans with identical kind/token_type/modifiers/scope/font_role/priority/provenance within each chunk.
+
+Source: `src/editor/surface.rs` — `DecorationResidualSide` enum, `subtract_half_open_range`, `subtract_provisional_chunk`, `coalesce_local_residual`, `coalesce_compatible_spans`, `decoration_chunk_byte_size`.
+
+Tests:
+- `tests/syntax_grammar.rs` — `plan058_repeated_comment_edits_do_not_grow_a_shifted_chunk_boundary_gap` (3 repeated insertions before byte 128, zero undecorated boundary bytes throughout), `plan058_first_party_languages_preserve_shifted_boundary_continuity` (5 first-party languages, 3 repeated insertions each).
+- `tests/decoration_transport.rs` — `plan058_empty_authority_after_insertion_preserves_shifted_right_residual`, `plan058_empty_authority_after_deletion_preserves_shifted_right_residual`, `plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry` (128 insert/delete pairs).
+- `src/editor/surface.rs` — `half_open_subtraction_returns_zero_one_or_two_fragments`, `current_authority_replaces_only_its_viewport_and_coalesces_right_residual`, `authoritative_viewport_splits_crossing_provisional_span`, `repeated_authority_keeps_local_residual_cache_bounded` (512 cycles, exactly 2 chunks/2 spans, retained bytes ≤ `SYNTAX_CACHE_BUDGET_BYTES`), `authoritative_syntax_preserves_other_package_and_semantic_provisional_chunks`.
+- `tests/editor_performance_invariants.rs` — `exact_range_decoration_replacement_stays_off_edit_and_paint_hot_paths` (subtraction/coalescing absent from `apply_edit` and `paint` bodies).
+
+### Verification
+
+- Parser/query/member metrics unchanged from Plan 057: one parser call, one query range, one member per language; queried bytes remain Rust 20, TypeScript 26, TSX 26, JavaScript 26, Markdown 17.
+- `first_party_authoritative_replacement` Criterion benchmark: one exact authority apply plus local residual coalescing measured 1.8150 µs median (95% interval 1.6250–1.9959 µs, 20 samples).
+- Five-language incremental estimates: Rust 152.39 µs, TypeScript 344.39 µs, TSX 125.50 µs, JavaScript 123.55 µs, Markdown 199.49 µs. No statistically significant regression.
+- Manual X11 Linux smoke: 150-byte Rust line comment before decorated code, 8 per-letter insertions inside the comment, then Backspace and Enter — all downstream Rust decoration retained with no per-letter white peeling.
 
 ## Rejected Alternatives
 

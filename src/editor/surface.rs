@@ -213,6 +213,12 @@ struct EditorDecorationChunk {
     provisional: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecorationResidualSide {
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EditorDecorationState {
     document_id: DocumentId,
@@ -257,18 +263,37 @@ impl EditorDecorationState {
         let key = set.chunk_key(package_prefix);
         let viewport_start = set.viewport_byte_start;
         let viewport_end = set.viewport_byte_end;
-        self.retain_chunks(|chunk| {
-            chunk.key != key
-                && !(chunk.provisional
-                    && chunk.key.package_prefix == key.package_prefix
-                    && chunk.key.kind == key.kind
-                    && ranges_intersect(
-                        chunk.key.byte_start,
-                        chunk.key.byte_end,
-                        key.byte_start,
-                        key.byte_end,
-                    ))
-        });
+        let mut retained = Vec::with_capacity(self.chunks.len().saturating_add(2));
+        let mut residuals = Vec::new();
+        for chunk in self.chunks.drain(..) {
+            if chunk.key == key {
+                continue;
+            }
+            if chunk.provisional
+                && chunk.key.package_prefix == key.package_prefix
+                && chunk.key.kind == key.kind
+                && ranges_intersect(
+                    chunk.key.byte_start,
+                    chunk.key.byte_end,
+                    key.byte_start,
+                    key.byte_end,
+                )
+            {
+                residuals.extend(subtract_provisional_chunk(
+                    chunk,
+                    key.byte_start,
+                    key.byte_end,
+                ));
+            } else {
+                retained.push(chunk);
+            }
+        }
+        for (residual, side) in residuals {
+            coalesce_local_residual(&mut retained, residual, side);
+        }
+        self.chunks = retained;
+        self.retained_bytes = self.chunks.iter().map(|chunk| chunk.byte_size).sum();
+
         if !set.spans.is_empty() {
             let last_access = self.next_access();
             self.retained_bytes = self.retained_bytes.saturating_add(bytes);
@@ -526,9 +551,183 @@ impl EditorDiagnosticState {
     }
 }
 
+fn subtract_half_open_range(
+    start: u64,
+    end: u64,
+    removed_start: u64,
+    removed_end: u64,
+) -> [Option<(u64, u64)>; 2] {
+    if !ranges_intersect(start, end, removed_start, removed_end) {
+        return [(start < end).then_some((start, end)), None];
+    }
+    [
+        (start < removed_start).then_some((start, end.min(removed_start))),
+        (end > removed_end).then_some((start.max(removed_end), end)),
+    ]
+}
+
+fn subtract_provisional_chunk(
+    chunk: EditorDecorationChunk,
+    authority_start: u64,
+    authority_end: u64,
+) -> Vec<(EditorDecorationChunk, DecorationResidualSide)> {
+    let chunk_ranges = subtract_half_open_range(
+        chunk.key.byte_start,
+        chunk.key.byte_end,
+        authority_start,
+        authority_end,
+    );
+    let span_fragments = chunk
+        .spans
+        .iter()
+        .flat_map(|span| {
+            subtract_half_open_range(
+                span.byte_start,
+                span.byte_end,
+                authority_start,
+                authority_end,
+            )
+            .into_iter()
+            .flatten()
+            .map(|(byte_start, byte_end)| {
+                let mut fragment = span.clone();
+                fragment.byte_start = byte_start;
+                fragment.byte_end = byte_end;
+                fragment
+            })
+        })
+        .collect::<Vec<_>>();
+
+    chunk_ranges
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, range)| {
+            let (byte_start, byte_end) = range?;
+            let spans = span_fragments
+                .iter()
+                .filter(|span| span.byte_start >= byte_start && span.byte_end <= byte_end)
+                .cloned()
+                .collect::<Vec<_>>();
+            if spans.is_empty() {
+                return None;
+            }
+            let mut key = chunk.key.clone();
+            key.byte_start = byte_start;
+            key.byte_end = byte_end;
+            let byte_size = decoration_chunk_byte_size(&key, &spans).unwrap_or(chunk.byte_size);
+            Some((
+                EditorDecorationChunk {
+                    key,
+                    spans,
+                    byte_size,
+                    last_access: chunk.last_access,
+                    provisional: true,
+                },
+                if index == 0 {
+                    DecorationResidualSide::Left
+                } else {
+                    DecorationResidualSide::Right
+                },
+            ))
+        })
+        .collect()
+}
+
+fn coalesce_local_residual(
+    chunks: &mut Vec<EditorDecorationChunk>,
+    mut residual: EditorDecorationChunk,
+    side: DecorationResidualSide,
+) {
+    let candidate = chunks
+        .iter()
+        .enumerate()
+        .filter(|(_, chunk)| {
+            chunk.provisional
+                && chunk.key.document_id == residual.key.document_id
+                && chunk.key.document_version == residual.key.document_version
+                && chunk.key.package_prefix == residual.key.package_prefix
+                && chunk.key.kind == residual.key.kind
+                && match side {
+                    DecorationResidualSide::Left => {
+                        chunk.key.byte_start <= residual.key.byte_start
+                            && chunk.key.byte_end >= residual.key.byte_start
+                    }
+                    DecorationResidualSide::Right => {
+                        chunk.key.byte_start <= residual.key.byte_end
+                            && chunk.key.byte_end >= residual.key.byte_end
+                    }
+                }
+        })
+        .min_by_key(|(_, chunk)| match side {
+            DecorationResidualSide::Left => residual.key.byte_start - chunk.key.byte_start,
+            DecorationResidualSide::Right => chunk.key.byte_end - residual.key.byte_end,
+        })
+        .map(|(index, _)| index);
+
+    if let Some(index) = candidate {
+        let neighbor = chunks.remove(index);
+        residual.key.byte_start = residual.key.byte_start.min(neighbor.key.byte_start);
+        residual.key.byte_end = residual.key.byte_end.max(neighbor.key.byte_end);
+        residual.last_access = residual.last_access.max(neighbor.last_access);
+        residual.spans.extend(neighbor.spans);
+        coalesce_compatible_spans(&mut residual.spans);
+        if let Some(byte_size) = decoration_chunk_byte_size(&residual.key, &residual.spans) {
+            residual.byte_size = byte_size;
+        } else {
+            residual.byte_size = residual.byte_size.saturating_add(neighbor.byte_size);
+        }
+    }
+    chunks.push(residual);
+}
+
+fn coalesce_compatible_spans(spans: &mut Vec<DecorationSpan>) {
+    spans.sort_by_key(|span| (span.byte_start, span.byte_end));
+    let mut coalesced: Vec<DecorationSpan> = Vec::with_capacity(spans.len());
+    for span in spans.drain(..) {
+        if let Some(previous) = coalesced.last_mut()
+            && previous.byte_end >= span.byte_start
+            && previous.kind == span.kind
+            && previous.token_type == span.token_type
+            && previous.modifiers == span.modifiers
+            && previous.scope == span.scope
+            && previous.font_role == span.font_role
+            && previous.priority == span.priority
+            && previous.provenance == span.provenance
+        {
+            previous.byte_end = previous.byte_end.max(span.byte_end);
+        } else {
+            coalesced.push(span);
+        }
+    }
+    *spans = coalesced;
+}
+
+fn decoration_chunk_byte_size(key: &DecorationChunkKey, spans: &[DecorationSpan]) -> Option<usize> {
+    rkyv::to_bytes::<rkyv::rancor::Error>(&DecorationSet {
+        document_id: key.document_id,
+        document_version: key.document_version,
+        package_prefix: key.package_prefix.clone(),
+        kind: key.kind,
+        viewport_byte_start: key.byte_start,
+        viewport_byte_end: key.byte_end,
+        spans: spans.to_vec(),
+    })
+    .ok()
+    .map(|bytes| bytes.len())
+}
+
 fn ranges_intersect(left_start: u64, left_end: u64, right_start: u64, right_end: u64) -> bool {
     left_start < right_end && left_end > right_start
 }
+
+/// Tuple shape returned by [`EditorSurface::visible_text_style_runs_for_test`]:
+/// `(range, font_role, [bold, italic, underline, strike], color)`.
+pub type VisibleTextStyleRunForTest = (
+    Range<usize>,
+    crate::protocol::FontRole,
+    [bool; 4],
+    Option<Color>,
+);
 
 fn normalize_visible_text_style_runs(
     decorations: &EditorDecorationState,
@@ -1074,6 +1273,36 @@ impl EditorSurface {
 
     pub fn visible_decoration_paint_ranges_for_test(&self) -> Vec<(Range<usize>, Color)> {
         self.visible_decoration_ranges(&self.visible_snapshot())
+    }
+
+    /// Normalized presentation runs for the current visible snapshot:
+    /// `(range, font_role, [bold, italic, underline, strike], color)`.
+    /// Integration tests assert rendered styling through this seam instead of
+    /// raw token emission.
+    pub fn visible_text_style_runs_for_test(&self) -> Vec<VisibleTextStyleRunForTest> {
+        normalize_visible_text_style_runs(
+            &self.decorations,
+            &self.document,
+            self.buffer.document_end_byte(),
+            &self.visible_snapshot(),
+            self.document_font_role(),
+            self.theme,
+        )
+        .into_iter()
+        .map(|run| {
+            (
+                run.range,
+                run.font_role,
+                [
+                    run.attributes.bold,
+                    run.attributes.italic,
+                    run.attributes.underline,
+                    run.attributes.strike,
+                ],
+                run.color,
+            )
+        })
+        .collect()
     }
 
     pub fn decoration_span_count(&self) -> usize {
@@ -2893,10 +3122,10 @@ mod tests {
 
     use super::{
         CARET_WIDTH, Color, EditorCommand, EditorSurface, TEXT_INSET,
-        normalize_visible_text_style_runs,
+        normalize_visible_text_style_runs, subtract_half_open_range,
     };
     use crate::editor::layout::LayoutCacheKey;
-    use crate::perf::metrics::PerfRecorder;
+    use crate::perf::{budgets::SYNTAX_CACHE_BUDGET_BYTES, metrics::PerfRecorder};
     use crate::protocol::{
         ActiveTypography, BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration,
         CompletionItemTextFormat, CompletionTrigger, DecorationKind, DecorationProvenance,
@@ -3019,6 +3248,45 @@ mod tests {
         assert_eq!(runs[0].font_role, crate::protocol::FontRole::Proportional);
         assert_eq!(runs[1].range, 5..9);
         assert_eq!(runs[1].font_role, crate::protocol::FontRole::Monospace);
+    }
+
+    #[test]
+    fn narrow_capture_priority_outranks_broad_prose_at_overlap() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "see link now".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        let broad = syntax_span(0, 12, TokenType::Paragraph);
+        assert_eq!(broad.priority, 70);
+        let mut narrow = syntax_span(4, 8, TokenType::Link);
+        narrow.priority = 80;
+        // Broad span first: priority, not emission order, must decide.
+        assert!(editor.apply_decoration_set(decoration_set(1, 0, 12, vec![broad, narrow])));
+
+        let runs = normalized_runs(&editor);
+        let link_style =
+            editor
+                .theme
+                .style_for(DecorationKind::Syntax, TokenType::Link, Modifiers::NONE);
+        let link_run = runs
+            .iter()
+            .find(|run| run.range == (4..8))
+            .expect("overlap resolves into its own run");
+        assert_eq!(link_run.color, Some(link_style.color));
+        let prose_style = editor.theme.style_for(
+            DecorationKind::Syntax,
+            TokenType::Paragraph,
+            Modifiers::NONE,
+        );
+        let prose_run = runs
+            .iter()
+            .find(|run| run.range == (0..4))
+            .expect("broad prose run remains outside the overlap");
+        assert_eq!(prose_run.color, Some(prose_style.color));
     }
 
     #[test]
@@ -3289,7 +3557,22 @@ mod tests {
     }
 
     #[test]
-    fn current_authoritative_chunks_replace_overlapping_provisional_ranges() {
+    fn half_open_subtraction_returns_zero_one_or_two_fragments() {
+        assert_eq!(subtract_half_open_range(0, 8, 0, 8), [None, None]);
+        assert_eq!(subtract_half_open_range(0, 9, 0, 8), [None, Some((8, 9))]);
+        assert_eq!(
+            subtract_half_open_range(0, 20, 8, 12),
+            [Some((0, 8)), Some((12, 20))]
+        );
+        assert_eq!(
+            subtract_half_open_range(2, 4, 0, 2),
+            [Some((2, 4)), None],
+            "validated UTF-8 boundaries are preserved rather than shifted"
+        );
+    }
+
+    #[test]
+    fn current_authority_replaces_only_its_viewport_and_coalesces_right_residual() {
         let mut editor = EditorSurface::default();
         assert!(editor.decorations.apply_set(decoration_set(
             1,
@@ -3315,12 +3598,160 @@ mod tests {
                 .apply_set(decoration_set(2, 0, 8, Vec::new()))
         );
         assert_eq!(editor.decoration_span_count(), 1);
+        assert_eq!(editor.decorations.chunks.len(), 1);
+        assert_eq!(
+            (
+                editor.decorations.chunks[0].key.byte_start,
+                editor.decorations.chunks[0].key.byte_end,
+            ),
+            (8, 17)
+        );
+        assert_eq!(
+            (
+                editor.decorations.chunks[0].spans[0].byte_start,
+                editor.decorations.chunks[0].spans[0].byte_end,
+            ),
+            (8, 17)
+        );
+    }
+
+    #[test]
+    fn authoritative_viewport_splits_crossing_provisional_span() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            20,
+            vec![syntax_span(0, 20, TokenType::Comment)],
+        )));
+        assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+            byte_offset: 10,
+            text: "x".to_string(),
+        }));
+        editor.decorations.confirm_version(1, 2);
+
+        assert!(editor.decorations.apply_set(decoration_set(
+            2,
+            8,
+            12,
+            vec![syntax_span(8, 12, TokenType::Keyword)],
+        )));
+
+        let mut ranges = editor
+            .decorations
+            .chunks
+            .iter()
+            .flat_map(|chunk| chunk.spans.iter())
+            .map(|span| (span.byte_start, span.byte_end, span.token_type))
+            .collect::<Vec<_>>();
+        ranges.sort_by_key(|range| range.0);
+        assert_eq!(
+            ranges,
+            vec![
+                (0, 8, TokenType::Comment),
+                (8, 12, TokenType::Keyword),
+                (12, 21, TokenType::Comment),
+            ]
+        );
+    }
+
+    #[test]
+    fn authoritative_syntax_preserves_other_package_and_semantic_provisional_chunks() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            8,
+            vec![syntax_span(0, 8, TokenType::Comment)],
+        )));
+        let mut other_package =
+            decoration_set(1, 0, 8, vec![syntax_span(0, 8, TokenType::Variable)]);
+        other_package.package_prefix = "other".to_string();
+        other_package.spans[0].provenance.package_prefix = "other".to_string();
+        assert!(editor.decorations.apply_set(other_package));
+        let mut semantic = decoration_set(1, 0, 8, vec![syntax_span(0, 8, TokenType::Variable)]);
+        semantic.kind = DecorationKind::Semantic;
+        semantic.spans[0].kind = DecorationKind::Semantic;
+        assert!(editor.decorations.apply_set(semantic));
+        assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+            byte_offset: 0,
+            text: "x".to_string(),
+        }));
+        editor.decorations.confirm_version(1, 2);
+
         assert!(
             editor
                 .decorations
-                .apply_set(decoration_set(2, 8, 16, Vec::new()))
+                .apply_set(decoration_set(2, 0, 8, Vec::new()))
         );
-        assert_eq!(editor.decoration_span_count(), 0);
+
+        assert!(editor.decorations.chunks.iter().any(|chunk| {
+            chunk.key.package_prefix == "other" && chunk.key.kind == DecorationKind::Syntax
+        }));
+        assert!(
+            editor
+                .decorations
+                .chunks
+                .iter()
+                .any(|chunk| chunk.key.kind == DecorationKind::Semantic)
+        );
+    }
+
+    #[test]
+    fn repeated_authority_keeps_local_residual_cache_bounded() {
+        let mut editor = EditorSurface::default();
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            0,
+            8,
+            vec![syntax_span(0, 8, TokenType::Comment)],
+        )));
+        assert!(editor.decorations.apply_set(decoration_set(
+            1,
+            8,
+            16,
+            vec![syntax_span(8, 16, TokenType::Comment)],
+        )));
+
+        for version in 2..=513 {
+            assert!(editor.decorations.apply_edit(&EditOperation::Insert {
+                byte_offset: 4,
+                text: "x".to_string(),
+            }));
+            editor.decorations.confirm_version(1, version);
+            assert!(editor.decorations.apply_set(decoration_set(
+                version,
+                0,
+                8,
+                vec![syntax_span(0, 8, TokenType::Comment)],
+            )));
+            assert_eq!(editor.decorations.chunks.len(), 2, "version {version}");
+            assert_eq!(editor.decorations.span_count(), 2, "version {version}");
+            assert_eq!(
+                editor
+                    .decorations
+                    .chunks
+                    .iter()
+                    .filter(|chunk| chunk.provisional)
+                    .count(),
+                1,
+                "version {version}"
+            );
+            assert_eq!(
+                editor.decorations.retained_bytes,
+                editor
+                    .decorations
+                    .chunks
+                    .iter()
+                    .map(|chunk| chunk.byte_size)
+                    .sum::<usize>(),
+                "version {version}: cache accounting"
+            );
+            assert!(
+                editor.decorations.retained_bytes <= SYNTAX_CACHE_BUDGET_BYTES,
+                "version {version}: cache budget"
+            );
+        }
     }
 
     #[test]
@@ -5348,9 +5779,11 @@ mod tests {
             Color::from_rgba8(0x61, 0xaf, 0xef, 0x55),
             "default Syntax family baseline"
         );
+        // Plan 059 task 3 revised the prose palette from uniform muted green
+        // to differentiated heading hues (Heading1 is red, bold by default).
         assert_family_color(
             "markup.heading.1",
-            Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
+            Color::from_rgba8(0xff, 0x4d, 0x6d, 0x55),
             "markup.* Syntax",
         );
         // Semantic uses the same TokenType family table as Syntax so LSP

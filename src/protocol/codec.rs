@@ -247,6 +247,26 @@ impl Error for CodecError {
     }
 }
 
+/// Aborts a framed read-pump task when the owning connection loop exits, so a
+/// split read half never outlives its connection. Connection loops select only
+/// over channels because `AsyncReadExt::read_exact` is not cancellation-safe:
+/// cancelling an in-progress framed read would strand partial frame bytes and
+/// desynchronize the stream.
+#[derive(Debug)]
+pub(crate) struct ReadPumpGuard(tokio::task::AbortHandle);
+
+impl ReadPumpGuard {
+    pub(crate) fn new(handle: tokio::task::AbortHandle) -> Self {
+        Self(handle)
+    }
+}
+
+impl Drop for ReadPumpGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Codec, CodecError, DEFAULT_MAX_FRAME_SIZE, LENGTH_PREFIX_BYTES};

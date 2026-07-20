@@ -227,6 +227,47 @@ fn plan057_linux_syntax_continuity_smoke_and_measurements_are_recorded() {
 }
 
 #[test]
+fn plan058_linux_exact_range_smoke_and_measurements_are_recorded() {
+    let launch_doc = launch_smoke_doc();
+    let performance_doc = performance_doc();
+
+    for expected in [
+        "Plan 058 exact-range replacement Linux smoke (2026-07-20)",
+        "cargo run -- smoke-gui --config-fixture language-packages --profile-perf",
+        "Eight letters were typed one at a time inside that comment",
+        "no one-byte-per-keypress white gap",
+        "Backspace and Enter",
+        "plan058_first_party_languages_preserve_shifted_boundary_continuity",
+        "plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry",
+        "repeated_authority_keeps_local_residual_cache_bounded",
+        "Temporary fixture text was restored",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "Plan 058 launch record must contain `{expected}`"
+        );
+    }
+
+    for expected in [
+        "Plan 058 exact-range replacement Linux verification (2026-07-20)",
+        "one parser call, one query range, and one emitted member",
+        "20 queried bytes for Rust",
+        "26 for TypeScript/TSX/JavaScript",
+        "17 for Markdown",
+        "512 authoritative applications",
+        "first_party_authoritative_replacement/apply_and_coalesce_residual",
+        "1.8150 µs",
+        "no statistically significant regression",
+        "machine-local and advisory",
+    ] {
+        assert!(
+            performance_doc.contains(expected),
+            "Plan 058 performance record must contain `{expected}`"
+        );
+    }
+}
+
+#[test]
 fn phase18_16_tiered_syntax_smoke_documents_engine_selection() {
     let launch_doc = launch_smoke_doc();
 
@@ -641,8 +682,9 @@ fn phase19_code_wiki_documents_open_dialog_path() {
     assert!(
         markdown.contains("Selected-file open now follows one generic path")
             && markdown.contains("`schedule_open_parse` returns immediately after enqueue")
-            && markdown
-                .contains("Tier 1 grammar contribution caps selected native windows at `4 KiB`"),
+            && markdown.contains(
+                "query/decor authority remains capped to the existing 4 KiB viewport output budget"
+            ),
         "Markdown package wiki must document selected-file activation and hot-path boundaries"
     );
 }

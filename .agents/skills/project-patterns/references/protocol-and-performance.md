@@ -41,8 +41,9 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 - Newer syntax versions cancel or coalesce superseded work, but the latest edit remains eligible immediately; do not use whitespace-only or idle-only parse scheduling.
 - Client decoration state may interpolate inert spans through optimistic edits for visual continuity, while server-issued current-version syntax remains authoritative. Existing narrow syntax may inherit appended Unicode alphanumeric/underscore suffixes; whitespace, newline, punctuation, and structural edits end narrow-token inheritance.
 - Every authoritative decoration chunk must contain complete capture state for exactly the UTF-8-safe range it replaces. Expand changed-range query coverage to complete touched replacement chunks before publication; never publish a wider authoritative range than was fully queried.
+- Applying current authoritative decorations must replace only the declared viewport. Subtract that exact range from overlapping provisional package/layer state, preserve geometry outside it, and coalesce only local compatible residuals; never delete a whole provisional chunk merely because it overlaps authority.
 - Keep syntax beneath slower semantic layers, reject stale decoration versions, and add no client parser unless measured optimized server latency justifies a separate decision.
-- Syntax continuity decision sources: `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md` and superseding `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`.
+- Syntax continuity decision sources: `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md`, superseding `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`, and `decision-logs/2026-07-19-2238-exact-range-provisional-decoration-replacement.md`.
 - Keep background AI/indexing/file work from delaying input confirmations or UI-reactive work.
 
 ## Testing Guidance

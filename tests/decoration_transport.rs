@@ -79,6 +79,70 @@ fn byte_range(text: &str, needle: &str) -> (u64, u64) {
     (start as u64, end as u64)
 }
 
+fn two_chunk_comment_editor() -> EditorSurface {
+    let package = decoration_package();
+    let mut editor = EditorSurface::default();
+    editor.load_snapshot(
+        7,
+        3,
+        "x".repeat(140),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    for (start, end) in [(0, 128), (128, 140)] {
+        let set = validate_decoration_publication(
+            &package,
+            3,
+            DecorationSet {
+                document_id: 7,
+                document_version: 3,
+                package_prefix: "markdown".to_string(),
+                kind: DecorationKind::Syntax,
+                viewport_byte_start: start,
+                viewport_byte_end: end,
+                spans: vec![DecorationSpan::from_vocabulary(
+                    start,
+                    end,
+                    DecorationKind::Syntax,
+                    TokenType::Comment,
+                    Modifiers::NONE,
+                    70,
+                    provenance(),
+                )],
+            },
+        )
+        .expect("two-chunk comment fixture validates");
+        assert!(editor.apply_decoration_set(set));
+    }
+    editor
+}
+
+fn unpainted_bytes(editor: &EditorSurface, range: std::ops::Range<usize>) -> Vec<usize> {
+    let painted = editor.visible_decoration_paint_ranges_for_test();
+    range
+        .filter(|byte| !painted.iter().any(|(range, _)| range.contains(byte)))
+        .collect()
+}
+
+fn full_comment_authority(document_version: u64) -> DecorationSet {
+    DecorationSet {
+        document_id: 7,
+        document_version,
+        package_prefix: "markdown".to_string(),
+        kind: DecorationKind::Syntax,
+        viewport_byte_start: 0,
+        viewport_byte_end: 128,
+        spans: vec![DecorationSpan::from_vocabulary(
+            0,
+            128,
+            DecorationKind::Syntax,
+            TokenType::Comment,
+            Modifiers::NONE,
+            70,
+            provenance(),
+        )],
+    }
+}
+
 #[test]
 fn decoration_payload_rejected_when_exceeding_budget() {
     let package = decoration_package();
@@ -295,7 +359,107 @@ fn edit_ack_retains_current_chunks_and_rejects_older_publications() {
 }
 
 #[test]
-fn optimistic_comment_style_extends_until_authoritative_replacement() {
+fn plan058_empty_authority_after_insertion_preserves_shifted_right_residual() {
+    let package = decoration_package();
+    let mut editor = two_chunk_comment_editor();
+    assert!(editor.navigate_to_byte_offset(10));
+    assert!(editor.insert_text("x"));
+    assert!(editor.note_confirmed_version(7, 4));
+
+    let empty = validate_decoration_publication(
+        &package,
+        4,
+        DecorationSet {
+            document_id: 7,
+            document_version: 4,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 128,
+            spans: Vec::new(),
+        },
+    )
+    .expect("empty insertion authority validates");
+    assert!(editor.apply_decoration_set(empty));
+
+    let missing = unpainted_bytes(&editor, 128..141);
+    assert!(
+        missing.is_empty(),
+        "authority 0..128 removed provisional bytes outside its viewport: {missing:?}"
+    );
+}
+
+#[test]
+fn plan058_empty_authority_after_deletion_preserves_shifted_right_residual() {
+    let package = decoration_package();
+    let mut editor = two_chunk_comment_editor();
+    assert!(editor.navigate_to_byte_offset(10));
+    assert!(editor.backspace());
+    assert!(editor.note_confirmed_version(7, 4));
+
+    let empty = validate_decoration_publication(
+        &package,
+        4,
+        DecorationSet {
+            document_id: 7,
+            document_version: 4,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: 128,
+            spans: Vec::new(),
+        },
+    )
+    .expect("empty deletion authority validates");
+    assert!(editor.apply_decoration_set(empty));
+
+    let missing = unpainted_bytes(&editor, 128..139);
+    assert!(
+        missing.is_empty(),
+        "authority 0..128 removed the right side of an overlapping provisional chunk: {missing:?}"
+    );
+}
+
+#[test]
+fn plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry() {
+    let package = decoration_package();
+    let mut editor = two_chunk_comment_editor();
+    let mut document_len = 140;
+    let mut version = 3;
+
+    for cycle in 0..128 {
+        let _ = editor.navigate_to_byte_offset(10);
+        assert!(editor.insert_text("x"));
+        document_len += 1;
+        version += 1;
+        assert!(editor.note_confirmed_version(7, version));
+        let authority =
+            validate_decoration_publication(&package, version, full_comment_authority(version))
+                .expect("insertion authority validates");
+        assert!(editor.apply_decoration_set(authority));
+        assert!(
+            unpainted_bytes(&editor, 0..document_len).is_empty(),
+            "cycle {cycle}: insertion exposed base-colored bytes"
+        );
+
+        let _ = editor.navigate_to_byte_offset(11);
+        assert!(editor.backspace());
+        document_len -= 1;
+        version += 1;
+        assert!(editor.note_confirmed_version(7, version));
+        let authority =
+            validate_decoration_publication(&package, version, full_comment_authority(version))
+                .expect("deletion authority validates");
+        assert!(editor.apply_decoration_set(authority));
+        assert!(
+            unpainted_bytes(&editor, 0..document_len).is_empty(),
+            "cycle {cycle}: deletion exposed base-colored bytes"
+        );
+    }
+}
+
+#[test]
+fn optimistic_comment_style_outside_authority_survives_exact_replacement() {
     let package = decoration_package();
     let mut set = valid_set(3);
     set.viewport_byte_end = 7;
@@ -332,6 +496,24 @@ fn optimistic_comment_style_extends_until_authoritative_replacement() {
     )
     .unwrap();
     assert!(editor.apply_decoration_set(empty));
+    assert_eq!(editor.decoration_span_count(), 1);
+    assert_eq!(editor.visible_decoration_paint_ranges_for_test()[0].0, 7..8);
+
+    let tail = validate_decoration_publication(
+        &package,
+        4,
+        DecorationSet {
+            document_id: 7,
+            document_version: 4,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 7,
+            viewport_byte_end: 8,
+            spans: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert!(editor.apply_decoration_set(tail));
     assert_eq!(editor.decoration_span_count(), 0);
 }
 

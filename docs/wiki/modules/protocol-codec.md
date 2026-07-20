@@ -10,7 +10,7 @@
 
 ## Overview
 
-The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
+The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
 
 ## Responsibilities
 
@@ -38,7 +38,7 @@ Phase 12 adds SDUI protocol variants without a second serialization path. `Serve
 
 Phase 13 adds `RuntimeDiagnostic` and `ServerMessage::RuntimeDiagnostic` for server-side JavaScript/configuration errors. Diagnostics carry `DiagnosticSeverity`, stable Clay error code, and sanitized actionable message; they do not carry raw source snippets, absolute paths, environment dumps, tokens, or authority handles.
 
-Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. `ClientMessage::DecorationViewportRequest` carries only client/document/version IDs and visible byte bounds; it never carries document text. The server validates those fields, reads canonical text from the already-open document, and schedules a bounded native parse window. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
+Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. Plan 059 (protocol version 5) adds `ServerMessage::DecorationBatch(Vec<DecorationSet>)` so multi-chunk parse updates ship in a single frame; single-chunk updates retain the plain `DecorationSet` wire shape. `ClientMessage::DecorationViewportRequest` carries only client/document/version IDs and visible byte bounds; it never carries document text. The server validates those fields, reads canonical text from the already-open document, and schedules a bounded native parse window. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
 
 `BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, document font role, key bindings, command declarations, routing policies, and editor rules; it is data, not script code. `core.text` defaults proportional and `core.code` defaults monospace.
 
@@ -61,12 +61,29 @@ let frame = codec.encode_client_message(&ClientMessage::Hello {
 let message = codec.decode_client_message(&frame)?;
 ```
 
+## Cancellation-Safe Framing (Plan 059)
+
+`Codec::read_server_message` and `Codec::read_client_message` call `tokio::io::AsyncReadExt::read_exact`, which is **not** cancellation-safe: a `tokio::select!` in the caller can drop the future mid-frame, leaving the stream position desynchronised. The caller then reads payload bytes as the next frame's length header, producing a corrupt frame-size error or archival validation failure.
+
+Plan 059 removes the mid-frame drop risk by giving every connection a dedicated read-pump task that owns the reader half and pushes complete decoded messages into a bounded `mpsc` channel. The main `select!` loop races only `mpsc::recv()` calls (both branches cancellation-safe). A `ReadPumpGuard` (newtype over `tokio::task::AbortHandle` in `src/protocol/codec.rs`) aborts the pump task on `Drop` so every return/error path cleans up.
+
+```
+stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mpsc tx
+                              writer ◀──[main select! loop]── mpsc rx
+```
+
+- **Client** (`src/client/mod.rs::run_connection`): already split via `tokio::io::split`; read-pump task spawned with `EDIT_QUEUE_CAPACITY` (256) channel.
+- **Server** (`src/server/connection.rs::handle_connection_with_analysis`): adds `tokio::io::split` after the sequential handshake; write half keeps the name `stream` so all 49 existing write sites need zero changes. Channel capacity 64 (single-client backpressure).
+
+`ReadPumpGuard` is `pub(crate)` in `src/protocol/codec.rs` (derives `Debug`, not `Clone`/`Copy`) and is shared between client and server since `codec.rs` is the framed-transport boundary both sides share. `Codec` is `Copy` so pump task and main loop each get their own cheap copy.
+
 ## Invariants and Constraints
 
 - `Codec` is the only protocol serialization boundary; client/server code should not call `rkyv` directly for wire messages.
 - Adding, removing, or reordering a wire enum variant requires incrementing `PROTOCOL_VERSION`; handshake rejection prevents stale server processes from decoding changed discriminants.
 - `DEFAULT_MAX_FRAME_SIZE` is 1 MiB to prevent accidental unbounded allocation from malformed IPC frames.
 - The 4-byte frame prefix is not part of the archived payload, so decode realigns payload bytes before validation.
+- Framed reads (`read_exact`) must be isolated in a spawned read-pump task that survives `select!` cancellation. Main loops race only cancellation-safe `mpsc::recv()` calls. `ReadPumpGuard` aborts the pump on `Drop` so no orphan task outlives the connection.
 - Behavior manifests are inert declarations of built-in behavior and do not execute JavaScript, WASM, extensions, commands, or filesystem/network operations.
 - File/workspace protocol messages carry workspace-relative or selected-file display paths and typed error codes; server-side workspace validation remains the authority for canonical host paths and selected-file grants.
 - SDUI protocol messages are inert declarative state or server-routed action intents; validation lives in server helpers, while codec validation remains byte/frame focused.

@@ -184,6 +184,26 @@ The optimized parse-through-ready-decoration benchmark was rerun with 10 samples
 
 Criterion reported no statistically significant performance change for any fixture. Wall-clock values remain machine-local and advisory; one-parse/query counts, payload/cache ceilings, stale-version rejection, and source-safe metric retention remain blocking deterministic gates.
 
+## Plan 058 exact-range replacement Linux verification (2026-07-20)
+
+Plan 058 changes only client application of current authoritative decoration sets. Linux host: kernel `7.1.3-43.stable`, `x86_64`; Rust/Cargo `1.96.1`. `server::syntax::tests::first_party_continuity_edits_keep_one_bounded_parse_and_query` retains the Plan 057 work counts exactly: one parser call, one query range, and one emitted member with 20 queried bytes for Rust, 26 for TypeScript/TSX/JavaScript, and 17 for Markdown. No parser, query, or transport work was added.
+
+Deterministic client bounds now cover both drift directions and long runs. `plan058_first_party_languages_preserve_shifted_boundary_continuity` checks every local-edit, acknowledgement, and streamed-authority state after three repeated pre-boundary insertions in all five native grammars. `plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry` runs 128 insertion/deletion pairs through validated transport without an undecorated byte. `repeated_authority_keeps_local_residual_cache_bounded` runs 512 authoritative applications while retaining exactly two chunks/two spans, one provisional residual, exact serialized-byte accounting, and `retained_bytes <= SYNTAX_CACHE_BUDGET_BYTES`. `exact_range_decoration_replacement_stays_off_edit_and_paint_hot_paths` keeps subtraction/coalescing out of local edit and paint bodies.
+
+A focused Criterion benchmark measures one current authoritative apply that subtracts `[0,128)` from shifted provisional chunks and locally coalesces the right residual. With 20 samples, 1 s warm-up, and 2 s measurement, `first_party_authoritative_replacement/apply_and_coalesce_residual` measured 1.8150 µs (95% interval 1.6250–1.9959 µs). Setup and optimistic edit creation are outside the timed body.
+
+The unchanged five-language incremental benchmark was rerun with 10 samples, 1 s warm-up, and 2 s measurement:
+
+| Fixture | Estimate | 95% interval | Criterion comparison |
+| --- | ---: | ---: | --- |
+| Rust | 152.39 µs | 97.456–187.70 µs | improvement reported |
+| TypeScript | 344.39 µs | 326.19–350.92 µs | no change |
+| TSX | 125.50 µs | 124.36–126.48 µs | no change |
+| JavaScript | 123.55 µs | 122.74–124.65 µs | no change |
+| Markdown | 199.49 µs | 165.71–214.08 µs | no change |
+
+Criterion found no statistically significant regression. Wall-clock values remain machine-local and advisory; deterministic geometry, work-count, cache-budget, stale-version, provenance, payload, and hot-path tests are blocking.
+
 ## Phase 14 Performance Budgets and Guardrails
 
 Phase 14 splits budgets into two categories:
@@ -266,7 +286,7 @@ Phase 18.18 adds deterministic payload/open-order guards and an optimized Criter
 
 Hard guards:
 
-- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It also locks the 4096-byte native parse window, 5000 ms timeout, and 30 MiB syntax-cache ceiling.
+- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It locks 4096-byte native parse windows for code grammars, Markdown's bounded full-document context ceiling (`MAX_OPENABLE_FILE_BYTES` = 768 KiB), the independent 4096-byte viewport query/output budget, 5000 ms timeout, and 30 MiB syntax-cache ceiling. Same-version Markdown scroll requests reuse the cached full tree, so the larger context ceiling does not mean a full reparse per viewport.
 - `first_party_open_parse_does_not_block_initial_render_per_language` installs a deliberately delayed handler for each package, enqueues parse work, and proves the editor snapshot is visible before background parse completion.
 - Existing `editor_performance_invariants` guards keep parser/package JavaScript/IPC/file IO out of paint, input, layout, and scroll paths.
 

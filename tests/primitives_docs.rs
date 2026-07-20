@@ -2235,7 +2235,7 @@ fn plan056_final_wiki_records_one_parse_authoritative_decoration_flow() {
         (&coordinator, "visible/changed-first `decoration_updates`"),
         (&syntax, "One query/capture pass"),
         (&syntax, "128-byte replacement-chunk grid"),
-        (&decoration, "overlapping provisional keys"),
+        (&decoration, "exact half-open viewport"),
         (&editor, "strict-interior edits resize it"),
     ] {
         assert!(
@@ -2387,6 +2387,119 @@ fn plan057_final_wiki_records_complete_replacement_and_same_word_inheritance() {
         assert!(
             !source.contains("bounded visible/changed envelope"),
             "reference docs must not describe superseded bounded-visible-envelope query"
+        );
+    }
+}
+
+#[test]
+fn plan058_final_wiki_records_exact_range_replacement_and_residual_coalescing() {
+    let index = fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let review = fs::read_to_string(repository_path(
+        "docs/wiki/modules/low-latency-incremental-syntax-decoration-primitive-review.md",
+    ))
+    .expect("read low-latency syntax review");
+    let decoration =
+        fs::read_to_string(repository_path("docs/wiki/modules/decoration-transport.md"))
+            .expect("read decoration transport wiki");
+    let editor = fs::read_to_string(repository_path("docs/wiki/modules/masonry-editor.md"))
+        .expect("read masonry editor wiki");
+    let parse_strategy = fs::read_to_string(repository_path(
+        "docs/reference/primitives/parse-update-strategy.md",
+    ))
+    .expect("read parse strategy");
+    let rendering_strategy = fs::read_to_string(repository_path(
+        "docs/reference/primitives/rendering-strategy.md",
+    ))
+    .expect("read rendering strategy");
+
+    // Wiki index must link the low-latency review.
+    assert!(
+        index.contains("Implemented parse/decor flow"),
+        "wiki index must retain implemented parse/decor flow link"
+    );
+
+    // Review page must contain Plan 058 implementation section.
+    for required in [
+        "Plan 058 Exact-Range Provisional Decoration Replacement",
+        "per-letter downstream whiteness",
+        "subtract_half_open_range",
+        "subtract_provisional_chunk",
+        "coalesce_local_residual",
+        "coalesce_compatible_spans",
+        "Exact-Range Authoritative Viewport Subtraction",
+        "plan058_repeated_comment_edits_do_not_grow_a_shifted_chunk_boundary_gap",
+        "plan058_first_party_languages_preserve_shifted_boundary_continuity",
+        "plan058_empty_authority_after_insertion_preserves_shifted_right_residual",
+        "plan058_empty_authority_after_deletion_preserves_shifted_right_residual",
+        "plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry",
+        "repeated_authority_keeps_local_residual_cache_bounded",
+        "exact_range_decoration_replacement_stays_off_edit_and_paint_hot_paths",
+        "first_party_authoritative_replacement",
+        "1.8150",
+        "no per-letter white peeling",
+    ] {
+        assert!(
+            review.contains(required),
+            "Plan 058 wiki review must record `{required}`"
+        );
+    }
+
+    // Decoration transport must describe exact half-open viewport subtraction and coalescing.
+    for required in [
+        "exact half-open viewport",
+        "subtracts that range from overlapping provisional chunks",
+        "preserves left/right span fragments outside authority",
+        "coalesces compatible residual chunks/spans",
+    ] {
+        assert!(
+            decoration.contains(required),
+            "decoration-transport wiki must record `{required}`"
+        );
+    }
+
+    // Masonry editor must describe exact-range replacement.
+    for required in [
+        "declared half-open viewport",
+        "split at authority boundaries",
+        "outside residuals survive and coalesce locally",
+    ] {
+        assert!(
+            editor.contains(required),
+            "masonry-editor wiki must record `{required}`"
+        );
+    }
+
+    // Primitives reference docs must describe exact-range subtraction.
+    for (source, required) in [
+        (
+            &parse_strategy,
+            "subtract the exact authoritative half-open viewport",
+        ),
+        (
+            &parse_strategy,
+            "preserving left/right span fragments outside authority",
+        ),
+        (
+            &rendering_strategy,
+            "subtract their exact half-open viewport from overlapping provisional chunks",
+        ),
+        (
+            &rendering_strategy,
+            "preserving left/right span fragments outside authority",
+        ),
+    ] {
+        assert!(
+            source.contains(required),
+            "reference docs must record `{required}`"
+        );
+    }
+
+    // Reference docs must not describe superseded whole-provisional replacement.
+    for source in [&parse_strategy, &rendering_strategy] {
+        assert!(
+            !source
+                .contains("replace affected package/layer ranges with current authoritative sets"),
+            "reference docs must not describe superseded whole-provisional-replacement language"
         );
     }
 }

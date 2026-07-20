@@ -496,6 +496,14 @@ impl EditorWidget {
             }
             ClientConnectionEvent::SduiUpdate(update) => self.sdui.apply_update(update),
             ClientConnectionEvent::DecorationSet(set) => self.editor.apply_decoration_set(set),
+            ClientConnectionEvent::DecorationBatch(sets) => {
+                // Every chunk applies even when an earlier chunk changed state.
+                let mut changed = false;
+                for set in sets {
+                    changed |= self.editor.apply_decoration_set(set);
+                }
+                changed
+            }
             ClientConnectionEvent::DiagnosticSet(set) => self.editor.apply_diagnostic_set(set),
             ClientConnectionEvent::CompletionResult(result) => self.apply_completion_result(result),
             ClientConnectionEvent::LanguageIntelligenceResult(result) => {
@@ -2718,6 +2726,50 @@ mod tests {
             !widget.apply_connection_event(ClientConnectionEvent::ActiveTypography(typography))
         );
         assert!(!widget.take_layout_invalidation());
+    }
+
+    #[test]
+    fn decoration_batch_applies_chunks_atomically_and_rejects_stale_versions() {
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        let provenance = crate::protocol::DecorationProvenance {
+            package_name: "@clay/markdown".to_string(),
+            package_version: "builtin".to_string(),
+            package_prefix: "markdown".to_string(),
+        };
+        let chunk = |version: u64, start: u64| crate::protocol::DecorationSet {
+            document_id: 7,
+            document_version: version,
+            package_prefix: "markdown".to_string(),
+            kind: crate::protocol::DecorationKind::Syntax,
+            viewport_byte_start: start,
+            viewport_byte_end: start + 6,
+            spans: vec![crate::protocol::DecorationSpan::from_vocabulary(
+                start,
+                start + 4,
+                crate::protocol::DecorationKind::Syntax,
+                crate::protocol::TokenType::Paragraph,
+                crate::protocol::Modifiers::NONE,
+                70,
+                provenance.clone(),
+            )],
+        };
+
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::DecorationBatch(vec![
+                chunk(12, 0),
+                chunk(12, 6)
+            ]))
+        );
+        // Stale-version batch is rejected chunk-by-chunk like single sets.
+        assert!(
+            !widget.apply_connection_event(ClientConnectionEvent::DecorationBatch(vec![
+                chunk(11, 0),
+                chunk(11, 6)
+            ]))
+        );
     }
 
     #[test]

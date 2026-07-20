@@ -13,7 +13,10 @@ use tokio::{
 
 use crate::{
     packages::commands::CommandRegistry,
-    perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
+    perf::budgets::{
+        COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
+        INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    },
     protocol::{
         ClientId, ClientMessage, CompletionProvenance, CompletionRequest, CompletionResultSet,
         CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata,
@@ -63,7 +66,7 @@ async fn handle_connection<S>(
     codec: Codec,
 ) -> Result<(), CodecError>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     handle_connection_with_analysis(
         stream,
@@ -107,7 +110,7 @@ pub(crate) async fn handle_connection_with_analysis<S>(
     codec: Codec,
 ) -> Result<(), CodecError>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let mut typography_updates = runtime_generation.subscribe_typography();
     let mut runtime_state_updates = runtime_generation.subscribe_runtime_state();
@@ -177,6 +180,30 @@ where
         }
     };
 
+    // Cancellation-safety: framed reads run in a dedicated pump task so a
+    // winning select branch can never strand a partially-read frame
+    // (`AsyncReadExt::read_exact` is not cancellation-safe). The loop below
+    // selects only over channels; `stream` is now the single owned write half.
+    let (mut reader, mut stream) = tokio::io::split(stream);
+    let (incoming_tx, mut incoming_rx) =
+        tokio::sync::mpsc::channel::<Result<ClientMessage, CodecError>>(64);
+    let read_pump = tokio::spawn(async move {
+        loop {
+            match codec.read_client_message(&mut reader).await {
+                Ok(message) => {
+                    if incoming_tx.send(Ok(message)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = incoming_tx.send(Err(error)).await;
+                    return;
+                }
+            }
+        }
+    });
+    let _read_pump_guard = crate::protocol::codec::ReadPumpGuard::new(read_pump.abort_handle());
+
     loop {
         let message = match tokio::select! {
             typography = typography_updates.recv() => match typography {
@@ -219,10 +246,22 @@ where
             // becomes required.
             update = parse_coordinator.next_update() => {
                 if let Some(update) = update {
-                    for set in update.decoration_updates {
-                        codec
-                            .write_server_message(&mut stream, &ServerMessage::DecorationSet(set))
-                            .await?;
+                    // One parse update's chunks ship in a single frame;
+                    // single-chunk updates keep the plain DecorationSet wire.
+                    let mut chunks = update.decoration_updates;
+                    match chunks.len() {
+                        0 => {}
+                        1 => {
+                            let set = chunks.pop().expect("length checked");
+                            codec
+                                .write_server_message(&mut stream, &ServerMessage::DecorationSet(set))
+                                .await?;
+                        }
+                        _ => {
+                            codec
+                                .write_server_message(&mut stream, &ServerMessage::DecorationBatch(chunks))
+                                .await?;
+                        }
                     }
                     if let Some(set) = update.diagnostic_update {
                         codec
@@ -266,10 +305,15 @@ where
                 }
                 continue;
             }
-            message = codec.read_client_message(&mut stream) => message,
+            message = incoming_rx.recv() => message,
         } {
-            Ok(message) => message,
-            Err(CodecError::Io(error))
+            Some(Ok(message)) => message,
+            None => {
+                close_analysis_documents(&document_analysis, &analysis_documents);
+                release_client_access(client_id, &document, &workspace).await;
+                return Ok(());
+            }
+            Some(Err(CodecError::Io(error)))
                 if matches!(
                     error.kind(),
                     std::io::ErrorKind::UnexpectedEof
@@ -281,7 +325,7 @@ where
                 release_client_access(client_id, &document, &workspace).await;
                 return Ok(());
             }
-            Err(error) => {
+            Some(Err(error)) => {
                 close_analysis_documents(&document_analysis, &analysis_documents);
                 release_client_access(client_id, &document, &workspace).await;
                 return Err(error);
@@ -2017,12 +2061,14 @@ async fn refresh_native_syntax_after_edit(
         return Ok(());
     };
     parse_coordinator.record_native_edit_accepted(metadata.document_id, metadata.version);
+    let viewport = window.byte_range();
     schedule_parse_snapshot(
         parse_coordinator,
         &metadata,
         behavior.lock().await.version(),
         policy,
         window,
+        viewport,
         Some(accepted_edit),
     )?;
     Ok(())
@@ -2064,22 +2110,40 @@ fn schedule_parse_window(
     policy: ParsePolicy,
     requested: ParseByteRange,
 ) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
-    let mut window_start = requested.start.min(text.len() as u64) as usize;
-    while !text.is_char_boundary(window_start) {
-        window_start = window_start.saturating_sub(1);
-    }
-    let requested_end = requested
-        .end
-        .max(window_start as u64)
-        .min(text.len() as u64);
-    let mut window_end =
-        requested_end.min((window_start as u64).saturating_add(policy.max_window_bytes)) as usize;
-    while !text.is_char_boundary(window_end) {
-        window_end = window_end.saturating_sub(1);
-    }
-    if window_start >= window_end {
+    let text_len = text.len();
+    let viewport_start = floor_char_boundary(text, requested.start.min(text_len as u64) as usize);
+    let output_budget = policy
+        .max_window_bytes
+        .min(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES as u64);
+    let viewport_end = floor_char_boundary(
+        text,
+        requested
+            .end
+            .max(viewport_start as u64)
+            .min(text_len as u64)
+            .min((viewport_start as u64).saturating_add(output_budget)) as usize,
+    );
+    if viewport_start >= viewport_end {
         return Ok(None);
     }
+    let viewport = ParseByteRange::new(viewport_start as u64, viewport_end as u64);
+
+    let (window_start, window_end) = if text_len as u64 <= policy.max_window_bytes {
+        (0, text_len)
+    } else {
+        let guard_budget = policy.max_window_bytes.saturating_sub(viewport.len());
+        let before = policy.guard_bytes.min(guard_budget / 2);
+        let after = policy.guard_bytes.min(guard_budget.saturating_sub(before));
+        let start = floor_char_boundary(text, viewport_start.saturating_sub(before as usize));
+        let mut end = ceil_char_boundary(
+            text,
+            viewport_end.saturating_add(after as usize).min(text_len),
+        );
+        if end.saturating_sub(start) > policy.max_window_bytes as usize {
+            end = floor_char_boundary(text, start.saturating_add(policy.max_window_bytes as usize));
+        }
+        (start, end)
+    };
 
     let prefix = &text[..window_start];
     let base_line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u64;
@@ -2106,6 +2170,7 @@ fn schedule_parse_window(
         behavior_version,
         policy,
         window,
+        viewport,
         None,
     )
 }
@@ -2116,9 +2181,9 @@ fn schedule_parse_snapshot(
     behavior_version: u64,
     policy: ParsePolicy,
     window: ParseWindowSnapshot,
+    viewport: ParseByteRange,
     accepted_edit: Option<ParseInputEdit>,
 ) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
-    let viewport = ParseByteRange::new(window.byte_start, window.byte_end);
     let invalidated_ranges =
         accepted_edit.map_or_else(|| vec![viewport], |edit| vec![edited_range(edit, viewport)]);
     let request = ParseScheduleRequest {
@@ -2138,6 +2203,20 @@ fn schedule_parse_snapshot(
             format!("Viewport parse scheduling failed: {error:?}"),
         )),
     }
+}
+
+fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
+    while !text.is_char_boundary(offset) {
+        offset = offset.saturating_sub(1);
+    }
+    offset
+}
+
+fn ceil_char_boundary(text: &str, mut offset: usize) -> usize {
+    while offset < text.len() && !text.is_char_boundary(offset) {
+        offset += 1;
+    }
+    offset
 }
 
 fn edited_range(edit: ParseInputEdit, window: ParseByteRange) -> ParseByteRange {
@@ -3644,6 +3723,184 @@ await loadPackage("@clay/markdown");"#,
     }
 
     #[tokio::test]
+    async fn multi_chunk_parse_update_ships_as_single_decoration_batch() {
+        let root = temp_workspace("decoration-batch");
+        let file = root.join("main.rs");
+        // Well past one 128-byte authority chunk.
+        let source = "fn main() { let value = 1; }\n".repeat(16);
+        fs::write(&file, &source).unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+
+        let (client, server) = duplex(64 * 1024);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            Arc::clone(&workspace),
+            sdui_state(),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
+            language_intelligence_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..6 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::OpenDocument {
+                    client_id: 99,
+                    workspace_root_id: root_id,
+                    path: "main.rs".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        // DocumentOpened, BehaviorManifest, replenished capability.
+        let _opened = codec.read_server_message(&mut client).await.unwrap();
+        let behavior_version = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            message => panic!("expected behavior manifest, got {message:?}"),
+        };
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
+
+        // Register/cache the native handler with one edit, then request the
+        // whole visible region so this test isolates multi-chunk wire batching
+        // from the edit's expected one-chunk incremental update.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Edit {
+                    document_id: 1,
+                    client_id: 99,
+                    lease_id: Some(1),
+                    base_version: 1,
+                    behavior_version,
+                    transaction_id: 555,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "// batch\n".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut confirmed_version = None;
+        let mut edit_update_seen = false;
+        let mut viewport_requested = false;
+        let mut single_set_frames = 0usize;
+        let batch = loop {
+            let message = timeout(
+                Duration::from_secs(2),
+                codec.read_server_message(&mut client),
+            )
+            .await
+            .expect("decoration batch timed out")
+            .unwrap();
+            match message {
+                ServerMessage::DecorationBatch(chunks)
+                    if viewport_requested && chunks[0].document_version == 2 =>
+                {
+                    break chunks;
+                }
+                ServerMessage::DecorationBatch(chunks)
+                    if !viewport_requested && chunks[0].document_version == 2 =>
+                {
+                    edit_update_seen = true;
+                }
+                ServerMessage::EditAck {
+                    confirmed_version: version,
+                    ..
+                } => confirmed_version = Some(version),
+                ServerMessage::DecorationSet(set)
+                    if set.document_id == 1 && set.document_version == 2 =>
+                {
+                    if viewport_requested {
+                        single_set_frames += 1;
+                    } else {
+                        edit_update_seen = true;
+                    }
+                }
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                message => panic!("expected decoration batch, got {message:?}"),
+            }
+            if !viewport_requested
+                && edit_update_seen
+                && let Some(document_version) = confirmed_version
+            {
+                codec
+                    .write_client_message(
+                        &mut client,
+                        &ClientMessage::DecorationViewportRequest {
+                            client_id: 99,
+                            document_id: 1,
+                            document_version,
+                            byte_start: 0,
+                            byte_end: (source.len() + "// batch\n".len()) as u64,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                viewport_requested = true;
+            }
+        };
+
+        assert!(
+            batch.len() > 1,
+            "multi-chunk window must batch, got {} chunks",
+            batch.len()
+        );
+        assert!(batch.iter().all(|set| set.document_id == 1));
+        assert!(
+            batch
+                .windows(2)
+                .all(|pair| pair[0].viewport_byte_start <= pair[1].viewport_byte_start),
+            "batch chunks arrive in viewport-key order"
+        );
+        assert!(batch.iter().all(|set| !set.spans.is_empty()));
+        assert_eq!(
+            single_set_frames, 0,
+            "batched parse update must not fan out per-chunk frames"
+        );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
     async fn selected_markdown_file_publishes_manifest_and_decorations() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let root = temp_workspace("selected-markdown-runtime");
@@ -3902,10 +4159,11 @@ await loadPackage("@clay/markdown");"#,
                 22,
                 "notes.md",
                 "markdown",
-                "## Heading 150",
-                (0..300)
-                    .map(|line| format!("## Heading {line}\n\nParagraph {line}.\n\n"))
-                    .collect::<String>(),
+                "LAST CODE LINE",
+                format!(
+                    "```text\n{}LAST CODE LINE\n```\n\nPlain prose after fence.\n",
+                    "code inside fence\n".repeat(300)
+                ),
             ),
         ] {
             let metadata = DocumentMetadata {
@@ -3943,7 +4201,11 @@ await loadPackage("@clay/markdown");"#,
                 super::ParseByteRange::new(0, text.len() as u64),
             )
             .expect("opening viewport schedules");
-            let opening_end = text.len().min(policy.max_window_bytes as usize) as u64;
+            let opening_end = text
+                .len()
+                .min(policy.max_window_bytes as usize)
+                .min(crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES)
+                as u64;
             let update = tokio::select! {
                 update = coordinator.next_update() => update.expect("opening native update"),
                 diagnostic = coordinator.next_diagnostic() => {
@@ -3982,12 +4244,12 @@ await loadPackage("@clay/markdown");"#,
                     panic!("nonzero viewport parse failed: {:?}", diagnostic)
                 }
             };
-            assert_eq!(update.viewport.start, start, "{path}");
-            assert_eq!(
-                update.viewport.end,
-                (start + policy.max_window_bytes).min(text.len() as u64),
-                "{path}"
-            );
+            let requested_end = (start
+                + crate::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES as u64)
+                .min(start + policy.max_window_bytes)
+                .min(text.len() as u64);
+            assert!(update.viewport.start <= start, "{path}");
+            assert!(update.viewport.end >= requested_end, "{path}");
             assert!(!update.decoration_updates.is_empty(), "{path}");
             assert!(
                 update.decoration_updates.iter().all(|set| set
@@ -3996,6 +4258,31 @@ await loadPackage("@clay/markdown");"#,
                     .all(|span| span.byte_start >= set.viewport_byte_start)),
                 "{path}"
             );
+            if path == "notes.md" {
+                let prose = text.find("Plain prose after fence.").unwrap() as u64;
+                assert!(
+                    update
+                        .decoration_updates
+                        .iter()
+                        .any(|set| set
+                            .spans
+                            .iter()
+                            .any(|span| span.token_type == TokenType::Paragraph
+                                && span.byte_start <= prose
+                                && span.byte_end > prose))
+                );
+                assert!(
+                    !update
+                        .decoration_updates
+                        .iter()
+                        .any(|set| set
+                            .spans
+                            .iter()
+                            .any(|span| span.token_type == TokenType::CodeBlock
+                                && span.byte_start <= prose
+                                && span.byte_end > prose))
+                );
+            }
         }
 
         let _ = fs::remove_file(config_root.join("init.js"));
@@ -4474,6 +4761,89 @@ await loadPackage("@clay/markdown");"#,
 
         let result = server_task.await.unwrap();
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn fragmented_client_frame_survives_concurrent_server_write() {
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+
+        let (mut client, server) = duplex(4096);
+        let codec = Codec::default();
+        let runtime_generation = runtime_generation();
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document_state(),
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            workspace_state(),
+            sdui_state(),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation.clone(),
+            parse_coordinator(),
+            language_intelligence_coordinator(),
+            codec,
+        ));
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+
+        // Drip-feed a client frame start, then fire a typography broadcast so a
+        // server write wins the select race mid-frame. The read pump must keep
+        // frame alignment regardless of the interleaving.
+        let frame = codec
+            .encode_client_message(&ClientMessage::ListDocuments { client_id: 99 })
+            .unwrap();
+        let split = 6;
+        client.write_all(&frame[..split]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut typography = crate::protocol::ActiveTypography::default();
+        typography.monospace.size += 1.0;
+        runtime_generation
+            .replace_typography(typography)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        client.write_all(&frame[split..]).await.unwrap();
+
+        let mut saw_typography = false;
+        let mut saw_status = false;
+        for _ in 0..4 {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::ActiveTypography(_) => saw_typography = true,
+                ServerMessage::DocumentList { .. } => saw_status = true,
+                other => panic!("unexpected message during fragmented read: {other:?}"),
+            }
+            if saw_typography && saw_status {
+                break;
+            }
+        }
+        assert!(saw_typography && saw_status);
+
+        // A second full request proves the stream stayed aligned.
+        codec
+            .write_client_message(&mut client, &ClientMessage::ListDocuments { client_id: 99 })
+            .await
+            .unwrap();
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::DocumentList { .. }
+        ));
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
     }
 
     #[tokio::test]

@@ -43,17 +43,8 @@
   (fenced_code_block)
 ] @code
 
-; ponytail: Tier 1 currently uses tree-sitter-md's block grammar, so predicates
-; classify standalone inline forms from the raw `inline` range. Mixed inline
-; runs remain paragraph text; add generic block+inline grammar composition when
-; partial-run styling is required.
-((inline) @strong
-  (#match? @strong "^\\*\\*[^\\n]+\\*\\*$"))
-((inline) @emphasis
-  (#match? @emphasis "^[_*][^\\n]+[_*]$"))
-((inline) @code-span
-  (#match? @code-span "^`[^\\n]+`$"))
-((inline) @link
-  (#match? @link "^\\[[^]\\n]+\\]\\([^\\n)]+\\)$"))
-
+; Inline forms (strong/emphasis/code-span/link) are styled by the
+; markdown_inline injection layer: `injections.scm` declares the ranges and
+; `inline-highlights.scm` captures them with the same styleMap keys. The block
+; grammar only owns block-level constructs here.
 (paragraph) @text

@@ -4,7 +4,7 @@ use clay::packages::{
     record::{PackageRecord, PackageRecordRule, assemble_package_record},
 };
 use clay::protocol::{
-    DecorationSet, DocumentAccess, DocumentFontRole, Modifiers, ParseByteRange,
+    DecorationSet, DecorationSpan, DocumentAccess, DocumentFontRole, Modifiers, ParseByteRange,
     ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot, TokenType,
 };
 #[cfg(any(unix, windows))]
@@ -609,11 +609,33 @@ fn incremental_notification_for(
     old_end: usize,
     new_end: usize,
 ) -> ParseEditNotification {
-    let mut notification = parse_notification_for(package_prefix, 2, new_text);
+    incremental_notification_for_versions(
+        package_prefix,
+        1,
+        old_text,
+        new_text,
+        start,
+        old_end,
+        new_end,
+    )
+}
+
+#[cfg(any(unix, windows))]
+fn incremental_notification_for_versions(
+    package_prefix: &str,
+    base_version: u64,
+    old_text: &str,
+    new_text: &str,
+    start: usize,
+    old_end: usize,
+    new_end: usize,
+) -> ParseEditNotification {
+    let document_version = base_version + 1;
+    let mut notification = parse_notification_for(package_prefix, document_version, new_text);
     notification.invalidated_ranges = vec![ParseByteRange::new(start as u64, new_end as u64)];
     notification.accepted_edit = Some(ParseInputEdit {
-        base_document_version: 1,
-        document_version: 2,
+        base_document_version: base_version,
+        document_version,
         start_byte: start as u64,
         old_end_byte: old_end as u64,
         new_end_byte: new_end as u64,
@@ -711,9 +733,9 @@ fn record_undecorated_ranges(
 ) {
     let painted = editor.visible_decoration_paint_ranges_for_test();
     for (label, expected) in expected {
-        if !painted
-            .iter()
-            .any(|(range, _)| range.start <= expected.start && range.end >= expected.end)
+        if expected
+            .clone()
+            .any(|byte| !painted.iter().any(|(range, _)| range.contains(&byte)))
         {
             failures.push(format!("{stage}: {label} {expected:?} was base-colored"));
         }
@@ -891,6 +913,46 @@ fn syntax_style_map_accepts_document_font_roles_and_rejects_concrete_typography(
         assemble_package_record(&package).unwrap_err().rule,
         PackageRecordRule::InvalidContributionDescriptor
     );
+}
+
+#[test]
+fn syntax_style_map_accepts_bounded_priority_and_rejects_invalid_values() {
+    let mut package = grammar_package("markdown", "markdown", "md");
+    package["clay"]["contributions"]["syntaxGrammars"][0]["styleMap"]["code"] = json!({
+        "type": "CodeSpan",
+        "priority": 80
+    });
+
+    let record = assemble_package_record(&package).expect("bounded priority validates");
+    assert_eq!(
+        record.contributions.syntax_grammars[0].style_map["code"].priority,
+        80
+    );
+    // Omitted priority keeps the historical default.
+    let keyword = record.contributions.syntax_grammars[0]
+        .style_map
+        .values()
+        .find(|entry| entry.priority != 80);
+    assert!(keyword.is_some(), "default entries keep priority 70");
+    assert!(
+        record.contributions.syntax_grammars[0]
+            .style_map
+            .values()
+            .filter(|entry| entry.priority != 80)
+            .all(|entry| entry.priority == 70)
+    );
+
+    for bad in [json!(101), json!(-1), json!(1.5), json!("80")] {
+        package["clay"]["contributions"]["syntaxGrammars"][0]["styleMap"]["code"] = json!({
+            "type": "CodeSpan",
+            "priority": bad
+        });
+        assert_eq!(
+            assemble_package_record(&package).unwrap_err().rule,
+            PackageRecordRule::InvalidContributionDescriptor,
+            "priority {bad} must be rejected"
+        );
+    }
 }
 
 #[test]
@@ -1576,9 +1638,12 @@ fn markdown_grammar_emits_prose_vocabulary_tokens_with_modifiers() {
         env!("CARGO_MANIFEST_DIR")
     ))
     .expect("read Markdown highlights query");
-    let handler =
+    let mut handler =
         TreeSitterSyntaxHandler::new(contribution, tree_sitter_md_025::LANGUAGE.into(), &query)
             .expect("Markdown query compiles");
+    handler
+        .enable_injections(include_str!("../packages/markdown/queries/injections.scm"))
+        .expect("Markdown injections query compiles");
     let source = "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n\n**bold**\n\n_emphasis_\n\n`code`\n\n[x](https://example.com)\n\n- item\n\n> quote\n\n```rust\nfn main() {}\n```\n";
     let set = handler
         .parse_sync(parse_notification_for("markdown", 1, source))
@@ -1611,6 +1676,134 @@ fn markdown_grammar_emits_prose_vocabulary_tokens_with_modifiers() {
         span.token_type == TokenType::Paragraph && span.modifiers.contains(Modifiers::ITALIC)
     }));
     assert!(set.spans.iter().all(|span| span.scope.is_none()));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn markdown_inline_injection_styles_mixed_runs() {
+    // Generic injection engine: block parse -> injections.scm declares the
+    // `inline` ranges for `markdown_inline` -> embedded grammar re-parses
+    // those ranges -> inline captures flow through the same styleMap. Mixed
+    // inline runs (the old regex-predicate dead end) must now style.
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry
+        .get("markdown.markdown")
+        .expect("native Markdown grammar")
+        .clone();
+    let mut handler = TreeSitterSyntaxHandler::new(
+        contribution,
+        tree_sitter_md_025::LANGUAGE.into(),
+        include_str!("../packages/markdown/queries/highlights.scm"),
+    )
+    .expect("Markdown query compiles");
+    handler
+        .enable_injections(include_str!("../packages/markdown/queries/injections.scm"))
+        .expect("Markdown injections query compiles");
+    let source = "# Title\n\nSee **bold** and *italic* and `code` and [link](https://example.com) inline.\n\n# Title with `code`\n\n<https://example.com> and <a@b.c>\n\n```unknownlanguage\nfn mixed() {}\n```\n";
+    let set = handler
+        .parse_sync(parse_notification_for("markdown", 1, source))
+        .expect("Markdown parses")
+        .decoration_updates
+        .expect("Markdown decorations");
+
+    // Spans crossing a 128-byte decoration chunk boundary are split; the
+    // editor coalesces adjacent same-token spans (plan058), so covering the
+    // needle's first byte is the honest per-chunk assertion.
+    let covering = |needle: &str| {
+        let start = source.find(needle).expect("needle") as u64;
+        move |span: &DecorationSpan| span.byte_start <= start && span.byte_end > start
+    };
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Paragraph
+                && span.modifiers.contains(Modifiers::BOLD)
+                && covering("**bold**")(span)),
+        "mixed-run strong_emphasis must emit Paragraph+BOLD"
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Paragraph
+                && span.modifiers.contains(Modifiers::ITALIC)
+                && covering("*italic*")(span)),
+        "mixed-run emphasis must emit Paragraph+ITALIC"
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::CodeSpan && covering("`code`")(span)),
+        "mixed-run code_span must emit CodeSpan"
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Link
+                && covering("[link](https://example.com)")(span)),
+        "mixed-run inline_link must emit Link"
+    );
+    // Narrow inline captures outrank broad prose via declarative priority.
+    let paragraph_priority = set
+        .spans
+        .iter()
+        .find(|span| span.token_type == TokenType::Paragraph && span.modifiers == Modifiers::NONE)
+        .map(|span| span.priority);
+    assert_eq!(paragraph_priority, Some(70));
+    for token_type in [TokenType::CodeSpan, TokenType::Link] {
+        let priority = set
+            .spans
+            .iter()
+            .find(|span| span.token_type == token_type)
+            .map(|span| span.priority);
+        assert_eq!(priority, Some(80), "{token_type:?} narrow capture priority");
+    }
+    // Plain paragraph prose stays Paragraph without inline modifiers.
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Paragraph
+                && span.modifiers == Modifiers::NONE
+                && covering("See")(span)),
+        "plain prose must stay unmodified Paragraph"
+    );
+    // Inline inside headings: Heading1 base with CodeSpan sub-range.
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Heading1 && covering("Title with")(span)),
+        "heading text keeps Heading1"
+    );
+    let heading_code_start = source.rfind("`code`").expect("heading code") as u64;
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::CodeSpan
+                && span.byte_start <= heading_code_start
+                && span.byte_end > heading_code_start),
+        "code span inside heading must emit CodeSpan"
+    );
+    // Autolinks map to Link.
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Link
+                && covering("<https://example.com>")(span)),
+        "uri_autolink must emit Link"
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::Link && covering("<a@b.c>")(span)),
+        "email_autolink must emit Link"
+    );
+    // Unregistered fenced-code language: skipped gracefully, block-level
+    // CodeBlock span still ships.
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| span.token_type == TokenType::CodeBlock),
+        "fenced code keeps the block-level CodeBlock span"
+    );
 }
 
 #[cfg(any(unix, windows))]
@@ -2164,6 +2357,210 @@ fn incremental_newline_shortens_line_comment_capture() {
     assert!(set.spans.iter().any(|span| {
         span.token_type == TokenType::Comment && span.byte_end == insertion as u64
     }));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan058_repeated_comment_edits_do_not_grow_a_shifted_chunk_boundary_gap() {
+    let handler = first_party_rust_handler();
+    let mut text = format!("//{}\nfn after() {{}}\n", "c".repeat(150));
+    let mut editor = apply_initial_syntax(&handler, &text);
+    let mut caret = 2;
+    assert!(editor.navigate_to_byte_offset(caret));
+    let mut authority_gap_bytes = Vec::new();
+    let mut transition_failures = Vec::new();
+
+    for base_version in 1..=3 {
+        let old_text = text.clone();
+        assert!(editor.insert_text("x"));
+        text.insert(caret as usize, 'x');
+        caret += 1;
+        let comment_end = text.find('\n').expect("line comment terminator");
+        let expected = [("comment suffix", 128..comment_end)];
+        record_undecorated_ranges(
+            &mut transition_failures,
+            &format!("version {} optimistic edit", base_version + 1),
+            &editor,
+            &expected,
+        );
+        assert!(editor.note_confirmed_version(11, base_version + 1));
+        record_undecorated_ranges(
+            &mut transition_failures,
+            &format!("version {} acknowledgement", base_version + 1),
+            &editor,
+            &expected,
+        );
+
+        let update = handler
+            .parse_sync(incremental_notification_for_versions(
+                "rust",
+                base_version,
+                &old_text,
+                &text,
+                caret as usize - 1,
+                caret as usize - 1,
+                caret as usize,
+            ))
+            .expect("incremental syntax parse");
+        assert_eq!(
+            update.syntax_tree_delta.as_deref(),
+            Some("tree-sitter:rust:incremental")
+        );
+        assert_eq!(
+            update.decoration_updates.len(),
+            1,
+            "one accepted edit should produce one touched replacement member"
+        );
+        for (index, set) in update.decoration_updates.into_iter().enumerate() {
+            assert!(editor.apply_decoration_set(set));
+            record_undecorated_ranges(
+                &mut transition_failures,
+                &format!("version {} authoritative member {index}", base_version + 1),
+                &editor,
+                &expected,
+            );
+        }
+        let painted = editor.visible_decoration_paint_ranges_for_test();
+        authority_gap_bytes.push(
+            (128..comment_end)
+                .filter(|byte| !painted.iter().any(|(range, _)| range.contains(byte)))
+                .count(),
+        );
+    }
+
+    assert_eq!(
+        authority_gap_bytes,
+        vec![0, 0, 0],
+        "each authoritative response currently exposes one more base-colored byte"
+    );
+    assert!(
+        transition_failures.is_empty(),
+        "decoration continuity regressed:\n{}",
+        transition_failures.join("\n")
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn plan058_first_party_languages_preserve_shifted_boundary_continuity() {
+    for (label, package_prefix, contribution_id, language_id, language, query, mut text) in [
+        (
+            "Rust",
+            "rust",
+            "rust.rust",
+            "rust",
+            tree_sitter_rust::LANGUAGE.into(),
+            include_str!("../packages/rust/queries/highlights.scm"),
+            format!("//{}\nfn after() {{}}\n", "c".repeat(150)),
+        ),
+        (
+            "TypeScript",
+            "typescript",
+            "typescript.typescript",
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            format!("//{}\nfunction after() {{}}\n", "c".repeat(150)),
+        ),
+        (
+            "TSX",
+            "typescript",
+            "typescript.tsx",
+            "tsx",
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            include_str!("../packages/typescript/queries/highlights.scm"),
+            format!(
+                "//{}\nfunction After() {{ return <div />; }}\n",
+                "c".repeat(150)
+            ),
+        ),
+        (
+            "JavaScript",
+            "javascript",
+            "javascript.javascript",
+            "javascript",
+            tree_sitter_javascript::LANGUAGE.into(),
+            include_str!("../packages/javascript/queries/highlights.scm"),
+            format!("//{}\nfunction after() {{}}\n", "c".repeat(150)),
+        ),
+        (
+            "Markdown",
+            "markdown",
+            "markdown.markdown",
+            "markdown",
+            tree_sitter_md_025::LANGUAGE.into(),
+            include_str!("../packages/markdown/queries/highlights.scm"),
+            format!("{}\n\n# After\n", "p".repeat(152)),
+        ),
+    ] {
+        let handler = first_party_handler(contribution_id, language, query);
+        let mut editor = apply_initial_syntax_for(&handler, package_prefix, language_id, &text);
+        let mut caret = if package_prefix == "markdown" { 1 } else { 2 };
+        assert!(editor.navigate_to_byte_offset(caret), "{label}: caret");
+        let mut failures = Vec::new();
+
+        for base_version in 1..=3 {
+            let old_text = text.clone();
+            assert!(editor.insert_text("x"), "{label}: local insertion");
+            text.insert(caret as usize, 'x');
+            caret += 1;
+            let decorated_end = text.find('\n').expect("decorated line end");
+            let expected = [("decorated suffix", 128..decorated_end)];
+            record_undecorated_ranges(
+                &mut failures,
+                &format!("{label} version {} optimistic edit", base_version + 1),
+                &editor,
+                &expected,
+            );
+            assert!(editor.note_confirmed_version(11, base_version + 1));
+            record_undecorated_ranges(
+                &mut failures,
+                &format!("{label} version {} acknowledgement", base_version + 1),
+                &editor,
+                &expected,
+            );
+
+            let update = handler
+                .parse_sync(incremental_notification_for_versions(
+                    package_prefix,
+                    base_version,
+                    &old_text,
+                    &text,
+                    caret as usize - 1,
+                    caret as usize - 1,
+                    caret as usize,
+                ))
+                .unwrap_or_else(|error| panic!("{label}: incremental parse: {error}"));
+            assert_eq!(
+                update.syntax_tree_delta.as_deref(),
+                Some(format!("tree-sitter:{language_id}:incremental").as_str()),
+                "{label}: cached tree"
+            );
+            assert_eq!(
+                update.decoration_updates.len(),
+                1,
+                "{label}: one touched replacement member"
+            );
+            for (index, set) in update.decoration_updates.into_iter().enumerate() {
+                assert!(editor.apply_decoration_set(set));
+                record_undecorated_ranges(
+                    &mut failures,
+                    &format!(
+                        "{label} version {} authoritative member {index}",
+                        base_version + 1
+                    ),
+                    &editor,
+                    &expected,
+                );
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "{label} boundary continuity regressed:\n{}",
+            failures.join("\n")
+        );
+    }
 }
 
 #[cfg(any(unix, windows))]
@@ -3279,8 +3676,15 @@ fn first_party_package_queries_keep_broad_captures_continuous() {
             .get(contribution_id)
             .unwrap_or_else(|| panic!("{label}: contribution is registered"))
             .clone();
-        let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
+        let mut handler = TreeSitterSyntaxHandler::new(contribution, language, query)
             .unwrap_or_else(|error| panic!("{label}: query compiles: {error}"));
+        if contribution_id == "markdown.markdown" {
+            // Markdown inline forms come from the markdown_inline injection
+            // layer, wired the same way `native_handler` wires it.
+            handler
+                .enable_injections(include_str!("../packages/markdown/queries/injections.scm"))
+                .unwrap_or_else(|error| panic!("{label}: injections compile: {error}"));
+        }
         let (start, old_end, new_end) = single_edit_offsets(old_text, new_text);
 
         handler

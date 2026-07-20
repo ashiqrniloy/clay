@@ -251,6 +251,44 @@ fn paint_uses_cached_inert_spans_without_package_javascript() {
 }
 
 #[test]
+fn exact_range_decoration_replacement_stays_off_edit_and_paint_hot_paths() {
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let apply_set = surface
+        .split("fn apply_set(&mut self, set: DecorationSet)")
+        .nth(1)
+        .and_then(|body| body.split("fn span_count(&self)").next())
+        .expect("decoration apply_set body");
+    let apply_edit = surface
+        .split("fn apply_edit(&mut self, operation: &EditOperation)")
+        .nth(1)
+        .and_then(|body| body.split("fn confirm_version(").next())
+        .expect("decoration apply_edit body");
+    let paint = surface
+        .split("pub fn paint(")
+        .nth(1)
+        .and_then(|body| body.split("fn paint_caret(").next())
+        .expect("surface paint body");
+
+    assert!(apply_set.contains("subtract_provisional_chunk"));
+    assert!(apply_set.contains("coalesce_local_residual"));
+    for hot_path in [apply_edit, paint] {
+        for forbidden in [
+            "subtract_provisional_chunk",
+            "coalesce_local_residual",
+            "TreeSitterSyntaxHandler",
+            "serverPublishDecorations",
+            "write_client_message",
+            "Deno.core",
+        ] {
+            assert!(
+                !hot_path.contains(forbidden),
+                "edit/paint hot path must not run authoritative replacement, parser, IPC, or JavaScript work: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only() {
     let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
     let widget_source =

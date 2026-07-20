@@ -169,20 +169,61 @@ impl StyleRegistry {
                 Color::from_rgba8(0x61, 0xaf, 0xef, 0x55), // Regexp
                 Color::from_rgba8(0xab, 0xb2, 0xbf, 0x55), // Operator
                 Color::from_rgba8(0x61, 0xaf, 0xef, 0x55), // Decorator
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Heading1
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Heading2
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Heading3
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Heading4
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Heading5
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Heading6
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // ListItem
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Quote
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // CodeBlock
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // CodeSpan
-                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f), // Link
+                // Prose palette (Plan 059 task 3): differentiated instead of
+                // the old uniform muted green. Headings step through hues and
+                // are bold by default; links are underlined blue; quotes are
+                // italic gray; code keeps the string green in monospace (the
+                // font role comes from the span, not the theme).
+                Color::from_rgba8(0xff, 0x4d, 0x6d, 0x55), // Heading1
+                Color::from_rgba8(0xff, 0xd1, 0x66, 0x55), // Heading2
+                Color::from_rgba8(0xc3, 0xe8, 0x8d, 0x55), // Heading3
+                Color::from_rgba8(0x61, 0xaf, 0xef, 0x55), // Heading4
+                Color::from_rgba8(0xc7, 0x92, 0xea, 0x55), // Heading5
+                Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x55), // Heading6
+                Color::from_rgba8(0xab, 0xb2, 0xbf, 0x55), // ListItem
+                Color::from_rgba8(0x7f, 0x84, 0x8e, 0x55), // Quote
+                Color::from_rgba8(0xc3, 0xe8, 0x8d, 0x55), // CodeBlock
+                Color::from_rgba8(0xff, 0xd1, 0x66, 0x55), // CodeSpan
+                Color::from_rgba8(0x61, 0xaf, 0xef, 0x55), // Link
                 Color::from_rgb8(0xf4, 0xf1, 0xff),        // Paragraph
             ],
-            attr_defaults: [0u16; 35],
+            attr_defaults: [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0, // Namespace..Macro
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0, // Keyword..Decorator
+                ATTR_BOLD,
+                ATTR_BOLD,
+                ATTR_BOLD,
+                ATTR_BOLD,
+                ATTR_BOLD,
+                ATTR_BOLD,      // Heading1..6
+                0,              // ListItem
+                ATTR_ITALIC,    // Quote
+                0,              // CodeBlock
+                0,              // CodeSpan
+                ATTR_UNDERLINE, // Link
+                0,              // Paragraph
+            ],
         }
     }
 
@@ -558,8 +599,28 @@ mod tests {
         assert_eq!(
             r.style_for(DecorationKind::Syntax, TokenType::Heading1, Modifiers::NONE)
                 .color,
-            r.semantic
+            r.syntax_color(TokenType::Heading1)
         );
+        // Default prose palette (Plan 059 task 3): prose tokens are visually
+        // differentiated without any theme package.
+        let heading1 = r.style_for(DecorationKind::Syntax, TokenType::Heading1, Modifiers::NONE);
+        let heading2 = r.style_for(DecorationKind::Syntax, TokenType::Heading2, Modifiers::NONE);
+        assert_ne!(heading1.color, heading2.color);
+        assert!(heading1.bold && heading2.bold);
+        let paragraph = r.style_for(
+            DecorationKind::Syntax,
+            TokenType::Paragraph,
+            Modifiers::NONE,
+        );
+        assert_eq!(paragraph.color, r.base.text);
+        assert!(!paragraph.bold && !paragraph.underline);
+        let link = r.style_for(DecorationKind::Syntax, TokenType::Link, Modifiers::NONE);
+        assert!(link.underline);
+        assert_ne!(link.color, paragraph.color);
+        let quote = r.style_for(DecorationKind::Syntax, TokenType::Quote, Modifiers::NONE);
+        assert!(quote.italic);
+        let code_span = r.style_for(DecorationKind::Syntax, TokenType::CodeSpan, Modifiers::NONE);
+        assert_ne!(code_span.color, paragraph.color);
         assert_eq!(
             r.style_for(
                 DecorationKind::Semantic,

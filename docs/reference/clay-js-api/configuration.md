@@ -207,6 +207,16 @@ Hidden/ad hoc keys are invalid, including any of `syntaxSameWordBoundary`, `synt
 
 Configuration evaluation stays outside keypress, text-edit, edit-acknowledgement, parse, publication, paint, layout, and scroll paths. This review grants no parser callback, filesystem, network, shell, or client-side JavaScript authority.
 
+## Plan 058 exact-range provisional decoration replacement configuration review
+
+Plan 058 does **not** promote a new user-facing `clay:configuration` API. Exact-range authoritative viewport subtraction (`subtract_half_open_range`, `subtract_provisional_chunk`), local provisional residual coalescing (`coalesce_local_residual`, `coalesce_compatible_spans`), and bounded residual chunk-count invariants are correctness fixes, not user policy choices.
+
+No configuration call is needed. [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) remains the sole relevant user engine-selection surface. The half-open interval subtraction, per-package/layer residual isolation, and bounded 512-cycle coalescing ceiling are compiled invariants validated by tests.
+
+Hidden/ad hoc keys are invalid, including any of `syntaxExactRangeReplacement`, `syntaxProvisionalSubtraction`, `syntaxResidualCoalescing`, `syntaxSubtractionCoalescing`, `syntaxExactRangeSubtraction`, `syntaxProvisionalResidual`, and `syntaxCoalescingStrategy`. No `clay.configuration.setSyntax*` API exists for these names.
+
+Configuration evaluation stays outside keypress, text-edit, edit-acknowledgement, parse, publication, paint, layout, and scroll paths. Authoritative subtraction and coalescing run only in `apply_set`, not in local-edit or paint hot paths. This review grants no parser callback, filesystem, network, shell, or client-side JavaScript authority.
+
 ## Phase 18.18 first-party language package configuration review
 
 Phase 18.18 promoted four first-party language packages from grammar-only metadata to full-mode contracts: Tier 1 native grammar with vocabulary styleMaps, expanded editor behavior (indent/electric/pairs/comment/autocomplete triggers), priority-0 base completion providers carrying bounded static keyword items, importable inert status items, and decoupled Markdown native-decoration-vs-package-JS-SDUI-preview. This review did **not** promote a new user-facing `clay:configuration` API.

@@ -342,6 +342,22 @@ cargo bench --bench first_party_language_baselines first_party_incremental_edit 
 
 See [Performance Fixtures and Baseline Workflow](performance.md#plan-057-syntax-continuity-linux-verification-2026-07-19) for measured parser/query/member counts, `syntax.edit_to_publish` instrumentation, and advisory five-language timings.
 
+### Plan 058 exact-range replacement Linux smoke (2026-07-20)
+
+Run the same first-party fixture with profiling enabled:
+
+```bash
+cargo run -- smoke-gui --config-fixture language-packages --profile-perf
+```
+
+The Linux verification used the X11 backend (`WAYLAND_DISPLAY='' WINIT_UNIX_BACKEND=x11`) so real editor keyboard/pointer events and framebuffer checkpoints could be observed. From the synthetic `tmp/src` workspace it opened `main.rs` containing a 150-byte Rust line comment before decorated functions/types/strings/numbers. Eight letters were typed one at a time inside that comment across the 128-byte replacement boundary. Screenshots after one, four, and eight letters retained decoration on the complete comment suffix and every downstream code block; no one-byte-per-keypress white gap or downstream color peeling appeared. The client log recorded edit acknowledgements and current `[0,128)` Rust syntax authority through document version 10.
+
+The same session then sent Backspace and Enter at the comment caret. Both produced acknowledgements (versions 11 and 12). Backspace retained downstream decoration; Enter correctly ended the line-comment capture at the newline while all later Rust keyword/function/type/string/number/operator decoration stayed visible. Temporary fixture text was restored after shutdown, screenshots/logs stayed under `/tmp`, managed smoke cleanup removed the isolated server, and package/protocol authority was unchanged.
+
+Repeatable coverage is `plan058_first_party_languages_preserve_shifted_boundary_continuity` for Rust, TypeScript, TSX, JavaScript, and Markdown; `plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry` for 128 insertion/deletion pairs; `plan058_repeated_comment_edits_do_not_grow_a_shifted_chunk_boundary_gap` for every Rust state transition; and `repeated_authority_keeps_local_residual_cache_bounded` for 512 bounded coalescing/cache cycles. Existing Plan 057 punctuation, newline, empty-authority, stale-version, and authoritative-correction matrices remain green.
+
+See [Performance Fixtures and Baseline Workflow](performance.md#plan-058-exact-range-replacement-linux-verification-2026-07-20) for unchanged parser/query/member counts, client apply cost, cache bounds, and advisory first-party timings.
+
 ### End-to-end file browser workflow smoke
 
 This smoke validates the six-step app workflow on Linux, Clay's primary development and CI host. The Plan 044 real-`cargo run` regressions are locked separately in [Manual File Browser Workflow Bug Contract](manual-file-browser-workflow-bug-contract.md).

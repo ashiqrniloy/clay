@@ -33,6 +33,8 @@ export type ServerRegisterSyntaxGrammarOptions = {
   styleMap?: Record<string, string | {
     styleToken: string;
     fontRole?: "monospace" | "proportional";
+    /** Optional capture priority 0-100; higher wins overlapping ranges. Default 70. */
+    priority?: number;
   }>;
   budgets?: { timeoutMs?: number; maxWindowBytes?: number };
   handler?: never;

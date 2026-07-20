@@ -197,6 +197,7 @@ fn server_public_items_have_api_inventory_entries_or_are_allowlisted() {
         "src/server/syntax.rs::TreeSitterSyntaxError",
         "src/server/syntax.rs::TreeSitterSyntaxHandler",
         "src/server/syntax.rs::TreeSitterSyntaxHandler::cached_tree_version",
+        "src/server/syntax.rs::TreeSitterSyntaxHandler::enable_injections",
         "src/server/syntax.rs::TreeSitterSyntaxHandler::new",
         "src/server/syntax.rs::TreeSitterSyntaxHandler::parse_sync",
         "src/server/syntax.rs::SyntaxGrammarRegistry",

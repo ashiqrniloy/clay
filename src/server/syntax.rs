@@ -15,7 +15,10 @@ use crate::{
         record::{PackageRecord, SyntaxGrammarContributionDescriptor},
     },
     perf::{
-        budgets::{DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
+        budgets::{
+            DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+            MAX_OPENABLE_FILE_BYTES,
+        },
         metrics::{
             MetricMetadata, MetricValue, PerfRecorder, SYNTAX_PARSE_FULL, SYNTAX_PARSE_INCREMENTAL,
             SYNTAX_PARSE_INVOCATIONS, SYNTAX_QUERY_BYTES, SYNTAX_QUERY_RANGES, global_recorder,
@@ -213,9 +216,42 @@ pub struct NativeGrammarDescriptor {
         crate::protocol::TokenType,
         crate::protocol::Modifiers,
         Option<crate::protocol::DocumentFontRole>,
+        u16,
     )],
     language: fn() -> Language,
+    max_window_bytes: usize,
+    /// Optional composite-grammar injection query (`queries.injections`). When
+    /// present, the handler re-parses each `@injection.content` range with the
+    /// first-party embedded grammar registered under the resolved injection
+    /// language name (see `FIRST_PARTY_EMBEDDED_GRAMMARS`).
+    injections_query_path: Option<&'static str>,
+    injections_query: Option<&'static str>,
 }
+
+/// First-party embedded grammar resolvable by injection language name. The
+/// generic injection executor refuses any name not registered here, so only
+/// Clay-vendored grammar artifacts ever parse an injected range.
+#[derive(Clone, Copy)]
+struct EmbeddedGrammarDescriptor {
+    name: &'static str,
+    language: fn() -> Language,
+    highlights_query: &'static str,
+}
+
+impl fmt::Debug for EmbeddedGrammarDescriptor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EmbeddedGrammarDescriptor")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
+const FIRST_PARTY_EMBEDDED_GRAMMARS: &[EmbeddedGrammarDescriptor] = &[EmbeddedGrammarDescriptor {
+    name: "markdown_inline",
+    language: || tree_sitter_md_025::INLINE_LANGUAGE.into(),
+    highlights_query: include_str!("../../packages/markdown/queries/inline-highlights.scm"),
+}];
 
 impl fmt::Debug for NativeGrammarDescriptor {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -230,6 +266,7 @@ impl fmt::Debug for NativeGrammarDescriptor {
             .field("file_names", &self.file_names)
             .field("grammar_source", &self.grammar_source)
             .field("highlights_query_path", &self.highlights_query_path)
+            .field("max_window_bytes", &self.max_window_bytes)
             .finish_non_exhaustive()
     }
 }
@@ -248,6 +285,9 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/rust/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_rust::LANGUAGE.into(),
+        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        injections_query_path: None,
+        injections_query: None,
     },
     NativeGrammarDescriptor {
         package_name: "@clay/typescript",
@@ -262,6 +302,9 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/typescript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        injections_query_path: None,
+        injections_query: None,
     },
     NativeGrammarDescriptor {
         package_name: "@clay/typescript",
@@ -276,6 +319,9 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/typescript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
+        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        injections_query_path: None,
+        injections_query: None,
     },
     NativeGrammarDescriptor {
         package_name: "@clay/javascript",
@@ -290,6 +336,9 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/javascript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_javascript::LANGUAGE.into(),
+        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        injections_query_path: None,
+        injections_query: None,
     },
     NativeGrammarDescriptor {
         package_name: "@clay/markdown",
@@ -304,6 +353,14 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/markdown/queries/highlights.scm"),
         style_map: MARKDOWN_NATIVE_STYLE_MAP,
         language: || tree_sitter_md_025::LANGUAGE.into(),
+        // Markdown block meaning (notably fenced-code state) can begin before
+        // the visible viewport. Parse bounded full-file context while query
+        // and decoration output remain viewport-limited.
+        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
+        injections_query_path: Some("packages/markdown/queries/injections.scm"),
+        injections_query: Some(include_str!(
+            "../../packages/markdown/queries/injections.scm"
+        )),
     },
 ];
 
@@ -312,54 +369,86 @@ const DEFAULT_NATIVE_STYLE_MAP: &[(
     TokenType,
     Modifiers,
     Option<crate::protocol::DocumentFontRole>,
+    u16,
 )] = &[
-    ("keyword", TokenType::Keyword, Modifiers::NONE, None),
-    ("string", TokenType::String, Modifiers::NONE, None),
-    ("comment", TokenType::Comment, Modifiers::NONE, None),
-    ("punctuation", TokenType::Operator, Modifiers::NONE, None),
-    ("text", TokenType::Paragraph, Modifiers::NONE, None),
-    ("function", TokenType::Function, Modifiers::NONE, None),
+    ("keyword", TokenType::Keyword, Modifiers::NONE, None, 70),
+    ("string", TokenType::String, Modifiers::NONE, None, 70),
+    ("comment", TokenType::Comment, Modifiers::NONE, None, 70),
+    (
+        "punctuation",
+        TokenType::Operator,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    ("text", TokenType::Paragraph, Modifiers::NONE, None, 70),
+    ("function", TokenType::Function, Modifiers::NONE, None, 70),
     (
         "function.declaration",
         TokenType::Function,
         Modifiers::DECLARATION,
         None,
+        70,
     ),
-    ("type", TokenType::Type, Modifiers::NONE, None),
-    ("number", TokenType::Number, Modifiers::NONE, None),
+    ("type", TokenType::Type, Modifiers::NONE, None, 70),
+    ("number", TokenType::Number, Modifiers::NONE, None, 70),
 ];
 
+// Narrow inline captures (code-span/strong/emphasis/link) outrank broad
+// prose captures (text/heading) at 80 so overlapping ranges resolve to the
+// inline token instead of the paragraph base color.
 const MARKDOWN_NATIVE_STYLE_MAP: &[(
     &str,
     TokenType,
     Modifiers,
     Option<crate::protocol::DocumentFontRole>,
+    u16,
 )] = &[
-    ("punctuation", TokenType::Operator, Modifiers::NONE, None),
-    ("text", TokenType::Paragraph, Modifiers::NONE, None),
+    (
+        "punctuation",
+        TokenType::Operator,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    ("text", TokenType::Paragraph, Modifiers::NONE, None, 70),
     (
         "code",
         TokenType::CodeBlock,
         Modifiers::NONE,
         Some(crate::protocol::DocumentFontRole::Monospace),
+        70,
     ),
     (
         "code-span",
         TokenType::CodeSpan,
         Modifiers::NONE,
         Some(crate::protocol::DocumentFontRole::Monospace),
+        80,
     ),
-    ("heading-1", TokenType::Heading1, Modifiers::NONE, None),
-    ("heading-2", TokenType::Heading2, Modifiers::NONE, None),
-    ("heading-3", TokenType::Heading3, Modifiers::NONE, None),
-    ("heading-4", TokenType::Heading4, Modifiers::NONE, None),
-    ("heading-5", TokenType::Heading5, Modifiers::NONE, None),
-    ("heading-6", TokenType::Heading6, Modifiers::NONE, None),
-    ("strong", TokenType::Paragraph, Modifiers::BOLD, None),
-    ("emphasis", TokenType::Paragraph, Modifiers::ITALIC, None),
-    ("list-marker", TokenType::ListItem, Modifiers::NONE, None),
-    ("link", TokenType::Link, Modifiers::NONE, None),
-    ("quote", TokenType::Quote, Modifiers::NONE, None),
+    ("heading-1", TokenType::Heading1, Modifiers::NONE, None, 70),
+    ("heading-2", TokenType::Heading2, Modifiers::NONE, None, 70),
+    ("heading-3", TokenType::Heading3, Modifiers::NONE, None, 70),
+    ("heading-4", TokenType::Heading4, Modifiers::NONE, None, 70),
+    ("heading-5", TokenType::Heading5, Modifiers::NONE, None, 70),
+    ("heading-6", TokenType::Heading6, Modifiers::NONE, None, 70),
+    ("strong", TokenType::Paragraph, Modifiers::BOLD, None, 80),
+    (
+        "emphasis",
+        TokenType::Paragraph,
+        Modifiers::ITALIC,
+        None,
+        80,
+    ),
+    (
+        "list-marker",
+        TokenType::ListItem,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    ("link", TokenType::Link, Modifiers::NONE, None, 80),
+    ("quote", TokenType::Quote, Modifiers::NONE, None, 70),
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -832,12 +921,15 @@ pub(crate) fn native_handler(
     else {
         return Ok(None);
     };
-    TreeSitterSyntaxHandler::new(
+    let mut handler = TreeSitterSyntaxHandler::new(
         contribution.clone(),
         (descriptor.language)(),
         descriptor.highlights_query,
-    )
-    .map(Some)
+    )?;
+    if let Some(injections_query) = descriptor.injections_query {
+        handler.enable_injections(injections_query)?;
+    }
+    Ok(Some(handler))
 }
 
 fn contribution_from_native_descriptor(
@@ -865,11 +957,11 @@ fn contribution_from_native_descriptor(
         grammar_source: Some(descriptor.grammar_source.to_string()),
         highlights_query_path: descriptor.highlights_query_path.to_string(),
         locals_query_path: None,
-        injections_query_path: None,
+        injections_query_path: descriptor.injections_query_path.map(str::to_string),
         style_map: descriptor
             .style_map
             .iter()
-            .map(|(capture, token_type, modifiers, font_role)| {
+            .map(|(capture, token_type, modifiers, font_role, priority)| {
                 (
                     (*capture).to_string(),
                     crate::packages::record::SyntaxStyleMapEntry {
@@ -877,12 +969,13 @@ fn contribution_from_native_descriptor(
                         modifiers: *modifiers,
                         scope: None,
                         font_role: *font_role,
+                        priority: *priority,
                     },
                 )
             })
             .collect(),
         timeout_ms: Some(5_000),
-        max_window_bytes: Some(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES),
+        max_window_bytes: Some(descriptor.max_window_bytes),
         estimated_payload_bytes: 512,
     }
 }
@@ -977,6 +1070,7 @@ pub struct SyntaxVocabularySpan {
     pub modifiers: Modifiers,
     pub scope: Option<String>,
     pub font_role: Option<crate::protocol::DocumentFontRole>,
+    pub priority: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1024,9 +1118,35 @@ pub struct TreeSitterSyntaxHandler {
     language: Language,
     parser: Arc<Mutex<Parser>>,
     highlights_query: Arc<Query>,
+    injections: Option<Arc<InjectionState>>,
     trees: Arc<Mutex<HashMap<DocumentId, CachedSyntaxTree>>>,
     decoration_cache: Arc<Mutex<SyntaxChunkCache>>,
     perf: PerfRecorder,
+}
+
+/// Generic composite-grammar state: a host-language injection query plus the
+/// lazily built embedded layers it references. Layer parsers are cached per
+/// injection language name so repeated parses of the same embedded grammar
+/// reuse one parser.
+#[derive(Debug)]
+struct InjectionState {
+    query: Query,
+    content_capture: u32,
+    language_capture: Option<u32>,
+    layers: Mutex<BTreeMap<String, Arc<EmbeddedLayer>>>,
+}
+
+struct EmbeddedLayer {
+    parser: Mutex<Parser>,
+    highlights: Query,
+}
+
+impl fmt::Debug for EmbeddedLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EmbeddedLayer")
+            .field("highlights", &self.highlights)
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for TreeSitterSyntaxHandler {
@@ -1070,10 +1190,47 @@ impl TreeSitterSyntaxHandler {
             language,
             parser: Arc::new(Mutex::new(parser)),
             highlights_query: Arc::new(query),
+            injections: None,
             trees: Arc::new(Mutex::new(HashMap::new())),
             decoration_cache: Arc::new(Mutex::new(SyntaxChunkCache::default())),
             perf: global_recorder(),
         })
+    }
+
+    /// Enable generic composite-grammar parsing: after the host parse, every
+    /// `@injection.content` range is re-parsed with the first-party embedded
+    /// grammar resolved from the pattern's `#set! injection.language "..."`
+    /// property or `@injection.language` capture text, and the embedded
+    /// grammar's highlight captures are emitted through this contribution's
+    /// style map with this package's provenance.
+    pub fn enable_injections(
+        &mut self,
+        injections_query: &str,
+    ) -> Result<(), TreeSitterSyntaxError> {
+        let query = Query::new(&self.language, injections_query).map_err(|error| {
+            TreeSitterSyntaxError::QueryCompileFailed {
+                message: error.to_string(),
+            }
+        })?;
+        let capture_names = query.capture_names();
+        let content_capture = capture_names
+            .iter()
+            .position(|name| *name == "injection.content")
+            .map(|index| index as u32)
+            .ok_or_else(|| TreeSitterSyntaxError::QueryCompileFailed {
+                message: "injection query declares no @injection.content capture".to_string(),
+            })?;
+        let language_capture = capture_names
+            .iter()
+            .position(|name| *name == "injection.language")
+            .map(|index| index as u32);
+        self.injections = Some(Arc::new(InjectionState {
+            query,
+            content_capture,
+            language_capture,
+            layers: Mutex::new(BTreeMap::new()),
+        }));
+        Ok(())
     }
 
     pub fn parse_sync(
@@ -1127,28 +1284,51 @@ impl TreeSitterSyntaxHandler {
             Some(tree)
         });
 
-        let metadata =
-            MetricMetadata::document(notification.document_id, notification.document_version);
-        self.perf.record_with_metadata(
-            SYNTAX_PARSE_INVOCATIONS,
-            MetricValue::Counter { amount: 1 },
-            metadata.clone(),
-        );
-        self.perf.record_with_metadata(
-            if old_tree.is_some() {
-                SYNTAX_PARSE_INCREMENTAL
-            } else {
-                SYNTAX_PARSE_FULL
-            },
-            MetricValue::Counter { amount: 1 },
-            metadata,
-        );
+        let cached_tree = self
+            .trees
+            .lock()
+            .expect("syntax tree cache lock poisoned")
+            .get(&notification.document_id)
+            .filter(|cached| {
+                cached.document_version == notification.document_version
+                    && cached.window_id == window.window_id
+                    && cached.tree.root_node().end_byte() == window.text.len()
+            })
+            .map(|cached| cached.tree.clone());
+        let (tree, parse_kind) = if let Some(tree) = cached_tree {
+            (tree, "cached")
+        } else {
+            let metadata =
+                MetricMetadata::document(notification.document_id, notification.document_version);
+            self.perf.record_with_metadata(
+                SYNTAX_PARSE_INVOCATIONS,
+                MetricValue::Counter { amount: 1 },
+                metadata.clone(),
+            );
+            self.perf.record_with_metadata(
+                if old_tree.is_some() {
+                    SYNTAX_PARSE_INCREMENTAL
+                } else {
+                    SYNTAX_PARSE_FULL
+                },
+                MetricValue::Counter { amount: 1 },
+                metadata,
+            );
 
-        let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
-        #[allow(deprecated)]
-        parser.set_timeout_micros(self.contribution.timeout_micros());
-        let Some(tree) = parser.parse(&window.text, old_tree.as_ref()) else {
-            return Err(TreeSitterSyntaxError::ParseTimedOut);
+            let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
+            #[allow(deprecated)]
+            parser.set_timeout_micros(self.contribution.timeout_micros());
+            let Some(tree) = parser.parse(&window.text, old_tree.as_ref()) else {
+                return Err(TreeSitterSyntaxError::ParseTimedOut);
+            };
+            (
+                tree,
+                if old_tree.is_some() {
+                    "incremental"
+                } else {
+                    "full"
+                },
+            )
         };
 
         let affected_ranges = query_ranges(&notification, window, old_tree.as_ref(), &tree);
@@ -1185,13 +1365,8 @@ impl TreeSitterSyntaxHandler {
             viewport: update_viewport,
             invalidated_ranges: vec![update_viewport],
             syntax_tree_delta: Some(format!(
-                "tree-sitter:{}:{}",
+                "tree-sitter:{}:{parse_kind}",
                 self.contribution.language_id,
-                if old_tree.is_some() {
-                    "incremental"
-                } else {
-                    "full"
-                }
             )),
             decoration_updates,
             // Tree-sitter recovery nodes are unreliable on bounded viewport
@@ -1281,6 +1456,16 @@ impl TreeSitterSyntaxHandler {
             }
         }
 
+        if let Some(injections) = &self.injections {
+            self.injection_captures_for_window(
+                injections,
+                window,
+                tree,
+                &query_range,
+                &mut syntax_captures,
+            )?;
+        }
+
         let spans = captures_to_decoration_spans(&self.contribution, syntax_captures)?;
         let mut sets = decoration_sets_for_ranges(notification, window, replacement_ranges, spans);
         sets.sort_by_key(|set| {
@@ -1312,6 +1497,174 @@ impl TreeSitterSyntaxHandler {
                 .map_err(map_decoration_error)?;
         }
         Ok(sets)
+    }
+}
+
+impl TreeSitterSyntaxHandler {
+    /// Run the generic injection executor: collect `@injection.content` ranges
+    /// per injection language from the host tree, re-parse each range set with
+    /// the registered embedded grammar (`set_included_ranges`), and append the
+    /// embedded highlight captures (same style map, same provenance) to the
+    /// host captures. Unregistered language names (e.g. fenced-code info
+    /// strings with no first-party grammar) and timed-out embedded parses are
+    /// skipped so host decorations still ship.
+    fn injection_captures_for_window(
+        &self,
+        injections: &InjectionState,
+        window: &crate::protocol::ParseWindowSnapshot,
+        tree: &Tree,
+        query_range: &std::ops::Range<usize>,
+        syntax_captures: &mut Vec<SyntaxCapture>,
+    ) -> Result<(), TreeSitterSyntaxError> {
+        if query_range.is_empty() {
+            return Ok(());
+        }
+        let mut groups: BTreeMap<String, Vec<tree_sitter::Range>> = BTreeMap::new();
+        let mut cursor = QueryCursor::new();
+        #[allow(deprecated)]
+        cursor.set_timeout_micros(self.contribution.timeout_micros());
+        cursor.set_byte_range(query_range.clone());
+        let mut matches =
+            cursor.matches(&injections.query, tree.root_node(), window.text.as_bytes());
+        loop {
+            matches.advance();
+            let Some(query_match) = matches.get() else {
+                break;
+            };
+            let language = injections
+                .query
+                .property_settings(query_match.pattern_index)
+                .iter()
+                .find(|property| &*property.key == "injection.language")
+                .and_then(|property| property.value.as_deref())
+                .map(str::to_string)
+                .or_else(|| {
+                    let index = injections.language_capture?;
+                    query_match
+                        .captures
+                        .iter()
+                        .find(|capture| capture.index == index)
+                        .and_then(|capture| {
+                            capture
+                                .node
+                                .utf8_text(window.text.as_bytes())
+                                .ok()
+                                .map(str::to_string)
+                        })
+                });
+            let Some(language) = language.filter(|language| !language.is_empty()) else {
+                continue;
+            };
+            for capture in query_match
+                .captures
+                .iter()
+                .filter(|capture| capture.index == injections.content_capture)
+            {
+                groups
+                    .entry(language.clone())
+                    .or_default()
+                    .push(capture.node.range());
+            }
+        }
+
+        for (language, mut ranges) in groups {
+            let Some(layer) = self.embedded_layer(injections, &language)? else {
+                continue;
+            };
+            ranges.sort_by_key(|range| (range.start_byte, range.end_byte));
+            ranges.dedup_by_key(|range| (range.start_byte, range.end_byte));
+            let mut parser = layer.parser.lock().expect("embedded parser lock poisoned");
+            #[allow(deprecated)]
+            parser.set_timeout_micros(self.contribution.timeout_micros());
+            if parser.set_included_ranges(&ranges).is_err() {
+                continue;
+            }
+            let Some(embedded_tree) = parser.parse(&window.text, None) else {
+                continue;
+            };
+            let mut cursor = QueryCursor::new();
+            #[allow(deprecated)]
+            cursor.set_timeout_micros(self.contribution.timeout_micros());
+            let mut captures = cursor.captures(
+                &layer.highlights,
+                embedded_tree.root_node(),
+                window.text.as_bytes(),
+            );
+            let capture_names = layer.highlights.capture_names();
+            loop {
+                captures.advance();
+                let Some((query_match, capture_index)) = captures.get() else {
+                    break;
+                };
+                let capture = query_match.captures[*capture_index];
+                let capture_name = capture_names[capture.index as usize];
+                if !self.contribution.style_map.contains_key(capture_name) {
+                    continue;
+                }
+                let absolute_start = window
+                    .byte_start
+                    .saturating_add(capture.node.start_byte() as u64);
+                let absolute_end = window
+                    .byte_start
+                    .saturating_add(capture.node.end_byte() as u64);
+                if absolute_start >= absolute_end {
+                    continue;
+                }
+                syntax_captures.push(SyntaxCapture {
+                    byte_start: absolute_start,
+                    byte_end: absolute_end,
+                    capture_name: capture_name.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve an injection language name to a cached embedded layer, building
+    /// it from the first-party registry on first use. Returns `None` for names
+    /// with no registered first-party grammar.
+    fn embedded_layer(
+        &self,
+        injections: &InjectionState,
+        language: &str,
+    ) -> Result<Option<Arc<EmbeddedLayer>>, TreeSitterSyntaxError> {
+        if let Some(layer) = injections
+            .layers
+            .lock()
+            .expect("embedded layer cache lock poisoned")
+            .get(language)
+        {
+            return Ok(Some(Arc::clone(layer)));
+        }
+        let Some(descriptor) = FIRST_PARTY_EMBEDDED_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.name == language)
+        else {
+            return Ok(None);
+        };
+        let embedded_language = (descriptor.language)();
+        let highlights =
+            Query::new(&embedded_language, descriptor.highlights_query).map_err(|error| {
+                TreeSitterSyntaxError::QueryCompileFailed {
+                    message: error.to_string(),
+                }
+            })?;
+        let mut parser = Parser::new();
+        parser.set_language(&embedded_language).map_err(|error| {
+            TreeSitterSyntaxError::QueryCompileFailed {
+                message: error.to_string(),
+            }
+        })?;
+        let layer = Arc::new(EmbeddedLayer {
+            parser: Mutex::new(parser),
+            highlights,
+        });
+        injections
+            .layers
+            .lock()
+            .expect("embedded layer cache lock poisoned")
+            .insert(language.to_string(), Arc::clone(&layer));
+        Ok(Some(layer))
     }
 }
 
@@ -1473,6 +1826,7 @@ pub fn map_capture_to_vocabulary(
         modifiers: entry.modifiers,
         scope: entry.scope.clone(),
         font_role: entry.font_role,
+        priority: entry.priority,
     })
 }
 
@@ -1494,7 +1848,7 @@ fn captures_to_decoration_spans(
             // contributions preserve their validated style token here.
             scope: vocabulary.scope,
             font_role: vocabulary.font_role,
-            priority: 70,
+            priority: vocabulary.priority,
             provenance: provenance.clone(),
         });
     }
@@ -1607,6 +1961,106 @@ mod tests {
             }],
             memory_budget: None,
         }
+    }
+
+    #[test]
+    fn markdown_native_descriptor_enables_inline_injection() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "markdown.markdown")
+            .expect("Markdown descriptor");
+        assert!(descriptor.injections_query.is_some());
+
+        let contribution = contribution_from_native_descriptor(descriptor);
+        assert_eq!(
+            contribution.injections_query_path.as_deref(),
+            Some("packages/markdown/queries/injections.scm")
+        );
+        let handler = native_handler(&contribution)
+            .expect("native handler builds")
+            .expect("markdown descriptor resolves");
+        assert!(handler.injections.is_some());
+
+        // Non-composite grammars stay single-language.
+        let rust = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "rust.rust")
+            .expect("Rust descriptor");
+        let handler = native_handler(&contribution_from_native_descriptor(rust))
+            .expect("native handler builds")
+            .expect("rust descriptor resolves");
+        assert!(handler.injections.is_none());
+    }
+
+    #[test]
+    fn same_version_markdown_scroll_reuses_full_document_tree_context() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "markdown.markdown")
+            .unwrap();
+        let mut handler = native_handler(&contribution_from_native_descriptor(descriptor))
+            .unwrap()
+            .unwrap();
+        let perf = PerfRecorder::for_test(true);
+        handler.perf = perf.clone();
+        let text = format!(
+            "```text\n{}LAST CODE LINE\n```\n\nPlain prose after fence.\n",
+            "code inside fence\n".repeat(300)
+        );
+        let scroll_start = text.find("LAST CODE LINE").unwrap() as u64;
+        let prose = text.find("Plain prose after fence.").unwrap() as u64;
+
+        let mut initial = notification(1, &text);
+        initial.package_prefix = "markdown".to_string();
+        initial.mode_id = "markdown.markdown".to_string();
+        initial.viewport = ParseByteRange::new(0, 4_096);
+        initial.invalidated_ranges = vec![initial.viewport];
+        initial.parse_windows[0].package_prefix = initial.package_prefix.clone();
+        initial.parse_windows[0].mode_id = initial.mode_id.clone();
+        handler.parse_sync(initial).unwrap();
+
+        let mut scrolled = notification(1, &text);
+        scrolled.package_prefix = "markdown".to_string();
+        scrolled.mode_id = "markdown.markdown".to_string();
+        scrolled.viewport = ParseByteRange::new(scroll_start, text.len() as u64);
+        scrolled.invalidated_ranges = vec![scrolled.viewport];
+        scrolled.parse_windows[0].package_prefix = scrolled.package_prefix.clone();
+        scrolled.parse_windows[0].mode_id = scrolled.mode_id.clone();
+        let update = handler.parse_sync(scrolled).unwrap();
+
+        assert_eq!(
+            update.syntax_tree_delta.as_deref(),
+            Some("tree-sitter:markdown:cached")
+        );
+        assert_eq!(
+            perf.snapshots()
+                .iter()
+                .filter(|snapshot| snapshot.name == SYNTAX_PARSE_INVOCATIONS)
+                .count(),
+            1
+        );
+        assert!(
+            update
+                .decoration_updates
+                .iter()
+                .any(|set| set
+                    .spans
+                    .iter()
+                    .any(|span| span.token_type == TokenType::Paragraph
+                        && span.byte_start <= prose
+                        && span.byte_end > prose))
+        );
+        assert!(
+            !update
+                .decoration_updates
+                .iter()
+                .any(|set| set
+                    .spans
+                    .iter()
+                    .any(|span| span.token_type == TokenType::CodeBlock
+                        && span.byte_start <= prose
+                        && span.byte_end > prose))
+        );
     }
 
     #[test]

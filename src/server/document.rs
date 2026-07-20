@@ -367,6 +367,27 @@ impl DocumentState {
             return Err("parse input edit version or range is invalid".to_string());
         }
 
+        if self.text.byte_len() as u64 <= policy.max_window_bytes {
+            let range = ParseByteRange::new(0, self.text.byte_len() as u64);
+            let mut snapshot = self.parse_window_snapshot(
+                package_prefix,
+                mode_id,
+                range,
+                policy.max_window_bytes,
+            )?;
+            snapshot.incremental_edit = true;
+            self.retained_parse_windows.insert(
+                (package_prefix.to_string(), mode_id.to_string()),
+                RetainedParseWindow {
+                    version: self.version,
+                    window_id: 0,
+                    byte_start: 0,
+                    byte_end: self.text.byte_len() as u64,
+                },
+            );
+            return Ok(Some(snapshot));
+        }
+
         let key = (package_prefix.to_string(), mode_id.to_string());
         let retained = self.retained_parse_windows.get(&key).copied();
         let transformed_end = retained.and_then(|window| {

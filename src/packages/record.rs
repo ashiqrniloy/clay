@@ -112,6 +112,16 @@ pub struct DecorationContributionDescriptor {
 /// Packages never select a concrete font family, size, color, or renderer
 /// value here — only the closed vocabulary the paint path resolves through the
 /// active theme.
+/// Default decoration priority for syntax-capture spans. Matches the
+/// historical syntax priority so omitted styleMap priorities keep today's
+/// rendering order.
+pub const DEFAULT_SYNTAX_STYLE_PRIORITY: u16 = 70;
+
+/// Highest priority a styleMap entry may declare. The syntax decoration
+/// layer ranks below semantic in overlap resolution regardless of priority,
+/// so this bound only orders captures within the syntax layer.
+pub const MAX_SYNTAX_STYLE_PRIORITY: u16 = 100;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxStyleMapEntry {
     pub token_type: TokenType,
@@ -120,6 +130,10 @@ pub struct SyntaxStyleMapEntry {
     /// leave this empty and render from the closed two-axis fields above.
     pub scope: Option<String>,
     pub font_role: Option<DocumentFontRole>,
+    /// Declarative capture priority: higher wins overlapping ranges within
+    /// the syntax layer (narrow captures outrank broad prose). Defaults to
+    /// [`DEFAULT_SYNTAX_STYLE_PRIORITY`].
+    pub priority: u16,
 }
 
 /// Inert descriptor for a package-provided Tree-sitter syntax grammar.
@@ -3921,6 +3935,34 @@ fn parse_syntax_style_map(
             ));
         }
 
+        let priority = match value {
+            Value::Object(entry) => match entry.get("priority") {
+                None => DEFAULT_SYNTAX_STYLE_PRIORITY,
+                Some(Value::Number(number)) => match number
+                    .as_u64()
+                    .and_then(|value| u16::try_from(value).ok())
+                    .filter(|value| *value <= MAX_SYNTAX_STYLE_PRIORITY)
+                {
+                    Some(priority) => priority,
+                    None => {
+                        return Err(ctx.error(
+                            PackageRecordRule::InvalidContributionDescriptor,
+                            Some(capture),
+                            "syntax grammar styleMap `priority` must be an integer between 0 and 100",
+                        ));
+                    }
+                },
+                Some(_) => {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(capture),
+                        "syntax grammar styleMap `priority` must be an integer between 0 and 100",
+                    ));
+                }
+            },
+            _ => DEFAULT_SYNTAX_STYLE_PRIORITY,
+        };
+
         let (token_type, modifiers, scope, font_role) = match value {
             Value::String(style_token) => {
                 if !is_known_syntax_style_token(style_token) {
@@ -4052,6 +4094,7 @@ fn parse_syntax_style_map(
                 modifiers,
                 scope,
                 font_role,
+                priority,
             },
         );
     }

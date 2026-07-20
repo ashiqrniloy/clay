@@ -2,7 +2,10 @@ use std::hint::black_box;
 
 use clay::{
     editor::{EditorCommand, EditorSurface},
-    protocol::{DocumentAccess, ParseByteRange, ParseEditNotification, ParseWindowSnapshot},
+    protocol::{
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentAccess,
+        Modifiers, ParseByteRange, ParseEditNotification, ParseWindowSnapshot, TokenType,
+    },
     server::syntax::{SyntaxGrammarRegistry, TreeSitterSyntaxHandler},
 };
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -178,6 +181,60 @@ fn first_party_incremental_edit(c: &mut Criterion) {
     group.finish();
 }
 
+fn authoritative_replacement_fixture() -> (EditorSurface, DecorationSet) {
+    let provenance = DecorationProvenance {
+        package_name: "@clay/rust".to_string(),
+        package_version: "builtin".to_string(),
+        package_prefix: "rust".to_string(),
+    };
+    let set = |version, start, end| DecorationSet {
+        document_id: 7,
+        document_version: version,
+        package_prefix: "rust".to_string(),
+        kind: DecorationKind::Syntax,
+        viewport_byte_start: start,
+        viewport_byte_end: end,
+        spans: vec![DecorationSpan::from_vocabulary(
+            start,
+            end,
+            DecorationKind::Syntax,
+            TokenType::Comment,
+            Modifiers::NONE,
+            70,
+            provenance.clone(),
+        )],
+    };
+    let mut surface = EditorSurface::default();
+    surface.load_snapshot(
+        7,
+        1,
+        "x".repeat(256),
+        DocumentAccess::Editable { lease_id: 1 },
+    );
+    assert!(surface.apply_decoration_set(set(1, 0, 128)));
+    assert!(surface.apply_decoration_set(set(1, 128, 256)));
+    assert!(surface.navigate_to_byte_offset(10));
+    assert!(surface.insert_text("x"));
+    assert!(surface.note_confirmed_version(7, 2));
+    (surface, set(2, 0, 128))
+}
+
+fn first_party_authoritative_replacement(c: &mut Criterion) {
+    c.bench_function(
+        "first_party_authoritative_replacement/apply_and_coalesce_residual",
+        |b| {
+            b.iter_batched(
+                authoritative_replacement_fixture,
+                |(mut surface, authority)| {
+                    black_box(surface.apply_decoration_set(authority));
+                    black_box(surface.decoration_span_count())
+                },
+                BatchSize::SmallInput,
+            )
+        },
+    );
+}
+
 fn first_party_decorated_scroll(c: &mut Criterion) {
     let mut group = c.benchmark_group("first_party_decorated_scroll");
     for fixture in &fixtures() {
@@ -221,6 +278,7 @@ criterion_group!(
     benches,
     first_party_open_parse,
     first_party_incremental_edit,
+    first_party_authoritative_replacement,
     first_party_decorated_scroll
 );
 criterion_main!(benches);

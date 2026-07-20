@@ -122,11 +122,12 @@ First-party grammar packages declare capture mappings in `clay.contributions.syn
     "modifiers": ["Declaration"]
   },
   "heading-1": { "type": "Heading1" },
-  "strong": { "type": "Paragraph", "modifiers": ["Bold"] }
+  "strong": { "type": "Paragraph", "modifiers": ["Bold"] },
+  "link": { "type": "Link", "priority": 80 }
 }
 ```
 
-`type` must be one closed `TokenType` variant and every `modifiers` value must be a closed `Modifiers` name. `fontRole`, when needed for code spans/blocks, remains semantic (`monospace` or `proportional`). The grammar-to-vocabulary conversion is load/parse-time validation; the native renderer reads resulting inert spans through `StyleRegistry`. Do not put colors, raw CSS, callbacks, executable code, or open-ended grammar scopes in a first-party styleMap. Legacy `styleToken` inputs remain a third-party compatibility path only.
+`type` must be one closed `TokenType` variant and every `modifiers` value must be a closed `Modifiers` name. `fontRole`, when needed for code spans/blocks, remains semantic (`monospace` or `proportional`). `priority` is an optional integer 0-100 (default 70): when two syntax-layer spans overlap, the higher priority wins color and font-role resolution, so narrow captures (links, code spans, emphasis) can outrank broad prose captures (paragraph or heading text) regardless of emission order; equal priorities keep the existing deterministic `font_role_precedes` tie-break chain. The priority bound is validated at package resolution like every other styleMap field. The grammar-to-vocabulary conversion is load/parse-time validation; the native renderer reads resulting inert spans through `StyleRegistry`. Do not put colors, raw CSS, callbacks, executable code, or open-ended grammar scopes in a first-party styleMap. Legacy `styleToken` inputs remain a third-party compatibility path only.
 
 See [Creating Clay Packages: complete first-party language packages](../packages/creating-packages.md#phase-1818-authoring-contract-complete-first-party-language-packages) for grammar, behavior, completion, UI, and Markdown preview composition.
 

@@ -46,6 +46,25 @@ Plan 030 (code-review remediation) hardens the local transport endpoints so that
 
 These changes are transport-layer boundaries, not application-level authentication. They complement the workspace/file authority model by ensuring another unprivileged same-machine account cannot connect to the IPC endpoint in the first place.
 
+## Cancellation-Safe Framing (Plan 059)
+
+Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_exact` is not cancellation-safe, and both the client and server ran it inside a `tokio::select!` loop. When the alternative branch won the race, the `read_exact` future was dropped mid-frame, leaving the reader half's byte position inside a partial frame. The next `read_exact` then interpreted payload bytes as a length header, producing a corrupt frame-size value (e.g. `1080257633` = `0x40636c61` = ASCII `@cla` — a decoration payload snippet).
+
+**Fix pattern** (applied identically on client and server):
+
+1. Split the stream into reader/writer halves via `tokio::io::split`.
+2. Spawn a dedicated *read-pump task* that owns the reader half, calls `codec.read_*_message` in a loop, and sends complete decoded messages into a bounded `mpsc` channel.
+3. The main connection `select!` loop races only `mpsc::recv()` calls (both branches cancellation-safe).
+4. A `ReadPumpGuard` (`src/protocol/codec.rs`, newtype over `tokio::task::AbortHandle`) aborts the pump task on `Drop` — cleaned up on every return/error path.
+
+**Server** (`handle_connection_with_analysis` in `src/server/connection.rs`): previously used a single `&mut stream` for both reads and writes inside the `select!` loop. The sequential handshake (Hello → Welcome → … → capability) still uses the combined stream (no select!). After the handshake, the stream is split; the write half keeps the name `stream` so all 49 existing `&mut stream` write sites need zero code changes. The read-pump channel capacity is 64 (adequate for a single client's backpressure).
+
+**Client** (`run_connection` in `src/client/mod.rs`): already used `tokio::io::split`. The `codec.read_server_message(&mut reader)` select branch was replaced with `incoming_rx.recv()`. Channel capacity is `EDIT_QUEUE_CAPACITY` (256).
+
+**Tests**:
+- `fragmented_frame_survives_concurrent_outgoing_message` (client): drip-feeds a partial `DecorationSet` frame, fires an outgoing edit to win the `select!` race, completes the frame, and asserts a following aligned `ActiveTheme` frame decodes — confirming mid-frame cancellation no longer corrupts the stream.
+- `fragmented_client_frame_survives_concurrent_server_write` (server): completes the handshake, drip-feeds a partial `GetDocumentStatus` frame, triggers `typography_update` to win the race, completes the frame, and asserts both `ActiveTypography` and a second aligned `GetDocumentStatus` decode.
+
 ## Invariants and Constraints
 
 - Socket and named-pipe I/O use Tokio async reads/writes; connection handling is isolated from the accept loop and transport-neutral after listener accept/connect.

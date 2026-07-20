@@ -19,8 +19,9 @@ use clay::{
             INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
             LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, LANGUAGE_SERVER_MAX_SESSIONS,
             LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES, LANGUAGE_SERVER_STDERR_BUDGET_BYTES,
-            PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS, PREVIOUS_BEHAVIOR_GRACE_MS,
-            RUNTIME_STATE_BROADCAST_CAPACITY, RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS,
+            MAX_OPENABLE_FILE_BYTES, PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS,
+            PREVIOUS_BEHAVIOR_GRACE_MS, RUNTIME_STATE_BROADCAST_CAPACITY,
+            RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS,
             RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES,
             RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS, RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS,
             SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
@@ -720,7 +721,14 @@ fn first_party_decoration_payloads_stay_within_budget_per_language() {
             .get(contribution_id)
             .unwrap_or_else(|| panic!("registered {contribution_id}"))
             .clone();
-        assert_eq!(contribution.max_window_bytes, Some(4096));
+        assert_eq!(
+            contribution.max_window_bytes,
+            Some(if label == "markdown" {
+                MAX_OPENABLE_FILE_BYTES
+            } else {
+                4096
+            })
+        );
         assert_eq!(contribution.timeout_ms, Some(5000));
         let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
             .unwrap_or_else(|error| panic!("compile {label} query: {error}"));
