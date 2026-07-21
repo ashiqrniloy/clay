@@ -285,7 +285,13 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/rust/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_rust::LANGUAGE.into(),
-        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        // Code meaning (strings, expressions, macro bodies) can begin well
+        // before the visible viewport; a viewport-sized fragment can parse as
+        // one recovery ERROR node (lost highlights) or invent tokens (e.g. a
+        // closing quote re-read as a string opener). Parse bounded full-file
+        // context while query and decoration output remain viewport-limited,
+        // same as the markdown grammar below.
+        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
     },
@@ -302,7 +308,8 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/typescript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        // See rust.rust: full-file context, viewport-limited output.
+        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
     },
@@ -319,7 +326,8 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/typescript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
-        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        // See rust.rust: full-file context, viewport-limited output.
+        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
     },
@@ -336,7 +344,8 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         highlights_query: include_str!("../../packages/javascript/queries/highlights.scm"),
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_javascript::LANGUAGE.into(),
-        max_window_bytes: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+        // See rust.rust: full-file context, viewport-limited output.
+        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
     },
@@ -1961,6 +1970,94 @@ mod tests {
             }],
             memory_budget: None,
         }
+    }
+
+    // Regression: code grammars parse full-file context so a viewport
+    // landing mid-expression no longer collapses into a recovery ERROR node
+    // (white text) or invents tokens (e.g. bogus string spans).
+    #[test]
+    fn code_grammars_parse_full_file_context_for_viewport_output() {
+        for descriptor in FIRST_PARTY_NATIVE_GRAMMARS {
+            assert_eq!(
+                descriptor.max_window_bytes, MAX_OPENABLE_FILE_BYTES,
+                "{}",
+                descriptor.id
+            );
+        }
+
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "rust.rust")
+            .unwrap();
+        let handler = native_handler(&contribution_from_native_descriptor(descriptor))
+            .unwrap()
+            .unwrap();
+        // Large source with a long expression; viewport lands mid-expression.
+        let text = format!(
+            "fn head() {{}}\nlet value = RuntimeOptions {{\n{}\n    ..Default::default()\n}};\nfn tail() -> usize {{ 42 }}\n",
+            (0..120)
+                .map(|index| format!("    field_{index}: Some(\"value_{index}\".to_string()),"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert!(text.len() > 4 * 1024);
+        let viewport = ParseByteRange::new(1_024, 3_072);
+        let scroll_notification = |viewport: ParseByteRange| ParseEditNotification {
+            document_id: 7,
+            document_version: 1,
+            behavior_version: 1,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            viewport,
+            invalidated_ranges: vec![viewport],
+            accepted_edit: None,
+            parse_windows: vec![ParseWindowSnapshot {
+                document_id: 7,
+                document_version: 1,
+                package_prefix: "rust".to_string(),
+                mode_id: "rust.rust".to_string(),
+                window_id: 0,
+                byte_start: 0,
+                byte_end: text.len() as u64,
+                base_line: 0,
+                base_column: 0,
+                incremental_edit: false,
+                text: text.clone(),
+            }],
+            memory_budget: None,
+        };
+
+        let update = handler
+            .parse_sync(scroll_notification(viewport))
+            .expect("full-file window parses");
+        let string_spans = update
+            .decoration_updates
+            .iter()
+            .flat_map(|set| set.spans.iter())
+            .filter(|span| span.token_type == TokenType::String)
+            .count();
+        assert!(
+            string_spans > 8,
+            "mid-expression viewport keeps string highlights: {string_spans}"
+        );
+        assert!(
+            update
+                .decoration_updates
+                .iter()
+                .flat_map(|set| set.spans.iter())
+                .all(|span| span.byte_start >= viewport.start && span.byte_end <= viewport.end),
+            "decoration output stays viewport-limited"
+        );
+
+        // Scrolling the same version reuses the cached full-file tree.
+        let scrolled = handler
+            .parse_sync(scroll_notification(ParseByteRange::new(2_048, 4_096)))
+            .expect("scroll reuses cached tree");
+        assert_eq!(
+            scrolled.syntax_tree_delta.as_deref(),
+            Some("tree-sitter:rust:cached")
+        );
+        assert!(!scrolled.decoration_updates.is_empty());
     }
 
     #[test]

@@ -2063,12 +2063,13 @@ impl EditorSurface {
             }
             self.visual_scroll_y += line_height;
         }
-        // Keep the visual offset within one line when logical lines can
-        // advance (multi-line documents); for single-page content taller than
-        // the viewport (wrapped lines / test-faked budgets) allow the full
-        // visual budget since there is no first visible line to advance.
+        // Keep the visual offset within one line while logical lines can
+        // still advance; once the first visible line reaches its maximum (or
+        // the document fits on one page), wrapped lines can make the visible
+        // window taller than the viewport, so allow the full visual budget.
         let max_first = document_lines.saturating_sub(self.viewport.visible_line_count());
-        let visual_cap = if max_first > 0 {
+        let viewport_at_end = self.viewport.first_visible_line() >= max_first;
+        let visual_cap = if max_first > 0 && !viewport_at_end {
             line_height.min(self.last_visual_max_scroll_y.max(0.0))
         } else {
             self.last_visual_max_scroll_y.max(0.0)
@@ -5361,6 +5362,27 @@ mod tests {
 
         assert!(changed);
         assert_eq!(editor.visual_scroll_y(), 80.0);
+    }
+
+    #[test]
+    fn scroll_vertical_pixels_reaches_wrapped_overflow_at_document_end() {
+        let mut editor = EditorSurface::default();
+        editor.set_text_for_test(&"line\n".repeat(100));
+        editor.update_visible_line_count_for_height(TEXT_INSET * 2.0 + 4.0 * 28.0);
+        // Wrapped lines make the final window taller than the viewport: the
+        // real overflow budget exceeds one line height.
+        editor.set_visual_scroll_bounds_for_test(200.0);
+        editor.scroll_lines(10_000);
+        assert_eq!(editor.viewport.first_visible_line(), 96);
+
+        let changed = editor.scroll_vertical_pixels(500.0);
+
+        assert!(changed);
+        assert_eq!(
+            editor.visual_scroll_y(),
+            200.0,
+            "scroll must reach the full wrapped-line overflow budget at document end"
+        );
     }
 
     #[test]

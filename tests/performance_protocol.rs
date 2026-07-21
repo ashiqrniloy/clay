@@ -721,14 +721,9 @@ fn first_party_decoration_payloads_stay_within_budget_per_language() {
             .get(contribution_id)
             .unwrap_or_else(|| panic!("registered {contribution_id}"))
             .clone();
-        assert_eq!(
-            contribution.max_window_bytes,
-            Some(if label == "markdown" {
-                MAX_OPENABLE_FILE_BYTES
-            } else {
-                4096
-            })
-        );
+        // All first-party native grammars parse bounded full-file context;
+        // query and decoration output stay viewport-limited.
+        assert_eq!(contribution.max_window_bytes, Some(MAX_OPENABLE_FILE_BYTES));
         assert_eq!(contribution.timeout_ms, Some(5000));
         let handler = TreeSitterSyntaxHandler::new(contribution, language, query)
             .unwrap_or_else(|error| panic!("compile {label} query: {error}"));
