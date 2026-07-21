@@ -1,6 +1,9 @@
+pub mod approvals;
 pub mod authorization;
+pub(crate) mod bundled;
 pub mod commands;
 pub mod conflict;
+pub mod extension_points;
 pub mod graph;
 pub mod manager;
 pub mod manifest;

@@ -4,14 +4,11 @@ use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Value, json};
 
-use crate::{
-    packages::manifest::{ClayPackageManifest, validate_manifest_value},
-    server::ui::{
-        RegisteredComponentContribution, RegisteredPackageInputContribution,
-        RegisteredPackageLayoutOverride, RegisteredPackageThemeTokenDeclaration,
-        RegisteredPackageUiStateScope, RegisteredPanelContribution,
-        RegisteredTransientOverlayContribution, UiContributionDiagnostic,
-    },
+use crate::server::ui::{
+    RegisteredComponentContribution, RegisteredPackageInputContribution,
+    RegisteredPackageLayoutOverride, RegisteredPackageThemeTokenDeclaration,
+    RegisteredPackageUiStateScope, RegisteredPanelContribution,
+    RegisteredTransientOverlayContribution, UiContributionDiagnostic,
 };
 
 use super::ClayOpState;
@@ -20,14 +17,16 @@ use super::ClayOpState;
 #[string]
 pub(super) fn op_clay_ui_register_panel_contribution(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
     let declaration = parse_json(&declaration_json, "clay.ui.invalid_panel_contribution")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
-        .register_panel_contribution(&package, &declaration)
+        .register_panel_contribution(&package.manifest, &declaration)
         .map_err(ui_error("clay.ui.registration_failed"))?;
     serde_json::to_string(&panel_result(&registered))
         .map_err(serialize_error("clay.ui.registration_failed"))
@@ -37,14 +36,16 @@ pub(super) fn op_clay_ui_register_panel_contribution(
 #[string]
 pub(super) fn op_clay_ui_register_component_contribution(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
     let declaration = parse_json(&declaration_json, "clay.ui.invalid_component_contribution")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
-        .register_component_contribution(&package, &declaration)
+        .register_component_contribution(&package.manifest, &declaration)
         .map_err(ui_error("clay.ui.registration_failed"))?;
     serde_json::to_string(&component_result(&registered))
         .map_err(serialize_error("clay.ui.registration_failed"))
@@ -54,17 +55,19 @@ pub(super) fn op_clay_ui_register_component_contribution(
 #[string]
 pub(super) fn op_clay_ui_register_transient_overlay_contribution(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
     let declaration = parse_json(
         &declaration_json,
         "clay.ui.invalid_transient_overlay_contribution",
     )?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
-        .register_transient_overlay_contribution(&package, &declaration)
+        .register_transient_overlay_contribution(&package.manifest, &declaration)
         .map_err(ui_error("clay.ui.registration_failed"))?;
     serde_json::to_string(&overlay_result(&registered))
         .map_err(serialize_error("clay.ui.registration_failed"))
@@ -74,14 +77,16 @@ pub(super) fn op_clay_ui_register_transient_overlay_contribution(
 #[string]
 pub(super) fn op_clay_ui_register_input_contribution(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
     let declaration = parse_json(&declaration_json, "clay.ui.invalid_input_contribution")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
-        .register_input_contribution(&package, &declaration)
+        .register_input_contribution(&package.manifest, &declaration)
         .map_err(ui_error("clay.ui.registration_failed"))?;
     serde_json::to_string(&input_result(&registered))
         .map_err(serialize_error("clay.ui.registration_failed"))
@@ -91,14 +96,16 @@ pub(super) fn op_clay_ui_register_input_contribution(
 #[string]
 pub(super) fn op_clay_ui_register_ui_state_scope(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
     let declaration = parse_json(&declaration_json, "clay.ui.invalid_ui_state_scope")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
-        .register_ui_state_scope(&package, &declaration)
+        .register_ui_state_scope(&package.manifest, &declaration)
         .map_err(ui_error("clay.ui.registration_failed"))?;
     serde_json::to_string(&ui_state_scope_result(&registered))
         .map_err(serialize_error("clay.ui.registration_failed"))
@@ -123,27 +130,19 @@ pub(super) fn op_clay_ui_set_layout_override(
 #[string]
 pub(super) fn op_clay_ui_register_theme_token(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
     let declaration = parse_json(&declaration_json, "clay.ui.invalid_theme_token")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
-        .register_theme_token(&package, &declaration)
+        .register_theme_token(&package.manifest, &declaration)
         .map_err(ui_error("clay.ui.registration_failed"))?;
     serde_json::to_string(&theme_token_result(&registered))
         .map_err(serialize_error("clay.ui.registration_failed"))
-}
-
-fn parse_manifest(json_text: &str) -> Result<ClayPackageManifest, JsErrorBox> {
-    let value = parse_json(json_text, "clay.packages.invalid_manifest")?;
-    validate_manifest_value(&value).map_err(|error| {
-        JsErrorBox::generic(format!(
-            "clay.packages.invalid_manifest: {:?}: {}",
-            error.rule, error.message
-        ))
-    })
 }
 
 fn parse_json(json_text: &str, code: &str) -> Result<Value, JsErrorBox> {

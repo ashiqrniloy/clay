@@ -22,6 +22,8 @@ pub struct ClayPackageMetadata {
     pub entry: String,
     pub load_entry: Option<String>,
     pub graph: PackageGraphRelations,
+    /// Owner-declared versioned extension points (`clay-extension-point-v1`).
+    pub extension_points: Vec<crate::packages::extension_points::ExtensionPointDeclaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -30,6 +32,12 @@ pub struct PackageGraphRelations {
     pub extends: Vec<String>,
     pub disables: Vec<String>,
     pub replaces: Vec<String>,
+    /// Structured mutation-bearing relation requests
+    /// (`clay-package-relation-v1`) from `clay.extends`/`clay.imports`/
+    /// `clay.overrides` object entries. Their `package` targets also appear in
+    /// `extends` (extends entries) or `depends_on` (imports/overrides entries)
+    /// so existing graph resolution and cycle detection cover them.
+    pub relation_requests: Vec<crate::packages::extension_points::StructuredRelationRequest>,
 }
 
 impl PackageGraphRelations {
@@ -132,7 +140,12 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
 
     let permissions = parse_requested_capabilities(clay, &context)?;
     let modes = parse_modes(clay.get("modes"), &api_prefix, &context)?;
-    let graph = parse_graph_relations(clay, &context)?;
+    let graph = parse_graph_relations(clay, &api_prefix, &context)?;
+    let extension_points = crate::packages::extension_points::parse_extension_points(
+        clay.get("extensionPoints"),
+        &api_prefix,
+        &context,
+    )?;
 
     Ok(ClayPackageManifest {
         name: package_name,
@@ -144,6 +157,7 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
             entry,
             load_entry,
             graph,
+            extension_points,
         },
     })
 }
@@ -261,14 +275,110 @@ fn parse_permission_array(
 
 fn parse_graph_relations(
     clay: &serde_json::Map<String, Value>,
+    api_prefix: &str,
     context: &DiagnosticContext,
 ) -> Result<PackageGraphRelations, PackageDiagnostic> {
+    // `dependsOn`/`disables`/`replaces` stay plain name arrays.
+    let mut depends_on = parse_relation_array(clay.get("dependsOn"), "clay.dependsOn", context)?;
+    let mut extends = Vec::new();
+    let mut relation_requests = Vec::new();
+    // `extends` accepts legacy string targets or structured relation objects.
+    parse_mixed_relation_array(
+        clay.get("extends"),
+        "extends",
+        api_prefix,
+        context,
+        &mut extends,
+        &mut relation_requests,
+    )?;
+    // `imports`/`overrides` are structured-relation fields; their targets are
+    // recorded as depends_on so the requester enables only after its targets.
+    for key in ["imports", "overrides"] {
+        parse_mixed_relation_array(
+            clay.get(key),
+            key,
+            api_prefix,
+            context,
+            &mut depends_on,
+            &mut relation_requests,
+        )?;
+    }
+    if relation_requests.len()
+        > crate::packages::extension_points::MAX_RELATION_REQUESTS_PER_MANIFEST
+    {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidPackageGraph,
+            format!(
+                "structured relation requests support at most {} entries",
+                crate::packages::extension_points::MAX_RELATION_REQUESTS_PER_MANIFEST
+            ),
+        ));
+    }
     Ok(PackageGraphRelations {
-        depends_on: parse_relation_array(clay.get("dependsOn"), "clay.dependsOn", context)?,
-        extends: parse_relation_array(clay.get("extends"), "clay.extends", context)?,
+        depends_on,
+        extends,
         disables: parse_relation_array(clay.get("disables"), "clay.disables", context)?,
         replaces: parse_relation_array(clay.get("replaces"), "clay.replaces", context)?,
+        relation_requests,
     })
+}
+
+/// Parse one relation field that accepts legacy string targets and structured
+/// relation objects. String targets go to `targets`; object entries are
+/// validated as `clay-package-relation-v1` requests and their `package`
+/// target is appended to `targets` so graph resolution/cycle detection apply.
+fn parse_mixed_relation_array(
+    value: Option<&Value>,
+    relation_key: &str,
+    api_prefix: &str,
+    context: &DiagnosticContext,
+    targets: &mut Vec<String>,
+    relation_requests: &mut Vec<crate::packages::extension_points::StructuredRelationRequest>,
+) -> Result<(), PackageDiagnostic> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let Value::Array(values) = value else {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidPackageGraph,
+            format!("clay.{relation_key} must be an array"),
+        ));
+    };
+    for entry in values {
+        match entry {
+            Value::String(relation) => {
+                let trimmed = relation.trim();
+                if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
+                    return Err(context.diagnostic(
+                        PackageValidationRule::InvalidPackageGraph,
+                        format!("clay.{relation_key} entries must be non-empty package specifiers"),
+                    ));
+                }
+                if !targets.iter().any(|target| target == trimmed) {
+                    targets.push(trimmed.to_string());
+                }
+            }
+            Value::Object(object) => {
+                let request = crate::packages::extension_points::parse_structured_relation(
+                    object,
+                    relation_key,
+                    api_prefix,
+                    context,
+                )?;
+                if !targets.iter().any(|target| target == &request.package) {
+                    targets.push(request.package.clone());
+                }
+                relation_requests.push(request);
+            }
+            _ => {
+                return Err(context.diagnostic(
+                    PackageValidationRule::InvalidPackageGraph,
+                    format!("clay.{relation_key} entries must be strings or relation objects"),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn parse_relation_array(
@@ -494,14 +604,14 @@ pub enum PackageValidationRule {
     ClientJavaScriptHook,
 }
 
-struct DiagnosticContext {
+pub(crate) struct DiagnosticContext {
     package_name: Option<String>,
     package_version: Option<String>,
     api_prefix: Option<String>,
 }
 
 impl DiagnosticContext {
-    fn new(
+    pub(crate) fn new(
         package_name: Option<String>,
         package_version: Option<String>,
         api_prefix: Option<String>,
@@ -513,7 +623,7 @@ impl DiagnosticContext {
         }
     }
 
-    fn diagnostic(
+    pub(crate) fn diagnostic(
         &self,
         rule: PackageValidationRule,
         message: impl Into<String>,

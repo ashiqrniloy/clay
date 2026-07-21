@@ -111,26 +111,28 @@ const CLAY_FACADE_UI: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
 const encode = (value) => JSON.stringify(value ?? null);
-export function serverRegisterPanelContribution(packageManifest, declaration) {
-  return parse(ops.op_clay_ui_register_panel_contribution(encode(packageManifest), encode(declaration)));
+// Package provenance is stamped host-side from the executing-package
+// context; facades never accept caller manifests.
+export function serverRegisterPanelContribution(declaration) {
+  return parse(ops.op_clay_ui_register_panel_contribution(encode(declaration)));
 }
-export function serverRegisterComponentContribution(packageManifest, declaration) {
-  return parse(ops.op_clay_ui_register_component_contribution(encode(packageManifest), encode(declaration)));
+export function serverRegisterComponentContribution(declaration) {
+  return parse(ops.op_clay_ui_register_component_contribution(encode(declaration)));
 }
-export function serverRegisterTransientOverlayContribution(packageManifest, declaration) {
-  return parse(ops.op_clay_ui_register_transient_overlay_contribution(encode(packageManifest), encode(declaration)));
+export function serverRegisterTransientOverlayContribution(declaration) {
+  return parse(ops.op_clay_ui_register_transient_overlay_contribution(encode(declaration)));
 }
-export function serverRegisterInputContribution(packageManifest, declaration) {
-  return parse(ops.op_clay_ui_register_input_contribution(encode(packageManifest), encode(declaration)));
+export function serverRegisterInputContribution(declaration) {
+  return parse(ops.op_clay_ui_register_input_contribution(encode(declaration)));
 }
-export function serverRegisterUiStateScope(packageManifest, declaration) {
-  return parse(ops.op_clay_ui_register_ui_state_scope(encode(packageManifest), encode(declaration)));
+export function serverRegisterUiStateScope(declaration) {
+  return parse(ops.op_clay_ui_register_ui_state_scope(encode(declaration)));
 }
 export function serverSetLayoutOverride(declaration) {
   return parse(ops.op_clay_ui_set_layout_override(encode(declaration)));
 }
-export function serverRegisterThemeToken(packageManifest, declaration) {
-  return parse(ops.op_clay_ui_register_theme_token(encode(packageManifest), encode(declaration)));
+export function serverRegisterThemeToken(declaration) {
+  return parse(ops.op_clay_ui_register_theme_token(encode(declaration)));
 }
 "#;
 
@@ -292,6 +294,14 @@ export async function loadPackage(specifier) {
     return loadedPackages[specifier];
   }
   const result = parse(ops.op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })));
+  if (result.domain === "third-party") {
+    // Approved third-party packages never execute in this (trusted) runtime:
+    // the host bridge evaluates their load entry in the third-party runtime
+    // and absorbs the registration payload (Plan 061 task 12).
+    parse(await ops.op_clay_packages_load_in_package_domain(JSON.stringify(result)));
+    loadedPackages[specifier] = result;
+    return result;
+  }
   const loadEntry = await import(result.loadEntrySpecifier);
   if (typeof loadEntry.default === "function") {
     await loadEntry.default();
@@ -311,7 +321,9 @@ export async function authorizeLanguageServer(options) {
 /** Start an authorized language-server child session for one contribution+root.
  * Returns an opaque session id used by the bounded session wrapper below. */
 export async function serverStartSession(options) {
-  return parse(await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null))).sessionId;
+  // The session owner is the host-stamped executing package; the op response
+  // carries the host-resolved package/contribution identity.
+  return parse(await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null)));
 }
 /** Open a bounded language-server session. Exact byte methods preserve
  * arbitrary child chunk boundaries; no process or stdio handle is exposed. */
@@ -355,14 +367,14 @@ export class LanguageServerSession {
   }
   async stop() {
     return parse(await ops.op_clay_language_server_stop_session(JSON.stringify({
-      sessionId: this.#sessionId,
+      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
     })));
   }
 }
 /** Start a session and return its opaque wrapper. */
 export async function startLanguageServerSession(options) {
-  const sessionId = await serverStartSession(options);
-  return new LanguageServerSession(sessionId, options.package, options.contribution);
+  const started = await serverStartSession(options);
+  return new LanguageServerSession(started.sessionId, started.package, started.contribution);
 }
 "#;
 
@@ -371,14 +383,15 @@ const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
 const activationRegistry = globalThis.__clayModeActivations ??= Object.create(null);
 const activationKey = (apiPrefix, modeId) => `${apiPrefix}:${modeId}`;
-export function serverRegisterModePattern(packageManifest, declaration) {
-  const result = parse(ops.op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
-  if (packageManifest?.clay?.apiPrefix && declaration?.modeId) {
-    activationRegistry[activationKey(packageManifest.clay.apiPrefix, declaration.modeId)] = {
-      packageManifest,
-      editorRules: declaration.editorRules,
-      commands: declaration.commands,
-      keymaps: declaration.keymaps,
+// Package provenance is stamped host-side; the op response carries the
+// host-registered packagePrefix/modeId used to key inert activation payloads.
+export function serverRegisterModePattern(declaration) {
+  const result = parse(ops.op_clay_modes_register_pattern(JSON.stringify(declaration ?? null)));
+  if (result?.packagePrefix && result?.modeId) {
+    activationRegistry[activationKey(result.packagePrefix, result.modeId)] = {
+      editorRules: declaration?.editorRules,
+      commands: declaration?.commands,
+      keymaps: declaration?.keymaps,
     };
   }
   return result;
@@ -386,15 +399,15 @@ export function serverRegisterModePattern(packageManifest, declaration) {
 export function serverClassifyDocument(input) {
   return parse(ops.op_clay_modes_classify_document(JSON.stringify(input ?? null)));
 }
-export function serverActivateMajorMode(packageManifest, input) {
-  return parse(ops.op_clay_modes_activate_major_mode(JSON.stringify(packageManifest ?? null), JSON.stringify(input ?? null)));
+export function serverActivateMajorMode(input) {
+  return parse(ops.op_clay_modes_activate_major_mode(JSON.stringify(input ?? null)));
 }
 export function serverActivateClassifiedMode(classification, input = {}) {
   const activation = activationRegistry[activationKey(classification?.apiPrefix, classification?.modeId)];
   if (!activation) {
     throw new Error("clay.modes.activation_failed: classified mode has no registered activation metadata");
   }
-  return serverActivateMajorMode(activation.packageManifest, {
+  return serverActivateMajorMode({
     ...input,
     documentId: classification.documentId,
     modeId: classification.modeId,
@@ -412,8 +425,9 @@ export function serverRegisterFoldingProvider(options) { void options; ops.op_cl
 const CLAY_FACADE_COMMANDS: &str = r#"
 const ops = Deno.core.ops;
 const parse = (json) => JSON.parse(json);
-export function serverRegisterCommand(packageManifest, declaration) {
-  return parse(ops.op_clay_commands_register_command(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
+// Package provenance is stamped host-side from the executing-package context.
+export function serverRegisterCommand(declaration) {
+  return parse(ops.op_clay_commands_register_command(JSON.stringify(declaration ?? null)));
 }
 export function serverListCommands() {
   return parse(ops.op_clay_commands_list_commands());
@@ -632,17 +646,52 @@ export function setTypography(options) {
 }
 "#;
 
-/// Isolated server-side Clay JavaScript runtime boundary.
+/// One persistent domain worker plus its per-domain generation state
+/// (poison flag, evaluation metric, replaceable worker handle).
 #[derive(Debug, Clone)]
+struct DomainRuntime {
+    poisoned: Arc<std::sync::atomic::AtomicBool>,
+    evaluations: Arc<AtomicU64>,
+    /// Per-domain runtime generation, bumped on every worker replacement
+    /// (poison recovery, trusted reload). Registration ownership metadata
+    /// per Plan 061 task 12.
+    generation: Arc<AtomicU64>,
+    worker: Arc<std::sync::Mutex<Arc<RuntimeWorker>>>,
+}
+
+/// Isolated server-side Clay JavaScript runtime boundary. Owns exactly two
+/// persistent application runtimes (Plan 061 trust domains): one trusted
+/// runtime for configuration and bundled first-party packages, and one shared
+/// third-party runtime for adopted packages. Each domain has its own op
+/// extension, module-loader allowlist, facade export set, poison/restart
+/// path, and evaluation metric; both share the host-owned `PackageService`
+/// and package load-entry allowlist.
+#[derive(Clone)]
 pub(crate) struct ClayJsRuntimeService {
     evaluations: Arc<AtomicU64>,
     timeout: Duration,
     heap_limit_bytes: usize,
-    poisoned: Arc<std::sync::atomic::AtomicBool>,
     completion_providers:
         Arc<std::sync::Mutex<Vec<crate::server::completion::CompletionProviderMeta>>>,
     native_syntax_handlers: Arc<std::sync::Mutex<std::collections::HashSet<(u64, String, String)>>>,
-    worker: Arc<std::sync::Mutex<Arc<RuntimeWorker>>>,
+    package_service: Arc<std::sync::Mutex<crate::packages::service::PackageService>>,
+    load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
+    workers_started: Arc<AtomicU64>,
+    trusted: DomainRuntime,
+    third_party: DomainRuntime,
+}
+
+impl std::fmt::Debug for ClayJsRuntimeService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClayJsRuntimeService")
+            .field("evaluations", &self.evaluations)
+            .field("timeout", &self.timeout)
+            .field("heap_limit_bytes", &self.heap_limit_bytes)
+            .field("workers_started", &self.workers_started)
+            .field("trusted", &self.trusted)
+            .field("third_party", &self.third_party)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for ClayJsRuntimeService {
@@ -657,20 +706,221 @@ impl ClayJsRuntimeService {
     }
 
     fn new_with_heap_limit(timeout: Duration, heap_limit_bytes: usize) -> Self {
-        Self {
-            evaluations: Arc::new(AtomicU64::new(0)),
+        Self::with_package_service(
             timeout,
             heap_limit_bytes,
-            poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            crate::packages::service::PackageService::new(
+                PathBuf::new(),
+                Box::new(crate::packages::manager::FakeBackend::new()),
+            ),
+        )
+    }
+
+    /// Production reload (Plan 061 task 12): a trusted-generation reload
+    /// shares the CURRENT third-party domain (worker, poison/generation
+    /// state, package authority, load-entry allowlist) so adopted
+    /// third-party packages, their providers, and their language-server
+    /// sessions survive a configuration reload untouched. Only the trusted
+    /// worker is rebuilt and re-runs configuration.
+    pub(crate) fn production_reload(current: &Self) -> Self {
+        let workers_started = Arc::new(AtomicU64::new(0));
+        let trusted = Self::start_domain_runtime(
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            current.timeout,
+            current.heap_limit_bytes,
+            &current.package_service,
+            &current.load_entry_allowlist,
+            &workers_started,
+        );
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_third_party_commands(
+                current
+                    .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                    .sender
+                    .clone(),
+            );
+        Self {
+            evaluations: Arc::new(AtomicU64::new(0)),
+            timeout: current.timeout,
+            heap_limit_bytes: current.heap_limit_bytes,
             completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
             native_syntax_handlers: Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            package_service: Arc::clone(&current.package_service),
+            load_entry_allowlist: Arc::clone(&current.load_entry_allowlist),
+            workers_started,
+            trusted,
+            third_party: current.third_party.clone(),
+        }
+    }
+
+    /// Production server runtime: durable approval store at the default
+    /// package store root so CLI/native approvals take effect (Plan 061 task
+    /// 10). A corrupt or unreadable approval store fails closed with an empty
+    /// in-memory store — no third-party package can be approved into
+    /// execution until the store is repaired.
+    pub(crate) fn production() -> Self {
+        let store_root = crate::packages::service::default_store_root();
+        let service = crate::packages::service::PackageService::open(
+            store_root,
+            Box::new(crate::packages::manager::FakeBackend::new()),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "clay: package approval store unavailable ({error}); third-party packages stay unadopted"
+            );
+            crate::packages::service::PackageService::new(
+                PathBuf::new(),
+                Box::new(crate::packages::manager::FakeBackend::new()),
+            )
+        });
+        Self::with_package_service(
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+            service,
+        )
+    }
+
+    fn with_package_service(
+        timeout: Duration,
+        heap_limit_bytes: usize,
+        package_service: crate::packages::service::PackageService,
+    ) -> Self {
+        let package_service = Arc::new(std::sync::Mutex::new(package_service));
+        let load_entry_allowlist = Arc::new(PackageLoadEntryAllowlist::default());
+        let workers_started = Arc::new(AtomicU64::new(0));
+        let trusted = Self::start_domain_runtime(
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            timeout,
+            heap_limit_bytes,
+            &package_service,
+            &load_entry_allowlist,
+            &workers_started,
+        );
+        let third_party = Self::start_domain_runtime(
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+            timeout,
+            heap_limit_bytes,
+            &package_service,
+            &load_entry_allowlist,
+            &workers_started,
+        );
+        // Wire the cross-domain bridge: trusted config `loadPackage` of an
+        // approved third-party package dispatches its load evaluation to the
+        // third-party worker (Plan 061 task 12).
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_third_party_commands(
+                third_party
+                    .worker
+                    .lock()
+                    .expect("Clay runtime service worker mutex poisoned")
+                    .sender
+                    .clone(),
+            );
+        Self {
+            evaluations: Arc::new(AtomicU64::new(0)),
+            timeout,
+            heap_limit_bytes,
+            completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
+            native_syntax_handlers: Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
+            package_service,
+            load_entry_allowlist,
+            workers_started,
+            trusted,
+            third_party,
+        }
+    }
+
+    fn start_domain_runtime(
+        domain: crate::packages::bundled::RuntimeDomain,
+        timeout: Duration,
+        heap_limit_bytes: usize,
+        package_service: &Arc<std::sync::Mutex<crate::packages::service::PackageService>>,
+        load_entry_allowlist: &Arc<PackageLoadEntryAllowlist>,
+        workers_started: &Arc<AtomicU64>,
+    ) -> DomainRuntime {
+        workers_started.fetch_add(1, Ordering::Relaxed);
+        DomainRuntime {
+            poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            evaluations: Arc::new(AtomicU64::new(0)),
+            generation: Arc::new(AtomicU64::new(1)),
             worker: Arc::new(std::sync::Mutex::new(start_runtime_worker(
                 timeout,
                 heap_limit_bytes,
+                domain,
+                Arc::clone(package_service),
+                Arc::clone(load_entry_allowlist),
             ))),
         }
+    }
+
+    fn domain(&self, domain: crate::packages::bundled::RuntimeDomain) -> &DomainRuntime {
+        match domain {
+            crate::packages::bundled::RuntimeDomain::Trusted => &self.trusted,
+            crate::packages::bundled::RuntimeDomain::ThirdParty => &self.third_party,
+        }
+    }
+
+    fn replace_domain_worker(&self, domain: crate::packages::bundled::RuntimeDomain) {
+        self.workers_started.fetch_add(1, Ordering::Relaxed);
+        self.domain(domain)
+            .generation
+            .fetch_add(1, Ordering::Relaxed);
+        let replacement = start_runtime_worker(
+            self.timeout,
+            self.heap_limit_bytes,
+            domain,
+            Arc::clone(&self.package_service),
+            Arc::clone(&self.load_entry_allowlist),
+        );
+        // Rewire the cross-domain bridge: the trusted worker dispatches
+        // third-party load evaluations to the CURRENT third-party worker.
+        if domain == crate::packages::bundled::RuntimeDomain::ThirdParty {
+            self.domain_worker(crate::packages::bundled::RuntimeDomain::Trusted)
+                .op_state
+                .set_third_party_commands(replacement.sender.clone());
+        }
+        *self
+            .domain(domain)
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned") = replacement;
+    }
+
+    /// Host-owned package authority shared by both domain runtimes.
+    pub(crate) fn package_service(
+        &self,
+    ) -> &Arc<std::sync::Mutex<crate::packages::service::PackageService>> {
+        &self.package_service
+    }
+
+    /// Runtime domain hosting an enabled package's code, resolved from the
+    /// host-owned enabled record (never from caller-supplied manifests).
+    fn enabled_record_domain(
+        &self,
+        package_name: &str,
+        package_version: &str,
+    ) -> crate::packages::bundled::RuntimeDomain {
+        self.package_service
+            .lock()
+            .expect("package service mutex poisoned")
+            .enabled_records()
+            .find(|record| {
+                record.manifest.name == package_name && record.manifest.version == package_version
+            })
+            .map(|record| record.runtime_domain)
+            .unwrap_or(crate::packages::bundled::RuntimeDomain::ThirdParty)
     }
 
     /// Sets a custom evaluation timeout. The default is
@@ -684,37 +934,6 @@ impl ClayJsRuntimeService {
     #[cfg(test)]
     pub(crate) fn with_timeout_and_heap_limit(timeout: Duration, heap_limit_bytes: usize) -> Self {
         Self::new_with_heap_limit(timeout, heap_limit_bytes)
-    }
-
-    pub(crate) fn new_document_analysis_worker(
-        &self,
-        runtime_document_id: crate::protocol::DocumentId,
-    ) -> Self {
-        let parent = self.worker();
-        let workspace = parent.op_state.workspace();
-        let op_state = Arc::new(ClayOpState::new_analysis_worker(
-            &parent.op_state,
-            Arc::clone(&workspace),
-            runtime_document_id,
-        ));
-        Self {
-            evaluations: Arc::new(AtomicU64::new(0)),
-            timeout: Duration::from_millis(
-                crate::perf::budgets::DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS,
-            ),
-            heap_limit_bytes: crate::perf::budgets::DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES,
-            poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
-            native_syntax_handlers: Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
-            )),
-            worker: Arc::new(std::sync::Mutex::new(start_runtime_worker_with_state(
-                Duration::from_millis(crate::perf::budgets::DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS),
-                crate::perf::budgets::DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES,
-                workspace,
-                op_state,
-            ))),
-        }
     }
 
     /// Evaluates a controlled server-owned ES module on the persistent runtime worker.
@@ -779,24 +998,73 @@ impl ClayJsRuntimeService {
         runtime_document_id: crate::protocol::DocumentId,
         metric: &'static str,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
-        if self.poisoned.swap(false, Ordering::Relaxed) {
-            self.replace_worker();
+        self.evaluate_entry_for_domain(
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            entry,
+            workspace,
+            runtime_document_id,
+            None,
+            metric,
+        )
+        .await
+    }
+
+    /// Evaluate a module with host-stamped package provenance: package-facing
+    /// registration/publication ops inside the evaluation resolve to
+    /// `package`'s host-enabled record. Used by Rust-driven package
+    /// loading/adoption and by tests; orchestration code that loads packages
+    /// through the `loadPackage` op gets provenance stamped by the op itself.
+    #[cfg(test)]
+    pub(crate) async fn evaluate_entry_as_package(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        package: &crate::packages::record::PackageRecord,
+        entry: RuntimeEntry,
+        metric: &'static str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        self.evaluate_entry_for_domain(
+            domain,
+            entry,
+            None,
+            0,
+            Some(crate::server::ops::PackageContext::from_record(package)),
+            metric,
+        )
+        .await
+    }
+
+    async fn evaluate_entry_for_domain(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        entry: RuntimeEntry,
+        workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
+        runtime_document_id: crate::protocol::DocumentId,
+        package_context: Option<crate::server::ops::PackageContext>,
+        metric: &'static str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        let domain_runtime = self.domain(domain);
+        if domain_runtime.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_domain_worker(domain);
         }
         let (response, receiver) = oneshot::channel();
         let command = RuntimeCommand::Evaluate {
             entry,
             workspace,
             runtime_document_id,
+            package_context,
             metric,
             response,
         };
-        if let Err(error) = self.worker().sender.send(command) {
-            self.replace_worker();
-            self.worker().sender.send(error.0).map_err(|_| {
-                ClayRuntimeError::Runtime(
-                    "persistent JavaScript runtime worker stopped".to_string(),
-                )
-            })?;
+        if let Err(error) = self.domain_worker(domain).sender.send(command) {
+            self.replace_domain_worker(domain);
+            self.domain_worker(domain)
+                .sender
+                .send(error.0)
+                .map_err(|_| {
+                    ClayRuntimeError::Runtime(
+                        "persistent JavaScript runtime worker stopped".to_string(),
+                    )
+                })?;
         }
         let result = receiver.await.map_err(|_| {
             ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
@@ -805,9 +1073,10 @@ impl ClayJsRuntimeService {
             result,
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
-            self.poisoned.store(true, Ordering::Relaxed);
+            domain_runtime.poisoned.store(true, Ordering::Relaxed);
         } else if let Ok(evaluation) = &result {
             self.evaluations.fetch_add(1, Ordering::Relaxed);
+            domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
             *self
                 .completion_providers
                 .lock()
@@ -815,6 +1084,25 @@ impl ClayJsRuntimeService {
                 evaluation.completion_providers.clone();
         }
         result
+    }
+
+    /// Test-only evaluation entry for the third-party domain, used by trust
+    /// boundary tests. Production third-party loading arrives with the
+    /// adoption/activation tasks.
+    #[cfg(test)]
+    pub(crate) async fn evaluate_third_party_module(
+        &self,
+        source: impl Into<String> + Send + 'static,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        self.evaluate_entry_for_domain(
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+            RuntimeEntry::ControlledSource(source.into()),
+            None,
+            1,
+            None,
+            "runtime.evaluate_third_party_module",
+        )
+        .await
     }
 
     pub(crate) fn completion_providers(
@@ -1073,29 +1361,35 @@ impl ClayJsRuntimeService {
         ))
     }
 
-    async fn invoke_parse_handler(
+    /// Dispatch one provider command to the runtime domain that owns the
+    /// registration's package (Plan 061 task 7): third-party callbacks run in
+    /// the third-party worker, trusted callbacks in the trusted worker, so a
+    /// slow or hostile sibling can never block the trusted runtime. On a
+    /// poisoned worker the domain worker is replaced once and the command is
+    /// retried; timeout/heap results poison the owning domain only.
+    async fn dispatch_to_domain<T>(
         &self,
-        registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
-        notification: ParseEditNotification,
-    ) -> Result<IncrementalParseUpdate, ClayRuntimeError> {
-        if self.poisoned.load(Ordering::Relaxed) {
-            return Err(ClayRuntimeError::Runtime(
-                "persistent JavaScript runtime worker stopped".to_string(),
-            ));
+        domain: crate::packages::bundled::RuntimeDomain,
+        command: RuntimeCommand,
+        receiver: oneshot::Receiver<Result<T, ClayRuntimeError>>,
+    ) -> Result<T, ClayRuntimeError> {
+        let domain_runtime = self.domain(domain);
+        if domain_runtime.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_domain_worker(domain);
+            self.replay_third_party_domain(domain).await?;
         }
-        let (response, receiver) = oneshot::channel();
-        self.worker()
-            .sender
-            .send(RuntimeCommand::Parse {
-                registration,
-                notification,
-                response,
-            })
-            .map_err(|_| {
-                ClayRuntimeError::Runtime(
-                    "persistent JavaScript runtime worker stopped".to_string(),
-                )
-            })?;
+        if let Err(error) = self.domain_worker(domain).sender.send(command) {
+            self.replace_domain_worker(domain);
+            self.replay_third_party_domain(domain).await?;
+            self.domain_worker(domain)
+                .sender
+                .send(error.0)
+                .map_err(|_| {
+                    ClayRuntimeError::Runtime(
+                        "persistent JavaScript runtime worker stopped".to_string(),
+                    )
+                })?;
+        }
         let result = receiver.await.map_err(|_| {
             ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
         })?;
@@ -1103,9 +1397,120 @@ impl ClayJsRuntimeService {
             result,
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
-            self.poisoned.store(true, Ordering::Relaxed);
+            domain_runtime.poisoned.store(true, Ordering::Relaxed);
+        } else if result.is_ok() {
+            domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
         }
         result
+    }
+
+    /// Replay every currently enabled, approved third-party package's load
+    /// entry into a freshly replaced third-party worker (Plan 061 task 12).
+    /// Only the current host-approved graph replays; deterministic
+    /// registration tokens (`apiPrefix:id:index`) restore the host-side
+    /// coordinator registrations in the fresh runtime. One bounded pass: a
+    /// failing replay evaluation poisons the domain again instead of
+    /// looping. No-op for the trusted domain (its replay is configuration
+    /// reload).
+    async fn replay_third_party_domain(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+    ) -> Result<(), ClayRuntimeError> {
+        if domain != crate::packages::bundled::RuntimeDomain::ThirdParty {
+            return Ok(());
+        }
+        let mut packages: Vec<(crate::server::ops::PackageContext, String)> = {
+            let service = self
+                .package_service
+                .lock()
+                .expect("package service mutex poisoned");
+            let mut enabled: Vec<_> = service
+                .enabled_records()
+                .filter(|record| {
+                    record.runtime_domain == crate::packages::bundled::RuntimeDomain::ThirdParty
+                })
+                .map(|record| {
+                    (
+                        crate::server::ops::PackageContext::from_record(record),
+                        record.manifest.name.clone(),
+                    )
+                })
+                .collect();
+            enabled.sort_by(|a, b| a.1.cmp(&b.1));
+            enabled
+                .into_iter()
+                .filter_map(|(context, name)| {
+                    self.load_entry_allowlist
+                        .specifier_for_package(&name)
+                        .map(|specifier| (context, specifier))
+                })
+                .collect()
+        };
+        packages.dedup_by(|a, b| a.0.package_name == b.0.package_name);
+        for (context, specifier) in packages {
+            let source = format!(
+                "const module = await import({specifier:?});\nif (typeof module.default === 'function') {{ await module.default(); }}"
+            );
+            let (response, receiver) = oneshot::channel();
+            self.domain_worker(domain)
+                .sender
+                .send(RuntimeCommand::Evaluate {
+                    entry: RuntimeEntry::ControlledSource(source),
+                    workspace: None,
+                    runtime_document_id: 1,
+                    package_context: Some(context),
+                    metric: "runtime.replay_third_party_domain",
+                    response,
+                })
+                .map_err(|_| {
+                    ClayRuntimeError::Runtime(
+                        "persistent JavaScript runtime worker stopped".to_string(),
+                    )
+                })?;
+            let result = receiver.await.map_err(|_| {
+                ClayRuntimeError::Runtime(
+                    "persistent JavaScript runtime worker stopped".to_string(),
+                )
+            })?;
+            if let Err(error) = result {
+                if matches!(
+                    error,
+                    ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit
+                ) {
+                    self.domain(domain).poisoned.store(true, Ordering::Relaxed);
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve the runtime domain owning a provider registration from the
+    /// host-enabled package record (never from caller-supplied identity).
+    fn registration_domain(
+        &self,
+        package: &crate::packages::record::PackageRecord,
+    ) -> crate::packages::bundled::RuntimeDomain {
+        self.enabled_record_domain(&package.manifest.name, &package.manifest.version)
+    }
+
+    async fn invoke_parse_handler(
+        &self,
+        registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
+        notification: ParseEditNotification,
+    ) -> Result<IncrementalParseUpdate, ClayRuntimeError> {
+        let domain = self.registration_domain(&registration.package);
+        let (response, receiver) = oneshot::channel();
+        self.dispatch_to_domain(
+            domain,
+            RuntimeCommand::Parse {
+                registration,
+                notification,
+                response,
+            },
+            receiver,
+        )
+        .await
     }
 
     async fn invoke_completion_provider(
@@ -1114,35 +1519,19 @@ impl ClayJsRuntimeService {
         request: crate::protocol::CompletionRequest,
         window: crate::server::completion::CompletionDocumentWindow,
     ) -> Result<crate::protocol::CompletionResultSet, ClayRuntimeError> {
-        if self.poisoned.load(Ordering::Relaxed) {
-            return Err(ClayRuntimeError::Runtime(
-                "persistent JavaScript runtime worker stopped".to_string(),
-            ));
-        }
+        let domain = self.registration_domain(&registration.package);
         let (response, receiver) = oneshot::channel();
-        self.worker()
-            .sender
-            .send(RuntimeCommand::Completion {
+        self.dispatch_to_domain(
+            domain,
+            RuntimeCommand::Completion {
                 registration,
                 request,
                 window,
                 response,
-            })
-            .map_err(|_| {
-                ClayRuntimeError::Runtime(
-                    "persistent JavaScript runtime worker stopped".to_string(),
-                )
-            })?;
-        let result = receiver.await.map_err(|_| {
-            ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
-        })?;
-        if matches!(
-            result,
-            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
-        ) {
-            self.poisoned.store(true, Ordering::Relaxed);
-        }
-        result
+            },
+            receiver,
+        )
+        .await
     }
 
     pub(crate) fn document_analysis_registration_authorized(
@@ -1177,10 +1566,8 @@ impl ClayJsRuntimeService {
         else {
             return false;
         };
-        let worker = self.worker();
-        let service = worker
-            .op_state
-            .package_service()
+        let service = self
+            .package_service
             .lock()
             .expect("package service mutex poisoned");
         service.enabled_records().any(|record| {
@@ -1204,9 +1591,7 @@ impl ClayJsRuntimeService {
     ) -> bool {
         self.document_analysis_registration_authorized(registration)
             && self
-                .worker()
-                .op_state
-                .package_service()
+                .package_service
                 .lock()
                 .expect("package service mutex poisoned")
                 .language_server_grant(
@@ -1221,24 +1606,33 @@ impl ClayJsRuntimeService {
         registration: crate::server::document_analysis::JsDocumentAnalyzerRegistration,
         event: crate::server::document_analysis::DocumentAnalysisEvent,
     ) -> Result<DocumentAnalysisInvocation, ClayRuntimeError> {
-        if self.poisoned.load(Ordering::Relaxed) {
-            return Err(ClayRuntimeError::Runtime(
-                "document analysis worker stopped".to_string(),
-            ));
+        // Route analysis through the owning domain runtime (Plan 061): no
+        // additional persistent runtimes are created per analyzer/document.
+        let domain = self.enabled_record_domain(
+            &registration.package.manifest.name,
+            &registration.package.manifest.version,
+        );
+        let domain_runtime = self.domain(domain);
+        if domain_runtime.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_domain_worker(domain);
         }
         let (response, receiver) = oneshot::channel();
         let invocation_id = self.evaluations.fetch_add(1, Ordering::Relaxed);
-        self.worker()
-            .sender
-            .send(RuntimeCommand::DocumentAnalysis {
-                registration,
-                event,
-                invocation_id,
-                response,
-            })
-            .map_err(|_| {
-                ClayRuntimeError::Runtime("document analysis worker stopped".to_string())
-            })?;
+        let command = RuntimeCommand::DocumentAnalysis {
+            registration,
+            event,
+            invocation_id,
+            response,
+        };
+        if let Err(error) = self.domain_worker(domain).sender.send(command) {
+            self.replace_domain_worker(domain);
+            self.domain_worker(domain)
+                .sender
+                .send(error.0)
+                .map_err(|_| {
+                    ClayRuntimeError::Runtime("document analysis worker stopped".to_string())
+                })?;
+        }
         let result = receiver.await.map_err(|_| {
             ClayRuntimeError::Runtime("document analysis worker stopped".to_string())
         })?;
@@ -1246,7 +1640,9 @@ impl ClayJsRuntimeService {
             result,
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
-            self.poisoned.store(true, Ordering::Relaxed);
+            domain_runtime.poisoned.store(true, Ordering::Relaxed);
+        } else if result.is_ok() {
+            domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
         }
         result
     }
@@ -1257,40 +1653,30 @@ impl ClayJsRuntimeService {
         request: crate::protocol::LanguageIntelligenceRequest,
         window: crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
     ) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
-        if self.poisoned.load(Ordering::Relaxed) {
-            return Err(ClayRuntimeError::Runtime(
-                "persistent JavaScript runtime worker stopped".to_string(),
-            ));
-        }
+        let domain = self.registration_domain(&registration.package);
         let (response, receiver) = oneshot::channel();
-        self.worker()
-            .sender
-            .send(RuntimeCommand::LanguageIntelligence {
+        self.dispatch_to_domain(
+            domain,
+            RuntimeCommand::LanguageIntelligence {
                 registration,
                 request,
                 window,
                 response,
-            })
-            .map_err(|_| {
-                ClayRuntimeError::Runtime(
-                    "persistent JavaScript runtime worker stopped".to_string(),
-                )
-            })?;
-        let result = receiver.await.map_err(|_| {
-            ClayRuntimeError::Runtime("persistent JavaScript runtime worker stopped".to_string())
-        })?;
-        if matches!(
-            result,
-            Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
-        ) {
-            self.poisoned.store(true, Ordering::Relaxed);
-        }
-        result
+            },
+            receiver,
+        )
+        .await
     }
 
+    /// Trusted-domain worker.
     fn worker(&self) -> Arc<RuntimeWorker> {
+        self.domain_worker(crate::packages::bundled::RuntimeDomain::Trusted)
+    }
+
+    fn domain_worker(&self, domain: crate::packages::bundled::RuntimeDomain) -> Arc<RuntimeWorker> {
         Arc::clone(
             &self
+                .domain(domain)
                 .worker
                 .lock()
                 .expect("Clay runtime service worker mutex poisoned"),
@@ -1299,8 +1685,37 @@ impl ClayJsRuntimeService {
 
     /// Revoke previous-generation executable process authority after commit.
     /// Coordinator registrations are cancelled separately; this tears down any
-    /// language-server children still owned by this service.
+    /// language-server children still owned by either domain of this service.
     pub(crate) async fn shutdown_generation_resources(&self) -> usize {
+        let trusted = self
+            .worker()
+            .op_state
+            .shutdown_language_server_sessions()
+            .await;
+        let third_party = self
+            .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
+            .op_state
+            .shutdown_language_server_sessions()
+            .await;
+        trusted + third_party
+    }
+
+    /// Snapshot of the third-party worker's current registration payload
+    /// (Plan 061 task 12): the worker survives trusted reloads, so at
+    /// generation commit the server re-registers these under the new
+    /// generation instead of canceling live third-party providers.
+    pub(crate) fn third_party_registrations_snapshot(&self) -> ClayRuntimeEvaluation {
+        harvest_op_state_evaluation(
+            &self
+                .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                .op_state,
+        )
+    }
+
+    /// Trusted-domain-only generation shutdown (Plan 061 task 12): reload
+    /// shares the third-party worker across generations, so only the old
+    /// trusted worker's language-server sessions end at commit.
+    pub(crate) async fn shutdown_trusted_generation_resources(&self) -> usize {
         self.worker()
             .op_state
             .shutdown_language_server_sessions()
@@ -1309,10 +1724,16 @@ impl ClayJsRuntimeService {
 
     #[cfg(test)]
     pub(crate) async fn language_server_session_count(&self) -> usize {
-        self.worker().op_state.language_server_session_count().await
+        let trusted = self.worker().op_state.language_server_session_count().await;
+        let third_party = self
+            .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
+            .op_state
+            .language_server_session_count()
+            .await;
+        trusted + third_party
     }
 
-    /// Test-only handle to the generation-owned language-server process service.
+    /// Test-only handle to the trusted generation's language-server process service.
     #[cfg(test)]
     pub(crate) fn language_server_process_for_test(
         &self,
@@ -1320,17 +1741,32 @@ impl ClayJsRuntimeService {
         self.worker().op_state.language_server_process()
     }
 
-    fn replace_worker(&self) {
-        *self
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned") =
-            start_runtime_worker(self.timeout, self.heap_limit_bytes);
-    }
-
     #[cfg(test)]
     pub(crate) fn evaluation_count(&self) -> u64 {
         self.evaluations.load(Ordering::Relaxed)
+    }
+
+    /// Total persistent application runtimes started by this service
+    /// (initial two plus any poison replacements). Trust-domain tests assert
+    /// package/document/analyzer activity never raises it above two.
+    #[cfg(test)]
+    pub(crate) fn workers_started(&self) -> u64 {
+        self.workers_started.load(Ordering::Relaxed)
+    }
+
+    /// Per-domain successful evaluation count (trust-domain dispatch tests).
+    #[cfg(test)]
+    pub(crate) fn domain_evaluations(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+    ) -> u64 {
+        self.domain(domain).evaluations.load(Ordering::Relaxed)
+    }
+
+    /// Per-domain runtime generation (bumped on every worker replacement).
+    #[cfg(test)]
+    pub(crate) fn domain_generation(&self, domain: crate::packages::bundled::RuntimeDomain) -> u64 {
+        self.domain(domain).generation.load(Ordering::Relaxed)
     }
 
     #[cfg(test)]
@@ -1589,7 +2025,7 @@ fn is_error_code_character(character: char) -> bool {
         || character == '_'
 }
 
-enum RuntimeEntry {
+pub(crate) enum RuntimeEntry {
     ControlledSource(String),
     ConfigurationRoot(PathBuf),
 }
@@ -1626,11 +2062,16 @@ impl Drop for RuntimeWorker {
     clippy::large_enum_variant,
     reason = "runtime worker commands stay on a single internal channel; boxing parse payloads is unnecessary until profiling says otherwise"
 )]
-enum RuntimeCommand {
+pub(crate) enum RuntimeCommand {
     Evaluate {
         entry: RuntimeEntry,
         workspace: Option<Arc<tokio::sync::Mutex<WorkspaceState>>>,
         runtime_document_id: crate::protocol::DocumentId,
+        /// Host-stamped package provenance for package-entry evaluations
+        /// (package adoption/loading driven from Rust, and tests). `None`
+        /// for configuration/orchestration evaluations; the package-load op
+        /// stamps provenance itself mid-evaluation.
+        package_context: Option<crate::server::ops::PackageContext>,
         metric: &'static str,
         response: oneshot::Sender<Result<ClayRuntimeEvaluation, ClayRuntimeError>>,
     },
@@ -1662,30 +2103,52 @@ enum RuntimeCommand {
     Shutdown,
 }
 
-fn start_runtime_worker(timeout: Duration, heap_limit_bytes: usize) -> Arc<RuntimeWorker> {
+fn start_runtime_worker(
+    timeout: Duration,
+    heap_limit_bytes: usize,
+    domain: crate::packages::bundled::RuntimeDomain,
+    package_service: Arc<std::sync::Mutex<crate::packages::service::PackageService>>,
+    load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
+) -> Arc<RuntimeWorker> {
     let default_workspace = Arc::new(tokio::sync::Mutex::new(WorkspaceState::new()));
-    let op_state = Arc::new(ClayOpState::new_for_document(
+    let op_state = Arc::new(ClayOpState::new_for_domain(
         Arc::clone(&default_workspace),
         1,
+        domain,
+        package_service,
+        load_entry_allowlist,
     ));
-    start_runtime_worker_with_state(timeout, heap_limit_bytes, default_workspace, op_state)
+    start_runtime_worker_with_state(
+        timeout,
+        heap_limit_bytes,
+        domain,
+        default_workspace,
+        op_state,
+    )
 }
 
 fn start_runtime_worker_with_state(
     timeout: Duration,
     heap_limit_bytes: usize,
+    domain: crate::packages::bundled::RuntimeDomain,
     default_workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
     op_state: Arc<ClayOpState>,
 ) -> Arc<RuntimeWorker> {
     let (sender, receiver) = mpsc::channel();
     let worker_state = Arc::clone(&op_state);
     let join = std::thread::Builder::new()
-        .name("clay-js-runtime".to_string())
+        .name(match domain {
+            crate::packages::bundled::RuntimeDomain::Trusted => "clay-js-runtime".to_string(),
+            crate::packages::bundled::RuntimeDomain::ThirdParty => {
+                "clay-js-runtime-third-party".to_string()
+            }
+        })
         .spawn(move || {
             run_runtime_worker(
                 receiver,
                 timeout,
                 heap_limit_bytes,
+                domain,
                 default_workspace,
                 worker_state,
             )
@@ -1702,6 +2165,7 @@ fn run_runtime_worker(
     receiver: mpsc::Receiver<RuntimeCommand>,
     timeout: Duration,
     heap_limit_bytes: usize,
+    domain: crate::packages::bundled::RuntimeDomain,
     default_workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
     op_state: Arc<ClayOpState>,
 ) {
@@ -1712,13 +2176,18 @@ fn run_runtime_worker(
         None,
         None,
         op_state.load_entry_allowlist(),
+        domain,
     ));
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("persistent JS runtime tokio runtime must build");
-    let (mut runtime, heap_limit_hit) =
-        create_js_runtime(Arc::clone(&op_state), Rc::clone(&loader), heap_limit_bytes);
+    let (mut runtime, heap_limit_hit) = create_js_runtime(
+        Arc::clone(&op_state),
+        Rc::clone(&loader),
+        heap_limit_bytes,
+        domain,
+    );
     let mut controlled_evaluation_id = 0_u64;
     let mut main_module_loaded = false;
 
@@ -1728,11 +2197,21 @@ fn run_runtime_worker(
                 entry,
                 workspace,
                 runtime_document_id,
+                package_context,
                 metric,
                 response,
             } => {
                 controlled_evaluation_id = controlled_evaluation_id.saturating_add(1);
                 let configuration_evaluation = matches!(&entry, RuntimeEntry::ConfigurationRoot(_));
+                if configuration_evaluation
+                    && domain != crate::packages::bundled::RuntimeDomain::Trusted
+                {
+                    let _ = response.send(Err(ClayRuntimeError::Runtime(
+                        "clay.domain.trusted_only: configuration evaluation requires the trusted runtime domain"
+                            .to_string(),
+                    )));
+                    continue;
+                }
                 let result = prepare_runtime_entry(entry, controlled_evaluation_id).and_then(
                     |loaded_entry| {
                         op_state.set_runtime_context(
@@ -1741,6 +2220,9 @@ fn run_runtime_worker(
                             configuration_evaluation,
                         );
                         op_state.begin_evaluation();
+                        if let Some(context) = package_context {
+                            op_state.set_current_package(Some(context));
+                        }
                         heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                         loader.set_entry(
                             loaded_entry.main_specifier.clone(),
@@ -1774,6 +2256,11 @@ fn run_runtime_worker(
                 response,
             } => {
                 op_state.begin_evaluation();
+                // Stamp host-owned handler provenance so publications inside
+                // the callback resolve to the registration's package.
+                op_state.set_current_package(Some(
+                    crate::server::ops::PackageContext::from_record(&registration.package),
+                ));
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let result = tokio_runtime.block_on(evaluate_js_parse_handler(
                     &mut runtime,
@@ -1798,6 +2285,9 @@ fn run_runtime_worker(
                 response,
             } => {
                 op_state.begin_evaluation();
+                op_state.set_current_package(Some(
+                    crate::server::ops::PackageContext::from_record(&registration.package),
+                ));
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let result = tokio_runtime.block_on(evaluate_js_completion_provider(
                     &mut runtime,
@@ -1823,6 +2313,9 @@ fn run_runtime_worker(
                 response,
             } => {
                 op_state.begin_evaluation();
+                op_state.set_current_package(Some(
+                    crate::server::ops::PackageContext::from_record(&registration.package),
+                ));
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let analysis_timeout = if matches!(
                     &event,
@@ -1858,6 +2351,9 @@ fn run_runtime_worker(
                 response,
             } => {
                 op_state.begin_evaluation();
+                op_state.set_current_package(Some(
+                    crate::server::ops::PackageContext::from_record(&registration.package),
+                ));
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let result = tokio_runtime.block_on(evaluate_js_language_intelligence_provider(
                     &mut runtime,
@@ -1885,11 +2381,12 @@ fn create_js_runtime(
     op_state: Arc<ClayOpState>,
     loader: Rc<ClayModuleLoader>,
     heap_limit_bytes: usize,
+    domain: crate::packages::bundled::RuntimeDomain,
 ) -> (JsRuntime, Arc<std::sync::atomic::AtomicBool>) {
     let create_params = v8::Isolate::create_params().heap_limits(0, heap_limit_bytes);
     let mut runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(loader),
-        extensions: vec![init_runtime_extension()],
+        extensions: vec![init_runtime_extension(domain)],
         create_params: Some(create_params),
         ..Default::default()
     });
@@ -1931,6 +2428,33 @@ fn prepare_runtime_entry(
                 configuration: Some(configuration),
             })
         }
+    }
+}
+
+/// Harvest the registration payload accumulated in a worker's op state into
+/// an evaluation snapshot. Used at every evaluation end, and at trusted
+/// reload commit to re-register the surviving third-party worker's
+/// registrations under the new generation (Plan 061 task 12).
+fn harvest_op_state_evaluation(op_state: &Arc<ClayOpState>) -> ClayRuntimeEvaluation {
+    let behavior_manifest = op_state.behavior_manifest();
+    ClayRuntimeEvaluation {
+        op_records: op_state.records(),
+        published_sdui_tree: op_state.published_sdui_tree(),
+        published_decoration_set: op_state.published_decoration_set(),
+        published_diagnostic_set: op_state.published_diagnostic_set(),
+        parse_handlers: op_state.parse_handlers(),
+        js_parse_handlers: op_state.js_parse_handlers(),
+        behavior_manifest: (behavior_manifest.behavior_version > 1).then_some(behavior_manifest),
+        ui_contributions: op_state.ui_contributions(),
+        syntax_grammars: op_state.syntax_grammars(),
+        syntax_engine_preferences: op_state.syntax_engine_preferences(),
+        completion_providers: op_state.completion_providers(),
+        js_completion_providers: op_state.js_completion_providers(),
+        language_intelligence_providers: op_state.language_intelligence_providers(),
+        js_language_intelligence_providers: op_state.js_language_intelligence_providers(),
+        document_analyzers: op_state.document_analyzers(),
+        active_theme: op_state.active_theme(),
+        active_typography: op_state.active_typography(),
     }
 }
 
@@ -1980,27 +2504,7 @@ async fn evaluate_loaded_module(
         result
             .await
             .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
-        let behavior_manifest = op_state.behavior_manifest();
-        Ok(ClayRuntimeEvaluation {
-            op_records: op_state.records(),
-            published_sdui_tree: op_state.published_sdui_tree(),
-            published_decoration_set: op_state.published_decoration_set(),
-            published_diagnostic_set: op_state.published_diagnostic_set(),
-            parse_handlers: op_state.parse_handlers(),
-            js_parse_handlers: op_state.js_parse_handlers(),
-            behavior_manifest: (behavior_manifest.behavior_version > 1)
-                .then_some(behavior_manifest),
-            ui_contributions: op_state.ui_contributions(),
-            syntax_grammars: op_state.syntax_grammars(),
-            syntax_engine_preferences: op_state.syntax_engine_preferences(),
-            completion_providers: op_state.completion_providers(),
-            js_completion_providers: op_state.js_completion_providers(),
-            language_intelligence_providers: op_state.language_intelligence_providers(),
-            js_language_intelligence_providers: op_state.js_language_intelligence_providers(),
-            document_analyzers: op_state.document_analyzers(),
-            active_theme: op_state.active_theme(),
-            active_typography: op_state.active_typography(),
-        })
+        Ok(harvest_op_state_evaluation(op_state))
     }
     .await;
 
@@ -3202,6 +3706,34 @@ struct LoadedRuntimeEntry {
     configuration: Option<Arc<ConfigurationRuntime>>,
 }
 
+/// `clay:*` facade specifiers the third-party domain may import (Plan 061
+/// task 1 classification). Configuration, documents, workspace, keybindings,
+/// packages, theme, application, and editor facades stay trusted-only.
+const THIRD_PARTY_FACADES: &[&str] = &[
+    "clay:sdui",
+    "clay:ui",
+    "clay:git",
+    "clay:behavior",
+    "clay:language-server",
+    "clay:modes",
+    "clay:commands",
+    "clay:decorations",
+    "clay:diagnostics",
+    "clay:parse",
+    "clay:syntax",
+    "clay:completion",
+    "clay:language",
+];
+
+fn facade_allowed(domain: crate::packages::bundled::RuntimeDomain, specifier: &str) -> bool {
+    match domain {
+        crate::packages::bundled::RuntimeDomain::Trusted => clay_facade_source(specifier).is_some(),
+        crate::packages::bundled::RuntimeDomain::ThirdParty => {
+            THIRD_PARTY_FACADES.contains(&specifier)
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ClayModuleLoader {
     state: std::sync::Mutex<ClayModuleLoaderState>,
@@ -3209,6 +3741,9 @@ struct ClayModuleLoader {
     // `op_clay_packages_load_package_by_specifier`, checked in resolve/load.
     // Ceiling: one entry per loaded package module.
     package_load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
+    // Trust domain this loader serves; gates facade and configuration-module
+    // resolution.
+    domain: crate::packages::bundled::RuntimeDomain,
 }
 
 #[derive(Debug)]
@@ -3224,6 +3759,7 @@ impl ClayModuleLoader {
         main_source: Option<String>,
         configuration: Option<Arc<ConfigurationRuntime>>,
         package_load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
+        domain: crate::packages::bundled::RuntimeDomain,
     ) -> Self {
         Self {
             state: std::sync::Mutex::new(ClayModuleLoaderState {
@@ -3232,6 +3768,7 @@ impl ClayModuleLoader {
                 configuration,
             }),
             package_load_entry_allowlist,
+            domain,
         }
     }
 
@@ -3273,6 +3810,9 @@ impl ModuleLoader for ClayModuleLoader {
             return Ok(state.main_specifier.clone());
         }
         if clay_facade_source(specifier).is_some() {
+            if !facade_allowed(self.domain, specifier) {
+                return Err(Self::denied(specifier));
+            }
             return ModuleSpecifier::parse(specifier)
                 .map_err(|error| Self::denied(&error.to_string()));
         }
@@ -3310,7 +3850,9 @@ impl ModuleLoader for ClayModuleLoader {
             return ModuleSpecifier::parse(&new_specifier)
                 .map_err(|error| Self::denied(&error.to_string()));
         }
-        if let Some(configuration) = &state.configuration {
+        if self.domain == crate::packages::bundled::RuntimeDomain::Trusted
+            && let Some(configuration) = &state.configuration
+        {
             return configuration
                 .resolve_module(specifier, referrer)
                 .map_err(|error| error.to_js_error());
@@ -3341,6 +3883,9 @@ impl ModuleLoader for ClayModuleLoader {
         }
 
         if let Some(source) = clay_facade_source(module_specifier.as_str()) {
+            if !facade_allowed(self.domain, module_specifier.as_str()) {
+                return ModuleLoadResponse::Sync(Err(Self::denied(module_specifier.as_str())));
+            }
             return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
                 ModuleType::JavaScript,
                 ModuleSourceCode::String(source.to_string().into()),
@@ -3383,7 +3928,9 @@ impl ModuleLoader for ClayModuleLoader {
                     }),
             );
         }
-        if let Some(configuration) = &state.configuration {
+        if self.domain == crate::packages::bundled::RuntimeDomain::Trusted
+            && let Some(configuration) = &state.configuration
+        {
             return ModuleLoadResponse::Sync(
                 configuration
                     .load_module_source(module_specifier)
@@ -3430,7 +3977,7 @@ mod tests {
         path::PathBuf,
         rc::Rc,
         sync::Arc,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
     use tokio::sync::Mutex;
@@ -3443,7 +3990,7 @@ mod tests {
     use super::{
         CONTROLLED_MAIN_SPECIFIER, ClayJsRuntimeService, ClayModuleLoader, ClayRuntimeError,
         ClayRuntimeEvaluation, PackageLoadEntryAllowlist, RuntimeEntry, create_js_runtime,
-        evaluate_loaded_module, prepare_runtime_entry,
+        evaluate_loaded_module, prepare_runtime_entry, start_runtime_worker,
     };
     use crate::perf::budgets::{
         BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, JS_RUNTIME_EVALUATION_TIMEOUT_MS,
@@ -3453,6 +4000,24 @@ mod tests {
         BehaviorVersion, DiagnosticSeverity, EnterRule, ParseByteRange, ParseEditNotification,
         ParsePolicy, ParseWindowSnapshot,
     };
+
+    /// Raw-runtime tests that exercise `loadPackage` need a third-party
+    /// worker sharing the test op state's package authority and load-entry
+    /// allowlist for the cross-domain bridge (Plan 061 task 12). The returned
+    /// worker must outlive the evaluations it serves.
+    fn wire_test_third_party_bridge(
+        op_state: &Arc<crate::server::ops::ClayOpState>,
+    ) -> Arc<super::RuntimeWorker> {
+        let worker = start_runtime_worker(
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            JS_RUNTIME_HEAP_LIMIT_BYTES,
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+            op_state.package_service_arc(),
+            op_state.load_entry_allowlist(),
+        );
+        op_state.set_third_party_commands(worker.sender.clone());
+        worker
+    }
     use crate::server::configuration::ConfigurationRuntime;
     use crate::server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest};
     use crate::server::workspace::WorkspaceState;
@@ -3483,6 +4048,166 @@ mod tests {
         let root = std::env::temp_dir().join(format!("clay-{name}-{suffix}"));
         fs::create_dir_all(&root).expect("create configuration fixture root");
         root
+    }
+
+    /// Build a synthetic package manifest for provenance tests.
+    fn test_package_json(
+        name: &str,
+        api_prefix: &str,
+        permissions: &[&str],
+        contributions: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": api_prefix,
+                "entry": "./dist/index.js",
+                "permissions": permissions,
+                "modes": [api_prefix],
+                "docs": "./docs/index.md",
+                "contributions": contributions,
+            }
+        })
+    }
+
+    /// Host-side install + authorize + enable of a synthetic package, then
+    /// evaluate `source` with that package's host-stamped provenance. This is
+    /// the same flow production package adoption uses: authority comes from
+    /// the enabled set and authorization record, never caller manifests.
+    async fn evaluate_as_package(
+        service: &ClayJsRuntimeService,
+        package_json: serde_json::Value,
+        approved: Vec<crate::packages::permissions::PackagePermission>,
+        source: &str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        evaluate_as_package_with_ls_grant(service, package_json, approved, None, source).await
+    }
+
+    /// Same as [`evaluate_as_package`], additionally recording a
+    /// language-server grant (which approves the `language-server`
+    /// capability) for analyzer/session provenance tests.
+    /// Host-side adoption flow for synthetic test packages: install, approve
+    /// the exact capability set, optionally grant a language-server
+    /// contribution, enable. Idempotent per package name/version.
+    fn ensure_synthetic_package_enabled(
+        service: &ClayJsRuntimeService,
+        package_json: serde_json::Value,
+        approved: Vec<crate::packages::permissions::PackagePermission>,
+        language_server_grant: Option<(&str, std::path::PathBuf)>,
+    ) -> crate::packages::record::PackageRecord {
+        let record = crate::packages::record::assemble_package_record(&package_json)
+            .expect("synthetic package record must assemble");
+        let root = config_fixture("package-provenance");
+        let op_state = service.test_op_state();
+        let mut locked = op_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        if locked
+            .enabled_record(&record.manifest.name, &record.manifest.version)
+            .is_none()
+        {
+            locked
+                .install_from_value_at_root_with_spec(package_json, root, "local:provenance-test")
+                .expect("synthetic package installs");
+            locked
+                .authorize_package(
+                    &record.manifest.name,
+                    approved.clone(),
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .expect("synthetic package authorizes");
+            // LS capability must be granted before enable: declared
+            // capabilities require a current grant at enable time.
+            if let Some((contribution, executable)) = &language_server_grant {
+                locked
+                    .authorize_language_server(
+                        &record.manifest.name,
+                        contribution,
+                        executable.clone(),
+                        vec![1],
+                        "test",
+                    )
+                    .expect("language-server grant authorizes");
+            }
+            // Pre-execution adoption gate: synthetic third-party packages
+            // need an exact durable approval before enable.
+            locked
+                .approve_package(&record.manifest.name, "test")
+                .expect("synthetic package approves");
+            locked
+                .enable(&record.manifest.name)
+                .expect("synthetic package enables");
+        }
+        record
+    }
+
+    async fn evaluate_as_package_with_ls_grant(
+        service: &ClayJsRuntimeService,
+        package_json: serde_json::Value,
+        approved: Vec<crate::packages::permissions::PackagePermission>,
+        language_server_grant: Option<(&str, std::path::PathBuf)>,
+        source: &str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        let record = ensure_synthetic_package_enabled(
+            service,
+            package_json,
+            approved,
+            language_server_grant,
+        );
+        // Evaluate in the runtime domain that owns the package (Plan 061 task
+        // 7): third-party packages run their callbacks in the third-party
+        // worker, which is where provider dispatch sends their commands.
+        let domain = service
+            .test_op_state()
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned")
+            .enabled_record(&record.manifest.name, &record.manifest.version)
+            .map(|enabled| enabled.runtime_domain)
+            .unwrap_or(crate::packages::bundled::RuntimeDomain::ThirdParty);
+        service
+            .evaluate_entry_as_package(
+                domain,
+                &record,
+                RuntimeEntry::ControlledSource(source.to_string()),
+                "runtime.evaluate_as_package",
+            )
+            .await
+    }
+
+    /// Same as [`evaluate_as_package`] but stamps the synthetic package into
+    /// the trusted domain: for tests exercising trusted-only ops (mode
+    /// activation, package loading) that third-party runtimes cannot reach.
+    async fn evaluate_as_trusted_package(
+        service: &ClayJsRuntimeService,
+        package_json: serde_json::Value,
+        approved: Vec<crate::packages::permissions::PackagePermission>,
+        source: &str,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        let record = ensure_synthetic_package_enabled(service, package_json, approved, None);
+        service
+            .test_op_state()
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned")
+            .force_enabled_runtime_domain_for_test(
+                &record.manifest.name,
+                &record.manifest.version,
+                crate::packages::bundled::RuntimeDomain::Trusted,
+            );
+        service
+            .evaluate_entry_as_package(
+                crate::packages::bundled::RuntimeDomain::Trusted,
+                &record,
+                RuntimeEntry::ControlledSource(source.to_string()),
+                "runtime.evaluate_as_trusted_package",
+            )
+            .await
     }
 
     #[tokio::test]
@@ -3526,6 +4251,1163 @@ mod tests {
 
         assert_eq!(result.op_records, vec!["persistent"]);
         assert_eq!(service.evaluation_count(), 2);
+    }
+
+    // ── Plan 061 task 4: two-domain trust boundary tests ────────────────────
+
+    // ── Plan 061 task 5: package-scoped provenance adversarial tests ────────
+
+    #[tokio::test]
+    async fn package_provenance_ignores_caller_supplied_identity_fields() {
+        let service = ClayJsRuntimeService::default();
+        // Options still carry forged identity fields naming another package;
+        // publication provenance must come from the executing-package context.
+        let result = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/alpha",
+                "alpha",
+                &["render-decorations"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::RenderDecorations],
+            r#"
+            import { serverPublishDiagnostics } from "clay:diagnostics";
+            serverPublishDiagnostics({
+              packageName: "@vendor/beta",
+              packageManifest: { name: "@vendor/beta", version: "9.9.9", clay: { apiPrefix: "beta" } },
+              packagePrefix: "beta",
+              permissions: ["render-decorations", "raw-ops"],
+              documentId: 1,
+              documentVersion: 1,
+              viewport: { byteStart: 0, byteEnd: 8 },
+              source: "s",
+              spans: [{ byteStart: 0, byteEnd: 1, severity: "error", code: "x", message: "y" }],
+            });
+            "#,
+        )
+        .await
+        .unwrap();
+        let set = result.published_diagnostic_set.expect("diagnostic set");
+        assert_eq!(set.provenance.package_name, "@vendor/alpha");
+        assert_eq!(set.provenance.package_prefix, "alpha");
+    }
+
+    #[tokio::test]
+    async fn disabled_package_callback_publications_fail_closed() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/stale",
+                "stale",
+                &["parse-document", "render-decorations"],
+                serde_json::json!({}),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ParseDocument,
+                crate::packages::permissions::PackagePermission::RenderDecorations,
+            ],
+            r#"
+            import { serverPublishDiagnostics } from "clay:diagnostics";
+            import { serverRegisterParseHandler } from "clay:parse";
+            serverRegisterParseHandler({
+              mode: "stale",
+              module: { default: async (notification) => {
+                serverPublishDiagnostics({
+                  documentId: notification.documentId,
+                  documentVersion: notification.documentVersion,
+                  viewport: notification.viewport,
+                  source: "stale",
+                  spans: [{ byteStart: 0, byteEnd: 1, severity: "error", code: "x", message: "y" }],
+                });
+                return { viewport: notification.viewport };
+              } }
+            });
+            "#,
+        )
+        .await
+        .unwrap();
+        let registration = evaluation
+            .js_parse_handlers
+            .first()
+            .expect("handler registered")
+            .clone();
+
+        // Disable the package host-side; the stale registration's callback
+        // must fail closed at op ingress (enabled-set lookup), not publish.
+        service
+            .test_op_state()
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned")
+            .disable("@vendor/stale")
+            .expect("package disables");
+        let notification = ParseEditNotification {
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            package_prefix: "stale".to_string(),
+            mode_id: "stale".to_string(),
+            viewport: ParseByteRange::new(0, 4),
+            invalidated_ranges: vec![ParseByteRange::new(0, 4)],
+            accepted_edit: None,
+            parse_windows: Vec::new(),
+            memory_budget: None,
+        };
+        let error = service
+            .invoke_parse_handler(registration, notification)
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("clay.packages.package_not_enabled"),
+            "stale package callback must fail closed, got {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn language_server_session_io_requires_executing_owner_package() {
+        let service = ClayJsRuntimeService::default();
+        // Package B knows A's package/contribution names and a session id, but
+        // session IO is bound to the host-stamped executing package.
+        let error = evaluate_as_package_with_ls_grant(
+            &service,
+            serde_json::json!({
+                "name": "@vendor/b",
+                "version": "0.1.0",
+                "type": "module",
+                "exports": { ".": "./dist/index.js" },
+                "clay": {
+                    "apiPrefix": "beta",
+                    "entry": "./dist/index.js",
+                    "permissions": ["parse-document"],
+                    "capabilities": ["language-server"],
+                    "modes": [],
+                    "docs": "./docs/index.md",
+                    "contributions": {
+                        "languageServers": [{
+                            "id": "beta.server",
+                            "executable": "/bin/true",
+                            "args": []
+                        }]
+                    }
+                }
+            }),
+            vec![crate::packages::permissions::PackagePermission::ParseDocument],
+            Some((
+                "beta.server",
+                std::fs::canonicalize("/bin/true").expect("canonical /bin/true"),
+            )),
+            r#"
+            const identity = { sessionId: 1, package: "@vendor/a", contribution: "a.server" };
+            try {
+              await Deno.core.ops.op_clay_language_server_send_message(
+                JSON.stringify({ ...identity, message: "x" }));
+              throw new Error("cross-package session write must not succeed");
+            } catch (error) {
+              Deno.core.ops.op_clay_runtime_record(String(error));
+            }
+            "#,
+        )
+        .await
+        .unwrap();
+        assert!(
+            evaluation_contains(&error, "clay.language_server.session_owner_mismatch"),
+            "cross-package session IO must fail, got {:?}",
+            error.op_records
+        );
+    }
+
+    fn evaluation_contains(evaluation: &ClayRuntimeEvaluation, needle: &str) -> bool {
+        evaluation
+            .op_records
+            .iter()
+            .any(|record| record.contains(needle))
+    }
+
+    #[tokio::test]
+    async fn third_party_provider_executes_in_third_party_runtime_only() {
+        let service = ClayJsRuntimeService::default();
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/domain-dynamic",
+                "domaindyn",
+                &["completion-provider"],
+                serde_json::json!({
+                    "completionProviders": [{
+                        "id": "domaindyn.provider",
+                        "triggerCharacters": ["."],
+                        "budgets": { "timeoutMs": 500, "maxItems": 8 }
+                    }]
+                }),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+            r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({
+                  module: {
+                    provideCompletion: async (_request, window) => ({
+                      status: "ok",
+                      items: [{ label: "dynamic", insertText: "dynamic", detail: window.text }]
+                    })
+                  }
+                });
+                "#,
+        )
+        .await
+        .unwrap();
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        service
+            .register_completion_providers(&coordinator, 4, &evaluation)
+            .unwrap();
+        let trusted_before =
+            service.domain_evaluations(crate::packages::bundled::RuntimeDomain::Trusted);
+        let third_party_before =
+            service.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty);
+        coordinator
+            .schedule_completion(
+                "domaindyn.provider",
+                crate::protocol::CompletionRequest {
+                    request_id: 92,
+                    client_id: 2,
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    cursor_byte_offset: 2,
+                    replacement_range: crate::protocol::CompletionReplacementRange {
+                        byte_start: 2,
+                        byte_end: 2,
+                    },
+                    trigger: crate::protocol::CompletionTrigger::Manual,
+                    provider_generation: 4,
+                },
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "domaindyn".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "fn".to_string(),
+                },
+            )
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.items[0].detail, "fn");
+        assert!(
+            service.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                > third_party_before,
+            "third-party provider must execute in the third-party runtime"
+        );
+        assert_eq!(
+            service.domain_evaluations(crate::packages::bundled::RuntimeDomain::Trusted),
+            trusted_before,
+            "third-party provider invocation must not touch the trusted runtime"
+        );
+    }
+
+    #[tokio::test]
+    async fn slow_third_party_provider_poisons_only_third_party_domain() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/slow-dynamic",
+                "slowdyn",
+                &["completion-provider"],
+                serde_json::json!({
+                    "completionProviders": [{
+                        "id": "slowdyn.provider",
+                        "triggerCharacters": ["."],
+                        "budgets": { "timeoutMs": 50, "maxItems": 8 }
+                    }]
+                }),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+            r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({
+                  module: {
+                    provideCompletion: async () => { for (;;) {} }
+                  }
+                });
+                "#,
+        )
+        .await
+        .unwrap();
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        service
+            .register_completion_providers(&coordinator, 4, &evaluation)
+            .unwrap();
+        coordinator
+            .schedule_completion(
+                "slowdyn.provider",
+                crate::protocol::CompletionRequest {
+                    request_id: 93,
+                    client_id: 2,
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    cursor_byte_offset: 2,
+                    replacement_range: crate::protocol::CompletionReplacementRange {
+                        byte_start: 2,
+                        byte_end: 2,
+                    },
+                    trigger: crate::protocol::CompletionTrigger::Manual,
+                    provider_generation: 4,
+                },
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "slowdyn".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "fn".to_string(),
+                },
+            )
+            .unwrap();
+        // The busy-loop provider times out; only the third-party domain is
+        // poisoned. The trusted runtime keeps answering immediately.
+        let _ = tokio::time::timeout(Duration::from_secs(1), coordinator.next_result()).await;
+        let trusted = service
+            .evaluate_controlled_module(
+                r#"Deno.core.ops.op_clay_runtime_record(Deno.core.ops.op_clay_runtime_ping());"#,
+            )
+            .await
+            .expect("trusted runtime survives third-party provider timeout");
+        assert_eq!(trusted.op_records, vec!["clay-runtime-ready"]);
+    }
+
+    /// Plan 061 task 12: a trusted-generation reload shares the third-party
+    /// domain — providers keep answering in the SAME worker (generation and
+    /// evaluation counters unchanged), and the reload snapshot re-registers
+    /// them under a new generation.
+    #[tokio::test]
+    async fn trusted_reload_preserves_third_party_providers() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/reload-survivor",
+                "survivor",
+                &["completion-provider"],
+                serde_json::json!({
+                    "completionProviders": [{
+                        "id": "survivor.provider",
+                        "triggerCharacters": ["."],
+                        "budgets": { "timeoutMs": 500, "maxItems": 8 }
+                    }]
+                }),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+            r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({
+                  module: {
+                    provideCompletion: async () => ({
+                      status: "ok",
+                      items: [{ label: "survivor", insertText: "survivor" }]
+                    })
+                  }
+                });
+                "#,
+        )
+        .await
+        .unwrap();
+
+        let third_party_generation_before =
+            service.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty);
+        let reloaded = ClayJsRuntimeService::production_reload(&service);
+        assert_eq!(
+            reloaded.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty),
+            third_party_generation_before,
+            "trusted reload must not replace the third-party worker"
+        );
+
+        // Re-register the surviving third-party registrations under the new
+        // generation exactly like the reload commit path does.
+        let snapshot = reloaded.third_party_registrations_snapshot();
+        assert_eq!(
+            snapshot.js_completion_providers.len(),
+            evaluation.js_completion_providers.len(),
+            "surviving worker must expose its registration payload"
+        );
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        reloaded
+            .register_completion_providers(&coordinator, 5, &snapshot)
+            .unwrap();
+        let third_party_evals_before =
+            reloaded.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty);
+        coordinator
+            .schedule_completion(
+                "survivor.provider",
+                crate::protocol::CompletionRequest {
+                    request_id: 95,
+                    client_id: 2,
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    cursor_byte_offset: 2,
+                    replacement_range: crate::protocol::CompletionReplacementRange {
+                        byte_start: 2,
+                        byte_end: 2,
+                    },
+                    trigger: crate::protocol::CompletionTrigger::Manual,
+                    provider_generation: 5,
+                },
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "survivor".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "su".to_string(),
+                },
+            )
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.items[0].label, "survivor");
+        assert!(
+            reloaded.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                > third_party_evals_before,
+            "provider must answer in the shared third-party worker after reload"
+        );
+    }
+
+    /// Plan 061 task 12: a poisoned third-party domain is replaced once and
+    /// replays ONLY the current approved graph; deterministic registration
+    /// tokens make the pre-poison coordinator registrations valid again.
+    #[tokio::test]
+    async fn third_party_poison_replays_approved_graph_and_restores_providers() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(100));
+        let root = config_fixture("third-party-replay").join("replayd");
+        write_loadable_package(
+            &root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              module: {
+                provideCompletion: async () => ({
+                  status: "ok",
+                  items: [{ label: "replayed", insertText: "replayed" }]
+                })
+              }
+            });
+            export default function load() {}
+            "#,
+        );
+        let package_json = test_package_json(
+            "@vendor/replayd",
+            "replayd",
+            &["completion-provider"],
+            serde_json::json!({
+                "completionProviders": [{
+                    "id": "replayd.provider",
+                    "triggerCharacters": ["."],
+                    "budgets": { "timeoutMs": 50, "maxItems": 8 }
+                }]
+            }),
+        );
+        let approved = vec![crate::packages::permissions::PackagePermission::CompletionProvider];
+        ensure_synthetic_package_enabled(&service, package_json.clone(), approved.clone(), None);
+        // Record the load entry so the poison-recovery replay can re-import it.
+        service
+            .test_op_state()
+            .load_entry_allowlist()
+            .record_for_package(
+                "clay://packages/@vendor/replayd/dist/load.js",
+                root.join("dist/load.js"),
+                root.clone(),
+                Some("@vendor/replayd"),
+            );
+        let evaluation = evaluate_as_package(
+            &service,
+            package_json.clone(),
+            approved.clone(),
+            r#"const m = await import("clay://packages/@vendor/replayd/dist/load.js"); await m.default();"#,
+        )
+        .await
+        .unwrap();
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        service
+            .register_completion_providers(&coordinator, 4, &evaluation)
+            .unwrap();
+
+        // Poison the third-party domain with a busy-loop evaluation.
+        let _ = evaluate_as_package(&service, package_json, approved, "for (;;) {}").await;
+        let generation_after_poison =
+            service.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty);
+
+        // The next third-party dispatch replaces the worker and replays the
+        // approved graph: the provider answers again under the same token.
+        coordinator
+            .schedule_completion(
+                "replayd.provider",
+                crate::protocol::CompletionRequest {
+                    request_id: 96,
+                    client_id: 2,
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    cursor_byte_offset: 2,
+                    replacement_range: crate::protocol::CompletionReplacementRange {
+                        byte_start: 2,
+                        byte_end: 2,
+                    },
+                    trigger: crate::protocol::CompletionTrigger::Manual,
+                    provider_generation: 4,
+                },
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "replayd".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "re".to_string(),
+                },
+            )
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(3), coordinator.next_result())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.items[0].label, "replayed");
+        assert!(
+            service.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                > generation_after_poison,
+            "poison recovery must bump the third-party domain generation"
+        );
+        let _ = fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    /// Plan 061 task 13 adversarial: the cross-domain load bridge rejects a
+    /// TRUSTED record — config must never route bundled packages through the
+    /// third-party runtime via the bridge op.
+    #[tokio::test]
+    async fn cross_domain_load_bridge_rejects_trusted_records() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                const result = JSON.parse(
+                    await Deno.core.ops.op_clay_packages_load_package_by_specifier(
+                        JSON.stringify({ specifier: "@clay/markdown" })
+                    )
+                );
+                await Deno.core.ops.op_clay_packages_load_in_package_domain(
+                    JSON.stringify(result)
+                );
+                "#,
+            )
+            .await
+            .expect_err("bridge must reject a trusted-domain record");
+        let message = error.to_string();
+        assert!(
+            message.contains("is not a third-party package"),
+            "unexpected bridge denial message: {message}"
+        );
+        assert_eq!(
+            service.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty),
+            0,
+            "denied bridge call must not touch the third-party runtime"
+        );
+    }
+
+    /// Plan 061 task 13 adversarial: poison recovery replays ONLY the current
+    /// approved graph — a package disabled after poisoning is not replayed,
+    /// and its pre-poison coordinator token fails closed.
+    #[tokio::test]
+    async fn third_party_poison_replay_skips_disabled_packages() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(100));
+        let root = config_fixture("third-party-replay-skip").join("skipd");
+        write_loadable_package(
+            &root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              module: {
+                provideCompletion: async () => ({
+                  status: "ok",
+                  items: [{ label: "skipped", insertText: "skipped" }]
+                })
+              }
+            });
+            export default function load() {}
+            "#,
+        );
+        let package_json = test_package_json(
+            "@vendor/skipd",
+            "skipd",
+            &["completion-provider"],
+            serde_json::json!({
+                "completionProviders": [{
+                    "id": "skipd.provider",
+                    "triggerCharacters": ["."],
+                    "budgets": { "timeoutMs": 50, "maxItems": 8 }
+                }]
+            }),
+        );
+        let approved = vec![crate::packages::permissions::PackagePermission::CompletionProvider];
+        ensure_synthetic_package_enabled(&service, package_json.clone(), approved.clone(), None);
+        service
+            .test_op_state()
+            .load_entry_allowlist()
+            .record_for_package(
+                "clay://packages/@vendor/skipd/dist/load.js",
+                root.join("dist/load.js"),
+                root.clone(),
+                Some("@vendor/skipd"),
+            );
+        let evaluation = evaluate_as_package(
+            &service,
+            package_json.clone(),
+            approved.clone(),
+            r#"const m = await import("clay://packages/@vendor/skipd/dist/load.js"); await m.default();"#,
+        )
+        .await
+        .unwrap();
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        service
+            .register_completion_providers(&coordinator, 4, &evaluation)
+            .unwrap();
+        // Poison, then disable the package before any dispatch replays it.
+        let _ = evaluate_as_package(&service, package_json, approved, "for (;;) {}").await;
+        service
+            .test_op_state()
+            .package_service()
+            .lock()
+            .unwrap()
+            .disable("@vendor/skipd")
+            .unwrap();
+        coordinator
+            .schedule_completion(
+                "skipd.provider",
+                crate::protocol::CompletionRequest {
+                    request_id: 97,
+                    client_id: 2,
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    cursor_byte_offset: 2,
+                    replacement_range: crate::protocol::CompletionReplacementRange {
+                        byte_start: 2,
+                        byte_end: 2,
+                    },
+                    trigger: crate::protocol::CompletionTrigger::Manual,
+                    provider_generation: 4,
+                },
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "skipd".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "sk".to_string(),
+                },
+            )
+            .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(1), coordinator.next_result()).await;
+        // A dropped channel or silent drop are both fail-closed: no
+        // completion is ever produced from the disabled package.
+        if let Ok(Some(result)) = outcome {
+            assert_ne!(
+                result.status,
+                crate::protocol::CompletionStatus::Ok,
+                "disabled package must not be replayed; provider must fail closed"
+            );
+        }
+        assert!(
+            service.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty) > 1,
+            "poison recovery must have replaced the third-party worker"
+        );
+        service
+            .evaluate_third_party_module("Deno.core.ops.op_clay_runtime_record('alive');")
+            .await
+            .expect("third-party domain stays alive after replay skip");
+        assert!(
+            !service
+                .test_op_state()
+                .package_service()
+                .lock()
+                .unwrap()
+                .inspect("@vendor/skipd")
+                .unwrap()
+                .is_enabled,
+            "replay must not re-enable the disabled package"
+        );
+        let _ = fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    /// Plan 061 task 13 adversarial: a third-party package cannot call
+    /// loadPackage — the loader op is trusted-only, so the public
+    /// clay:packages facade fails closed by op absence in the third-party
+    /// runtime.
+    #[tokio::test]
+    async fn third_party_package_cannot_load_other_packages() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let error = evaluate_as_package(
+            &service,
+            test_package_json("@vendor/loader", "loaderd", &[], serde_json::json!({})),
+            Vec::new(),
+            r#"
+                import { loadPackage } from "clay:packages";
+                await loadPackage("@clay/markdown");
+                "#,
+        )
+        .await
+        .expect_err("third-party loadPackage must fail closed");
+        let message = error.to_string();
+        // clay:packages is not in the third-party facade allowlist: denial at
+        // the import boundary, before any op is reachable.
+        assert!(
+            message.contains("not allowed in the server runtime boundary"),
+            "expected import-boundary denial, got: {message}"
+        );
+        assert!(
+            service
+                .test_op_state()
+                .package_service()
+                .lock()
+                .unwrap()
+                .enabled_records()
+                .all(|record| record.manifest.name != "@clay/markdown"),
+            "denied loadPackage must not enable the target package"
+        );
+    }
+
+    #[tokio::test]
+    async fn third_party_runtime_cannot_see_trusted_ops_or_admin_modules() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+
+        // Trusted-only/admin op names are not even enumerable in the
+        // third-party isolate; public contribution ops exist in both.
+        let probe = service
+            .evaluate_third_party_module(
+                r#"
+                const ops = Deno.core.ops;
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                    ping: typeof ops.op_clay_runtime_ping,
+                    configGet: typeof ops.op_clay_configuration_get_state,
+                    openDocument: typeof ops.op_clay_documents_open_document,
+                    loadPackage: typeof ops.op_clay_packages_load_package,
+                    authorizeLs: typeof ops.op_clay_language_server_authorize,
+                    classify: typeof ops.op_clay_modes_classify_document,
+                    setTheme: typeof ops.op_clay_theme_set_theme,
+                    publicRegister: typeof ops.op_clay_commands_register_command,
+                    publicPublish: typeof ops.op_clay_decorations_publish_decorations,
+                }));
+                "#,
+            )
+            .await
+            .expect("third-party op probe evaluation");
+        assert_eq!(
+            probe.op_records,
+            vec![
+                r#"{"ping":"undefined","configGet":"undefined","openDocument":"undefined","loadPackage":"undefined","authorizeLs":"undefined","classify":"undefined","setTheme":"undefined","publicRegister":"function","publicPublish":"function"}"#
+            ]
+        );
+
+        // The same names resolve to real functions in the trusted isolate.
+        let trusted_probe = service
+            .evaluate_controlled_module(
+                r#"
+                const ops = Deno.core.ops;
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                    ping: typeof ops.op_clay_runtime_ping,
+                    configGet: typeof ops.op_clay_configuration_get_state,
+                    loadPackage: typeof ops.op_clay_packages_load_package,
+                }));
+                "#,
+            )
+            .await
+            .expect("trusted op probe evaluation");
+        assert_eq!(
+            trusted_probe.op_records,
+            vec![r#"{"ping":"function","configGet":"function","loadPackage":"function"}"#]
+        );
+
+        // Admin/internal facade modules do not resolve in the third-party
+        // domain; public facades do.
+        for specifier in [
+            "clay:configuration",
+            "clay:documents",
+            "clay:workspace",
+            "clay:keybindings",
+            "clay:packages",
+            "clay:theme",
+            "clay:application",
+            "clay:editor",
+        ] {
+            let result = service
+                .evaluate_third_party_module(format!(r#"import "{specifier}";"#))
+                .await;
+            assert!(
+                result.is_err(),
+                "third-party domain must reject admin facade {specifier}"
+            );
+        }
+        for specifier in ["clay:commands", "clay:decorations", "clay:sdui"] {
+            service
+                .evaluate_third_party_module(format!(r#"import "{specifier}";"#))
+                .await
+                .unwrap_or_else(|error| panic!("third-party public facade {specifier}: {error}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn domain_globals_and_module_state_do_not_cross() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        service
+            .evaluate_controlled_module("globalThis.__clayDomainProbe = 'trusted';")
+            .await
+            .expect("trusted global write");
+        let third_party = service
+            .evaluate_third_party_module(
+                "Deno.core.ops.op_clay_runtime_record(String(globalThis.__clayDomainProbe));",
+            )
+            .await
+            .expect("third-party global read");
+        assert_eq!(third_party.op_records, vec!["undefined"]);
+        service
+            .evaluate_third_party_module("globalThis.__clayDomainProbe = 'third-party';")
+            .await
+            .expect("third-party global write");
+        let trusted = service
+            .evaluate_controlled_module(
+                "Deno.core.ops.op_clay_runtime_record(String(globalThis.__clayDomainProbe));",
+            )
+            .await
+            .expect("trusted global read");
+        assert_eq!(trusted.op_records, vec!["trusted"]);
+    }
+
+    #[tokio::test]
+    async fn third_party_termination_replaces_only_third_party_generation() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(150));
+        // Runaway third-party evaluation terminates only its own domain.
+        let timed_out = service.evaluate_third_party_module("while (true) {}").await;
+        assert!(
+            matches!(timed_out, Err(ClayRuntimeError::Timeout)),
+            "third-party runaway must time out, got {timed_out:?}"
+        );
+        // Trusted domain stays responsive without any worker replacement.
+        let workers_after_timeout = service.workers_started();
+        service
+            .evaluate_controlled_module("Deno.core.ops.op_clay_runtime_ping();")
+            .await
+            .expect("trusted runtime remains responsive after third-party termination");
+        assert_eq!(workers_after_timeout, 2);
+        assert_eq!(service.workers_started(), 2);
+        // Third-party domain recovers by replacing only its own worker.
+        service
+            .evaluate_third_party_module("Deno.core.ops.op_clay_runtime_record('recovered');")
+            .await
+            .expect("third-party domain restarts after termination");
+        assert_eq!(service.workers_started(), 3);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn process_rss_kib_and_threads() -> (u64, usize) {
+        let status = fs::read_to_string("/proc/self/status").expect("read process status");
+        let rss_kib = status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmRSS:"))
+            .and_then(|value| value.split_whitespace().next())
+            .and_then(|value| value.parse().ok())
+            .expect("parse VmRSS from process status");
+        let threads = fs::read_dir("/proc/self/task")
+            .expect("read process task directory")
+            .count();
+        (rss_kib, threads)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "manual Plan 061 before/after resource baseline"]
+    async fn runtime_resource_baseline_probe() {
+        let (rss_before_kib, threads_before) = process_rss_kib_and_threads();
+        let startup_started = Instant::now();
+        let service = ClayJsRuntimeService::default();
+        service
+            .evaluate_controlled_module("Deno.core.ops.op_clay_runtime_ping();")
+            .await
+            .expect("first runtime evaluation");
+        let startup_us = startup_started.elapsed().as_micros();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let (rss_after_start_kib, threads_after_start) = process_rss_kib_and_threads();
+
+        let mut warm_evaluation_us = Vec::with_capacity(20);
+        for _ in 0..20 {
+            let started = Instant::now();
+            service
+                .evaluate_controlled_module("Deno.core.ops.op_clay_runtime_ping();")
+                .await
+                .expect("warm runtime evaluation");
+            warm_evaluation_us.push(started.elapsed().as_micros());
+        }
+        warm_evaluation_us.sort_unstable();
+        let warm_evaluation_median_us = warm_evaluation_us[warm_evaluation_us.len() / 2];
+
+        let mut package_load_us = Vec::new();
+        for specifier in [
+            "@clay/rust",
+            "@clay/markdown",
+            "@clay/git",
+            "@clay/theme-gruvbox-material-dark",
+        ] {
+            let started = Instant::now();
+            service
+                .evaluate_controlled_module(format!(
+                    "import {{ loadPackage }} from 'clay:packages'; await loadPackage({specifier:?});"
+                ))
+                .await
+                .unwrap_or_else(|error| panic!("load {specifier}: {error}"));
+            package_load_us.push((specifier, started.elapsed().as_micros()));
+        }
+        let enabled_packages = service
+            .test_op_state()
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned")
+            .enabled_records()
+            .count();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let (rss_after_packages_kib, threads_after_packages) = process_rss_kib_and_threads();
+
+        let reload_started = Instant::now();
+        let candidate = ClayJsRuntimeService::default();
+        candidate
+            .evaluate_controlled_module("Deno.core.ops.op_clay_runtime_ping();")
+            .await
+            .expect("candidate runtime evaluation");
+        let candidate_reload_us = reload_started.elapsed().as_micros();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let (rss_with_candidate_kib, threads_with_candidate) = process_rss_kib_and_threads();
+        drop(candidate);
+
+        // Plan 061 task 4: analysis invokes route through the two domain
+        // runtimes; no per-analyzer persistent runtimes exist anymore.
+        let (rss_with_max_analysis_kib, threads_with_max_analysis) =
+            (rss_with_candidate_kib, threads_with_candidate);
+
+        assert_eq!(enabled_packages, 4);
+        assert_eq!(service.workers_started(), 2);
+        eprintln!(
+            "PLAN061_RUNTIME_BASELINE rss_before_kib={rss_before_kib} rss_after_start_kib={rss_after_start_kib} rss_after_packages_kib={rss_after_packages_kib} rss_with_candidate_kib={rss_with_candidate_kib} rss_with_max_analysis_kib={rss_with_max_analysis_kib} threads_before={threads_before} threads_after_start={threads_after_start} threads_after_packages={threads_after_packages} threads_with_candidate={threads_with_candidate} threads_with_max_analysis={threads_with_max_analysis} startup_us={startup_us} warm_evaluation_median_us={warm_evaluation_median_us} candidate_reload_us={candidate_reload_us} enabled_packages={enabled_packages} package_load_us={package_load_us:?} main_heap_limit_bytes={JS_RUNTIME_HEAP_LIMIT_BYTES} persistent_workers_started={}",
+            service.workers_started()
+        );
+
+        // Plan 061 task 13: third-party provider latency + bridge
+        // saturation (serial cross-domain dispatches through the completion
+        // coordinator).
+        let provider_evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/probe-provider",
+                "probeprov",
+                &["completion-provider"],
+                serde_json::json!({
+                    "completionProviders": [{
+                        "id": "probeprov.provider",
+                        "triggerCharacters": ["."],
+                        "budgets": { "timeoutMs": 500, "maxItems": 8 }
+                    }]
+                }),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+            r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({
+                  module: {
+                    provideCompletion: async (_request, window) => ({
+                      status: "ok",
+                      items: [{ label: "probe", insertText: "probe", detail: window.text }]
+                    })
+                  }
+                });
+                "#,
+        )
+        .await
+        .unwrap();
+        let coordinator = crate::server::completion::CompletionCoordinator::new();
+        service
+            .register_completion_providers(&coordinator, 4, &provider_evaluation)
+            .unwrap();
+        let completion_window = crate::server::completion::CompletionDocumentWindow {
+            document_id: 7,
+            document_version: 3,
+            behavior_version: 5,
+            package_prefix: "probeprov".to_string(),
+            byte_start: 0,
+            byte_end: 2,
+            text: "pr".to_string(),
+        };
+        let mut provider_invoke_us = Vec::with_capacity(20);
+        let saturation_started = Instant::now();
+        for index in 0..20u32 {
+            let started = Instant::now();
+            coordinator
+                .schedule_completion(
+                    "probeprov.provider",
+                    crate::protocol::CompletionRequest {
+                        request_id: u64::from(100 + index),
+                        client_id: 2,
+                        document_id: 7,
+                        document_version: 3,
+                        behavior_version: 5,
+                        cursor_byte_offset: 2,
+                        replacement_range: crate::protocol::CompletionReplacementRange {
+                            byte_start: 2,
+                            byte_end: 2,
+                        },
+                        trigger: crate::protocol::CompletionTrigger::Manual,
+                        provider_generation: 4,
+                    },
+                    completion_window.clone(),
+                )
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+                .await
+                .unwrap()
+                .unwrap();
+            provider_invoke_us.push(started.elapsed().as_micros());
+        }
+        provider_invoke_us.sort_unstable();
+        let provider_invoke_median_us = provider_invoke_us[provider_invoke_us.len() / 2];
+        let bridge_saturation_20_serial_us = saturation_started.elapsed().as_micros();
+
+        // Third-party recovery: poison the domain with a busy-loop, then time
+        // the first successful provider answer (replace + replay + invoke).
+        let recovery_service = ClayJsRuntimeService::with_timeout(Duration::from_millis(50));
+        let recovery_root = config_fixture("third-party-recovery-probe").join("recoverd");
+        write_loadable_package(
+            &recovery_root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              module: {
+                provideCompletion: async () => ({
+                  status: "ok",
+                  items: [{ label: "recovered", insertText: "recovered" }]
+                })
+              }
+            });
+            export default function load() {}
+            "#,
+        );
+        let recovery_json = test_package_json(
+            "@vendor/recoverd",
+            "recoverd",
+            &["completion-provider"],
+            serde_json::json!({
+                "completionProviders": [{
+                    "id": "recoverd.provider",
+                    "triggerCharacters": ["."],
+                    "budgets": { "timeoutMs": 50, "maxItems": 8 }
+                }]
+            }),
+        );
+        let recovery_permissions =
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider];
+        ensure_synthetic_package_enabled(
+            &recovery_service,
+            recovery_json.clone(),
+            recovery_permissions.clone(),
+            None,
+        );
+        recovery_service
+            .test_op_state()
+            .load_entry_allowlist()
+            .record_for_package(
+                "clay://packages/@vendor/recoverd/dist/load.js",
+                recovery_root.join("dist/load.js"),
+                recovery_root.clone(),
+                Some("@vendor/recoverd"),
+            );
+        let recovery_evaluation = evaluate_as_package(
+            &recovery_service,
+            recovery_json.clone(),
+            recovery_permissions.clone(),
+            r#"const m = await import("clay://packages/@vendor/recoverd/dist/load.js"); await m.default();"#,
+        )
+        .await
+        .unwrap();
+        let recovery_coordinator = crate::server::completion::CompletionCoordinator::new();
+        recovery_service
+            .register_completion_providers(&recovery_coordinator, 4, &recovery_evaluation)
+            .unwrap();
+        let _ = evaluate_as_package(
+            &recovery_service,
+            recovery_json,
+            recovery_permissions,
+            "for (;;) {}",
+        )
+        .await;
+        let recovery_started = Instant::now();
+        recovery_coordinator
+            .schedule_completion(
+                "recoverd.provider",
+                crate::protocol::CompletionRequest {
+                    request_id: 200,
+                    client_id: 2,
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    cursor_byte_offset: 2,
+                    replacement_range: crate::protocol::CompletionReplacementRange {
+                        byte_start: 2,
+                        byte_end: 2,
+                    },
+                    trigger: crate::protocol::CompletionTrigger::Manual,
+                    provider_generation: 4,
+                },
+                crate::server::completion::CompletionDocumentWindow {
+                    document_id: 7,
+                    document_version: 3,
+                    behavior_version: 5,
+                    package_prefix: "recoverd".to_string(),
+                    byte_start: 0,
+                    byte_end: 2,
+                    text: "re".to_string(),
+                },
+            )
+            .unwrap();
+        let recovered =
+            tokio::time::timeout(Duration::from_secs(3), recovery_coordinator.next_result())
+                .await
+                .unwrap()
+                .unwrap();
+        let third_party_recovery_us = recovery_started.elapsed().as_micros();
+        assert_eq!(recovered.items[0].label, "recovered");
+        let _ = fs::remove_dir_all(recovery_root.parent().unwrap());
+
+        eprintln!(
+            "PLAN061_CROSS_DOMAIN provider_invoke_median_us={provider_invoke_median_us} bridge_saturation_20_serial_us={bridge_saturation_20_serial_us} third_party_recovery_us={third_party_recovery_us}"
+        );
     }
 
     #[tokio::test]
@@ -3603,9 +5485,16 @@ mod tests {
     async fn js_parse_handler_bridge_accepts_inert_diagnostic_records() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/fixture-parser",
+                "fixture",
+                &["parse-document"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::ParseDocument],
+            r#"
                 import { serverRegisterParseHandler } from "clay:parse";
                 const parser = { default: async (notification) => ({
                   diagnostics: {
@@ -3622,16 +5511,12 @@ mod tests {
                 }) };
                 serverRegisterParseHandler({
                   module: parser,
-                  packageName: "@clay/fixture-parser",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "fixture",
-                  permissions: ["parse-document"],
                   mode: "fixture",
                 });
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
         let coordinator = ParseCoordinator::new();
         service
             .register_parse_handlers(&coordinator, 1, &evaluation)
@@ -3662,73 +5547,82 @@ mod tests {
     #[tokio::test]
     async fn parse_registration_rejects_executable_callbacks_and_missing_permissions() {
         let service = ClayJsRuntimeService::default();
-        for source in [
+        // Executable callback fields are rejected by the facade before any op.
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterParseHandler } from "clay:parse";
+                serverRegisterParseHandler({
+                  mode: "evil",
+                  handler() {}
+                });
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("clay.parse.invalid_handler"),
+            "unexpected registration error: {error}"
+        );
+        // Missing approved parse-document capability fails closed.
+        let error = evaluate_as_package(
+            &service,
+            test_package_json("@clay/no-parse", "noparse", &[], serde_json::json!({})),
+            vec![],
             r#"
             import { serverRegisterParseHandler } from "clay:parse";
             serverRegisterParseHandler({
-              packageName: "@clay/evil",
-              packageVersion: "0.1.0",
-              packagePrefix: "evil",
-              permissions: ["parse-document"],
-              mode: "evil",
-              handler() {}
-            });
-            "#,
-            r#"
-            import { serverRegisterParseHandler } from "clay:parse";
-            serverRegisterParseHandler({
-              packageName: "@clay/no-parse",
-              packageVersion: "0.1.0",
-              packagePrefix: "noparse",
-              permissions: [],
               mode: "noparse"
             });
             "#,
-        ] {
-            let error = service
-                .evaluate_controlled_module(source)
-                .await
-                .unwrap_err();
-            let message = error.to_string();
-            assert!(
-                message.contains("clay.parse.invalid_handler")
-                    || message.contains("clay.packages.missing_permission"),
-                "unexpected registration error: {message}"
-            );
-        }
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("clay.packages.missing_permission"),
+            "unexpected registration error: {error}"
+        );
     }
 
     #[tokio::test]
     async fn syntax_facade_registers_grammar_metadata_without_raw_ops() {
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/rust-grammar",
+                "rust",
+                &["parse-document", "render-decorations"],
+                serde_json::json!({
+                    "syntaxGrammars": [{
+                        "languageId": "rust",
+                        "filePatterns": { "extensions": ["rs"] },
+                        "grammar": { "kind": "native", "source": "tree-sitter-rust" },
+                        "queries": { "highlights": "./queries/highlights.scm" },
+                        "styleMap": {
+                          "keyword": { "type": "Keyword" },
+                          "string": { "type": "String" },
+                          "comment": { "type": "Comment" },
+                          "punctuation": { "type": "Operator" }
+                        },
+                        "budgets": { "timeoutMs": 5000, "maxWindowBytes": 4096 }
+                    }]
+                }),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ParseDocument,
+                crate::packages::permissions::PackagePermission::RenderDecorations,
+            ],
+            r#"
                 import { serverRegisterSyntaxGrammar } from "clay:syntax";
-                const result = serverRegisterSyntaxGrammar({
-                  packageName: "@clay/rust",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "rust",
-                  permissions: ["parse-document", "render-decorations"],
-                  syntaxGrammar: {
-                    languageId: "rust",
-                    filePatterns: { extensions: ["rs"] },
-                    grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
-                    queries: { highlights: "./queries/highlights.scm" },
-                    styleMap: {
-                      keyword: "keyword.control",
-                      string: "string.quoted",
-                      comment: "comment.line",
-                      punctuation: "punctuation.definition"
-                    },
-                    budgets: { timeoutMs: 5000, maxWindowBytes: 4096 }
-                  }
-                });
+                const result = serverRegisterSyntaxGrammar({});
                 Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.languages[0]}:${result.registeredGrammarCount}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(evaluation.op_records, vec!["rust:rust:0"]);
         assert!(evaluation.syntax_grammars.iter().any(|grammar| {
@@ -3740,29 +5634,35 @@ mod tests {
     #[tokio::test]
     async fn syntax_facade_engine_preference_allows_explicit_wasm_override() {
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_trusted_package(
+            &service,
+            test_package_json(
+                "@clay/rust-grammar",
+                "rust",
+                &["parse-document", "render-decorations"],
+                serde_json::json!({
+                    "syntaxGrammars": [{
+                        "languageId": "rust",
+                        "filePatterns": { "extensions": ["rs"] },
+                        "grammar": { "kind": "tree-sitter-wasm", "path": "./grammars/rust.wasm" },
+                        "queries": { "highlights": "./queries/highlights.scm" },
+                        "styleMap": { "keyword": { "type": "Keyword" } }
+                    }]
+                }),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ParseDocument,
+                crate::packages::permissions::PackagePermission::RenderDecorations,
+            ],
+            r#"
                 import { setSyntaxEnginePreference, serverRegisterSyntaxGrammar } from "clay:syntax";
                 setSyntaxEnginePreference("rust", "wasm");
-                const result = serverRegisterSyntaxGrammar({
-                  packageName: "@clay/rust",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "rust",
-                  permissions: ["parse-document", "render-decorations"],
-                  syntaxGrammar: {
-                    languageId: "rust",
-                    filePatterns: { extensions: ["rs"] },
-                    grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
-                    queries: { highlights: "./queries/highlights.scm" },
-                    styleMap: { keyword: "keyword.control" }
-                  }
-                });
+                const result = serverRegisterSyntaxGrammar({});
                 Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.registeredGrammarCount}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(evaluation.op_records, vec!["rust:1"]);
         assert!(evaluation.syntax_grammars.iter().any(|grammar| {
@@ -3858,71 +5758,73 @@ mod tests {
     #[tokio::test]
     async fn syntax_facade_rejects_raw_authority_and_third_party_grammars() {
         let service = ClayJsRuntimeService::default();
-        for source in [
-            r#"
-            import { serverRegisterSyntaxGrammar } from "clay:syntax";
-            serverRegisterSyntaxGrammar({
-              packageName: "@clay/rust",
-              packagePrefix: "rust",
-              permissions: ["parse-document", "render-decorations"],
-              rawOps: true
-            });
-            "#,
-            r#"
-            import { serverRegisterSyntaxGrammar } from "clay:syntax";
-            serverRegisterSyntaxGrammar({
-              packageName: "@vendor/rust",
-              packagePrefix: "vendor-rust",
-              permissions: ["parse-document", "render-decorations"],
-              syntaxGrammar: {
-                languageId: "rust",
-                filePatterns: { extensions: ["rs"] },
-                grammar: { kind: "tree-sitter-wasm", path: "./grammars/rust.wasm" },
-                queries: { highlights: "./queries/highlights.scm" },
-                styleMap: { keyword: "keyword.control" }
-              }
-            });
-            "#,
-        ] {
-            let error = service
-                .evaluate_controlled_module(source)
-                .await
-                .unwrap_err();
-            let message = error.to_string();
-            assert!(
-                message.contains("clay.syntax.invalid_grammar")
-                    || message.contains("first-party-only"),
-                "unexpected syntax registration error: {message}"
-            );
-        }
+        // Raw authority fields are rejected by the facade before any op.
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterSyntaxGrammar } from "clay:syntax";
+                serverRegisterSyntaxGrammar({ rawOps: true });
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("clay.syntax.invalid_grammar"),
+            "unexpected syntax registration error: {error}"
+        );
+        // Third-party grammar contributions are rejected at host-side manifest
+        // validation, before any package code runs.
+        let error = crate::packages::record::assemble_package_record(&test_package_json(
+            "@vendor/rust",
+            "vendor-rust",
+            &["parse-document", "render-decorations"],
+            serde_json::json!({
+                "syntaxGrammars": [{
+                    "languageId": "rust",
+                    "filePatterns": { "extensions": ["rs"] },
+                    "grammar": { "kind": "tree-sitter-wasm", "path": "./grammars/rust.wasm" },
+                    "queries": { "highlights": "./queries/highlights.scm" },
+                    "styleMap": { "keyword": { "type": "Keyword" } }
+                }]
+            }),
+        ))
+        .unwrap_err();
+        assert!(
+            error.message.contains("first-party-only"),
+            "unexpected manifest validation error: {error:?}"
+        );
     }
 
     #[tokio::test]
     async fn completion_facade_registers_provider_metadata_without_raw_ops() {
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_trusted_package(
+            &service,
+            test_package_json(
+                "@vendor/words",
+                "words",
+                &["completion-provider"],
+                serde_json::json!({
+                    "completionProviders": [{
+                        "id": "words.buffer",
+                        "priority": 2,
+                        "exclusive": true,
+                        "triggerCharacters": ["."],
+                        "wordBoundaryChars": [".", ","],
+                        "budgets": { "timeoutMs": 50, "maxItems": 20 }
+                    }]
+                }),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+            r#"
                 import { serverListCompletionProvidersForTrigger, serverRegisterCompletionProvider } from "clay:completion";
-                const result = serverRegisterCompletionProvider({
-                  packageName: "@vendor/words",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "words",
-                  permissions: ["completion-provider"],
-                  providerId: "words.buffer",
-                  triggerCharacters: ["."],
-                  wordBoundaryChars: [".", ","],
-                  priority: 2,
-                  exclusive: true,
-                  timeoutMs: 50,
-                  maxItems: 20
-                });
+                const result = serverRegisterCompletionProvider({});
                 const listed = serverListCompletionProvidersForTrigger({ trigger: "." });
                 Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.providers[0]}:${result.registeredProviderCount}:${result.runtimeBridge}:${listed.providers[0].exclusive}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             evaluation.op_records,
@@ -3940,19 +5842,24 @@ mod tests {
     #[tokio::test]
     async fn completion_facade_invokes_token_backed_dynamic_provider() {
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@vendor/dynamic",
+                "dynamic",
+                &["completion-provider"],
+                serde_json::json!({
+                    "completionProviders": [{
+                        "id": "dynamic.provider",
+                        "triggerCharacters": ["."],
+                        "budgets": { "timeoutMs": 500, "maxItems": 8 }
+                    }]
+                }),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+            r#"
                 import { serverRegisterCompletionProvider } from "clay:completion";
                 serverRegisterCompletionProvider({
-                  packageName: "@vendor/dynamic",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "dynamic",
-                  permissions: ["completion-provider"],
-                  providerId: "dynamic.provider",
-                  triggerCharacters: ["."],
-                  timeoutMs: 500,
-                  maxItems: 8,
                   module: {
                     provideCompletion: async (_request, window) => ({
                       status: "ok",
@@ -3961,9 +5868,9 @@ mod tests {
                   }
                 });
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
         let coordinator = crate::server::completion::CompletionCoordinator::new();
         service
             .register_completion_providers(&coordinator, 4, &evaluation)
@@ -4009,15 +5916,13 @@ mod tests {
     async fn language_intelligence_facade_registers_token_backed_provider_without_process_authority()
      {
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json("@org/intel", "intel", &["parse-document"], serde_json::json!({})),
+            vec![crate::packages::permissions::PackagePermission::ParseDocument],
+            r#"
                 import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
                 const result = serverRegisterLanguageIntelligenceProvider({
-                  packageName: "@org/intel",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "intel",
-                  permissions: ["parse-document"],
                   provider: {
                     id: "intel.intelligence",
                     modes: ["intel"],
@@ -4031,9 +5936,9 @@ mod tests {
                 });
                 Deno.core.ops.op_clay_runtime_record(`${result.packagePrefix}:${result.providerId}:${result.runtimeBridge}:${result.languageServerRequired}:${typeof result.token}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             evaluation.op_records,
@@ -4068,33 +5973,46 @@ mod tests {
                 r#"
                 import {{ serverRegisterDocumentAnalyzer }} from "clay:language";
                 serverRegisterDocumentAnalyzer({{
-                  packageManifest: {{
-                    name: "@vendor/analysis",
-                    version: "1.0.0",
-                    type: "module",
-                    exports: {{ ".": "./dist/index.js" }},
-                    clay: {{
-                      apiPrefix: "analysis",
-                      entry: "./dist/index.js",
-                      loadEntry: "./dist/load.js",
-                      permissions: ["parse-document"],
-                      capabilities: ["language-server"],
-                      modes: [],
-                      docs: "./docs.md",
-                      contributions: {{
-                        languageServers: [{{ id: "analysis.server", executable: "/bin/true", args: [] }}]
-                      }}
-                    }}
-                  }},
                   analyzer: {analyzer}
                 }});
                 "#
             );
-            let error = service
-                .evaluate_controlled_module(source)
-                .await
-                .unwrap_err();
-            assert!(error.to_string().contains("clay.language.invalid_analyzer"));
+            let error = evaluate_as_package_with_ls_grant(
+                &service,
+                serde_json::json!({
+                    "name": "@vendor/analysis",
+                    "version": "0.1.0",
+                    "type": "module",
+                    "exports": { ".": "./dist/index.js" },
+                    "clay": {
+                        "apiPrefix": "analysis",
+                        "entry": "./dist/index.js",
+                        "permissions": ["parse-document"],
+                        "capabilities": ["language-server"],
+                        "modes": [],
+                        "docs": "./docs/index.md",
+                        "contributions": {
+                            "languageServers": [{
+                                "id": "analysis.server",
+                                "executable": "/bin/true",
+                                "args": []
+                            }]
+                        }
+                    }
+                }),
+                vec![crate::packages::permissions::PackagePermission::ParseDocument],
+                Some((
+                    "analysis.server",
+                    std::fs::canonicalize("/bin/true").expect("canonical /bin/true"),
+                )),
+                &source,
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("clay.language.invalid_analyzer"),
+                "unexpected analyzer registration error: {error}"
+            );
         }
     }
 
@@ -4140,15 +6058,18 @@ mod tests {
     async fn language_intelligence_js_bridge_publishes_validated_hover_result() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@org/intel",
+                "intel",
+                &["parse-document"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::ParseDocument],
+            r#"
                 import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
                 serverRegisterLanguageIntelligenceProvider({
-                  packageName: "@org/intel",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "intel",
-                  permissions: ["parse-document"],
                   provider: {
                     id: "intel.intelligence",
                     modes: ["intel"],
@@ -4165,9 +6086,9 @@ mod tests {
                   }
                 });
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(evaluation.js_language_intelligence_providers.len(), 1);
 
         let coordinator =
@@ -4218,24 +6139,33 @@ mod tests {
     #[tokio::test]
     async fn completion_facade_disables_provider_and_filters_trigger_listing() {
         let service = ClayJsRuntimeService::default();
+        for (name, prefix) in [("@vendor/words", "words"), ("@vendor/other", "other")] {
+            evaluate_as_package(
+                &service,
+                test_package_json(
+                    name,
+                    prefix,
+                    &["completion-provider"],
+                    serde_json::json!({
+                        "completionProviders": [{
+                            "id": format!("{prefix}.buffer"),
+                            "triggerCharacters": ["."]
+                        }]
+                    }),
+                ),
+                vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+                r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({});
+                "#,
+            )
+            .await
+            .unwrap();
+        }
         let evaluation = service
             .evaluate_controlled_module(
                 r#"
-                import { serverDisableCompletion, serverListCompletionProvidersForTrigger, serverRegisterCompletionProvider } from "clay:completion";
-                serverRegisterCompletionProvider({
-                  packageName: "@vendor/words",
-                  packagePrefix: "words",
-                  permissions: ["completion-provider"],
-                  providerId: "words.buffer",
-                  triggerCharacters: ["."]
-                });
-                serverRegisterCompletionProvider({
-                  packageName: "@vendor/other",
-                  packagePrefix: "other",
-                  permissions: ["completion-provider"],
-                  providerId: "other.buffer",
-                  triggerCharacters: ["."]
-                });
+                import { serverDisableCompletion, serverListCompletionProvidersForTrigger } from "clay:completion";
                 const disabled = serverDisableCompletion({ provider: "words.buffer" });
                 const repeated = serverDisableCompletion({ provider: "words.buffer" });
                 const packageDisabled = serverDisableCompletion({ packagePrefix: "@vendor/other" });
@@ -4286,47 +6216,116 @@ mod tests {
     #[tokio::test]
     async fn completion_facade_rejects_callbacks_missing_permission_and_bad_prefix() {
         let service = ClayJsRuntimeService::default();
-        for source in [
-            r#"
-            import { serverRegisterCompletionProvider } from "clay:completion";
-            serverRegisterCompletionProvider({
-              packageName: "@vendor/evil",
-              packagePrefix: "evil",
-              permissions: ["completion-provider"],
-              providerId: "evil.words",
-              handler() {}
-            });
-            "#,
-            r#"
-            import { serverRegisterCompletionProvider } from "clay:completion";
-            serverRegisterCompletionProvider({
-              packageName: "@vendor/nope",
-              packagePrefix: "nope",
-              permissions: [],
-              providerId: "nope.words"
-            });
-            "#,
-            r#"
-            import { serverRegisterCompletionProvider } from "clay:completion";
-            serverRegisterCompletionProvider({
-              packageName: "@vendor/bad",
-              packagePrefix: "bad",
-              permissions: ["completion-provider"],
-              providerId: "other.words"
-            });
-            "#,
-        ] {
-            let error = service
-                .evaluate_controlled_module(source)
-                .await
-                .unwrap_err();
-            let message = error.to_string();
-            assert!(
-                message.contains("clay.completion.invalid_provider")
-                    || message.contains("completion-provider"),
-                "unexpected completion registration error: {message}"
-            );
-        }
+        // Executable callback fields are rejected by the facade before any op.
+        let error = service
+            .evaluate_controlled_module(
+                r#"
+                import { serverRegisterCompletionProvider } from "clay:completion";
+                serverRegisterCompletionProvider({ handler() {} });
+                "#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("clay.completion.invalid_provider"),
+            "unexpected completion registration error: {error}"
+        );
+        // Approved-capability check: enable with the capability granted, then
+        // shrink the authorization record; the enabled package's registration
+        // now fails closed against the current approved set.
+        let package_json = test_package_json(
+            "@vendor/nope",
+            "nope",
+            &["completion-provider"],
+            serde_json::json!({
+                "completionProviders": [{ "id": "nope.words" }]
+            }),
+        );
+        let root = config_fixture("package-provenance");
+        let record = {
+            let op_state = service.test_op_state();
+            let mut locked = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            locked
+                .install_from_value_at_root_with_spec(package_json, root, "local:provenance-test")
+                .expect("synthetic package installs");
+            locked
+                .authorize_package(
+                    "@vendor/nope",
+                    vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .expect("synthetic package authorizes");
+            locked
+                .approve_package("@vendor/nope", "test")
+                .expect("approves");
+            locked.enable("@vendor/nope").expect("enables");
+            locked
+                .authorize_package(
+                    "@vendor/nope",
+                    vec![],
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .expect("capability shrink authorizes");
+            crate::packages::record::assemble_package_record(&serde_json::json!({
+                "name": "@vendor/nope",
+                "version": "0.1.0",
+                "type": "module",
+                "exports": { ".": "./dist/index.js" },
+                "clay": {
+                    "apiPrefix": "nope",
+                    "entry": "./dist/index.js",
+                    "permissions": ["completion-provider"],
+                    "modes": ["nope"],
+                    "docs": "./docs/index.md",
+                    "contributions": { "completionProviders": [{ "id": "nope.words" }] },
+                }
+            }))
+            .expect("record assembles")
+        };
+        let error = service
+            .evaluate_entry_as_package(
+                crate::packages::bundled::RuntimeDomain::Trusted,
+                &record,
+                RuntimeEntry::ControlledSource(
+                    r#"
+                    import { serverRegisterCompletionProvider } from "clay:completion";
+                    serverRegisterCompletionProvider({});
+                    "#
+                    .to_string(),
+                ),
+                "runtime.evaluate_as_package",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("clay.packages.missing_permission")
+                && error.to_string().contains("completion-provider"),
+            "unexpected completion registration error: {error}"
+        );
+        // Provider ids outside the host package prefix are rejected at
+        // host-side manifest validation, before any package code runs.
+        let error = crate::packages::record::assemble_package_record(&test_package_json(
+            "@vendor/bad",
+            "bad",
+            &["completion-provider"],
+            serde_json::json!({
+                "completionProviders": [{ "id": "other.words" }]
+            }),
+        ))
+        .unwrap_err();
+        assert!(
+            error.message.contains("apiPrefix"),
+            "unexpected manifest validation error: {error:?}"
+        );
     }
 
     #[tokio::test]
@@ -4835,16 +6834,19 @@ mod tests {
     #[tokio::test]
     async fn js_parse_handler_timeout_uses_registered_budget() {
         let service = ClayJsRuntimeService::default();
-        let evaluation = service
-            .evaluate_controlled_module(
-                r#"
+        let evaluation = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/loop",
+                "loop",
+                &["parse-document"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::ParseDocument],
+            r#"
                 import { serverRegisterParseHandler } from "clay:parse";
                 const parser = { parse() { while (true) {} } };
                 serverRegisterParseHandler({
-                  packageName: "@clay/loop",
-                  packageVersion: "0.1.0",
-                  packagePrefix: "loop",
-                  permissions: ["parse-document"],
                   mode: "loop",
                   parseUnit: "line-group",
                   timeoutMs: 50,
@@ -4852,9 +6854,9 @@ mod tests {
                   exportName: "parse"
                 });
                 "#,
-            )
-            .await
-            .expect("malicious handler registration itself should be bounded metadata work");
+        )
+        .await
+        .expect("malicious handler registration itself should be bounded metadata work");
         let registration = evaluation
             .js_parse_handlers
             .first()
@@ -5114,9 +7116,16 @@ mod tests {
     #[tokio::test]
     async fn runtime_imports_clay_ui_facade_and_registers_contributions() {
         let service = ClayJsRuntimeService::default();
-        let result = service
-            .evaluate_controlled_module(
-                r#"
+        let result = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/markdown-ui",
+                "markdown",
+                &["command-registration"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CommandRegistration],
+            r#"
                 import { serverRegisterCommand } from "clay:commands";
                 import {
                   serverRegisterComponentContribution,
@@ -5125,33 +7134,23 @@ mod tests {
                   serverRegisterTransientOverlayContribution,
                 } from "clay:ui";
 
-                const manifest = {
-                  name: "@clay/markdown",
-                  version: "0.1.0",
-                  clay: {
-                    apiPrefix: "markdown",
-                    entry: "./dist/index.js",
-                    permissions: ["command-registration"],
-                    modes: ["markdown"],
-                  },
-                };
-                serverRegisterCommand(manifest, {
+                serverRegisterCommand({
                   commandId: "markdown.togglePreview",
                   displayName: "Toggle Markdown Preview",
                   routingPolicy: "server-first",
                 });
-                const token = serverRegisterThemeToken(manifest, {
+                const token = serverRegisterThemeToken({
                   token: "markdown.preview.background",
                   type: "color-role",
                   fallback: "surface.panel",
                   description: "Markdown preview background",
                 });
-                const component = serverRegisterComponentContribution(manifest, {
+                const component = serverRegisterComponentContribution({
                   kind: "label",
                   id: "markdown.preview.empty",
                   text: "Preview unavailable",
                 });
-                const panel = serverRegisterPanelContribution(manifest, {
+                const panel = serverRegisterPanelContribution({
                   id: "markdown.preview",
                   slot: "right",
                   kind: "fixed",
@@ -5169,7 +7168,7 @@ mod tests {
                     }],
                   },
                 });
-                const overlay = serverRegisterTransientOverlayContribution(manifest, {
+                const overlay = serverRegisterTransientOverlayContribution({
                   id: "markdown.preview.overlay",
                   anchor: "working-area",
                   focusPolicy: "restore",
@@ -5178,9 +7177,9 @@ mod tests {
                 });
                 Deno.core.ops.op_clay_runtime_record(`${panel.slot}:${component.rootKind}:${overlay.focusPolicy}:${token.type}:${panel.provenance.apiPrefix}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             result.op_records,
@@ -5192,37 +7191,34 @@ mod tests {
         assert_eq!(result.ui_contributions.theme_tokens.len(), 1);
         assert_eq!(
             result.ui_contributions.panels[0].provenance.package_name,
-            "@clay/markdown"
+            "@clay/markdown-ui"
         );
     }
 
     #[tokio::test]
     async fn runtime_clay_ui_rejects_invalid_prefix_unregistered_action_and_raw_css() {
         let service = ClayJsRuntimeService::default();
-        let error = service
-            .evaluate_controlled_module(
-                r#"
+        let error = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/markdown-ui",
+                "markdown",
+                &["command-registration"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::CommandRegistration],
+            r#"
                 import { serverRegisterPanelContribution } from "clay:ui";
-                const manifest = {
-                  name: "@clay/markdown",
-                  version: "0.1.0",
-                  clay: {
-                    apiPrefix: "markdown",
-                    entry: "./dist/index.js",
-                    permissions: ["command-registration"],
-                    modes: ["markdown"],
-                  },
-                };
-                serverRegisterPanelContribution(manifest, {
+                serverRegisterPanelContribution({
                   id: "other.preview",
                   slot: "right",
                   rawCss: "color: red",
                   component: { kind: "button", id: "other.preview.button", label: "Run", action: { commandId: "markdown.missing" } },
                 });
                 "#,
-            )
-            .await
-            .unwrap_err();
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
         assert!(error.to_string().contains("clay.ui.registration_failed"));
@@ -5343,7 +7339,9 @@ mod tests {
         );
         assert_eq!(result.parse_handlers.len(), 1);
         assert_eq!(result.parse_handlers[0].package_prefix, "markdown");
-        assert!(result.published_decoration_set.is_some());
+        // Decorations publish only through package callbacks now; the fixture
+        // (configuration code) no longer publishes directly.
+        assert!(result.published_decoration_set.is_none());
         let manifest = result
             .behavior_manifest
             .expect("markdown behavior manifest");
@@ -5381,7 +7379,9 @@ mod tests {
         );
         assert_eq!(result.parse_handlers.len(), 1);
         assert_eq!(result.parse_handlers[0].package_prefix, "markdown");
-        assert!(result.published_decoration_set.is_some());
+        // Decorations publish only through package callbacks now; the fixture
+        // (configuration code) no longer publishes directly.
+        assert!(result.published_decoration_set.is_none());
         let manifest = result
             .behavior_manifest
             .expect("Windows Markdown open behavior manifest");
@@ -5429,15 +7429,16 @@ mod tests {
             import * as packages from "clay:packages";
             import * as parse from "clay:parse";
             import * as sdui from "clay:sdui";
-            import { loadMarkdownPackage } from "./load.js";
+            import { loadPackage } from "clay:packages";
+            import { markdownPackageContract } from "./load.js";
             import { publishMarkdownDecorations } from "./parser.js";
             import { publishMarkdownPreviewStatus } from "./sdui.js";
 
             const clay = { commands, decorations, modes, packages, parse, sdui };
-            const contract = await loadMarkdownPackage(clay, {
-              documentId: 1,
-              path: "sample.md",
-            });
+            // Load through the real loadPackage path (host-stamped provenance
+            // for this evaluation), then drive the parser/sdui workflow.
+            await loadPackage("@clay/markdown");
+            const contract = markdownPackageContract();
 
             const text = "# Runtime package\n\n- item\n";
             const tokens = [
@@ -6289,9 +8290,28 @@ mod tests {
     #[tokio::test]
     async fn runtime_imports_modes_commands_and_packages_facades() {
         let service = ClayJsRuntimeService::default();
-        let result = service
-            .evaluate_controlled_module(
-                r#"
+        let result = evaluate_as_trusted_package(
+            &service,
+            test_package_json(
+                "@clay/markdown-facade",
+                "markdown",
+                &[
+                    "mode-registration",
+                    "mode-activation",
+                    "command-registration",
+                    "parse-document",
+                ],
+                serde_json::json!({
+                    "commands": [{ "id": "markdown.togglePreview", "displayName": "Toggle Markdown Preview", "routingPolicy": "server-first" }]
+                }),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ModeRegistration,
+                crate::packages::permissions::PackagePermission::ModeActivation,
+                crate::packages::permissions::PackagePermission::CommandRegistration,
+                crate::packages::permissions::PackagePermission::ParseDocument,
+            ],
+            r#"
                 import { serverRegisterModePattern, serverActivateMajorMode } from "clay:modes";
                 import { serverRegisterCommand, serverListCommands } from "clay:commands";
                 import { serverLoadPackage, serverValidatePackagePermissions } from "clay:packages";
@@ -6301,8 +8321,10 @@ mod tests {
                 if (typeof serverPublishDecorations !== "function" || typeof serverRegisterParseHandler !== "function") {
                   throw new Error("decoration/parse facade export missing");
                 }
+                // serverLoadPackage validates a manifest shape only; it grants
+                // no authority and sets no provenance.
                 const manifest = {
-                  name: "@clay/markdown",
+                  name: "@clay/markdown-facade",
                   version: "0.1.0",
                   clay: {
                     apiPrefix: "markdown",
@@ -6321,14 +8343,14 @@ mod tests {
                 };
                 const loaded = serverLoadPackage(manifest);
                 const permissions = serverValidatePackagePermissions(manifest.clay.permissions);
-                serverRegisterModePattern(manifest, {
+                serverRegisterModePattern({
                   modeId: "markdown",
                   displayName: "Markdown",
                   extensions: ["md"],
                   mimeTypes: ["text/markdown"]
                 });
-                const activation = serverActivateMajorMode(manifest, { documentId: 5, path: "README.md" });
-                const command = serverRegisterCommand(manifest, {
+                const activation = serverActivateMajorMode({ documentId: 5, path: "README.md" });
+                const command = serverRegisterCommand({
                   commandId: "markdown.togglePreview",
                   displayName: "Toggle Markdown Preview",
                   permissions: ["parse-document"]
@@ -6336,9 +8358,9 @@ mod tests {
                 const commands = serverListCommands();
                 Deno.core.ops.op_clay_runtime_record(`${loaded.contributions.commands}:${permissions.permissions.length}:${activation.modeId}:${activation.behaviorVersion}:${command.commandId}:${commands.length}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             result.op_records,
@@ -6949,10 +8971,6 @@ mod tests {
                 import { serverRegisterCompletionProvider } from "clay:completion";
 
                 serverRegisterCompletionProvider({
-                  packageName: "@evil/lang",
-                  packageVersion: "0.0.0",
-                  packagePrefix: "evil",
-                  permissions: ["parse-document"],
                   providerId: "evil.keywords",
                   triggerCharacters: ["."]
                 });
@@ -6963,8 +8981,8 @@ mod tests {
 
         let message = error.to_string();
         assert!(
-            message.contains("completion-provider"),
-            "expected missing completion-provider permission error, got: {message}"
+            message.contains("clay.packages.no_active_package"),
+            "expected no-active-package provenance error, got: {message}"
         );
     }
 
@@ -7044,21 +9062,7 @@ mod tests {
             let source = format!(
                 r#"
                 import {{ serverRegisterParseHandler }} from "clay:parse";
-                const manifest = {{
-                  name: "@clay/markdown",
-                  version: "0.1.0",
-                  type: "module",
-                  exports: {{ ".": "./dist/index.js" }},
-                  clay: {{
-                    apiPrefix: "markdown",
-                    entry: "./dist/index.js",
-                    permissions: ["parse-document"],
-                    modes: ["markdown"],
-                    docs: "./docs/index.md"
-                  }}
-                }};
                 serverRegisterParseHandler({{
-                  packageManifest: manifest,
                   mode: "markdown",
                   parseUnit: "line-group",
                   viewportPriority: true,
@@ -7066,10 +9070,20 @@ mod tests {
                 }});
                 "#
             );
-            let error = ClayJsRuntimeService::default()
-                .evaluate_controlled_module(source)
-                .await
-                .unwrap_err();
+            let service = ClayJsRuntimeService::default();
+            let error = evaluate_as_package(
+                &service,
+                test_package_json(
+                    "@clay/markdown-policy",
+                    "markdown",
+                    &["parse-document"],
+                    serde_json::json!({}),
+                ),
+                vec![crate::packages::permissions::PackagePermission::ParseDocument],
+                &source,
+            )
+            .await
+            .unwrap_err();
 
             assert!(
                 matches!(error, ClayRuntimeError::Runtime(_)),
@@ -7084,32 +9098,28 @@ mod tests {
 
     #[tokio::test]
     async fn phase18_parse_and_decoration_facades_are_runtime_backed() {
-        let result = ClayJsRuntimeService::default()
-            .evaluate_controlled_module(
-                r#"
+        let service = ClayJsRuntimeService::default();
+        let result = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/markdown-phase18",
+                "markdown",
+                &["parse-document", "render-decorations"],
+                serde_json::json!({}),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ParseDocument,
+                crate::packages::permissions::PackagePermission::RenderDecorations,
+            ],
+            r#"
                 import { serverPublishDecorations } from "clay:decorations";
                 import { serverRegisterParseHandler } from "clay:parse";
-                const manifest = {
-                  name: "@clay/markdown",
-                  version: "0.1.0",
-                  type: "module",
-                  exports: { ".": "./dist/index.js" },
-                  clay: {
-                    apiPrefix: "markdown",
-                    entry: "./dist/index.js",
-                    permissions: ["parse-document", "render-decorations"],
-                    modes: ["markdown"],
-                    docs: "./docs/index.md"
-                  }
-                };
                 const handler = serverRegisterParseHandler({
-                  packageManifest: manifest,
                   mode: "markdown",
                   parseUnit: "line-group",
                   viewportPriority: true,
                 });
                 const decorations = serverPublishDecorations({
-                  packageManifest: manifest,
                   documentId: 1,
                   documentVersion: 1,
                   behaviorVersion: 1,
@@ -7118,9 +9128,9 @@ mod tests {
                 });
                 Deno.core.ops.op_clay_runtime_record(`${handler.mode}:${decorations.publishedSpanCount}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.op_records, vec!["markdown:1"]);
         assert_eq!(result.parse_handlers.len(), 1);
@@ -7134,25 +9144,19 @@ mod tests {
     async fn semantic_two_axis_publication_accepts_token_type_and_modifiers() {
         use crate::protocol::{DecorationKind, Modifiers, TokenType};
 
-        let result = ClayJsRuntimeService::default()
-            .evaluate_controlled_module(
-                r#"
+        let service = ClayJsRuntimeService::default();
+        let result = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@org/semantic",
+                "semanticpkg",
+                &["render-decorations"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::RenderDecorations],
+            r#"
                 import { serverPublishDecorations } from "clay:decorations";
-                const manifest = {
-                  name: "@org/semantic",
-                  version: "1.0.0",
-                  type: "module",
-                  exports: { ".": "./dist/index.js" },
-                  clay: {
-                    apiPrefix: "semanticpkg",
-                    entry: "./dist/index.js",
-                    permissions: ["render-decorations"],
-                    modes: ["semanticpkg"],
-                    docs: "./docs/index.md"
-                  }
-                };
                 const decorations = serverPublishDecorations({
-                  packageManifest: manifest,
                   documentId: 7,
                   documentVersion: 3,
                   viewport: { byteStart: 0, byteEnd: 16 },
@@ -7167,9 +9171,9 @@ mod tests {
                 });
                 Deno.core.ops.op_clay_runtime_record(`${decorations.publishedSpanCount}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.op_records, vec!["1"]);
         let set = result
@@ -7186,25 +9190,19 @@ mod tests {
 
     #[tokio::test]
     async fn diagnostics_facade_publishes_validated_range_diagnostics() {
-        let result = ClayJsRuntimeService::default()
-            .evaluate_controlled_module(
-                r#"
+        let service = ClayJsRuntimeService::default();
+        let result = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/rust-diag",
+                "rust",
+                &["render-decorations"],
+                serde_json::json!({}),
+            ),
+            vec![crate::packages::permissions::PackagePermission::RenderDecorations],
+            r#"
                 import { serverPublishDiagnostics } from "clay:diagnostics";
-                const manifest = {
-                  name: "@clay/rust",
-                  version: "0.1.0",
-                  type: "module",
-                  exports: { ".": "./dist/index.js" },
-                  clay: {
-                    apiPrefix: "rust",
-                    entry: "./dist/index.js",
-                    permissions: ["render-decorations"],
-                    modes: ["rust"],
-                    docs: "./docs/index.md"
-                  }
-                };
                 const published = serverPublishDiagnostics({
-                  packageManifest: manifest,
                   documentId: 7,
                   documentVersion: 3,
                   viewport: { byteStart: 0, byteEnd: 64 },
@@ -7219,9 +9217,9 @@ mod tests {
                 });
                 Deno.core.ops.op_clay_runtime_record(`${published.source}:${published.publishedSpanCount}`);
                 "#,
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.op_records, vec!["my-parser:1"]);
         let set = result.published_diagnostic_set.expect("diagnostic set");
@@ -7236,14 +9234,12 @@ mod tests {
 
     #[tokio::test]
     async fn diagnostics_publication_rejects_missing_permission_or_bad_provenance() {
+        // No executing-package context at all: raw/config code cannot publish.
         let missing = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
                 r#"
                 import { serverPublishDiagnostics } from "clay:diagnostics";
                 serverPublishDiagnostics({
-                  packageName: "@clay/rust",
-                  packagePrefix: "rust",
-                  permissions: [],
                   documentId: 1,
                   documentVersion: 1,
                   viewport: { byteStart: 0, byteEnd: 8 },
@@ -7257,21 +9253,55 @@ mod tests {
         assert!(
             missing
                 .to_string()
+                .contains("clay.packages.no_active_package"),
+            "publication without package context must fail, got {missing}"
+        );
+
+        // Enabled package whose approved capabilities were shrunk below
+        // render-decorations.
+        let service = ClayJsRuntimeService::default();
+        let error = evaluate_as_package(
+            &service,
+            test_package_json("@org/unapproved", "unapproved", &[], serde_json::json!({})),
+            vec![],
+            r#"
+            import { serverPublishDiagnostics } from "clay:diagnostics";
+            serverPublishDiagnostics({
+              documentId: 1,
+              documentVersion: 1,
+              viewport: { byteStart: 0, byteEnd: 8 },
+              source: "my-parser",
+              spans: [{ byteStart: 1, byteEnd: 2, severity: "error", code: "x", message: "y" }],
+            });
+            "#,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
                 .contains("clay.packages.missing_permission"),
-            "missing render-decorations must fail, got {missing}"
+            "missing render-decorations approval must fail, got {error}"
         );
     }
 
     #[tokio::test]
     async fn diagnostics_publication_rejects_stale_oversized_or_executable_data() {
-        let stale = ClayJsRuntimeService::default()
-            .evaluate_controlled_module(
-                r#"
+        let service = ClayJsRuntimeService::default();
+        let package_json = test_package_json(
+            "@clay/rust-diag",
+            "rust",
+            &["render-decorations"],
+            serde_json::json!({}),
+        );
+        let approved = vec![crate::packages::permissions::PackagePermission::RenderDecorations];
+        let stale = evaluate_as_package(
+            &service,
+            package_json.clone(),
+            approved.clone(),
+            r#"
                 import { serverPublishDiagnostics } from "clay:diagnostics";
                 serverPublishDiagnostics({
-                  packageName: "@clay/rust",
-                  packagePrefix: "rust",
-                  permissions: ["render-decorations"],
                   documentId: 1,
                   documentVersion: 1,
                   currentDocumentVersion: 2,
@@ -7280,9 +9310,9 @@ mod tests {
                   spans: [{ byteStart: 1, byteEnd: 2, severity: "error", code: "x", message: "y" }],
                 });
                 "#,
-            )
-            .await
-            .unwrap_err();
+        )
+        .await
+        .unwrap_err();
         assert!(
             stale
                 .to_string()
@@ -7290,14 +9320,12 @@ mod tests {
             "stale version must fail, got {stale}"
         );
 
+        // Executable callback fields are rejected by the facade before any op.
         let executable = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
                 r#"
                 import { serverPublishDiagnostics } from "clay:diagnostics";
                 serverPublishDiagnostics({
-                  packageName: "@clay/rust",
-                  packagePrefix: "rust",
-                  permissions: ["render-decorations"],
                   documentId: 1,
                   documentVersion: 1,
                   viewport: { byteStart: 0, byteEnd: 8 },
@@ -7320,9 +9348,6 @@ mod tests {
             r#"
                 import {{ serverPublishDiagnostics }} from "clay:diagnostics";
                 serverPublishDiagnostics({{
-                  packageName: "@clay/rust",
-                  packagePrefix: "rust",
-                  permissions: ["render-decorations"],
                   documentId: 1,
                   documentVersion: 1,
                   viewport: {{ byteStart: 0, byteEnd: 8 }},
@@ -7338,8 +9363,7 @@ mod tests {
                 "#,
             "m".repeat(2048)
         );
-        let oversized = ClayJsRuntimeService::default()
-            .evaluate_controlled_module(oversized_source)
+        let oversized = evaluate_as_package(&service, package_json, approved, &oversized_source)
             .await
             .unwrap_err();
         assert!(
@@ -7360,7 +9384,7 @@ mod tests {
             root.join("init.js"),
             r##"
             import { serverPublishDecorations } from "clay:decorations";
-            import { parseMarkdownDecorations, publishMarkdownDecorations } from "./parser.js";
+            import { parseMarkdownDecorations, publishMarkdownDecorations } from "clay://packages/@clay/markdown-adapter/parser.js";
 
             const text = "# Hé 🦀\n\nSome **bold** and *em* and `code`.\n\n```js\nx\n```\n\n1. item\n";
             const markdownTokens = [
@@ -7478,10 +9502,36 @@ mod tests {
         )
         .unwrap();
 
-        let result = ClayJsRuntimeService::default()
-            .load_configuration_from_root(root)
-            .await
-            .unwrap();
+        // The adapter publishes through a package context: register the
+        // parser module in the load-entry allowlist for a synthetic package
+        // and evaluate the script with that package's host-stamped provenance.
+        let service = ClayJsRuntimeService::default();
+        service
+            .test_op_state()
+            .load_entry_allowlist()
+            .record_for_package(
+                "clay://packages/@clay/markdown-adapter/parser.js",
+                fs::canonicalize(root.join("parser.js")).unwrap(),
+                fs::canonicalize(&root).unwrap(),
+                Some("@clay/markdown-adapter"),
+            );
+        let source = fs::read_to_string(root.join("init.js")).unwrap();
+        let result = evaluate_as_package(
+            &service,
+            test_package_json(
+                "@clay/markdown-adapter",
+                "markdown",
+                &["parse-document", "render-decorations"],
+                serde_json::json!({}),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ParseDocument,
+                crate::packages::permissions::PackagePermission::RenderDecorations,
+            ],
+            &source,
+        )
+        .await
+        .unwrap();
 
         let tokens = &result.op_records[0];
         for expected in [
@@ -7956,6 +10006,286 @@ mod tests {
         assert_eq!(result.op_records, vec!["1344:384"]);
     }
 
+    // Plan 061 task 15: trusted init.js configuration APIs for third-party
+    // package loading, replacement, and adoption-state diagnostics.
+
+    /// Plan 061 task 15: one-line `loadPackage` from a trusted configuration
+    /// must fail with a clear pending-adoption diagnostic when no durable
+    /// approval exists — init.js cannot bypass the pre-execution gate.
+    #[tokio::test]
+    async fn third_party_config_load_fails_with_pending_adoption_diagnostic() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let root = config_fixture("third-party-config-adoption")
+            .join(format!("pending-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_loadable_package(
+            &root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              module: {
+                provideCompletion: async () => ({
+                  status: "ok",
+                  items: [{ label: "config-loaded", insertText: "config-loaded" }]
+                })
+              }
+            });
+            export default function load() {}
+            "#,
+        );
+        let mut package_json = loadable_package_fixture("@vendor/config-adopt", "cfgadopt");
+        package_json["clay"]["permissions"] = serde_json::json!(["completion-provider"]);
+        package_json["clay"]["contributions"] = serde_json::json!({
+            "completionProviders": [{
+                "id": "cfgadopt.provider",
+                "triggerCharacters": ["."],
+                "budgets": { "timeoutMs": 500, "maxItems": 8 }
+            }]
+        });
+        {
+            let op_state = service.test_op_state();
+            let mut locked = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            locked
+                .install_from_value_at_root_with_spec(
+                    package_json,
+                    root.clone(),
+                    "local:config-adopt-test",
+                )
+                .expect("synthetic package installs");
+            // Intentionally skip approve_package — leaving it in Pending state.
+            locked
+                .authorize_package(
+                    "@vendor/config-adopt",
+                    vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .expect("synthetic package authorizes");
+        }
+        let config_root = config_fixture("third-party-config-adoption").join("config");
+        fs::create_dir_all(&config_root).unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@vendor/config-adopt");
+            "#,
+        )
+        .unwrap();
+        let error = service
+            .load_configuration_from_root(config_root)
+            .await
+            .expect_err("unadopted third-party package must not execute via config");
+        let message = error.to_string();
+        assert!(
+            message.contains("adoption") || message.contains("missing"),
+            "expected adoption diagnostic, got: {message}"
+        );
+        assert!(
+            !service
+                .test_op_state()
+                .package_service()
+                .lock()
+                .unwrap()
+                .inspect("@vendor/config-adopt")
+                .unwrap()
+                .is_enabled,
+            "pending package must stay disabled after failed config load"
+        );
+        let _ = fs::remove_dir_all(
+            config_fixture("third-party-config-adoption")
+                .join(format!("pending-{}", std::process::id())),
+        );
+    }
+
+    /// Plan 061 task 15: after CLI adoption, a one-line `loadPackage` from
+    /// `init.js` succeeds — the package executes in the third-party runtime
+    /// and its registration payload is absorbed into the trusted worker.
+    #[tokio::test]
+    async fn third_party_config_load_succeeds_after_cli_adoption() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let root = config_fixture("third-party-config-adoption")
+            .join(format!("adopted-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_loadable_package(
+            &root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              module: {
+                provideCompletion: async () => ({
+                  status: "ok",
+                  items: [{ label: "config-loaded", insertText: "config-loaded" }]
+                })
+              }
+            });
+            export default function load() {}
+            "#,
+        );
+        let mut package_json = loadable_package_fixture("@vendor/config-adopt-ok", "cfgadok");
+        package_json["clay"]["permissions"] = serde_json::json!(["completion-provider"]);
+        package_json["clay"]["contributions"] = serde_json::json!({
+            "completionProviders": [{
+                "id": "cfgadok.provider",
+                "triggerCharacters": ["."],
+                "budgets": { "timeoutMs": 500, "maxItems": 8 }
+            }]
+        });
+        {
+            let op_state = service.test_op_state();
+            let mut locked = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            locked
+                .install_from_value_at_root_with_spec(
+                    package_json,
+                    root.clone(),
+                    "local:config-adopt-ok",
+                )
+                .expect("synthetic package installs");
+            locked
+                .authorize_package(
+                    "@vendor/config-adopt-ok",
+                    vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .expect("synthetic package authorizes");
+            // Simulate the CLI adoption step that must precede config load.
+            locked
+                .approve_package("@vendor/config-adopt-ok", "cli")
+                .expect("CLI adoption succeeds");
+        }
+        let config_root = config_fixture("third-party-config-adoption").join("config-ok");
+        fs::create_dir_all(&config_root).unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@vendor/config-adopt-ok");
+            Deno.core.ops.op_clay_runtime_record("package-loaded");
+            "#,
+        )
+        .unwrap();
+        let result = service
+            .load_configuration_from_root(config_root)
+            .await
+            .expect("adopted third-party package must load via config");
+        assert!(
+            result.op_records.contains(&"package-loaded".to_string()),
+            "config evaluation must complete after third-party load"
+        );
+        assert!(
+            !result.js_completion_providers.is_empty(),
+            "absorbed cross-domain registration must include completion provider"
+        );
+        let _ = fs::remove_dir_all(
+            config_fixture("third-party-config-adoption")
+                .join(format!("adopted-{}", std::process::id())),
+        );
+    }
+
+    /// Plan 061 task 15: a stale approval (version drift, scope expansion, or
+    /// target replacement) blocks config-load of an approved package — the
+    /// adoption gate fails closed and a diagnostic is produced.
+    #[tokio::test]
+    async fn stale_approval_blocks_config_load_with_clear_diagnostic() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let root = config_fixture("third-party-config-stale")
+            .join(format!("stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_loadable_package(
+            &root,
+            r#"
+            import { serverRegisterCompletionProvider } from "clay:completion";
+            serverRegisterCompletionProvider({
+              module: {
+                provideCompletion: async () => ({
+                  status: "ok",
+                  items: [{ label: "stale", insertText: "stale" }]
+                })
+              }
+            });
+            export default function load() {}
+            "#,
+        );
+        let package_json_v1 = loadable_package_fixture("@vendor/config-stale", "cfgstale");
+        {
+            let op_state = service.test_op_state();
+            let mut locked = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            locked
+                .install_from_value_at_root_with_spec(
+                    package_json_v1,
+                    root.clone(),
+                    "local:config-stale",
+                )
+                .expect("synthetic package v1 installs");
+            locked
+                .authorize_package(
+                    "@vendor/config-stale",
+                    Vec::new(),
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .expect("synthetic package authorizes");
+            locked
+                .approve_package("@vendor/config-stale", "cli")
+                .expect("initial adoption succeeds");
+        }
+        // Update the install to a different version, staling the approval.
+        let mut package_json_v2 = loadable_package_fixture("@vendor/config-stale", "cfgstale");
+        package_json_v2["version"] = serde_json::json!("0.2.0");
+        {
+            let op_state = service.test_op_state();
+            let mut locked = op_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            locked
+                .install_from_value_at_root_with_spec(
+                    package_json_v2,
+                    root.clone(),
+                    "local:config-stale-v2",
+                )
+                .expect("synthetic package v2 installs");
+        }
+        let config_root = config_fixture("third-party-config-stale").join("config");
+        fs::create_dir_all(&config_root).unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@vendor/config-stale");
+            "#,
+        )
+        .unwrap();
+        let error = service
+            .load_configuration_from_root(config_root)
+            .await
+            .expect_err("stale approval must block config load (version drift beyond adopted)");
+        let message = error.to_string();
+        assert!(
+            message.contains("adoption")
+                || message.contains("stale")
+                || message.contains("missing"),
+            "expected stale-adoption diagnostic, got: {message}"
+        );
+        let _ = fs::remove_dir_all(
+            config_fixture("third-party-config-stale")
+                .join(format!("stale-{}", std::process::id())),
+        );
+    }
+
     #[test]
     fn keypress_routing_uses_manifest_not_js() {
         let manifest = {
@@ -8159,6 +10489,25 @@ mod tests {
         package_root: PathBuf,
         load_source: &str,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        evaluate_with_seeded_package_adoption(
+            specifier,
+            package_name,
+            api_prefix,
+            package_root,
+            load_source,
+            true,
+        )
+        .await
+    }
+
+    async fn evaluate_with_seeded_package_adoption(
+        specifier: &str,
+        package_name: &str,
+        api_prefix: &str,
+        package_root: PathBuf,
+        load_source: &str,
+        adopt: bool,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         write_loadable_package(&package_root, load_source);
         let op_state = Arc::new(crate::server::ops::ClayOpState::new_for_document(
             Arc::new(Mutex::new(WorkspaceState::new())),
@@ -8181,18 +10530,28 @@ mod tests {
                     "test-user",
                 )
                 .expect("seed package authorization succeeds");
+            if adopt {
+                service
+                    .approve_package(package_name, "test")
+                    .expect("seed package adoption approval succeeds");
+            }
         }
+        // Third-party packages load through the cross-domain bridge; the
+        // worker must outlive the evaluations below.
+        let _third_party_worker = wire_test_third_party_bridge(&op_state);
         let main_specifier = ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER).unwrap();
         let loader = Rc::new(ClayModuleLoader::new(
             main_specifier,
             None,
             None,
             op_state.load_entry_allowlist(),
+            crate::packages::bundled::RuntimeDomain::Trusted,
         ));
         let (mut runtime, heap_limit_hit) = create_js_runtime(
             Arc::clone(&op_state),
             Rc::clone(&loader),
             JS_RUNTIME_HEAP_LIMIT_BYTES,
+            crate::packages::bundled::RuntimeDomain::Trusted,
         );
         let source = format!(
             r#"
@@ -8236,6 +10595,7 @@ mod tests {
             Arc::new(Mutex::new(WorkspaceState::new())),
             1,
         ));
+        let _third_party_worker = wire_test_third_party_bridge(&op_state);
         let package_json = loadable_package_fixture(package_name, api_prefix);
         {
             let mut service = op_state
@@ -8253,6 +10613,9 @@ mod tests {
                     "test-user",
                 )
                 .expect("seed package authorization succeeds");
+            service
+                .approve_package(package_name, "test")
+                .expect("seed package adoption approval succeeds");
         }
         let loaded =
             prepare_runtime_entry(RuntimeEntry::ConfigurationRoot(config_root), 1).unwrap();
@@ -8261,11 +10624,13 @@ mod tests {
             loaded.main_source.clone(),
             loaded.configuration.clone(),
             op_state.load_entry_allowlist(),
+            crate::packages::bundled::RuntimeDomain::Trusted,
         ));
         let (mut runtime, heap_limit_hit) = create_js_runtime(
             Arc::clone(&op_state),
             Rc::clone(&loader),
             JS_RUNTIME_HEAP_LIMIT_BYTES,
+            crate::packages::bundled::RuntimeDomain::Trusted,
         );
         loader.set_entry(
             loaded.main_specifier.clone(),
@@ -8305,7 +10670,9 @@ mod tests {
                 }});
                 throw new Error("loaded package unexpectedly self-authorized");
               }} catch (error) {{
-                if (!String(error).includes("authorization_sealed")) throw error;
+                // Trusted-domain runtimes reject with authorization_sealed;
+                // third-party runtimes fail closed by op absence (Plan 061).
+                if (!String(error).includes("authorization_sealed") && !String(error).includes("is not a function")) throw error;
                 Deno.core.ops.op_clay_runtime_record("package grant sealed");
               }}
             }}
@@ -8328,13 +10695,15 @@ mod tests {
             Arc::clone(&workspace),
             1,
         ));
+        let _third_party_worker = wire_test_third_party_bridge(&op_state);
         op_state.set_runtime_context(Arc::clone(&workspace), 1, true);
-        op_state
-            .package_service()
-            .lock()
-            .unwrap()
-            .install_from_value_at_root_with_spec(package_json, package_root, specifier)
-            .unwrap();
+        {
+            let mut locked = op_state.package_service().lock().unwrap();
+            locked
+                .install_from_value_at_root_with_spec(package_json, package_root, specifier)
+                .unwrap();
+            locked.approve_package(package_name, "test").unwrap();
+        }
 
         fs::write(
             config_root.join("init.js"),
@@ -8372,11 +10741,13 @@ mod tests {
             loaded.main_source.clone(),
             loaded.configuration.clone(),
             op_state.load_entry_allowlist(),
+            crate::packages::bundled::RuntimeDomain::Trusted,
         ));
         let (mut runtime, heap_limit_hit) = create_js_runtime(
             Arc::clone(&op_state),
             Rc::clone(&loader),
             JS_RUNTIME_HEAP_LIMIT_BYTES,
+            crate::packages::bundled::RuntimeDomain::Trusted,
         );
         loader.set_entry(
             loaded.main_specifier.clone(),
@@ -8449,41 +10820,44 @@ mod tests {
             Arc::clone(&workspace),
             1,
         ));
+        let _third_party_worker = wire_test_third_party_bridge(&op_state);
         op_state.set_runtime_context(Arc::clone(&workspace), 1, true);
-        op_state
-            .package_service()
-            .lock()
-            .unwrap()
-            .install_from_value_at_root_with_spec(
-                package_json,
-                package_root,
-                "local:language-server-bytes",
-            )
-            .unwrap();
+        {
+            let mut service = op_state.package_service().lock().unwrap();
+            service
+                .install_from_value_at_root_with_spec(
+                    package_json,
+                    package_root,
+                    "local:language-server-bytes",
+                )
+                .unwrap();
+            // Base capabilities first: the init.js language-server grant below
+            // augments this record with the `language-server` capability.
+            service
+                .authorize_package(
+                    package_name,
+                    vec![
+                        crate::packages::permissions::PackagePermission::ParseDocument,
+                        crate::packages::permissions::PackagePermission::RenderDecorations,
+                        crate::packages::permissions::PackagePermission::CompletionProvider,
+                    ],
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .unwrap();
+        }
 
+        // Phase 1 (configuration): approve the contribution/root grant.
         fs::write(
             config_root.join("init.js"),
             format!(
                 r#"
-                import {{ authorizeLanguageServer, startLanguageServerSession }} from "clay:language-server";
+                import {{ authorizeLanguageServer }} from "clay:language-server";
                 await authorizeLanguageServer({{
                   package: {package_name:?},
                   contribution: {contribution:?},
                   workspaceRootIds: [{workspace_root_id}],
                 }});
-                const session = await startLanguageServerSession({{
-                  package: {package_name:?},
-                  contribution: {contribution:?},
-                  workspaceRootId: {workspace_root_id},
-                }});
-                const sent = new Uint8Array([0, 240, 159, 166, 128, 255]);
-                await session.sendBytes(sent);
-                const received = [];
-                while (received.length < sent.length) {{
-                  received.push(...await session.readBytes(sent.length - received.length, 2000));
-                }}
-                Deno.core.ops.op_clay_runtime_record(`bytes:${{received.join(",")}}`);
-                await session.stop();
                 "#
             ),
         )
@@ -8496,23 +10870,71 @@ mod tests {
             loaded.main_source.clone(),
             loaded.configuration.clone(),
             op_state.load_entry_allowlist(),
+            crate::packages::bundled::RuntimeDomain::Trusted,
         ));
         let (mut runtime, heap_limit_hit) = create_js_runtime(
             Arc::clone(&op_state),
             Rc::clone(&loader),
             JS_RUNTIME_HEAP_LIMIT_BYTES,
+            crate::packages::bundled::RuntimeDomain::Trusted,
         );
         loader.set_entry(
             loaded.main_specifier.clone(),
             loaded.main_source.clone(),
             loaded.configuration.clone(),
         );
-        let evaluation = evaluate_loaded_module(
+        evaluate_loaded_module(
             &mut runtime,
             &op_state,
             loaded,
             Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
             true,
+            &heap_limit_hit,
+        )
+        .await
+        .unwrap();
+
+        // Enable with the grant in place, then run the session phase under the
+        // package's host-stamped context: sessions are owned by the executing
+        // package, never by caller-supplied names.
+        let enabled = {
+            let mut locked = op_state.package_service().lock().unwrap();
+            locked.approve_package(package_name, "test").unwrap();
+            locked.enable(package_name).unwrap().clone()
+        };
+        op_state.set_current_package(Some(crate::server::ops::PackageContext::from_record(
+            &enabled,
+        )));
+        let session_source = format!(
+            r#"
+            import {{ startLanguageServerSession }} from "clay:language-server";
+            const session = await startLanguageServerSession({{
+              contribution: {contribution:?},
+              workspaceRootId: {workspace_root_id},
+            }});
+            const sent = new Uint8Array([0, 240, 159, 166, 128, 255]);
+            await session.sendBytes(sent);
+            const received = [];
+            while (received.length < sent.length) {{
+              received.push(...await session.readBytes(sent.length - received.length, 2000));
+            }}
+            Deno.core.ops.op_clay_runtime_record(`bytes:${{received.join(",")}}`);
+            await session.stop();
+            "#
+        );
+        let session_entry =
+            prepare_runtime_entry(RuntimeEntry::ControlledSource(session_source), 2).unwrap();
+        loader.set_entry(
+            session_entry.main_specifier.clone(),
+            session_entry.main_source.clone(),
+            session_entry.configuration.clone(),
+        );
+        let evaluation = evaluate_loaded_module(
+            &mut runtime,
+            &op_state,
+            session_entry,
+            Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
+            false,
             &heap_limit_hit,
         )
         .await
@@ -8656,16 +11078,7 @@ mod tests {
             r#"
             import { serverRegisterCompletionProvider } from "clay:completion";
             export default function load() {
-              serverRegisterCompletionProvider({
-                packageName: "completion-provider",
-                packageVersion: "0.1.0",
-                packagePrefix: "completionprovider",
-                permissions: ["completion-provider"],
-                providerId: "completionprovider.words",
-                triggerCharacters: ["."],
-                timeoutMs: 50,
-                maxItems: 20
-              });
+              serverRegisterCompletionProvider({});
             }
             "#,
         );
@@ -8673,9 +11086,15 @@ mod tests {
             Arc::new(Mutex::new(WorkspaceState::new())),
             1,
         ));
+        let _third_party_worker = wire_test_third_party_bridge(&op_state);
         let mut package_json =
             loadable_package_fixture("completion-provider", "completionprovider");
         package_json["clay"]["permissions"] = serde_json::json!(["completion-provider"]);
+        package_json["clay"]["contributions"]["completionProviders"] = serde_json::json!([{
+            "id": "completionprovider.words",
+            "triggerCharacters": ["."],
+            "budgets": { "timeoutMs": 50, "maxItems": 20 }
+        }]);
         {
             let mut service = op_state
                 .package_service()
@@ -8696,6 +11115,9 @@ mod tests {
                     "test-user",
                 )
                 .expect("seed completion package authorization succeeds");
+            service
+                .approve_package("completion-provider", "test")
+                .expect("seed completion package adoption approval succeeds");
         }
         let main_specifier = ModuleSpecifier::parse(CONTROLLED_MAIN_SPECIFIER).unwrap();
         let loader = Rc::new(ClayModuleLoader::new(
@@ -8703,11 +11125,13 @@ mod tests {
             None,
             None,
             op_state.load_entry_allowlist(),
+            crate::packages::bundled::RuntimeDomain::Trusted,
         ));
         let (mut runtime, heap_limit_hit) = create_js_runtime(
             Arc::clone(&op_state),
             Rc::clone(&loader),
             JS_RUNTIME_HEAP_LIMIT_BYTES,
+            crate::packages::bundled::RuntimeDomain::Trusted,
         );
         let loaded = prepare_runtime_entry(
             RuntimeEntry::ControlledSource(
@@ -8785,6 +11209,34 @@ mod tests {
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
+    /// Plan 061 task 10 sentinel: an unapproved third-party package's
+    /// JavaScript never executes — `loadPackage` fails at the adoption gate
+    /// before the load entry module is imported/evaluated.
+    #[tokio::test]
+    async fn unapproved_third_party_package_never_executes_before_adoption() {
+        let root = config_fixture("unapproved-package-load").join("stealth-package");
+        let err = evaluate_with_seeded_package_adoption(
+            "stealth-package",
+            "stealth-package",
+            "stealthpackage",
+            root.clone(),
+            r#"Deno.core.ops.op_clay_runtime_record("SENTINEL-EXECUTED"); export default function load() {}"#,
+            false,
+        )
+        .await
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("clay.package_approval.missing"),
+            "unapproved loadPackage must fail at the adoption gate, got: {message}"
+        );
+        assert!(
+            !message.contains("SENTINEL-EXECUTED"),
+            "package load entry must never execute before approval, got: {message}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn op_clay_packages_load_package_by_specifier_rejects_unknown_package() {
         // `@clay/*` shape but no installed package on disk.
@@ -8841,7 +11293,13 @@ mod tests {
             allowlist.record(specifier, path.clone(), package_root.clone());
         }
         let main_specifier = ModuleSpecifier::parse("clay://runtime/main.js").unwrap();
-        ClayModuleLoader::new(main_specifier, None, configuration, allowlist)
+        ClayModuleLoader::new(
+            main_specifier,
+            None,
+            configuration,
+            allowlist,
+            crate::packages::bundled::RuntimeDomain::Trusted,
+        )
     }
 
     fn default_load_options() -> ModuleLoadOptions {
@@ -9401,17 +11859,13 @@ mod tests {
         fs::write(
             root.join("init.js"),
             r#"
-            import * as commands from "clay:commands";
-            import * as decorations from "clay:decorations";
-            import * as modes from "clay:modes";
-            import * as packages from "clay:packages";
-            import * as parse from "clay:parse";
-            import { loadMarkdownPackage, registerMarkdownPreview } from "./load.js";
+            import { loadPackage } from "clay:packages";
+            import { registerMarkdownPreview } from "./load.js";
 
             // Realistic opt-in order: load the package first (registers the
-            // markdown.togglePreview command), THEN publish the optional panel.
-            const clay = { commands, decorations, modes, packages, parse };
-            await loadMarkdownPackage(clay, { documentId: 1, path: "sample.md" });
+            // markdown.togglePreview command and stamps host provenance for
+            // this evaluation), THEN publish the optional panel.
+            await loadPackage("@clay/markdown");
             const panel = registerMarkdownPreview();
             Deno.core.ops.op_clay_runtime_record(`${panel.id}:${panel.slot}:${panel.defaultVisibility}`);
             "#,

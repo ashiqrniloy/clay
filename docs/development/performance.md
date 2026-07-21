@@ -218,6 +218,7 @@ Phase 14 splits budgets into two categories:
 | Client edit payload (`ClientMessage::Edit`) | <= 512 bytes | `cargo test --test performance_protocol` (`representative_protocol_payloads_fit_phase14_budgets`) |
 | Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 128 bytes | `cargo test --test performance_protocol` |
 | Behavior manifest payload (`ServerMessage::BehaviorManifest`) | <= 2048 bytes | `cargo test --test performance_protocol` |
+| Package manifest metadata (`clay.*` incl. contributions and extension points) | <= 8192 bytes | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`; `cargo test --test performance_budgets` |
 | SDUI snapshot payload (`ServerMessage::SduiSnapshot`) | <= 4096 bytes | `cargo test --test performance_protocol` |
 | SDUI update payload (`ServerMessage::SduiUpdate`) | <= 1024 bytes | `cargo test --test performance_protocol` |
 | Client edit queue depth and responsiveness | bounded queue (default capacity 256), no blocking enqueue on full queue | `cargo test --test performance_protocol` (`client_edit_queue_reports_depth_without_blocking_input`) |

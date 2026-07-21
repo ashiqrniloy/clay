@@ -1364,6 +1364,20 @@ fn phase18_21_lsp_bridge_primitive_review() -> String {
     .expect("read Phase 18.21 LSP bridge primitive review")
 }
 
+fn package_principal_and_result_routing_primitive_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/package-principal-and-result-routing-primitive-review.md",
+    ))
+    .expect("read package principal and result routing primitive review")
+}
+
+fn first_party_package_extension_api_review() -> String {
+    fs::read_to_string(repository_path(
+        "docs/wiki/modules/first-party-package-extension-api-review.md",
+    ))
+    .expect("read first-party package extension API review")
+}
+
 fn workspace_file_browser_wiki() -> String {
     fs::read_to_string(repository_path(
         "docs/wiki/modules/workspace-file-browser.md",
@@ -3712,6 +3726,277 @@ fn phase18_21_lsp_bridge_primitive_review_is_linked_and_complete() {
             "Phase 18.21 primitive review must preserve boundary {required}"
         );
     }
+}
+
+#[test]
+fn package_principal_and_result_routing_primitive_review_is_indexed_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let review = package_principal_and_result_routing_primitive_review();
+
+    assert!(
+        wiki_index.contains("modules/package-principal-and-result-routing-primitive-review.md"),
+        "wiki index must link package principal and result routing primitive review"
+    );
+    for required in [
+        "Existing Primitive and Gap Matrix",
+        "Caller provenance comes from host-owned package activation/capability state, never caller manifest JSON",
+        "Generation binding invalidates stale package execution and outputs",
+        "First-party mutation requires target extension-point consent, user approval, authenticated requester provenance",
+        "String bearer tokens and JavaScript-visible authority handles are forbidden",
+        "Completion and language-intelligence requests return request-scoped `oneshot` receivers",
+        "one server-owned dispatcher",
+        "Language-server subprocess authority remains the approved fixed-contribution contract",
+        "Approved Package Provenance and Trust-Domain Contract",
+    ] {
+        assert!(
+            review.contains(required),
+            "package principal/result routing review must document {required}"
+        );
+    }
+}
+
+#[test]
+fn first_party_package_extension_api_review_is_indexed_and_complete() {
+    let wiki_index =
+        fs::read_to_string(repository_path("docs/wiki/index.md")).expect("read wiki index");
+    let review = first_party_package_extension_api_review();
+
+    assert!(
+        wiki_index.contains("modules/first-party-package-extension-api-review.md"),
+        "wiki index must link first-party package extension API review"
+    );
+    for required in [
+        "Generic Public API Families Required in the Third-Party Runtime",
+        "@clay/markdown",
+        "@clay/rust",
+        "@clay/typescript",
+        "@clay/javascript",
+        "@clay/git",
+        "@clay/lsp-rust",
+        "@clay/lsp-typescript",
+        "@clay/lsp-javascript",
+        "@clay/lsp-markdown",
+        "@clay/theme-gruvbox-material-dark",
+        "@clay/theme-gruvbox-material-light",
+        "packages/lsp-shared",
+        "Full First-Party Replacement",
+        "target owner declaration plus user approval",
+        "replacement remains third-party",
+    ] {
+        assert!(
+            review.contains(required),
+            "first-party package extension API review must document {required}"
+        );
+    }
+}
+
+#[test]
+fn plan061_trust_domain_and_extension_schemas_are_locked() {
+    let registry = fs::read_to_string(repository_path("docs/reference/primitives/registry.md"))
+        .expect("read primitive registry");
+    for primitive in [
+        "PackageTrustDomainClassification",
+        "ExtensionPointDeclaration",
+        "PackageRelationRequest",
+        "PackageAdoptionRecord",
+        "PackageReplacementRecord",
+        "CrossDomainRequestEnvelope",
+    ] {
+        assert!(
+            registry.contains(primitive),
+            "primitive registry must contain Plan 061 row {primitive}"
+        );
+    }
+
+    let security = fs::read_to_string(repository_path(
+        "docs/reference/primitives/package-security.md",
+    ))
+    .expect("read package security");
+    for required in [
+        "Package Runtime Trust Domains and Extension Authority",
+        "clay-extension-point-v1",
+        "clay-package-relation-v1",
+        "clay-package-approval-v1",
+        "clay-package-replacement-v1",
+        "clay-cross-domain-envelope-v1",
+        "compiled bundled inventory",
+        "owner consent",
+        "User-only full replacement",
+        "shared-cohort",
+        "core.text",
+        "never promote code into the trusted runtime",
+        "No V8 objects, functions, promises, globals, or module instances cross",
+        "CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES",
+        "`ok`/`error`/`denied`/`stale`/`revoked`/`timeout`",
+        "exact subset",
+        "2026-07-21-0001-two-package-runtime-trust-domains.md",
+    ] {
+        assert!(
+            security.contains(required),
+            "package-security.md must lock {required}"
+        );
+    }
+
+    let loading = fs::read_to_string(repository_path(
+        "docs/reference/primitives/package-loading.md",
+    ))
+    .expect("read package loading");
+    for required in [
+        "Plan 061 Adoption, Replacement, and Two-Domain Loading",
+        "no JavaScript until the user approves",
+        "shared-third-party-runtime disclosure",
+        "disabled/replaced packages with withdrawn contributions",
+        "Roll back to the target's prior validated generation",
+        "compiled bundled inventory",
+        "owning domain runtime",
+        "never auto-load",
+    ] {
+        assert!(
+            loading.contains(required),
+            "package-loading.md must lock {required}"
+        );
+    }
+
+    let review = first_party_package_extension_api_review();
+    for required in [
+        "schemas locked",
+        "clay-extension-point-v1",
+        "clay-package-relation-v1",
+        "clay-package-approval-v1",
+        "clay-package-replacement-v1",
+        "clay-cross-domain-envelope-v1",
+        "no per-package Rust APIs, per-language branches, generic actor/plugin framework",
+        "@clay/markdown",
+        "@clay/git",
+        "@clay/theme-gruvbox-material-light",
+        "packages/lsp-shared",
+    ] {
+        assert!(
+            review.contains(required),
+            "first-party extension API review must record {required}"
+        );
+    }
+
+    for (package, prefix) in [
+        ("@clay/markdown", "markdown"),
+        ("@clay/rust", "rust"),
+        ("@clay/typescript", "typescript"),
+        ("@clay/javascript", "javascript"),
+        ("@clay/git", "git"),
+        ("@clay/lsp-rust", "lsp-rust"),
+        ("@clay/lsp-typescript", "lsp-typescript"),
+        ("@clay/lsp-javascript", "lsp-javascript"),
+        ("@clay/lsp-markdown", "lsp-markdown"),
+        (
+            "@clay/theme-gruvbox-material-dark",
+            "theme-gruvbox-material-dark",
+        ),
+        (
+            "@clay/theme-gruvbox-material-light",
+            "theme-gruvbox-material-light",
+        ),
+    ] {
+        assert!(
+            review.contains(package),
+            "extension matrix must account for bundled package {package} ({prefix})"
+        );
+    }
+}
+
+#[test]
+fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
+    fn marked_section<'a>(text: &'a str, name: &str) -> &'a str {
+        let start = format!("<!-- plan061-task1-{name}:start -->");
+        let end = format!("<!-- plan061-task1-{name}:end -->");
+        text.split_once(&start)
+            .and_then(|(_, remaining)| remaining.split_once(&end))
+            .map(|(section, _)| section)
+            .unwrap_or_else(|| panic!("Plan 061 must contain {name} inventory markers"))
+    }
+
+    fn assert_exact_inventory(section: &str, values: &BTreeSet<String>, expected: usize) {
+        assert_eq!(values.len(), expected, "unexpected source inventory count");
+        for value in values {
+            let token = format!("`{value}`");
+            assert_eq!(
+                section.matches(&token).count(),
+                1,
+                "Plan 061 inventory must classify {token} exactly once"
+            );
+        }
+    }
+
+    let plan = fs::read_to_string(repository_path(
+        "plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md",
+    ))
+    .expect("read Plan 061");
+    let ops_source =
+        fs::read_to_string(repository_path("src/server/ops/mod.rs")).expect("read runtime ops");
+    // Plan 061 task 4 split the single extension into trusted + third-party
+    // domains; the union of both lists is the full 67-op inventory (task 12
+    // added the trusted-only cross-domain bridge op).
+    let mut ops = BTreeSet::new();
+    for extension_name in [
+        "extension!(\n    clay_runtime_trusted_extension,",
+        "extension!(\n    clay_runtime_package_extension,",
+    ] {
+        let body = ops_source
+            .split_once(extension_name)
+            .and_then(|(_, remaining)| remaining.split_once("\n);").map(|(body, _)| body))
+            .unwrap_or_else(|| panic!("find {extension_name} op list"));
+        for line in body.lines().map(str::trim) {
+            if let Some(name) = line
+                .strip_suffix(',')
+                .filter(|name| name.starts_with("op_clay_"))
+            {
+                ops.insert(name.to_string());
+            }
+        }
+    }
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 67);
+
+    let runtime_source = fs::read_to_string(repository_path("src/server/js_runtime.rs"))
+        .expect("read JavaScript runtime");
+    let facade_match = runtime_source
+        .split_once("fn clay_facade_source")
+        .and_then(|(_, remaining)| remaining.split_once("const CLAY_FACADE_CONFIGURATION"))
+        .map(|(body, _)| body)
+        .expect("find clay facade source match");
+    let facades = facade_match
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| {
+            line.strip_prefix('"')
+                .and_then(|remaining| remaining.split_once('"'))
+                .map(|(specifier, _)| specifier)
+                .filter(|specifier| specifier.starts_with("clay:"))
+                .map(str::to_string)
+        })
+        .collect::<BTreeSet<_>>();
+    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 21);
+
+    let mut packages = BTreeSet::new();
+    for entry in fs::read_dir(repository_path("packages")).expect("read packages directory") {
+        let package_json = entry
+            .expect("read package entry")
+            .path()
+            .join("package.json");
+        if !package_json.is_file() {
+            continue;
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(package_json).expect("read package manifest"))
+                .expect("parse package manifest");
+        if value.get("clay").is_some()
+            && let Some(name) = value.get("name").and_then(serde_json::Value::as_str)
+        {
+            packages.insert(name.to_string());
+        }
+    }
+    let package_section = marked_section(&plan, "package-inventory");
+    assert_exact_inventory(package_section, &packages, 11);
+    assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 
 #[test]

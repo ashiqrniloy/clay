@@ -1,174 +1,188 @@
-# Unified Package Runtime Authority
+# Package Extension and Adoption Authority (Plan 061)
 
 ## Source
 
-- `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md`
-- `src/packages/manager.rs`
-- `src/packages/service.rs`
-- `src/packages/manifest.rs`
-- `src/packages/record.rs`
-- `src/packages/permissions.rs`
-- `src/packages/conflict.rs`
-- `src/server/ops/packages.rs`
-- `src/server/js_runtime.rs`
-- `docs/reference/primitives/package-security.md`
-- `docs/reference/primitives/package-loading.md`
+- `src/packages/bundled.rs` — `BUNDLED_PACKAGES` inventory (11 entries, FNV-1a-64 fingerprints), `verify_bundled_trust`, `RuntimeDomain` enum.
+- `src/packages/manifest.rs` — `ExtensionPointDeclaration`, `StructuredRelationRequest`, `parse_extension_point`, `parse_mixed_relation_array`, contribution namespace validation.
+- `src/packages/extension_points.rs` — `RelationOperation`, `ExtensionContributionKind` (16 variants), validation constants and charset rules.
+- `src/packages/approvals.rs` — `PackageApprovalStore`, `PackageApprovalRecord`, `ApprovedRelation`, `ApprovedReplacement`, `approval_covers`, `AdoptionState`, atomic file persistence.
+- `src/packages/service.rs` — `install_from_value_at_root_with_spec`, `approve_package`, `adoption_state`, `enable` with adoption gating and replacement approval revocation, `rollback_replacement`, `enable_graph` with `verify_relation_authority`, `enable` transactionality (snapshot/restore), `force_enabled_runtime_domain_for_test`.
+- `src/packages/record.rs` — `PackageRecord` with `runtime_domain` field, `PartialEq` excluding `runtime_domain`.
+- `src/packages/conflict.rs` — `reconcile_enabled_conflicts` post-enable, `PackageReplaces` conflict resolution.
+- `src/server/cross_domain.rs` — `CrossDomainRequestEnvelope`, cross-domain invocation validation, `dispatch_to_domain` with provider routing.
+- `src/server/ops/packages.rs` — `op_clay_packages_load_package_by_specifier` (sync trusted-only, stamps domain in result), `op_clay_packages_load_in_package_domain` (async, bridge dispatch + absorption).
+- `src/server/js_runtime.rs` — Two-domain runtime topology, `production_reload`, cross-domain bridge wiring, `replay_third_party_domain`, `dispatch_to_domain` with replacement.
+- `src/server/mod.rs` — `TrustedOpState`, connected-loop references wired to `PackageService` and bridge.
+- `src/main.rs` — CLI `clay package adopt/revoke/rollback/inspect`, `PackageService::open` for durable store.
+- `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`
+- `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` (superseded authority model retained for provenance)
+- `plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md`
 
-## Scope
+## Architecture
 
-Clay uses one package authority model for Clay-shipped and user-installed packages. Package source (`@clay/*`, npm, GitHub, git URL, tarball, or local path) affects default trust prompts and provenance display, but not the capabilities a user can grant.
+Package authority in Clay is built on four layers:
 
-Authority boundaries remain separate:
+1. **Identity**: immutable bundled inventory (`BUNDLED_PACKAGES`) for Clay-shipped packages, everything else is third-party.
+2. **Provenance**: package name + version + canonical root + manifest fingerprint matched against the bundled inventory, or an installed provenance record for third-party packages.
+3. **Adoption**: durable user-approved `PackageApprovalRecord` stored at `~/.config/clay/packages` with exact identity/version/integrity/capabilities/processes/relations/replacements. No code executes before adoption.
+4. **Extension**: versioned extension points (`clay-extension-point-v1`) declared by package owners, combined with structured relation requests (`clay-package-relation-v1`) from consuming packages. Both owner consent (extension point declarations) and user consent (durable approval) are required before enable.
+
+## Bundled Trust Inventory
+
+`src/packages/bundled.rs` defines a compile-time `BUNDLED_PACKAGES` array of 11 first-party packages. Each entry has:
+
+- Exact name (e.g., `@clay/markdown`), version, canonical root relative to `CARGO_MANIFEST_DIR/packages/<slug>`.
+- An FNV-1a-64 fingerprint over the canonical root directory for drift detection.
+- An `inventory_matches_source_tree` unit test that fails if source changes without fingerprint regeneration.
+
+`verify_bundled_trust` is the single choke point: it validates `source_kind == ClayShipped`, exact name/version/canonical root match, and fingerprint equality before granting `Trusted` domain. The `PackageSourceKind::from_spec` `@clay/*` prefix classification remains a "claimed family" heuristic; trust decisions are always deferred to `verify_bundled_trust`.
+
+`RuntimeDomain::Trusted` is stamped on a `PackageRecord` only after `verify_bundled_trust` passes in `enable_graph`. All other packages default to `ThirdParty` and cannot be promoted. Clay core (`@clay/core`) is not replaceable.
+
+## Extension Points
+
+Extension points are versioned schema declarations in `package.json` under `clay.extensionPoints`. Each point declares:
+
+- `id`: `{apiPrefix}.{camelCaseName}` with ascii_alphanumeric charset.
+- `version`: integer ≥ 1.
+- `operations`: array of `RelationOperation` (`dependOn`, `extend`, `disable`, `replace`).
+- `contributionKinds`: closed enum of `ExtensionContributionKind` (16 variants: `mode`, `command`, `keyRouting`, `textTransform`, `syntaxGrammar`, `parseHandler`, `completionProvider`, `languageIntelligenceProvider`, `documentAnalyzer`, `languageServer`, `sdui`, `decoration`, `diagnostic`, `ui`, `theme`, `statusItem`).
+- `scopes`: optional array of contribution IDs the point controls (defaults to all owner contributions).
+- `summary`: human-readable string.
+
+Schema constants enforce: max 64 extension points per manifest, max 32 scopes per entry, max 128 chars per scope, max point ID length 64, max summary length 200, payload budget `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` (8192 bytes).
+
+A `bundle_extension_points_match_real_contributions` test validates every bundled package declares extension points, and every scope references a real contribution ID or known runtime-registered ID.
+
+## Structured Relations and Graph Resolution
+
+Package manifests declare `clay.graph.relations` with mixed string/object arrays. String entries (`"@clay/markdown"`) are bare target references. Object entries are `StructuredRelationRequest` with:
+
+- `package`: target package name.
+- `extensionPoint`: target owner-declared extension point ID.
+- `operation`: specific `RelationOperation` from the extension point's allowed set.
+- `scopes`: optional subset of the extension point's declared scopes.
+
+`parse_mixed_relation_array` handles both forms and deduplicates targets. The existing `enable_graph` cycle detection, topological ordering, and conflict resolution apply uniformly.
+
+`verify_relation_authority` runs during `enable_graph` and enforces:
+
+1. **Owner consent**: every `StructuredRelationRequest` must match a declared extension point on the TARGET package with matching operation.
+2. **User consent**: every ThirdParty enable requires a `PackageApprovalRecord` with `approval_covers` returning `Approved`. Approvals cover both relation targets and replacement targets.
+
+## Durable Approval Store
+
+`PackageApprovalStore` (at `~/.config/clay/packages`) persists one JSON document per approved package. Each `PackageApprovalRecord` contains:
+
+- Exact `package_name`, `package_version`, `api_prefix`, `integrity`.
+- `approved_permissions`: snapshot of approved capability strings at adoption time.
+- `processes`: language-server contribution IDs requiring external processes.
+- `relations`: array of `ApprovedRelation` (target + extension_point + operation).
+- `replacements`: array of `ApprovedReplacement` (replaced target + withdrawn contribution IDs + `rollback_restore_target` flag).
+- `approved_at`: RFC3339 timestamp (manual conversion, no chrono dependency).
+- `approved_by`: human label ("cli" for CLI adopt, or user name for UI adopt).
+
+Serialization is manual `serde_json::Value` conversion (Clay has no `serde` dependency). Atomic writes use temp-file + fsync + rename with `0o600` owner-only permissions. Corruption at open time fails closed (in-memory empty store).
+
+`approval_covers` validates exact identity match (name, version, api_prefix, integrity), permissions subset, and relations/replacements subset. Version drift, scope expansion, and target replacement invalidate the approval (returning `Stale`). Permission narrowing requires re-adoption.
+
+## Adoption Lifecycle
 
 ```text
-install != enable != load != runtime execution != package-manager execution != client behavior delivery
+Installed → Pending → (user/cli approve) → Approved → (loadPackage) → Enabled → (revoke/disable) → Revoked
+                ↑                                              ↓
+                └── stale (version drift, scope expansion, target replacement) ←┘
 ```
 
-## Current Primitive Inventory
+- **Install**: `PackageService::install_from_value_at_root_with_spec` records the package root and manifest. No code executes.
+- **Authorize**: `authorize_package` sets the `RuntimeProfile` (currently `Restricted` for all third-party packages) and approved capabilities.
+- **Adopt**: `approve_package` builds and persists a `PackageApprovalRecord` from host-side facts (provenance, assembled manifest, permissions, LS contribution IDs, graph relations, replacement targets).
+- **Enable**: `loadPackage` / `enable` checks `adoption_state`. If `Approved`, enables the package with capability verification, graph resolution, and conflict reconciliation. Rejected otherwise.
+- **Stale**: `adoption_state` returns `Stale` when the installed version, api_prefix, or integrity no longer matches the approval record, or when scope/replacement expansion is detected.
+- **Revoke**: `revoke_package_approval` removes the approval and (if enabled) disables the package.
 
-- **Install:** `PackageService::install` delegates package download, registry access, dependency resolution, lockfile/integrity/caching, and package-store mutation to `PackageManagerBackend` / `PnpmBackend`. Install records package files and metadata; it does not enable or run `loadEntry`.
-- **Enable:** `PackageService::enable` reads installed `package.json`, builds a `PackageRecord` through `assemble_package_record`, then runs `check_enabled_packages`. Today conflicts reject; the target model evolves this into explicit user/package override, extend, disable, and replace policy.
-- **Load:** `op_clay_packages_load_package_by_specifier` currently resolves only `@clay/*` from the bundled first-party package root. Plan 035 replaces this limitation with a source-aware resolver that can load enabled npm/GitHub/git/local packages through the same validation path.
-- **Runtime execution:** `ClayModuleLoader` currently admits only resolver-recorded load entries. Target runtime keeps root confinement and provenance, but generalizes allowlist entries to all enabled user-authorized packages.
-- **Package-manager execution:** Package-manager stdout/stderr/exit code, lockfiles, and discovered `package.json` metadata are provenance/diagnostics, not automatic enablement. User authorization plus Clay metadata validation controls enable/load.
-- **Client behavior delivery:** Clients receive validated manifests, SDUI/protocol updates, decorations, parse updates, diagnostics, and other approved state. Client-side package JavaScript/native UI becomes possible only through explicit future capabilities and APIs.
-- **Capabilities:** Current code knows narrow package permissions plus newly documented grantable host capabilities. All packages use the same vocabulary; source does not impose a permanent ceiling.
+### Enable Transactionality
 
-## Target Authority Model
+`enable` snapshots enabled records, conflict resolutions, revocation records, and approval store before mutation. On `enable_graph` failure, all snapshots are restored (full rollback). On success for replacements: the replaced target's durable approval is revoked, and if that revoke or approval restore fails, the snapshot rollback fires.
 
-A Clay package identity is:
+### Replacement Atomicity
 
-```text
-source + package name + version/resolved identity + package root + clay.apiPrefix + enabled state + user-approved capabilities
-```
+When a third-party package with `replaces` relation is enabled:
 
-Source examples:
+1. `enable_graph` resolves conflicts with `PackageReplaces` resolution.
+2. Post-enable, conflict resolution delta is scanned for `PackageReplaces` with winner matching the enabling package.
+3. Each replaced target's durable approval is revoked (Trusted targets are no-ops).
+4. Replaced targets are disabled as a transactional side effect.
+5. `rollback_replacement(target)` disables the replacement, re-adopts the target, and re-enables it.
+
+## Cross-Domain Typed Invocation
+
+`src/server/cross_domain.rs` validates `clay-cross-domain-envelope-v1` requests:
+
+- Requester must be enabled ThirdParty (Trusted blocked at ingress).
+- Target must be enabled with declared `extension_point/version/operation`.
+- `approval_ref` must bind to a matching durable approval.
+- Durable approval must cover the relation (`approval_covers`).
+
+Denial reasons: stale requester, revoked approval, wrong target/point/operation, oversize payload, forged approval_ref. Constants: max 16 pending cross-domain requests, 250ms deadline.
+
+## First-Party Package Replacement
+
+All 11 bundled packages declare extension points covering their contribution surfaces. A third-party package can:
+
+- **Disable** a first-party package: requires a `clay.graph.disables` declaration matching a declared owner extension point, plus user approval.
+- **Replace** a first-party package: requires both `clay.graph.replaces` + owner extension point consent + user approval. The replacement stays ThirdParty (no promotion). Replaced target is atomically disabled. Contribution IDs must stay within the replacement's own `apiPrefix` namespace (cross-prefix claiming is structurally unrepresentable in `assemble_package_record`).
 
 ```bash
-clay package add @clay/markdown
-clay package add @vendor/package
-clay package add github:user/repo
-clay package add https://github.com/user/repo.git
-clay package add ./local-package
+clay package inspect @vendor/markdown-repl   # shows pending adoption state
+clay package adopt @vendor/markdown-repl     # shows capabilities, processes, relations, replacements; user confirms
+# in init.js: await loadPackage("@vendor/markdown-repl");  # one-line replacement
+clay package rollback @clay/markdown          # disables replacement, re-adopts target, re-enables
+clay package revoke @vendor/markdown-repl    # removes approval, disables if enabled
 ```
 
-Clay should show source and requested capabilities before enable, then record user/admin approval. Package manifest declarations are requests; user authorization is the grant.
+## Host-Stamped Package Provenance (P0-1)
 
-## Grantable Capabilities
+All 66 ops now receive host-stamped `PackageContext` (package_name, package_version, api_prefix) rather than caller-assembled manifest objects. `set_current_package` is called by `loadPackage` / `load_in_package_domain` after successful enable. `begin_evaluation` clears context before each command batch. Dead self-assertion functions (`package_from_options`, `package_value_from_options`, `parse_manifest`) are deleted.
 
-Initial target capability vocabulary:
+Language-server session spoofing is closed: `start_session` resolves identity host-side from `current_package_record`; `stop_session` verifies identity (package, contribution, descriptor_fingerprint) against session records; data-path ops are gated by session ownership.
 
-- `mode-registration`
-- `mode-activation`
-- `command-registration`
-- `package-configuration`
-- `parse-document`
-- `render-decorations`
-- `render-folding`
-- `completion-provider`
-- `package-control`
-- `package-import`
-- `filesystem`
-- `network`
-- `shell`
-- `wasm`
-- `ai-tools`
-- `workspace-mutation`
-- `native-ui`
-- `client-runtime`
-- `raw-ops`
+## Invariants
 
-These are powerful and must be visible, revocable, and diagnosable. They are not categorically forbidden for third-party packages.
-
-## Package Graph and Package Control
-
-Packages may declare graph relations:
-
-```json
-{
-  "clay": {
-    "apiPrefix": "example",
-    "loadEntry": "./dist/load.js",
-    "capabilities": ["mode-registration", "package-control"],
-    "dependsOn": ["@clay/markdown"],
-    "extends": ["@clay/markdown"],
-    "disables": ["@clay/markdown"],
-    "replaces": ["@clay/markdown"]
-  }
-}
-```
-
-Rules:
-
-- `dependsOn`: target package loads first and may be imported/used internally when `package-import` is granted.
-- `extends`: both packages remain active; extender can register additive behavior.
-- `disables`: target package is disabled when user grants `package-control`.
-- `replaces`: target package is disabled and replacement may claim its package slots/modes through explicit conflict policy.
-- Same rules apply to Clay and non-Clay packages.
-
-## Conflict Resolution Target
-
-Current `check_enabled_packages` gives useful deterministic diagnostics but rejects all collisions. Target resolution order:
-
-1. explicit user configuration;
-2. package `replaces` / `extends` declarations;
-3. package priority/precedence metadata;
-4. deterministic diagnostic fallback.
-
-No silent load-order wins. Conflicts should include package name, version, source, apiPrefix, contribution ID, requested relation, and selected winner/loser.
-
-## Runtime Profiles
-
-Runtime profile is a user/config choice, not a first-party/third-party distinction:
-
-```text
-native-trust | sandboxed | restricted
-```
-
-Any source may use any implemented profile when the user grants it. Sandboxing remains useful as an optional runtime profile, not as proof that third-party packages are second-class.
-
-## Hot-Path Policy
-
-Install, provenance lookup, authorization prompts, enable/load validation, package graph changes, conflict resolution, reload, rollback, and package-manager calls run at startup, user command, configuration, reload, or background time. They do not run in keypress, paint, layout, scroll, text-event, edit-ack, or Masonry hot paths.
-
-## Package-Scoped Disable, Rollback, and Revocation
-
-`PackageService::disable` is active withdrawal. It routes through `revoke_enabled_package`, removes the package from the enabled `PackageRecord` set, increments a monotonic package generation, stores a `PackageRevocationRecord` with `PackageContributionWithdrawalCounts` (commands, behavior manifests, SDUI, parse handlers, decorations, completions, layout, input, state, theme, diagnostics), and removes conflict resolutions involving the disabled package. Failed enable/graph/conflict attempts snapshot and restore enabled records, conflict diagnostics, revocation records, and package generation so rollback keeps the previous valid generation active.
-
-Runtime hooks reuse existing generation primitives: `ParseCoordinator::cancel_package` removes package-owned parse handlers and aborts in-flight tasks through the same abort path as `cancel_generation`, while `PackageLoadEntryAllowlist::revoke_package` withdraws package-owned load entries and transitive module entries so no orphaned imports remain.
-
-## Remaining Implementation Work
-
-Plan 035 implemented the unified authority model, source-aware resolver, authorization records, package graph, conflict resolution, and package-scoped revocation. Work that remains for future plans includes:
-
-- Durable persisted installed/enabled/authorization/revocation state across server process restarts.
-- End-user callable Clay JS APIs and CLI commands for `authorize`, `enable`, `disable`, `inspect`, `list`, and `setConflictOverride` (Rust primitives exist; op wiring is planned).
-- Production sandbox profile routing (the `RuntimeProfile` enum and authorization storage exist; separate-process sandbox harness wiring is deferred).
-- Package-import boundary checks for `package-import` capability and internal cross-package module use.
-- Richer user-facing conflict precedence configuration beyond user overrides, package-control graph actions, and key-binding priority.
-- Publication-side wiring for withdrawing all package-owned contribution caches beyond enabled records, parse handlers, and module load entries.
+- Trusted domain = compiled bundled inventory only. No runtime promotion into Trusted.
+- Third-party shared runtime = one trust cohort. Packages within the third-party runtime can mutate each other; this is disclosed at adoption.
+- All third-party enables require durable approval (no blanket approval for packages without relations).
+- Replacement requires: (a) owner extension point declaration, (b) user durable approval, (c) replacement stays ThirdParty. Clay core is not replaceable.
+- Extension point payload budget 8192 bytes. Cross-domain envelope payload 8192 bytes. Both are compiled constants.
+- LS grants are non-transferable: each package gets its own, keyed to the package name in the grant map.
+- Contribution IDs must use the owning package's `apiPrefix` namespace (validated at manifest assembly).
+- `enable` is atomic; failure leaves no partial state.
+- No `serde` dependency in Clay; all JSON serialization is manual `serde_json::Value` conversion.
 
 ## Tests
 
 Run focused coverage with:
 
 ```text
-cargo test --test package_loading_docs unified_package_authority_model_is_documented
-cargo test --test package_loading_docs package_loading_keeps_validation_and_parsing_out_of_typing_hot_path
-cargo test --test package_loading
- cargo test --test package_graph
- cargo test --test package_conflicts
- cargo test --test parse_coordinator
- cargo test --test clay_js_api_inventory
- cargo test --test rust_visibility_api_mapping
+cargo test --test package_graph        # extension point validation, structured relations, adoption lifecycle, replacement + rollback
+cargo test --test package_loading      # replacement withdraws trusted target atomically, LS lifecycles, adoption gating
+cargo test --test package_conflicts    # replacement edge approval, stale-on-commit
+cargo test --test primitives_docs      # op/extension/subset inventory tests, wiki doc completeness
+cargo test --lib package_approval      # PackageApprovalStore round-trip, corruption, version drift
+cargo test --lib bundled_trust         # inventory matches source, extension points match real contributions
+cargo test --lib cross_domain          # cross-domain envelope validation, requester/target checks
+cargo test --lib third_party_config    # plan 061 task 15 config verification (adoption, stale, load)
+cargo test --lib runtime_resource      # two-runtime RSS/thread/candidate reload baselines
+cargo test --lib rust_visibility       # facade allowlist parity, internal type audit
 ```
 
 ## Related
 
+- [Embedded JavaScript Runtime](embedded-js-runtime.md) — Two Runtime Trust Domains section
 - [Package Loading](package-loading.md)
-- [Persistent Runtime Hardening](persistent-runtime-hardening.md)
-- [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Parse Coordinator](parse-coordinator.md)
+- [Language Server Process Service](language-server-process-service.md)
 - `docs/reference/primitives/package-security.md`
 - `docs/reference/primitives/package-loading.md`
-- `plans/035-Third-Party-Package-Runtime-Authority-Policy.md`
+- `docs/reference/packages/creating-packages.md`
+- `plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md`

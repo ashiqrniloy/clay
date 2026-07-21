@@ -83,9 +83,9 @@ use self::{
         op_clay_modes_register_pattern,
     },
     packages::{
-        op_clay_packages_list_first_party_specifiers, op_clay_packages_load_package,
-        op_clay_packages_load_package_by_specifier, op_clay_packages_validate_manifest,
-        op_clay_packages_validate_permissions,
+        op_clay_packages_list_first_party_specifiers, op_clay_packages_load_in_package_domain,
+        op_clay_packages_load_package, op_clay_packages_load_package_by_specifier,
+        op_clay_packages_validate_manifest, op_clay_packages_validate_permissions,
     },
     parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
@@ -115,7 +115,42 @@ struct ClayRuntimeContext {
     configuration_evaluation: bool,
 }
 
+/// Host-owned provenance of the package whose code is currently executing
+/// (activation or host-invoked callback). Set only by Rust: the package-load
+/// op, the runtime worker before invoking a registered handler, or a host
+/// evaluation that carries an explicit package context. JavaScript cannot
+/// influence this value; caller-supplied manifests never select authority
+/// (Plan 061 task 5 / Plan 060 P0-1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PackageContext {
+    pub package_name: String,
+    pub package_version: String,
+    pub api_prefix: String,
+}
+
+impl PackageContext {
+    pub(crate) fn from_record(record: &crate::packages::record::PackageRecord) -> Self {
+        Self {
+            package_name: record.manifest.name.clone(),
+            package_version: record.manifest.version.clone(),
+            api_prefix: record.manifest.clay.api_prefix.clone(),
+        }
+    }
+}
+
 pub(crate) struct ClayOpState {
+    /// Runtime trust domain this state belongs to (Plan 061). Trusted states
+    /// host configuration and bundled first-party packages; third-party
+    /// states host adopted packages and can only reach the public op set.
+    domain: crate::packages::bundled::RuntimeDomain,
+    /// Currently executing package provenance; see [`PackageContext`].
+    current_package: Mutex<Option<PackageContext>>,
+    /// Cross-domain bridge (Plan 061 task 12): the trusted worker dispatches
+    /// third-party package load evaluations to the CURRENT third-party
+    /// worker. Rewired on every third-party worker replacement; always `None`
+    /// on the third-party worker itself.
+    third_party_commands:
+        Mutex<Option<std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>>>,
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
@@ -190,7 +225,31 @@ impl ClayOpState {
         workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
         runtime_document_id: crate::protocol::DocumentId,
     ) -> Self {
+        Self::new_for_domain(
+            workspace,
+            runtime_document_id,
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            Arc::new(Mutex::new(crate::packages::service::PackageService::new(
+                PathBuf::new(),
+                Box::new(crate::packages::manager::FakeBackend::new()),
+            ))),
+            Arc::new(PackageLoadEntryAllowlist::default()),
+        )
+    }
+
+    /// Construct one domain-scoped op state sharing the host-owned
+    /// `PackageService` and package load-entry allowlist. Third-party states
+    /// start with language-server authorization sealed; grants open only
+    /// during trusted configuration evaluation.
+    pub(crate) fn new_for_domain(
+        workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
+        runtime_document_id: crate::protocol::DocumentId,
+        domain: crate::packages::bundled::RuntimeDomain,
+        package_service: Arc<Mutex<crate::packages::service::PackageService>>,
+        load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
+    ) -> Self {
         Self {
+            domain,
             runtime_records: Mutex::new(Vec::new()),
             published_sdui_tree: Mutex::new(None),
             published_decoration_set: Mutex::new(None),
@@ -226,15 +285,177 @@ impl ClayOpState {
                 runtime_document_id,
                 configuration_evaluation: false,
             }),
-            package_service: Arc::new(Mutex::new(crate::packages::service::PackageService::new(
-                PathBuf::new(),
-                Box::new(crate::packages::manager::FakeBackend::new()),
-            ))),
-            language_server_authority_sealed: AtomicBool::new(false),
+            current_package: Mutex::new(None),
+            third_party_commands: Mutex::new(None),
+            package_service,
+            language_server_authority_sealed: AtomicBool::new(
+                domain == crate::packages::bundled::RuntimeDomain::ThirdParty,
+            ),
             language_server_process:
                 crate::server::language_server::LanguageServerProcessService::new(),
-            load_entry_allowlist: Arc::new(PackageLoadEntryAllowlist::default()),
+            load_entry_allowlist,
         }
+    }
+
+    /// Runtime trust domain for this state.
+    #[cfg(test)]
+    pub(crate) fn domain(&self) -> crate::packages::bundled::RuntimeDomain {
+        self.domain
+    }
+
+    /// Set/clear the executing-package provenance. Host-only: called by the
+    /// package-load op after a successful host-side enable, by the runtime
+    /// worker around registered handler callbacks, and by host evaluations
+    /// carrying an explicit package context. Cleared at every evaluation
+    /// begin so stale contexts never leak across commands.
+    pub(crate) fn set_current_package(&self, context: Option<PackageContext>) {
+        *self
+            .current_package
+            .lock()
+            .expect("current package mutex poisoned") = context;
+    }
+
+    /// Rewire the cross-domain bridge to the current third-party worker
+    /// (service constructor and every third-party worker replacement).
+    pub(crate) fn set_third_party_commands(
+        &self,
+        sender: std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>,
+    ) {
+        *self
+            .third_party_commands
+            .lock()
+            .expect("third-party bridge mutex poisoned") = Some(sender);
+    }
+
+    /// Current third-party worker command channel for the cross-domain
+    /// package-load bridge op.
+    pub(crate) fn third_party_commands(
+        &self,
+    ) -> Option<std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>> {
+        self.third_party_commands
+            .lock()
+            .expect("third-party bridge mutex poisoned")
+            .clone()
+    }
+
+    /// Absorb a cross-domain package-load evaluation's registration payload
+    /// into this (trusted) worker's registries so the outer configuration
+    /// evaluation's harvest publishes it to server coordinators exactly like
+    /// a locally loaded package (Plan 061 task 12). Only coordinator-bound
+    /// registration lanes merge; command/mode/UI registries stay per-worker
+    /// (third-party command/mode activation routing is a later task).
+    pub(crate) fn absorb_cross_domain_evaluation(
+        &self,
+        evaluation: &crate::server::js_runtime::ClayRuntimeEvaluation,
+    ) {
+        self.runtime_records
+            .lock()
+            .expect("runtime records mutex poisoned")
+            .extend(evaluation.op_records.iter().cloned());
+        self.parse_handlers
+            .lock()
+            .expect("parse handlers mutex poisoned")
+            .extend(evaluation.parse_handlers.iter().cloned());
+        self.js_parse_handlers
+            .lock()
+            .expect("js parse handlers mutex poisoned")
+            .extend(evaluation.js_parse_handlers.iter().cloned());
+        self.completion_providers
+            .lock()
+            .expect("completion providers mutex poisoned")
+            .extend(evaluation.completion_providers.iter().cloned());
+        self.js_completion_providers
+            .lock()
+            .expect("js completion providers mutex poisoned")
+            .extend(evaluation.js_completion_providers.iter().cloned());
+        self.language_intelligence_providers
+            .lock()
+            .expect("language intelligence providers mutex poisoned")
+            .extend(evaluation.language_intelligence_providers.iter().cloned());
+        self.js_language_intelligence_providers
+            .lock()
+            .expect("js language intelligence providers mutex poisoned")
+            .extend(
+                evaluation
+                    .js_language_intelligence_providers
+                    .iter()
+                    .cloned(),
+            );
+        self.document_analyzers
+            .lock()
+            .expect("document analyzers mutex poisoned")
+            .extend(evaluation.document_analyzers.iter().cloned());
+        if let Some(tree) = &evaluation.published_sdui_tree {
+            *self
+                .published_sdui_tree
+                .lock()
+                .expect("sdui tree mutex poisoned") = Some(tree.clone());
+        }
+        if let Some(set) = &evaluation.published_decoration_set {
+            *self
+                .published_decoration_set
+                .lock()
+                .expect("decoration set mutex poisoned") = Some(set.clone());
+        }
+        if let Some(set) = &evaluation.published_diagnostic_set {
+            *self
+                .published_diagnostic_set
+                .lock()
+                .expect("diagnostic set mutex poisoned") = Some(set.clone());
+        }
+    }
+
+    /// Resolve the executing package to its host-enabled record. Caller
+    /// manifests are never consulted: the context names a package, and the
+    /// host `PackageService` enabled set decides whether that package may act
+    /// (stale/disabled packages fail closed).
+    pub(crate) fn current_package_record(
+        &self,
+    ) -> Result<crate::packages::record::PackageRecord, JsErrorBox> {
+        let context = self
+            .current_package
+            .lock()
+            .expect("current package mutex poisoned")
+            .clone()
+            .ok_or_else(|| {
+                JsErrorBox::generic(
+                    "clay.packages.no_active_package: package-facing APIs require an active \
+                     package activation or host-invoked package callback",
+                )
+            })?;
+        let service = self.package_service();
+        let service = service.lock().expect("package service mutex poisoned");
+        service
+            .enabled_record(&context.package_name, &context.package_version)
+            .cloned()
+            .ok_or_else(|| {
+                JsErrorBox::generic(format!(
+                    "clay.packages.package_not_enabled: package `{}` version `{}` is not enabled",
+                    context.package_name, context.package_version
+                ))
+            })
+    }
+
+    /// Resolve the executing package and require an approved capability from
+    /// the host authorization record (never caller-declared permissions).
+    pub(crate) fn require_current_package_capability(
+        &self,
+        permission: crate::packages::permissions::PackagePermission,
+    ) -> Result<crate::packages::record::PackageRecord, JsErrorBox> {
+        let record = self.current_package_record()?;
+        let service = self.package_service();
+        let approved = service
+            .lock()
+            .expect("package service mutex poisoned")
+            .has_approved_capability(&record.manifest.name, permission);
+        if !approved {
+            return Err(JsErrorBox::generic(format!(
+                "clay.packages.missing_permission: package `{}` lacks approved `{}`",
+                record.manifest.name,
+                permission.as_str()
+            )));
+        }
+        Ok(record)
     }
 
     pub(crate) fn workspace(
@@ -307,6 +528,9 @@ impl ClayOpState {
     }
 
     pub(crate) fn begin_evaluation(&self) {
+        // Stale package provenance must never leak across commands; the
+        // load op or the worker handler branch re-stamps it when needed.
+        self.set_current_package(None);
         self.runtime_records
             .lock()
             .expect("Clay runtime op state mutex poisoned")
@@ -343,16 +567,12 @@ impl ClayOpState {
         self.package_service.as_ref()
     }
 
-    pub(crate) fn new_analysis_worker(
-        parent: &Self,
-        workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
-        runtime_document_id: crate::protocol::DocumentId,
-    ) -> Self {
-        let mut state = Self::new_for_document(workspace, runtime_document_id);
-        state.package_service = Arc::clone(&parent.package_service);
-        state.load_entry_allowlist = Arc::clone(&parent.load_entry_allowlist);
-        state.language_server_authority_sealed = AtomicBool::new(true);
-        state
+    /// Shared authority handle for test-driven third-party worker wiring.
+    #[cfg(test)]
+    pub(crate) fn package_service_arc(
+        &self,
+    ) -> Arc<Mutex<crate::packages::service::PackageService>> {
+        Arc::clone(&self.package_service)
     }
 
     /// Handle to the validated package `loadEntry` allowlist shared with
@@ -604,9 +824,12 @@ impl ClayOpState {
             .classify(input)
     }
 
+    /// Activate a major mode with host-resolved owner provenance: the
+    /// classification names the owning package from registered declaration
+    /// provenance, and the owner manifest comes from the host enabled set +
+    /// approved capabilities. Caller manifests are never consulted.
     pub(super) fn activate_major_mode(
         &self,
-        package: &crate::packages::manifest::ClayPackageManifest,
         input: &crate::packages::modes::DocumentClassificationInput,
     ) -> Result<crate::packages::modes::MajorModeActivation, crate::packages::modes::ModeDiagnostic>
     {
@@ -615,7 +838,30 @@ impl ClayOpState {
             .lock()
             .expect("Clay runtime op state mutex poisoned");
         let classification = modes.classify(input)?;
-        modes.activate_major_mode(package, classification)
+        let owner = {
+            let service = self.package_service();
+            let service = service.lock().expect("package service mutex poisoned");
+            service
+                .enabled_record(
+                    &classification.package_name,
+                    &classification.package_version,
+                )
+                .filter(|record| {
+                    service.has_approved_capability(
+                        &record.manifest.name,
+                        crate::packages::permissions::PackagePermission::ModeActivation,
+                    )
+                })
+                .cloned()
+        }
+        .ok_or_else(|| {
+            crate::packages::modes::ModeDiagnosticContext::from_classification(&classification)
+                .diagnostic(
+                    crate::packages::modes::ModeValidationRule::MissingPermission,
+                    "mode owner package is not enabled with approved mode-activation",
+                )
+        })?;
+        modes.activate_major_mode(&owner.manifest, classification)
     }
 
     /// Publish a new behavior manifest shaped by package-supplied editor rules.
@@ -1187,8 +1433,10 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
     Ok(())
 }
 
+// Trusted domain: configuration evaluation and bundled first-party packages.
+// This is the full op set (66 ops).
 extension!(
-    clay_runtime_extension,
+    clay_runtime_trusted_extension,
     ops = [
         op_clay_runtime_ping,
         op_clay_runtime_record,
@@ -1228,6 +1476,7 @@ extension!(
         op_clay_packages_validate_permissions,
         op_clay_packages_load_package,
         op_clay_packages_load_package_by_specifier,
+        op_clay_packages_load_in_package_domain,
         op_clay_packages_list_first_party_specifiers,
         op_clay_language_server_authorize,
         op_clay_language_server_start_session,
@@ -1259,6 +1508,53 @@ extension!(
     ],
 );
 
+// Third-party domain: adopted packages in the shared third-party runtime.
+// Public contribution/registration ops plus the internal result-bridge ops
+// their facades and host-side provider invocations use. No configuration,
+// document/workspace authority, package loading, language-server
+// authorization, classification/activation, or admin ops exist in this
+// isolate — unregistered ops are not enumerable or callable from JavaScript.
+extension!(
+    clay_runtime_package_extension,
+    ops = [
+        op_clay_runtime_record,
+        op_clay_sdui_define_node,
+        op_clay_sdui_publish_tree,
+        op_clay_ui_register_panel_contribution,
+        op_clay_ui_register_component_contribution,
+        op_clay_ui_register_transient_overlay_contribution,
+        op_clay_ui_register_theme_token,
+        op_clay_ui_register_input_contribution,
+        op_clay_ui_register_ui_state_scope,
+        op_clay_ui_set_layout_override,
+        op_clay_git_list_statuses,
+        op_clay_git_refresh_status,
+        op_clay_behavior_get_active_manifest,
+        op_clay_behavior_list_routes,
+        op_clay_language_server_start_session,
+        op_clay_language_server_send_message,
+        op_clay_language_server_read_message,
+        op_clay_language_server_send_bytes,
+        op_clay_language_server_read_bytes,
+        op_clay_language_server_stop_session,
+        op_clay_modes_register_pattern,
+        op_clay_commands_register_command,
+        op_clay_commands_list_commands,
+        op_clay_commands_execute_command,
+        op_clay_decorations_publish_decorations,
+        op_clay_diagnostics_publish_diagnostics,
+        op_clay_parse_register_parse_handler,
+        op_clay_parse_store_update,
+        op_clay_syntax_register_syntax_grammar,
+        op_clay_completion_register_completion_provider,
+        op_clay_completion_store_result,
+        op_clay_completion_disable,
+        op_clay_language_register_intelligence_provider,
+        op_clay_language_register_document_analyzer,
+        op_clay_language_store_intelligence_result,
+    ],
+);
+
 fn command_for_rule(rule: &KeyBindingRule) -> CommandDeclaration {
     match rule.routing_policy {
         crate::protocol::RoutingPolicy::ClientFirstPredictable
@@ -1286,6 +1582,74 @@ fn display_name(command_id: &str) -> String {
         .replace('-', " ")
 }
 
-pub(crate) fn init_runtime_extension() -> deno_core::Extension {
-    clay_runtime_extension::init()
+pub(crate) fn init_runtime_extension(
+    domain: crate::packages::bundled::RuntimeDomain,
+) -> deno_core::Extension {
+    match domain {
+        crate::packages::bundled::RuntimeDomain::Trusted => clay_runtime_trusted_extension::init(),
+        crate::packages::bundled::RuntimeDomain::ThirdParty => {
+            clay_runtime_package_extension::init()
+        }
+    }
+}
+
+#[cfg(test)]
+mod domain_extension_tests {
+    use std::collections::BTreeSet;
+
+    fn op_names(extension: &deno_core::Extension) -> BTreeSet<&'static str> {
+        extension.ops.iter().map(|decl| decl.name).collect()
+    }
+
+    #[test]
+    fn package_extension_is_strict_subset_without_admin_ops() {
+        let trusted = op_names(&super::clay_runtime_trusted_extension::init());
+        let package = op_names(&super::clay_runtime_package_extension::init());
+        assert_eq!(trusted.len(), 67);
+        assert_eq!(package.len(), 35);
+        assert!(
+            package.is_subset(&trusted),
+            "every third-party op must also exist in the trusted extension"
+        );
+        for admin in [
+            "op_clay_runtime_ping",
+            "op_clay_configuration_load_module",
+            "op_clay_configuration_get_state",
+            "op_clay_configuration_set_package_option",
+            "op_clay_theme_set_theme",
+            "op_clay_theme_set_typography",
+            "op_clay_documents_open_document",
+            "op_clay_documents_save_document",
+            "op_clay_documents_reload_document",
+            "op_clay_documents_get_document_status",
+            "op_clay_documents_list_documents",
+            "op_clay_workspace_list_roots",
+            "op_clay_workspace_add_root",
+            "op_clay_workspace_discover_root_for_path",
+            "op_clay_workspace_list_directory",
+            "op_clay_workspace_create_listing_cancel_token",
+            "op_clay_workspace_cancel_listing",
+            "op_clay_keybindings_bind_key",
+            "op_clay_keybindings_unbind_key",
+            "op_clay_keybindings_list_key_bindings",
+            "op_clay_packages_validate_manifest",
+            "op_clay_packages_validate_permissions",
+            "op_clay_packages_load_package",
+            "op_clay_packages_load_package_by_specifier",
+            "op_clay_packages_load_in_package_domain",
+            "op_clay_packages_list_first_party_specifiers",
+            "op_clay_language_server_authorize",
+            "op_clay_syntax_set_engine_preference",
+            "op_clay_modes_classify_document",
+            "op_clay_modes_activate_major_mode",
+            "op_clay_completion_providers_for_trigger",
+            "op_clay_runtime_unavailable",
+        ] {
+            assert!(
+                !package.contains(admin),
+                "third-party extension must not register {admin}"
+            );
+            assert!(trusted.contains(admin), "trusted extension keeps {admin}");
+        }
+    }
 }

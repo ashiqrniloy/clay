@@ -47,12 +47,6 @@ export type LanguageIntelligenceProviderDeclaration = {
 };
 
 export type ServerRegisterLanguageIntelligenceProviderOptions = {
-  packageManifest?: unknown;
-  packageName?: string;
-  packageVersion?: string;
-  packagePrefix?: string;
-  apiPrefix?: string;
-  permissions?: string[];
   provider?: LanguageIntelligenceProviderDeclaration;
   id?: string;
   modes?: string[];
@@ -73,7 +67,6 @@ export type ServerRegisterLanguageIntelligenceProviderOptions = {
 };
 
 export type ServerRegisterDocumentAnalyzerOptions = {
-  packageManifest: unknown;
   analyzer: {
     id: string;
     contribution: string;

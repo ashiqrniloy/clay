@@ -92,7 +92,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
 
   // Register the mode's file-extension and MIME patterns.
   // The editor classifies documents by these static patterns; no JS runs on open.
-  await clay.modes.serverRegisterModePattern(packageManifest, {
+  await clay.modes.serverRegisterModePattern({
     modeId,
     displayName: "Markdown",
     defaultFontRole: "proportional",
@@ -107,7 +107,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
   // keymaps fields are all Markdown-specific knowledge declared by the package.
   // The editor op deserializes them into generic protocol types (EnterRule,
   // PairRule, KeyBindingRule) — no Markdown logic lives in Rust.
-  await clay.modes.serverActivateMajorMode(packageManifest, {
+  await clay.modes.serverActivateMajorMode({
     documentId,
     path: documentPath,
     mimeType,
@@ -118,7 +118,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
 
   // Register each command so it is discoverable in help/search.
   for (const command of commands) {
-    await clay.commands.serverRegisterCommand(packageManifest, {
+    await clay.commands.serverRegisterCommand({
       commandId: command.id,
       displayName: command.userFacingName,
       routingPolicy: command.routingPolicy,
@@ -127,7 +127,6 @@ export async function loadMarkdownPackage(clay, options = {}) {
   }
 
   await clay.completion?.serverRegisterCompletionProvider?.({
-    packageManifest,
     completionProvider: markdownCompletionProvider,
     providerId: markdownCompletionProvider.id,
     priority: markdownCompletionProvider.priority,
@@ -138,7 +137,7 @@ export async function loadMarkdownPackage(clay, options = {}) {
   });
 
   // Register inert status metadata; native client code owns rendering.
-  await clay.ui?.serverRegisterComponentContribution?.(packageManifest, markdownStatusItem);
+  await clay.ui?.serverRegisterComponentContribution?.(markdownStatusItem);
 
   // Keep parser.js registered as Tier 3 fallback metadata. On open, Clay's
   // generic syntax selector installs the matching Tier 1 native handler first;
@@ -151,7 +150,6 @@ export async function loadMarkdownPackage(clay, options = {}) {
     // metadata registration. Real @clay/markdown package load includes parser.js.
   }
   await clay.parse.serverRegisterParseHandler({
-    packageManifest,
     mode: modeId,
     parseUnit: contract.parse.parseUnit,
     viewportPriority: contract.parse.viewportPriority,
@@ -188,8 +186,8 @@ export async function markdownLoadMode(options = {}) {
 // `markdown.togglePreview` command is registered), or drive it through Clay's
 // package-option / layout-override configuration. The PackageUiRegistry
 // validates the action target, slot, and payload before publication.
-export function registerMarkdownPreview(manifest = markdownPackageManifest()) {
-  return serverRegisterPanelContribution(manifest, {
+export function registerMarkdownPreview() {
+  return serverRegisterPanelContribution({
     id: "markdown.preview",
     slot: "right",
     kind: "fixed",

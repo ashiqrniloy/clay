@@ -1192,22 +1192,186 @@ Expected outcome:
 - Clay becomes usable for real editing sessions, not only architecture validation.
 - Daily-use features integrate with package modes and server authority instead of bypassing them.
 
-## Cockpit
+## Phase 20.1: UI Design Language, Token Catalog Expansion, and Typography Hierarchy
 
-## File browser with dynamic root selection
+Establish the modern minimalist design language as Clay-owned tokens and typography hierarchy before any component uplift, so every later phase restyles through tokens instead of ad-hoc values.
+
+Entry gate:
+
+- Run `npx ui-skills start` and load the smallest useful UI skill set (minimalist/visual, redesign, layout) before writing the design language. Record the selected skills in the phase plan.
+- Do not start until Phase 20 daily-editing hardening items that touch theme/accessibility have landed or are explicitly deferred.
+
+Focus areas:
+
+- Audit the current token surface: core tokens in `src/shell/theme.rs`, editor base UI colors in `src/editor/theme.rs`, and typography variants in `src/editor/typography.rs`.
+- Define the minimalist design language for Clay: expanded 4pt spacing scale, restrained radius scale, near-invisible elevation, a single consistent accent, muted semantic colors, state color roles (hover/active/disabled), focus-ring token, motion duration tokens, and overlay z-level tokens. All additions are typed tokens with core fallbacks; additive-only, no existing token renames.
+- Expand the typography hierarchy beyond `Title`/`Body`/`Status`/`Detail` with clear title levels (for example `Display`, `Section`, `Caption`) that scale from the user-configured font roles and sizes. Packages and components continue to reference roles and variants, never concrete families or point sizes; font setup and title hierarchy stay user-configurable (theme, font from UI with config-file override).
+- Rethink and document defaults: default theme values, default panel sizes, and density defaults as token-backed values rather than hardcoded constants.
+- Update `.agents/skills/clay-ui/references/tokens.md`, `docs/reference/packages/creating-packages.md`, and theme package docs with the new token catalog.
+
+Expected outcome:
+
+- Every visual value used by later uplift phases exists as a typed, user-overridable token.
+- The typography hierarchy covers title levels and main text through semantic variants only.
+- Existing theme packages keep working unchanged through same-typed core fallbacks.
+
+## Phase 20.2: Clay UI Primitive Library Foundation
+
+Build the Clay-owned primitive layer that all components (core and package-contributed) compose from, so external packages cannot diverge from the established aesthetic.
+
+Entry gate:
+
+- Run `npx ui-skills start` first and load the relevant craft/layout skills. Do not start until Phase 20.1 tokens exist.
+
+Focus areas:
+
+- Implement native primitives in the shell: divider/separator, focus ring, panel chrome (title row, collapse affordance, resize handle), scroll chrome, badge/tag, `kbd` hint, icon slot, and tooltip shell. Each primitive is token-driven, state-complete (hover/active/focus/disabled), and carries an accessibility role.
+- Route existing paint paths (`src/masonry_sdui.rs`, editor surface chrome, status bar) through the new primitives instead of one-off drawing.
+- Define the conformance contract: primitives are the only way to paint UI chrome; package components map onto primitives by construction.
+- Add structural tests proving primitives consume tokens (no raw values) and render all interaction states.
+- Update `.agents/skills/clay-ui/references/components.md` with the primitive inventory.
+
+Expected outcome:
+
+- A small, documented primitive set underpins every current surface.
+- No remaining hardcoded colors, spacing, or sizes in shell/SDUI paint paths.
+
+## Phase 20.3: Layout Primitives — Splits, Panel Resizing, and Screen Division
+
+Turn the existing pane split tree and fixed slot model into user-facing layout primitives with safe package access.
+
+Entry gate:
+
+- Run `npx ui-skills start` first. Do not start until Phase 20.2 primitives exist (divider/resize handle come from it).
+
+Focus areas:
+
+- Draggable split dividers on `PaneSplitTree` splits and resize handles on `left`/`right`/`top`/`bottom` fixed slots, with min/max clamping, collapse/restore, and persisted user sizes. Panel sizes remain user-configurable; defaults come from Phase 20.1 tokens.
+- Split-screen composition primitives so packages can request additional panes/splits through inert, versioned layout intents rather than native mutation.
+- Focus and input-routing behavior across splits and panels, including transient surface anchoring inside split layouts.
+- Structural layout tests: geometry invariants, resize clamping, collapse/restore, persistence round-trip, and no-layout-mutation-during-layout.
+- Document the layout primitives in `docs/reference/packages/creating-packages.md` and the clay-ui catalog.
+
+Expected outcome:
+
+- Users can split the screen and resize/collapse all four panels; sizes persist.
+- Packages can participate in split layouts without breaking focus, input routing, or aesthetics.
+
+## Phase 20.4: Core Component Uplift on the Existing Catalog
+
+Restyle every implemented component to the minimalist aesthetic using Phase 20.1 tokens and Phase 20.2 primitives, without changing component kinds or style-variable schemas.
+
+Entry gate:
+
+- Run `npx ui-skills start` first (redesign/visual skills). Do not start until Phases 20.1–20.2 have landed.
+
+Focus areas:
+
+- Uplift `editorView` chrome (caret, selection, scrollbar, diagnostics), `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, and `statusItem` to the new design language.
+- Complete interaction states for every component (hover/active/focus/disabled) driven by state tokens.
+- Apply spacing rhythm: tight grouping for related elements, generous separation between groups; no uniform padding everywhere.
+- Compatibility contract: component kinds, style variables, and token names are unchanged; all first-party packages (git, markdown, rust, typescript, javascript, LSP bridges, themes) render correctly without modification.
+- Structural observability snapshots for each component in every state; re-run the full package test suite as a regression gate.
+
+Expected outcome:
+
+- The whole app reads as one coherent minimalist interface.
+- Zero breaking changes for existing packages.
+
+## Phase 20.5: Overlay, Menu, and Input Components
+
+Implement the reserved component kinds and the missing input/menu surfaces on top of the shared overlay primitive.
+
+Entry gate:
+
+- Run `npx ui-skills start` first. Do not start until Phase 20.4 has uplifted the base catalog.
+
+Focus areas:
+
+- Implement reserved kinds `dropdown`, `collapse`, `modal` (and `table` if justified by a real package need) with validation, docs, and tests.
+- New components: pop-up/dialog, text input field (focus, placeholder, validation states), multi-select (dropdown variant with badges), context menu and menu bar, tooltip, and command palette surface for the Command Centre direction.
+- Uplift the transient menu and inline completion pop-up onto the shared overlay primitive: consistent anchoring, dismissal, focus policy, provenance display, and token styling.
+- All actions remain inert command intents; all styling remains token-only; keyboard navigation and accessibility roles are complete for every new surface.
+- Update `.agents/skills/clay-ui/references/components.md`, the package authoring guide, and component validation tests.
+
+Expected outcome:
+
+- Pop-ups, dropdowns, text inputs, multi-selects, menus, and the completion pop-up share one overlay foundation and one aesthetic.
+- Package authors gain the new components through documented, validated kinds only.
+
+## Phase 20.6: Theme Package Segregation and User-Configurable Theme/Font UI
+
+Make themes and typography first-class, user-facing, and package-segregated.
+
+Entry gate:
+
+- Run `npx ui-skills start` first. Do not start until Phase 20.1 token expansion and Phase 20.5 input components exist (settings UI needs them).
+
+Focus areas:
+
+- Segregate default themes into dedicated theme packages, shipping a light/dark default pair in the spirit of modus operandi / modus vivendi alongside the existing Gruvbox packages.
+- Theme, font role, and font-size-hierarchy configuration from the UI, with `~/.config/clay/init.js` config-file override and documented precedence (package defaults < user config < UI session changes, or as decided).
+- Live theme switch without restart; typography changes revalidate through the existing revisioned typography registry.
+- Settings surfaces built exclusively from catalog components (dropdown, text input, multi-select, list) as a conformance proof.
+- Document theme authoring and user override APIs; keep generated registry coverage for any new Clay JS configuration APIs.
+
+Expected outcome:
+
+- Users switch and tune themes, fonts, and the title/text size hierarchy from the UI or config file.
+- Default themes live in segregated packages like any other theme.
+
+## Phase 20.7: Package UI Conformance and Aesthetic Guardrails
+
+Guarantee that external packages cannot destroy the established aesthetics or usability.
+
+Entry gate:
+
+- Do not start until Phases 20.2–20.5 define the primitives and components being guarded.
+
+Focus areas:
+
+- Enforcement points: typed token validation (existing), reserved-kind gating (existing), plus new contrast/legibility checks on theme-package contributions, payload budgets, and state-completeness checks for package-contributed components.
+- Package UI conformance test suite: every catalog component rendered in every state through structural snapshots; theme packages validated for token coverage and fallback correctness.
+- CI lint that fails on raw colors/sizes in shell/SDUI paint paths and on undocumented components or tokens.
+- Diagnostics for package authors: clear validation errors naming the rejected value and the expected token type.
+- Document the guardrails in `docs/reference/packages/creating-packages.md` and the clay-ui skill.
+
+Expected outcome:
+
+- A third-party package physically cannot inject raw styling or break layout/usability invariants.
+- Conformance coverage runs in CI alongside existing package tests.
+
+## Phase 20.8: UI Reference Documentation and Agent Convention Maintenance
+
+Lock the conventions in as living documentation for humans and AI agents.
+
+Entry gate:
+
+- Do not start until at least Phases 20.1 and 20.4 have landed; then run continuously alongside Phases 20.5–20.7.
+
+Focus areas:
+
+- Maintain `.agents/skills/clay-ui/references/components.md` and `references/tokens.md` as the complete, current catalog of reusable components, primitives, style variables, tokens, and layout rules; every UI phase updates them in the same change.
+- Keep `docs/reference/packages/creating-packages.md` accurate for every new/changed component, token, and layout capability, with implemented-vs-planned markers.
+- Add a UI components page under `docs/reference/` linking the catalog, token tables, and conformance rules; update the code wiki navigation.
+- Verify the create-plan skill UI requirements (`.agents/skills/create-plan/references/clay.md`) stay aligned with the implemented catalog.
+
+Expected outcome:
+
+- Any agent or developer can discover every reusable UI primitive/component and the rules for using them without reading paint code.
+- Documentation drift fails CI or phase acceptance.
 
 ## Window management with splits and tabs
 
-## User Package and Config segregation with defined ~/.config/clay structure
+## Command Centre
 
 ## Handling config, key binding, theme, font from UI with config file override
 
-## UI Revamp with modern aesthetic
-- Seggregate default theme packages
-- Modus operandi and Vivendi packages
-- Font setup review with Title hierarchy
-- Further structure definition. Rethink defaults
+## File browser with dynamic root selection
 
+
+
+## User Package and Config segregation with defined ~/.config/clay structure
 
 ## Agentic AI with Prism
 - Prism upgrade with Web agent for search with Exa, Firecrawl, Brave search

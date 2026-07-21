@@ -134,24 +134,22 @@ const typescriptPackageManifest = () => ({
 });
 
 export default async function loadTypescriptPackage() {
-  await serverRegisterSyntaxGrammar(typescriptGrammarContract());
-  await serverRegisterModePattern(typescriptPackageManifest(), {
+  await serverRegisterSyntaxGrammar({});
+  await serverRegisterModePattern({
     modeId: "typescript",
     displayName: "TypeScript",
     defaultFontRole: "monospace",
     extensions: ["ts", "tsx", "mts", "cts"],
     editorRules: typescriptEditorRules
   });
-  await serverRegisterCommand(typescriptPackageManifest(), {
+  await serverRegisterCommand({
     commandId: "typescript.toggleLineComment",
     displayName: "Toggle TypeScript Line Comment",
     routingPolicy: "server-first",
     permissions: []
   });
-  await serverRegisterCompletionProvider({
-    packageManifest: typescriptPackageManifest()
-  });
-  await serverRegisterComponentContribution(typescriptPackageManifest(), {
+  await serverRegisterCompletionProvider({});
+  await serverRegisterComponentContribution({
     kind: "statusItem",
     id: "typescript.status.mode",
     style: { variant: "muted" },

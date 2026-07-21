@@ -148,6 +148,28 @@ Phase 19 preserves the one-line `loadPackage` contract. Reload does not add a fo
 
 Generation-local package state (module closures, handler tokens, sessions, in-memory caches) must be rebuilt from `loadEntry`. Explicitly persistent user/workspace state (open documents, leases, workspace roots, grants, documented package options/layout overrides) lives outside the runtime generation and is re-applied through documented Clay JS APIs. Unsupported migration hooks such as `onReload`/`migrateState` are intentionally absent.
 
+## Plan 061 Adoption, Replacement, and Two-Domain Loading
+
+Plan 061 locks the loading lifecycle for the approved two-runtime trust model (`decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`; schemas in [package-security.md](package-security.md#package-runtime-trust-domains-and-extension-authority)). Until Plan 061 tasks implement it, this is a locked design contract, not runtime behavior.
+
+Adoption before execution: a third-party package runs no JavaScript until the user approves a host-rendered adoption view showing source/version/integrity, the shared-third-party-runtime disclosure, requested capabilities and external processes, dependencies/imports, exact extension-point requests and scopes, disabled/replaced packages with withdrawn contributions, wildcards, and transitive effects. Approval writes a durable `clay-package-approval-v1` record; enable/load then validates the record exactly as it validates bundled records, and stale or widened requests fail closed pending re-approval.
+
+Replacement activation is host-owned and atomic:
+
+1. Validate/install the replacement without executing its code.
+2. Verify the target exists and is package-managed (Clay core, `core.text`, `core.code`, shell, and bootstrap are not targets).
+3. Require the `package-control` grant plus explicit user approval of the exact `clay-package-replacement-v1` record.
+4. Build the candidate third-party runtime generation and replacement contributions off to the side.
+5. Check compatibility claims, conflicts, and dependent relations.
+6. Withdraw target contributions through the existing disable/revocation path.
+7. Publish the candidate as active owner while preserving replacement provenance; the replacement stays in the third-party runtime and never acquires target identity, grants, executables, or trusted placement.
+8. Revoke target handlers, sessions, and stale outputs.
+9. Roll back to the target's prior validated generation if candidate activation fails before commit.
+
+Domain routing at load: trusted runtime placement comes only from the compiled bundled inventory bound to exact name/version/root/integrity; bundled packages load into the trusted runtime, adopted packages into the shared third-party runtime, and each domain has its own op extension, module allowlist, facade export set, heap/time budget, and generation lifecycle. Document-analysis callbacks route through their owning domain runtime rather than spawning additional persistent runtimes. Cross-domain extension invocation uses the bounded inert `clay-cross-domain-envelope-v1` only; no V8 objects, functions, promises, or raw ops cross. Reload/disable/revocation and rollback reuse the Phase 19 candidate-before-swap model per domain: a failed third-party generation never replaces the trusted runtime, and a failed trusted candidate keeps the prior validated generation.
+
+The current open-time bundled auto-load path (`serverListFirstPartyPackageSpecifiers` loading until a non-`core.*` classification matches) is reconciled under this model as a trusted-runtime convenience only; third-party packages never auto-load, and explicit adoption/approval remains the only path into the third-party runtime.
+
 ## Carried-forward deferrals
 
 - **Durable package state:** Runtime `PackageService` can resolve installed/source-aware packages already present in its registry, but durable enable/authorization hydration across server restarts is not implemented; packages are reloaded from configuration each runtime generation.

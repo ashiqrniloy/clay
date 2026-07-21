@@ -91,6 +91,9 @@ fn install_and_authorize(
             "test-user",
         )
         .expect("fixture authorization succeeds");
+    service
+        .approve_package(&record.manifest.name, "test")
+        .expect("fixture adoption approval succeeds");
 }
 
 fn service() -> PackageService {

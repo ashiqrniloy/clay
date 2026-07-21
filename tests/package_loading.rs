@@ -1,3 +1,4 @@
+use clay::packages::authorization::RuntimeProfile as AuthorizationRuntimeProfile;
 use clay::packages::conflict::{PackageConflictKind, check_enabled_packages};
 /// Integration tests for the Phase 17 package enable/load contract validator
 /// and package management service.
@@ -29,6 +30,7 @@ use clay::packages::modes::{
     DocumentClassificationInput, MajorModeActivation, MinorModeDeclaration, ModeDeclaration,
     ModeRegistry, ModeValidationRule,
 };
+use clay::packages::permissions::PackagePermission;
 use clay::packages::record::{PackageRecordRule, assemble_package_record};
 use clay::packages::service::{PackageService, PackageServiceError};
 use clay::protocol::{BehaviorScope, Modifiers, TokenType};
@@ -568,6 +570,9 @@ fn granted_powerful_capabilities_parse_and_show_in_inspection() {
             "test-user",
         )
         .expect("authorization record stores powerful grants");
+    service
+        .approve_package("@vendor/power-mode", "test")
+        .unwrap();
     service
         .enable("@vendor/power-mode")
         .expect("approved capabilities allow enable");
@@ -1239,6 +1244,7 @@ fn package_service_disable_removes_active_contributions() {
         .install_from_value(package_json.clone())
         .expect("install must succeed");
     authorize_requested_capabilities(&mut service, &package_json);
+    service.approve_package("@clay/markdown", "test").unwrap();
     service
         .enable("@clay/markdown")
         .expect("enable must succeed for valid package");
@@ -1324,6 +1330,10 @@ fn failed_replacement_keeps_previous_generation_active() {
     service.install_from_value(conflicting.clone()).unwrap();
     authorize_requested_capabilities(&mut service, &active);
     authorize_requested_capabilities(&mut service, &conflicting);
+    service.approve_package("@vendor/active", "test").unwrap();
+    service
+        .approve_package("@vendor/conflicting", "test")
+        .unwrap();
     service.enable("@vendor/active").unwrap();
 
     let err = service.enable("@vendor/conflicting").unwrap_err();
@@ -1378,6 +1388,7 @@ fn package_cli_subcommands_route_through_shared_service() {
 
     // `clay package enable @clay/markdown`
     authorize_requested_capabilities(&mut service, &package_json);
+    service.approve_package("@clay/markdown", "test").unwrap();
     service.enable("@clay/markdown").expect("enable succeeds");
     let after_enable = service
         .inspect("@clay/markdown")
@@ -1491,6 +1502,7 @@ fn package_service_enable_after_refresh_does_not_require_reinstall() {
     // After refresh and authorization, enable succeeds without any install call.
     service.refresh_installed().expect("refresh must succeed");
     authorize_requested_capabilities(&mut service, &package_json);
+    service.approve_package("@clay/markdown", "test").unwrap();
     service
         .enable("@clay/markdown")
         .expect("enable must succeed on a previously-installed package after refresh");
@@ -2112,6 +2124,8 @@ fn enable_rejects_duplicate_prefix_and_mode_and_command() {
     service.install_from_value(one_alt_package.clone()).unwrap();
     authorize_requested_capabilities(&mut service, &one_package);
     authorize_requested_capabilities(&mut service, &one_alt_package);
+    service.approve_package("@clay/one", "test").unwrap();
+    service.approve_package("@clay/one-alt", "test").unwrap();
     service.enable("@clay/one").unwrap();
     let err = service.enable("@clay/one-alt").unwrap_err();
     match err {
@@ -2350,6 +2364,7 @@ fn language_server_enable_requires_current_exact_grant_and_revocation_fails_clos
             "test-user",
         )
         .unwrap();
+    service.approve_package("@vendor/lsp", "test").unwrap();
     service
         .enable("@vendor/lsp")
         .expect("exact grant enables package");
@@ -2418,8 +2433,24 @@ fn bundled_defaults_never_auto_grant_language_server() {
     service
         .install_from_value_at_root(fixture, "/tmp/clay-lsp-test".into())
         .unwrap();
+    // Synthetic `@clay/*` packages outside the compiled bundled inventory are
+    // third-party: bundled defaults must fail closed (Plan 061 trust domains).
+    assert!(matches!(
+        service.authorize_bundled_defaults("@clay/lsp-test", "clay-bundled-default"),
+        Err(PackageServiceError::BundledTrustDenied { .. })
+    ));
+    // A user grant of the non-process capabilities still never auto-grants
+    // language-server process authority.
     service
-        .authorize_bundled_defaults("@clay/lsp-test", "clay-bundled-default")
+        .authorize_package(
+            "@clay/lsp-test",
+            vec![
+                PackagePermission::ModeRegistration,
+                PackagePermission::ModeActivation,
+            ],
+            clay::packages::authorization::RuntimeProfile::Restricted,
+            "user",
+        )
         .unwrap();
 
     assert!(matches!(
@@ -2429,4 +2460,245 @@ fn bundled_defaults_never_auto_grant_language_server() {
             ..
         })
     ));
+}
+
+#[test]
+fn spoofed_clay_prefixed_package_stays_third_party() {
+    use clay::packages::authorization::RuntimeProfile;
+
+    // Real bundled manifest content installed from a foreign root/spec is a
+    // spoof: name and source-kind claims never select bundled trust.
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/markdown/package.json").expect("read bundled manifest"),
+    )
+    .expect("bundled manifest parses");
+    let mut service = PackageService::new("/tmp/clay-spoof-store", Box::new(FakeBackend::new()));
+    service
+        .install_from_value_at_root_with_spec(
+            manifest,
+            "/tmp/clay-spoof-markdown".into(),
+            "file:/tmp/clay-spoof-markdown",
+        )
+        .unwrap();
+
+    assert!(matches!(
+        service.authorize_bundled_defaults("@clay/markdown", "clay-bundled-default"),
+        Err(PackageServiceError::BundledTrustDenied { .. })
+    ));
+    assert!(matches!(
+        service.enable("@clay/markdown"),
+        Err(PackageServiceError::MissingCapabilityGrant { .. })
+    ));
+
+    // A full user grant enables the package as third-party but still cannot
+    // promote it into bundled trust.
+    let record = service
+        .inspect("@clay/markdown")
+        .expect("spoofed package inspectable");
+    let capabilities = record
+        .requested_capabilities
+        .iter()
+        .filter_map(|name| clay::packages::permissions::parse_permission(name).ok())
+        .collect();
+    service
+        .authorize_package(
+            "@clay/markdown",
+            capabilities,
+            RuntimeProfile::Restricted,
+            "user",
+        )
+        .unwrap();
+    assert!(matches!(
+        service.authorize_bundled_defaults("@clay/markdown", "clay-bundled-default"),
+        Err(PackageServiceError::BundledTrustDenied { .. })
+    ));
+}
+
+#[test]
+fn exact_bundled_package_receives_defaults() {
+    // Exact inventory match (name, version, canonical root, manifest
+    // integrity) receives bundled defaults without any user grant.
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/markdown/package.json").expect("read bundled manifest"),
+    )
+    .expect("bundled manifest parses");
+    let mut service = PackageService::new("/tmp/clay-bundled-store", Box::new(FakeBackend::new()));
+    service
+        .install_from_value_at_root(manifest, "packages/markdown".into())
+        .unwrap();
+    service
+        .authorize_bundled_defaults("@clay/markdown", "clay-bundled-default")
+        .expect("exact bundled package receives defaults");
+    service
+        .enable("@clay/markdown")
+        .expect("exact bundled package enables");
+}
+
+/// Plan 061 task 11: a user-approved third-party package can fully replace a
+/// bundled first-party package — the target's contributions withdraw
+/// atomically, the replacement keeps its own third-party provenance/runtime
+/// domain, and the audit pair is recorded.
+#[test]
+fn third_party_replacement_withdraws_trusted_target_atomically() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/markdown/package.json").expect("read bundled manifest"),
+    )
+    .expect("bundled manifest parses");
+    let mut service =
+        PackageService::new("/tmp/clay-replacement-store", Box::new(FakeBackend::new()));
+    service
+        .install_from_value_at_root(manifest, "packages/markdown".into())
+        .unwrap();
+    service
+        .authorize_bundled_defaults("@clay/markdown", "clay-bundled-default")
+        .unwrap();
+    service.enable("@clay/markdown").unwrap();
+
+    let replacement = serde_json::json!({
+        "name": "@vendor/markdown-repl",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "vmdown",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "capabilities": [],
+            "permissions": ["mode-registration", "mode-activation"],
+            "modes": ["vmdown.markdown"],
+            "replaces": ["@clay/markdown"],
+            "docs": "./docs/index.md"
+        }
+    });
+    service
+        .install_from_value(replacement.clone())
+        .expect("replacement installs");
+    let record = assemble_package_record(&replacement).unwrap();
+    service
+        .authorize_package(
+            "@vendor/markdown-repl",
+            [
+                record.manifest.clay.permissions.clone(),
+                vec![PackagePermission::PackageControl],
+            ]
+            .concat(),
+            AuthorizationRuntimeProfile::Sandboxed,
+            "user",
+        )
+        .unwrap();
+    service
+        .approve_package("@vendor/markdown-repl", "test")
+        .unwrap();
+    service
+        .enable("@vendor/markdown-repl")
+        .expect("approved replacement enables over the trusted target");
+
+    let target = service.inspect("@clay/markdown").unwrap();
+    assert!(
+        !target.is_enabled,
+        "target contributions withdraw atomically"
+    );
+    let winner = service.inspect("@vendor/markdown-repl").unwrap();
+    assert!(winner.is_enabled);
+    let enabled_winner = service
+        .enabled_records()
+        .find(|record| record.manifest.name == "@vendor/markdown-repl")
+        .expect("replacement enabled record");
+    assert!(
+        format!("{:?}", enabled_winner).contains("ThirdParty"),
+        "replacement must never be reclassified into the trusted domain"
+    );
+    assert!(
+        service
+            .conflict_resolution_diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.reason
+                == clay::packages::conflict::PackageConflictResolutionReason::PackageReplaces
+                && diagnostic.winner.package_name == "@vendor/markdown-repl"
+                && diagnostic.loser.package_name == "@clay/markdown"),
+        "target/replacement audit pair must be recorded"
+    );
+
+    // Explicit rollback restores the trusted target.
+    let rolled_back = service.rollback_replacement("@clay/markdown").unwrap();
+    assert_eq!(rolled_back, "@vendor/markdown-repl");
+    assert!(service.inspect("@clay/markdown").unwrap().is_enabled);
+    assert!(!service.inspect("@vendor/markdown-repl").unwrap().is_enabled);
+}
+
+/// Plan 061 task 12: a replacement never inherits the replaced target's
+/// language-server grant — it needs its own exact current grant, and the
+/// target's grant does not transfer during replacement.
+#[test]
+fn replacement_language_server_requires_own_fresh_grant() {
+    let mut service = PackageService::new(
+        "target/test-package-store/replacement-ls-grant",
+        Box::new(FakeBackend::default()),
+    );
+    let target = language_server_package_fixture("@vendor/lsp-target", "1.0.0", "ls-target");
+    service.install_from_value(target).unwrap();
+    service
+        .authorize_package(
+            "@vendor/lsp-target",
+            Vec::new(),
+            AuthorizationRuntimeProfile::Restricted,
+            "user",
+        )
+        .unwrap();
+    service
+        .authorize_language_server(
+            "@vendor/lsp-target",
+            "ls-target.server",
+            std::fs::canonicalize("/bin/true").unwrap(),
+            vec![1],
+            "user",
+        )
+        .unwrap();
+    service
+        .approve_package("@vendor/lsp-target", "test")
+        .unwrap();
+    service.enable("@vendor/lsp-target").unwrap();
+
+    let mut replacement = language_server_package_fixture("@vendor/lsp-repl", "1.0.0", "ls-repl");
+    replacement["clay"]["replaces"] = json!(["@vendor/lsp-target"]);
+    service.install_from_value(replacement).unwrap();
+    service
+        .authorize_package(
+            "@vendor/lsp-repl",
+            vec![PackagePermission::PackageControl],
+            AuthorizationRuntimeProfile::Restricted,
+            "user",
+        )
+        .unwrap();
+    service.approve_package("@vendor/lsp-repl", "test").unwrap();
+    // The target's grant must not transfer: enable fails closed until the
+    // replacement holds its own exact grant.
+    let error = service.enable("@vendor/lsp-repl").unwrap_err();
+    assert!(
+        matches!(
+            error,
+            PackageServiceError::MissingLanguageServerGrant { .. }
+                | PackageServiceError::MissingCapabilityGrant { .. }
+        ),
+        "replacement must not inherit the target's grant, got {error}"
+    );
+    service
+        .authorize_language_server(
+            "@vendor/lsp-repl",
+            "ls-repl.server",
+            std::fs::canonicalize("/bin/true").unwrap(),
+            vec![1],
+            "user",
+        )
+        .unwrap();
+    service
+        .enable("@vendor/lsp-repl")
+        .expect("replacement enables with its own exact grant");
+    assert!(!service.inspect("@vendor/lsp-target").unwrap().is_enabled);
+    // The target's grant stays keyed to the target only (revocable, exact
+    // package + contribution + fingerprint); it was never usable by the
+    // replacement, proven by the failed enable above.
+    assert_eq!(
+        service.revoke_language_server_grants("@vendor/lsp-target"),
+        1
+    );
 }

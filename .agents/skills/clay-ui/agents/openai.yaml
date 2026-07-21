@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clay UI"
+  short_description: "Clay app UI primitives, components, and tokens"
+  default_prompt: "Use $clay-ui to work on the Clay app UI with the established primitives, components, theme tokens, and layout model, routing through npx ui-skills start first."

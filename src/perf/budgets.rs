@@ -53,14 +53,21 @@ pub const EDIT_ACK_PAYLOAD_BUDGET_BYTES: usize = 128;
 /// accommodate first-party theme packages that declare a full inert
 /// `textStyles` mapping (every `TokenType` family + base UI color ~45 entries,
 /// ~2.3 KB) alongside their manifest, while still bounding package-load cost.
-/// Oversize manifests are rejected with `ManifestValidationFailed`/
-/// `PayloadBudgetExceeded` at record time.
-pub const BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES: usize = 4096;
+/// Raised to 8192 bytes (Plan 061 task 8) so manifests can also carry their
+/// versioned `clay.extensionPoints` declarations (locked schema cap: 64
+/// points) — the largest first-party manifest (`@clay/markdown`, ~5.5 KB)
+/// defines the headroom. Oversize manifests are rejected with
+/// `ManifestValidationFailed`/`PayloadBudgetExceeded` at record time.
+pub const BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES: usize = 8192;
 pub const SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
 /// One validated three-profile typography snapshot. Family/profile limits are
 /// checked before publication; this bounds its serialized protocol envelope.
 pub const TYPOGRAPHY_PAYLOAD_BUDGET_BYTES: usize = 1024;
+/// One cross-domain extension request or result payload (inert JSON bytes).
+/// Rust-mediated only; checked before allocation-heavy parsing so a hostile
+/// sibling package cannot force unbounded buffering across the trust boundary.
+pub const CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES: usize = 8192;
 
 // Runtime SDUI `publishTree` budgets. A package- or config-published tree is
 // untrusted input parsed into a `serde_json::Value` and then converted into a

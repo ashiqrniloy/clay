@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::{
     packages::{
         commands::{CommandDiagnostic, PackageCommandDeclaration},
-        manifest::{ClayPackageManifest, validate_manifest_value},
+        manifest::ClayPackageManifest,
         permissions::parse_permission,
     },
     protocol::RoutingPolicy,
@@ -22,15 +22,19 @@ use super::ClayOpState;
 #[string]
 pub(super) fn op_clay_commands_register_command(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::CommandRegistration,
+        )?;
     let value = parse_json(&declaration_json, "clay.commands.invalid_declaration")?;
-    let declaration = parse_declaration(&value, &package)?;
+    let declaration = parse_declaration(&value, &package.manifest)?;
     let registered = state
         .borrow::<Arc<ClayOpState>>()
-        .register_command(&package, declaration)
+        .register_command(&package.manifest, declaration)
         .map_err(command_error("clay.commands.registration_failed"))?;
     serde_json::to_string(&json!({
         "packageName": registered.package_name,
@@ -73,16 +77,6 @@ pub(super) fn op_clay_commands_list_commands(state: &mut OpState) -> Result<Stri
         .map_err(serialize_error("clay.commands.list_failed"))
 }
 
-fn parse_manifest(json_text: &str) -> Result<ClayPackageManifest, JsErrorBox> {
-    let value = parse_json(json_text, "clay.packages.invalid_manifest")?;
-    validate_manifest_value(&value).map_err(|error| {
-        JsErrorBox::generic(format!(
-            "clay.packages.invalid_manifest: {:?}: {}",
-            error.rule, error.message
-        ))
-    })
-}
-
 fn parse_declaration(
     value: &Value,
     package: &ClayPackageManifest,
@@ -109,9 +103,9 @@ fn parse_declaration(
         };
 
     Ok(PackageCommandDeclaration {
-        package_name: string_or(value, "packageName", &package.name),
-        package_version: string_or(value, "packageVersion", &package.version),
-        api_prefix: string_or(value, "apiPrefix", &package.clay.api_prefix),
+        package_name: package.name.clone(),
+        package_version: package.version.clone(),
+        api_prefix: package.clay.api_prefix.clone(),
         command_id: required_string(value, "commandId")?,
         display_name: required_string(value, "displayName")?,
         routing_policy: parse_routing_policy(

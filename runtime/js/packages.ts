@@ -112,9 +112,17 @@ export async function loadPackage(specifier: string): Promise<unknown> {
   if (loadedPackages[specifier]) {
     return loadedPackages[specifier];
   }
-  const result = parse<{ loadEntrySpecifier: string }>(
+  const result = parse<{ loadEntrySpecifier: string; domain?: string }>(
     requireOps().op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })),
   );
+  if (result.domain === "third-party") {
+    // Approved third-party packages never execute in this (trusted) runtime:
+    // the host bridge evaluates their load entry in the third-party runtime
+    // and absorbs the registration payload (Plan 061 task 12).
+    parse(await requireOps().op_clay_packages_load_in_package_domain(JSON.stringify(result)));
+    loadedPackages[specifier] = result;
+    return result;
+  }
   // Import the validated on-disk loadEntry, then invoke its default export so
   // the package activates (registers modes/commands/parse handlers) under Clay's
   // authority. The loadEntry contract is: a module whose default export is the

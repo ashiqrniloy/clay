@@ -121,22 +121,21 @@ const javascriptPackageManifest = () => ({
 });
 
 export default async function loadJavaScriptPackage() {
-  await serverRegisterSyntaxGrammar(javascriptGrammarContract());
-  await serverRegisterModePattern(javascriptPackageManifest(), {
+  await serverRegisterSyntaxGrammar({});
+  await serverRegisterModePattern({
     modeId: "javascript",
     displayName: "JavaScript",
     defaultFontRole: "monospace",
     extensions: ["js", "jsx", "mjs", "cjs"],
     editorRules: javascriptEditorRules
   });
-  await serverRegisterCommand(javascriptPackageManifest(), {
+  await serverRegisterCommand({
     commandId: "javascript.toggleLineComment",
     displayName: "Toggle JavaScript Line Comment",
     routingPolicy: "server-first",
     permissions: []
   });
   await serverRegisterCompletionProvider({
-    packageManifest: javascriptPackageManifest(),
     providerId: "javascript.keywords",
     priority: 0,
     triggerCharacters: completionTriggerCharactersFromEditorRules(javascriptEditorRules),
@@ -144,7 +143,7 @@ export default async function loadJavaScriptPackage() {
     items: javascriptKeywords,
     budgets: { timeoutMs: 300, maxItems: 32 }
   });
-  await serverRegisterComponentContribution(javascriptPackageManifest(), {
+  await serverRegisterComponentContribution({
     kind: "statusItem",
     id: "javascript.status.mode",
     style: { variant: "muted" },

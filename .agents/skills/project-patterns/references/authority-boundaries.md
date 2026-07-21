@@ -58,6 +58,15 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Keep process work asynchronous and outside typing, paint, layout, scroll, and local text-application paths.
 - Decision log source: `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 
+## Package Runtime Trust Domains
+
+- Clay and exact integrity-verified bundled packages run in one trusted JavaScript runtime; adopted third-party packages run together in a second runtime and cannot be promoted through normal approval.
+- Third-party runtime installs only documented public package ops and narrow host state. Clay-internal ops are absent, not hidden by facades.
+- Cross-domain communication uses typed, bounded, inert Rust-mediated values. No V8 object, function, global, module instance, or promise crosses domains.
+- Third-party mutation of first-party behavior requires both a target-declared extension point and explicit user approval. Full approved replacement withdraws the first-party package while replacement code remains third-party and keeps its provenance.
+- Third-party packages form a disclosed shared trust cohort and are not isolated from each other.
+- Decision log source: `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`.
+
 ## Long-Lived Package Document Analysis
 
 - Bind each worker to exact package provenance, contribution grant, canonical workspace root, and runtime generation; use resolver-recorded package modules rather than callback values or arbitrary module URLs.

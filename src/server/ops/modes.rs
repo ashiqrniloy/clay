@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::{
     packages::{
-        manifest::{ClayPackageManifest, validate_manifest_value},
+        manifest::ClayPackageManifest,
         modes::{DocumentClassificationInput, ModeDeclaration, ModeDiagnostic},
     },
     protocol::{
@@ -22,17 +22,27 @@ use super::ClayOpState;
 #[string]
 pub(super) fn op_clay_modes_register_pattern(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // Provenance comes from the host-owned executing-package context; the
+    // declaration cannot override package name/version/prefix.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::ModeRegistration,
+        )?;
     let declaration_value = parse_json(&declaration_json, "clay.modes.invalid_declaration")?;
-    let declaration = parse_declaration(&declaration_value, &package)?;
+    let declaration = parse_declaration(&declaration_value, &package.manifest)?;
+    let response_identity = json!({
+        "registered": true,
+        "packagePrefix": declaration.api_prefix,
+        "modeId": declaration.mode_id,
+    });
     state
         .borrow::<Arc<ClayOpState>>()
-        .register_mode(&package, declaration)
+        .register_mode(&package.manifest, declaration)
         .map_err(mode_error("clay.modes.registration_failed"))?;
-    serde_json::to_string(&json!({ "registered": true }))
+    serde_json::to_string(&response_identity)
         .map_err(serialize_error("clay.modes.registration_failed"))
 }
 
@@ -126,10 +136,10 @@ pub(super) fn op_clay_modes_classify_document(
 #[string]
 pub(super) fn op_clay_modes_activate_major_mode(
     state: &mut OpState,
-    #[string] manifest_json: String,
     #[string] input_json: String,
 ) -> Result<String, JsErrorBox> {
-    let package = parse_manifest(&manifest_json)?;
+    // The mode owner is resolved host-side from the classification (registered
+    // declaration provenance + enabled set), never from a caller manifest.
     let value = parse_json(&input_json, "clay.modes.invalid_activation")?;
     let input = DocumentClassificationInput {
         document_id: value
@@ -166,7 +176,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
 
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let activation = op_state
-        .activate_major_mode(&package, &input)
+        .activate_major_mode(&input)
         .map_err(mode_error("clay.modes.activation_failed"))?;
 
     // If the package supplied editor rules, publish an updated behavior manifest
@@ -466,24 +476,14 @@ fn parse_routing_policy_str(value: &str) -> Result<RoutingPolicy, String> {
     }
 }
 
-fn parse_manifest(json_text: &str) -> Result<ClayPackageManifest, JsErrorBox> {
-    let value = parse_json(json_text, "clay.packages.invalid_manifest")?;
-    validate_manifest_value(&value).map_err(|error| {
-        JsErrorBox::generic(format!(
-            "clay.packages.invalid_manifest: {:?}: {}",
-            error.rule, error.message
-        ))
-    })
-}
-
 fn parse_declaration(
     value: &Value,
     package: &ClayPackageManifest,
 ) -> Result<ModeDeclaration, JsErrorBox> {
     Ok(ModeDeclaration {
-        package_name: string_or(value, "packageName", &package.name),
-        package_version: string_or(value, "packageVersion", &package.version),
-        api_prefix: string_or(value, "apiPrefix", &package.clay.api_prefix),
+        package_name: package.name.clone(),
+        package_version: package.version.clone(),
+        api_prefix: package.clay.api_prefix.clone(),
         mode_id: required_string(value, "modeId", "clay.modes.invalid_declaration")?,
         display_name: string_or(value, "displayName", "Mode"),
         document_font_role: match value

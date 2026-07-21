@@ -4,6 +4,10 @@ pub mod completion;
 mod configuration;
 mod connection;
 pub(crate) mod control_center;
+// Cross-domain envelope validation is wired to extension-point handlers in
+// Plan 061 task 8; until then only tests exercise it.
+#[allow(dead_code)]
+pub(crate) mod cross_domain;
 pub mod decorations;
 pub mod diagnostics;
 pub(crate) mod document;
@@ -127,7 +131,7 @@ impl RuntimeGeneration {
     fn initial() -> Self {
         Self {
             id: 1,
-            service: ClayJsRuntimeService::default(),
+            service: ClayJsRuntimeService::production(),
             evaluation: None,
             diagnostics: Vec::new(),
         }
@@ -715,7 +719,11 @@ impl IpcServer {
 
         let previous_generation_id = self.runtime_generation.generation_id().await;
         let next_generation_id = previous_generation_id.saturating_add(1);
-        let next_service = ClayJsRuntimeService::default();
+        // Trusted-generation reload shares the live third-party domain so
+        // adopted third-party packages, providers, and language-server
+        // sessions survive untouched (Plan 061 task 12).
+        let current_service = self.runtime_generation.current_service().await;
+        let next_service = ClayJsRuntimeService::production_reload(&current_service);
 
         let evaluation = match self.load_configuration_for_service(&next_service).await {
             Ok(evaluation) => evaluation.unwrap_or_default(),
@@ -998,6 +1006,22 @@ impl IpcServer {
             &self.document_analysis,
             &self.language_intelligence,
         )?;
+        // The third-party worker survives trusted reloads; re-register its
+        // live registrations under the new generation so the post-commit
+        // generation cancel never withdraws them (Plan 061 task 12).
+        let third_party_snapshot = candidate
+            .generation
+            .service
+            .third_party_registrations_snapshot();
+        register_runtime_contributions(
+            candidate.generation.id,
+            &candidate.generation.service,
+            &third_party_snapshot,
+            &self.parse_coordinator,
+            &self.completion,
+            &self.document_analysis,
+            &self.language_intelligence,
+        )?;
 
         let previous_generation = self.runtime_generation.current().await;
         let previous_generation_id = candidate.expected_generation_id;
@@ -1019,11 +1043,14 @@ impl IpcServer {
                 &self.document_analysis,
                 &self.language_intelligence,
             );
-            // Old grants/process authority end at commit. Cleanup failure must
-            // not restore previous-generation executable handlers.
+            // Old trusted grants/process authority end at commit; the shared
+            // third-party domain (workers, providers, language-server
+            // sessions) survives a trusted reload (Plan 061 task 12). Cleanup
+            // failure must not restore previous-generation executable
+            // handlers.
             let _ = previous_generation
                 .service
-                .shutdown_generation_resources()
+                .shutdown_trusted_generation_resources()
                 .await;
             // Retain only the immediately previous inert manifest for bounded
             // stale Edit/EditorIntent acceptance. Executable authority is gone.

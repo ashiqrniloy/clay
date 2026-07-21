@@ -5,7 +5,7 @@ use deno_error::JsErrorBox;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    packages::record::{PackageRecord, assemble_package_record},
+    packages::record::PackageRecord,
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentFontRole,
         DocumentId, DocumentVersion, Modifiers, TokenType,
@@ -25,7 +25,14 @@ pub(super) fn op_clay_decorations_publish_decorations(
     let options = options_value.as_object().ok_or_else(|| {
         clay_error("clay.decorations.invalid_publication: options must be an object")
     })?;
-    let package = package_from_options(options, "render-decorations")?;
+    // Provenance comes from the host-owned executing-package context,
+    // resolved against the enabled set with an approved capability check;
+    // caller-supplied manifests are never consulted.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::RenderDecorations,
+        )?;
     let document_id = required_u64(
         options,
         "documentId",
@@ -196,81 +203,6 @@ fn modifiers_from_value(value: Option<&Value>) -> Result<Modifiers, JsErrorBox> 
             "clay.decorations.invalid_span: modifiers must be an array of strings",
         )),
     }
-}
-
-pub(super) fn package_from_options(
-    options: &Map<String, Value>,
-    required_permission: &str,
-) -> Result<PackageRecord, JsErrorBox> {
-    if let Some(manifest) = options.get("packageManifest") {
-        let package = assemble_package_record(manifest).map_err(|error| {
-            clay_error(format!(
-                "clay.packages.invalid_manifest: {:?}: {}",
-                error.rule, error.message
-            ))
-        })?;
-        if !package
-            .manifest
-            .clay
-            .permissions
-            .iter()
-            .any(|permission| permission.as_str() == required_permission)
-        {
-            return Err(clay_error(format!(
-                "clay.packages.missing_permission: package `{}` must declare `{required_permission}`",
-                package.manifest.name
-            )));
-        }
-        return Ok(package);
-    }
-
-    let package_name = required_str(options, "packageName", "clay.packages.invalid_manifest")?;
-    let package_version = options
-        .get("packageVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("0.0.0");
-    let api_prefix = required_str(options, "packagePrefix", "clay.packages.invalid_manifest")
-        .or_else(|_| required_str(options, "apiPrefix", "clay.packages.invalid_manifest"))?;
-    let permissions = options
-        .get("permissions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            clay_error(format!(
-                "clay.packages.missing_permission: `{required_permission}` permission is required"
-            ))
-        })?;
-    let permission_strings = permissions
-        .iter()
-        .map(|value| {
-            value.as_str().ok_or_else(|| {
-                clay_error("clay.packages.invalid_permissions: permissions must be strings")
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if !permission_strings.contains(&required_permission) {
-        return Err(clay_error(format!(
-            "clay.packages.missing_permission: `{required_permission}` permission is required"
-        )));
-    }
-    assemble_package_record(&json!({
-        "name": package_name,
-        "version": package_version,
-        "type": "module",
-        "exports": { ".": "./dist/index.js" },
-        "clay": {
-            "apiPrefix": api_prefix,
-            "entry": "./dist/index.js",
-            "permissions": permission_strings,
-            "modes": [options.get("mode").and_then(Value::as_str).unwrap_or(api_prefix)],
-            "docs": "./docs/index.md"
-        }
-    }))
-    .map_err(|error| {
-        clay_error(format!(
-            "clay.packages.invalid_manifest: {:?}: {}",
-            error.rule, error.message
-        ))
-    })
 }
 
 pub(super) fn parse_json(json_text: &str, code: &str) -> Result<Value, JsErrorBox> {

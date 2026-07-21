@@ -604,20 +604,28 @@ fn markdown_fixture_activates_with_markdown_it_adapter() {
 
     let load = std::fs::read_to_string("packages/markdown/dist/load.js")
         .expect("Markdown load runtime must exist");
+    // Plan 061 task 5: registrations use the host-stamped package context;
+    // no caller manifest crosses the facade boundary.
     assert!(load.contains("markdownPackageManifest"));
     assert!(load.contains("serverLoadPackage?.(packageManifest)"));
-    assert!(load.contains("serverRegisterModePattern(packageManifest"));
-    assert!(load.contains("serverActivateMajorMode(packageManifest"));
-    assert!(load.contains("serverRegisterCommand(packageManifest"));
-    assert!(load.contains("packageManifest,"));
+    assert!(load.contains("serverRegisterModePattern({"));
+    assert!(load.contains("serverActivateMajorMode({"));
+    assert!(load.contains("serverRegisterCommand({"));
     assert!(load.contains("adapter: contract.parse.adapter"));
     assert!(load.contains("./dist/parser.js"));
     assert!(load.contains("./dist/sdui.js"));
-    assert!(
-        !load.contains("serverRegisterModePattern({")
-            && !load.contains("serverRegisterCommand({\n      packageName"),
-        "load runtime must use the real Clay facade signatures, not stale single-object stubs"
-    );
+    for stale in [
+        "serverRegisterModePattern(packageManifest",
+        "serverActivateMajorMode(packageManifest",
+        "serverRegisterCommand(packageManifest",
+        "serverRegisterComponentContribution?.(packageManifest",
+        "packageManifest,\n",
+    ] {
+        assert!(
+            !load.contains(stale),
+            "load runtime must not pass caller manifests across facades (`{stale}`)"
+        );
+    }
 }
 
 #[test]
@@ -753,15 +761,26 @@ fn windows_markdown_open_fixture_loads_markdown_package() {
     // preview is a package PanelContribution, not fixture publishTree output.
     for expected in [
         "@clay/markdown",
-        "serverLoadPackage(markdownPackage)",
-        "serverRegisterModePattern(markdownPackage",
-        "serverRegisterParseHandler({",
-        "serverPublishDecorations({",
-        "extensions: [\"md\", \"markdown\", \"mdown\"]",
+        "loadPackage",
+        "serverActivateClassifiedMode(classification",
+        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });",
     ] {
         assert!(
             fixture.contains(expected),
             "Windows Markdown open fixture must include `{expected}`"
+        );
+    }
+    // Inline package manifests and config-side contribution registration are
+    // not package authority (Plan 061 task 5).
+    for forbidden_manifest in [
+        "markdownPackage",
+        "serverRegisterModePattern(",
+        "serverRegisterParseHandler(",
+        "serverPublishDecorations(",
+    ] {
+        assert!(
+            !fixture.contains(forbidden_manifest),
+            "Windows Markdown open fixture must not self-assert package authority (`{forbidden_manifest}`)"
         );
     }
     for forbidden in [
@@ -1162,6 +1181,9 @@ fn markdown_disabled_falls_back_to_plain_text_after_rewrite() {
             "test-user",
         )
         .expect("Markdown package authorization must succeed");
+    service
+        .approve_package("@clay/markdown", "test")
+        .expect("Markdown package adoption approval must succeed");
     service
         .enable("@clay/markdown")
         .expect("Markdown package must enable before fallback test");

@@ -96,6 +96,23 @@ pub enum PackageServiceError {
     PackageGraphCycle { cycle: Vec<String> },
     /// A package attempted disables/replaces without an explicit package-control grant.
     MissingPackageControlGrant { package_name: String },
+    /// A structured relation request failed owner/user consent verification.
+    RelationDenied {
+        package_name: String,
+        code: &'static str,
+        detail: String,
+    },
+    /// A third-party package cannot execute without an exact current durable
+    /// user approval (Plan 061 task 10 pre-execution adoption gate).
+    AdoptionRequired {
+        package_name: String,
+        code: &'static str,
+        detail: String,
+    },
+    /// The durable package approval store failed to load or persist.
+    ApprovalStore { message: String },
+    /// Rollback requested for a package with no active replacement.
+    NoActiveReplacement { target: String },
 }
 
 impl std::error::Error for PackageServiceError {}
@@ -155,6 +172,26 @@ impl std::fmt::Display for PackageServiceError {
                 f,
                 "package `{package_name}` declares disables/replaces without a package-control authorization grant"
             ),
+            Self::RelationDenied {
+                package_name,
+                code,
+                detail,
+            } => write!(
+                f,
+                "{code}: package `{package_name}` relation request denied ({detail})"
+            ),
+            Self::AdoptionRequired {
+                package_name,
+                code,
+                detail,
+            } => write!(
+                f,
+                "{code}: package `{package_name}` requires explicit user adoption before execution ({detail}); inspect with `clay package inspect {package_name}` and approve with `clay package adopt {package_name}`"
+            ),
+            Self::ApprovalStore { message } => write!(f, "{message}"),
+            Self::NoActiveReplacement { target } => {
+                write!(f, "no enabled package currently replaces `{target}`")
+            }
         }
     }
 }
@@ -236,6 +273,59 @@ pub struct PackageInspection {
     pub runtime_profile: Option<String>,
 }
 
+/// Adoption state of an installed package for inspection surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdoptionState {
+    /// No durable approval exists; the package cannot execute.
+    Pending,
+    /// An exact current durable approval covers the installed package.
+    Approved,
+    /// An approval exists but no longer matches the installed
+    /// identity/capabilities/processes/relations (stale or expanded).
+    Stale,
+    /// The approval was explicitly revoked.
+    Revoked,
+}
+
+/// All contribution IDs declared by a record (approval withdrawn lists).
+fn contribution_ids_of(record: &PackageRecord) -> Vec<String> {
+    let contributions = &record.contributions;
+    contributions
+        .commands
+        .iter()
+        .map(|d| d.id.clone())
+        .chain(
+            contributions
+                .completion_providers
+                .iter()
+                .map(|d| d.id.clone()),
+        )
+        .chain(contributions.language_servers.iter().map(|d| d.id.clone()))
+        .chain(
+            contributions
+                .language_intelligence_providers
+                .iter()
+                .map(|d| d.id.clone()),
+        )
+        .chain(contributions.sdui.iter().map(|d| d.region_id.clone()))
+        .chain(contributions.ui_components.iter().map(|d| d.id.clone()))
+        .chain(contributions.ui_panels.iter().map(|d| d.id.clone()))
+        .chain(contributions.syntax_grammars.iter().map(|d| d.id.clone()))
+        .collect()
+}
+
+/// Default on-disk package store root shared by the CLI and the production
+/// server runtime: `~/.config/clay/packages`.
+pub fn default_store_root() -> std::path::PathBuf {
+    let base = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    match base {
+        Some(home) => home.join(".config").join("clay").join("packages"),
+        None => std::path::PathBuf::from(".clay-packages"),
+    }
+}
+
 /// One shared package-management service.
 ///
 /// The `backend` field is boxed so that tests can inject a [`crate::packages::manager::FakeBackend`]
@@ -259,6 +349,8 @@ pub struct PackageService {
     package_generation: u64,
     /// Package-scoped revocation records keyed by package name.
     revocations: HashMap<String, PackageRevocationRecord>,
+    /// Durable host-owned user approvals (`clay-package-approval-v1`).
+    approvals: crate::packages::approvals::PackageApprovalStore,
 }
 
 impl PackageService {
@@ -280,7 +372,250 @@ impl PackageService {
             conflict_resolutions: Vec::new(),
             package_generation: 0,
             revocations: HashMap::new(),
+            approvals: crate::packages::approvals::PackageApprovalStore::in_memory(),
         }
+    }
+
+    /// Create a service backed by the durable approval store under
+    /// `store_root` (`clay-package-approvals.json`). Loading fails closed on
+    /// corruption, truncation, unknown store version, or unsafe permissions:
+    /// a store Clay cannot trust behaves as a hard error, never as "no
+    /// approvals". Production wiring uses this constructor.
+    pub fn open(
+        store_root: impl Into<PathBuf>,
+        backend: Box<dyn PackageManagerBackend>,
+    ) -> Result<Self, PackageServiceError> {
+        let store_root = store_root.into();
+        let approvals = crate::packages::approvals::PackageApprovalStore::open(&store_root)
+            .map_err(|error| PackageServiceError::ApprovalStore {
+                message: error.to_string(),
+            })?;
+        let mut service = Self::new(store_root, backend);
+        service.approvals = approvals;
+        Ok(service)
+    }
+
+    /// The approval store (read-only) for host-side coverage checks.
+    // Used by cross-domain envelope validation (handlers wired in task 8).
+    #[allow(dead_code)]
+    pub(crate) fn approval_store(&self) -> &crate::packages::approvals::PackageApprovalStore {
+        &self.approvals
+    }
+
+    /// Host-authored durable approval records (read-only view).
+    pub fn package_approvals(
+        &self,
+    ) -> impl Iterator<Item = &crate::packages::approvals::PackageApprovalRecord> {
+        self.approvals.records()
+    }
+
+    /// Record one host-authored durable approval and persist the store.
+    /// Package code has no path to this; only host approval flows call it.
+    pub fn record_package_approval(
+        &mut self,
+        record: crate::packages::approvals::PackageApprovalRecord,
+    ) -> Result<(), PackageServiceError> {
+        self.approvals
+            .upsert(record)
+            .map_err(|error| PackageServiceError::ApprovalStore {
+                message: error.to_string(),
+            })
+    }
+
+    /// Build and persist an exact durable approval for an installed package
+    /// from host-side facts (identity, capabilities, processes, relations,
+    /// replacements). One authority path shared by CLI and future native UI
+    /// (Plan 061 task 10).
+    pub fn approve_package(
+        &mut self,
+        package_name: &str,
+        approved_by: &str,
+    ) -> Result<crate::packages::approvals::PackageApprovalRecord, PackageServiceError> {
+        let installed =
+            self.installed
+                .get(package_name)
+                .ok_or_else(|| PackageServiceError::NotInstalled {
+                    package_name: package_name.to_string(),
+                })?;
+        let record = assemble_package_record(&installed.package_json)
+            .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
+        let capabilities = record
+            .manifest
+            .clay
+            .permissions
+            .iter()
+            .map(|permission| permission.as_str().to_string())
+            .collect();
+        let processes = record
+            .contributions
+            .language_servers
+            .iter()
+            .map(|descriptor| descriptor.id.clone())
+            .collect();
+        let relations = record
+            .manifest
+            .clay
+            .graph
+            .relation_requests
+            .iter()
+            .map(|request| crate::packages::approvals::ApprovedRelation {
+                package: request.package.clone(),
+                extension_point: request.extension_point.clone(),
+                version: request.version,
+                operation: request.operation.as_str().to_string(),
+                scopes: request.scopes.clone(),
+            })
+            .collect();
+        let replacements = record
+            .manifest
+            .clay
+            .graph
+            .replaces
+            .iter()
+            .map(|target| {
+                let withdrawn_contributions = self
+                    .installed
+                    .get(target)
+                    .and_then(|target_installed| {
+                        assemble_package_record(&target_installed.package_json).ok()
+                    })
+                    .map(|target_record| contribution_ids_of(&target_record))
+                    .unwrap_or_default();
+                crate::packages::approvals::ApprovedReplacement {
+                    target: target.clone(),
+                    replacement_package: record.manifest.name.clone(),
+                    replacement_version: record.manifest.version.clone(),
+                    replacement_source: installed.provenance.requested_spec.clone(),
+                    replacement_integrity: installed.provenance.integrity.clone(),
+                    withdrawn_contributions,
+                    compatibility_claims: Vec::new(),
+                    rollback_restore_target: true,
+                }
+            })
+            .collect();
+        let approval = crate::packages::approvals::PackageApprovalRecord {
+            package: installed.provenance.resolved_name.clone(),
+            resolved_version: installed.provenance.resolved_version.clone(),
+            source: installed.provenance.requested_spec.clone(),
+            integrity: installed.provenance.integrity.clone(),
+            package_root: installed
+                .provenance
+                .package_root
+                .to_string_lossy()
+                .into_owned(),
+            api_prefix: record.manifest.clay.api_prefix.clone(),
+            capabilities,
+            processes,
+            relations,
+            replacements,
+            approved_by: approved_by.to_string(),
+            approved_at: crate::packages::approvals::rfc3339_now(),
+            revoked: false,
+        };
+        self.record_package_approval(approval.clone())?;
+        Ok(approval)
+    }
+
+    /// Current adoption state of an installed package (None if not installed).
+    pub fn adoption_state(&self, package_name: &str) -> Option<AdoptionState> {
+        let installed = self.installed.get(package_name)?;
+        let record = assemble_package_record(&installed.package_json).ok()?;
+        let processes: Vec<String> = record
+            .contributions
+            .language_servers
+            .iter()
+            .map(|descriptor| descriptor.id.clone())
+            .collect();
+        match self.approvals.approval_covers(
+            &installed.provenance,
+            &record.manifest.clay.api_prefix,
+            &record.manifest.clay.permissions,
+            &processes,
+            &record.manifest.clay.graph,
+        ) {
+            Ok(()) => Some(AdoptionState::Approved),
+            Err(crate::packages::approvals::ApprovalMismatch::NotFound) => {
+                Some(AdoptionState::Pending)
+            }
+            Err(crate::packages::approvals::ApprovalMismatch::Revoked) => {
+                Some(AdoptionState::Revoked)
+            }
+            Err(_) => Some(AdoptionState::Stale),
+        }
+    }
+
+    /// Revoke a durable approval (kept for diagnostics) and persist.
+    pub fn revoke_package_approval(
+        &mut self,
+        package_name: &str,
+    ) -> Result<bool, PackageServiceError> {
+        self.approvals
+            .revoke(package_name)
+            .map_err(|error| PackageServiceError::ApprovalStore {
+                message: error.to_string(),
+            })
+    }
+
+    /// Verify owner-plus-user consent for structured relation requests before
+    /// the requester is enabled (and therefore before any of its code runs).
+    /// Owner consent: the target's enabled record declares the exact
+    /// versioned extension point and operation. User consent: third-party
+    /// requesters additionally need an exact durable approval covering
+    /// identity, capabilities, processes, and relation edges; trusted-domain
+    /// packages are pre-authorized by the bundled inventory and skip the
+    /// durable-approval requirement.
+    fn verify_relation_authority(&self, record: &PackageRecord) -> Result<(), PackageServiceError> {
+        let requests = &record.manifest.clay.graph.relation_requests;
+        for request in requests {
+            let target = self.enabled.get(&request.package).ok_or_else(|| {
+                PackageServiceError::RelationDenied {
+                    package_name: record.manifest.name.clone(),
+                    code: "clay.package_relation.target_not_enabled",
+                    detail: format!("relation target `{}` is not enabled", request.package),
+                }
+            })?;
+            crate::packages::extension_points::verify_relation_request(
+                &target.manifest.clay.extension_points,
+                request,
+            )
+            .map_err(|error| PackageServiceError::RelationDenied {
+                package_name: record.manifest.name.clone(),
+                code: error.code(),
+                detail: format!("{:?}", error),
+            })?;
+        }
+        // Pre-execution adoption gate (Plan 061 task 10): NO third-party
+        // package executes without an exact current durable user approval
+        // covering identity, capabilities, processes, and relations —
+        // relation-bearing or not. Trusted bundled packages are exempt (their
+        // authority is the compiled inventory, not user adoption).
+        if record.runtime_domain == crate::packages::bundled::RuntimeDomain::ThirdParty {
+            let installed = self.installed.get(&record.manifest.name).ok_or_else(|| {
+                PackageServiceError::NotInstalled {
+                    package_name: record.manifest.name.clone(),
+                }
+            })?;
+            let processes: Vec<String> = record
+                .contributions
+                .language_servers
+                .iter()
+                .map(|descriptor| descriptor.id.clone())
+                .collect();
+            self.approvals
+                .approval_covers(
+                    &installed.provenance,
+                    &record.manifest.clay.api_prefix,
+                    &record.manifest.clay.permissions,
+                    &processes,
+                    &record.manifest.clay.graph,
+                )
+                .map_err(|mismatch| PackageServiceError::AdoptionRequired {
+                    package_name: record.manifest.name.clone(),
+                    code: mismatch.code(),
+                    detail: format!("{:?}", mismatch),
+                })?;
+        }
+        Ok(())
     }
 
     /// Repopulate the `installed` map from the package-manager store.
@@ -619,9 +954,10 @@ impl PackageService {
                 package_name: package_name.to_string(),
             }
         })?;
-        if installed.provenance.source_kind
-            != crate::packages::manager::PackageSourceKind::ClayShipped
-        {
+        // Bundled defaults require exact inventory verification: name, version,
+        // canonical shipped root, and manifest integrity. Requested source kind
+        // or `@clay/*` naming alone never qualifies.
+        if crate::packages::bundled::verify_bundled_trust(&installed.provenance).is_err() {
             return Err(PackageServiceError::BundledTrustDenied {
                 package_name: package_name.to_string(),
             });
@@ -684,12 +1020,43 @@ impl PackageService {
         let previous_resolutions = self.conflict_resolutions.clone();
         let previous_revocations = self.revocations.clone();
         let previous_package_generation = self.package_generation;
-        let result = self.enable_graph(package_name, &mut Vec::new());
+        let previous_approvals = self.approvals.snapshot();
+        let resolution_offset = previous_resolutions.len();
+        let result = self
+            .enable_graph(package_name, &mut Vec::new())
+            .and_then(|_| {
+                // Stale-on-replacement (Plan 061 task 11): a committed
+                // replacement revokes the replaced target's durable approval,
+                // so restoring the target always requires an explicit user
+                // rollback/re-adoption — never a silent old-approval reuse.
+                // Trusted targets hold no approval record; `revoke` no-ops.
+                let replaced: Vec<String> = self.conflict_resolutions[resolution_offset..]
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.reason == PackageConflictResolutionReason::PackageReplaces
+                            && diagnostic.winner.package_name == package_name
+                    })
+                    .map(|diagnostic| diagnostic.loser.package_name.clone())
+                    .collect();
+                for target in replaced {
+                    self.approvals.revoke(&target).map_err(|error| {
+                        PackageServiceError::ApprovalStore {
+                            message: error.to_string(),
+                        }
+                    })?;
+                }
+                Ok(())
+            });
         if let Err(error) = result {
             self.enabled = previous_enabled;
             self.conflict_resolutions = previous_resolutions;
             self.revocations = previous_revocations;
             self.package_generation = previous_package_generation;
+            if let Err(restore_error) = self.approvals.restore(previous_approvals) {
+                return Err(PackageServiceError::ApprovalStore {
+                    message: format!("approval rollback failed: {restore_error}"),
+                });
+            }
             return Err(error);
         }
         Ok(self
@@ -698,11 +1065,64 @@ impl PackageService {
             .expect("root package must be enabled after successful graph evaluation"))
     }
 
+    /// Explicit user rollback of a committed replacement (Plan 061 task 11):
+    /// disable the active replacement of `target`, re-adopt the target when
+    /// it is third-party (the replacement commit revoked its approval), and
+    /// re-enable it. Returns the disabled replacement's name. Restoration is
+    /// always this explicit user action — never an automatic reversal.
+    pub fn rollback_replacement(&mut self, target: &str) -> Result<String, PackageServiceError> {
+        let replacement = self
+            .enabled
+            .values()
+            .find(|record| {
+                record.manifest.clay.graph.replaces.iter().any(|spec| {
+                    self.installed_package_for_specifier(spec)
+                        .is_some_and(|(name, _)| name == target)
+                })
+            })
+            .map(|record| record.manifest.name.clone())
+            .ok_or_else(|| PackageServiceError::NoActiveReplacement {
+                target: target.to_string(),
+            })?;
+        self.disable(&replacement)?;
+        let installed =
+            self.installed
+                .get(target)
+                .ok_or_else(|| PackageServiceError::NotInstalled {
+                    package_name: target.to_string(),
+                })?;
+        let third_party =
+            crate::packages::bundled::verify_bundled_trust(&installed.provenance).is_err();
+        if third_party && !matches!(self.adoption_state(target), Some(AdoptionState::Approved)) {
+            self.approve_package(target, "rollback")?;
+        }
+        self.enable(target)?;
+        Ok(replacement)
+    }
+
     /// Disable a currently enabled package.
     ///
     /// Removes the package from the enabled set, freeing all package-owned
     /// contribution categories and recording a package-scoped revocation
     /// generation for runtime/parse/UI withdrawal hooks.
+    /// Test-only: stamp the runtime domain of an enabled record so synthetic
+    /// packages can exercise trusted-domain dispatch paths.
+    #[cfg(test)]
+    pub(crate) fn force_enabled_runtime_domain_for_test(
+        &mut self,
+        package_name: &str,
+        package_version: &str,
+        domain: crate::packages::bundled::RuntimeDomain,
+    ) {
+        if let Some(record) = self
+            .enabled
+            .get_mut(package_name)
+            .filter(|record| record.manifest.version == package_version)
+        {
+            record.runtime_domain = domain;
+        }
+    }
+
     pub fn disable(&mut self, package_name: &str) -> Result<PackageRecord, PackageServiceError> {
         self.revoke_enabled_package(package_name, "disable")
     }
@@ -755,6 +1175,31 @@ impl PackageService {
         self.enabled.values()
     }
 
+    /// Host-owned enabled record for an exact name/version pair. Used at
+    /// package-facing op ingress so the executing package context resolves
+    /// against the enabled set (a disabled or stale-version package fails
+    /// closed).
+    pub(crate) fn enabled_record(
+        &self,
+        package_name: &str,
+        package_version: &str,
+    ) -> Option<&PackageRecord> {
+        self.enabled
+            .get(package_name)
+            .filter(|record| record.manifest.version == package_version)
+    }
+
+    /// Whether the current authorization record approves `permission` for
+    /// `package_name` (never caller-declared permissions).
+    pub(crate) fn has_approved_capability(
+        &self,
+        package_name: &str,
+        permission: crate::packages::permissions::PackagePermission,
+    ) -> bool {
+        self.authorization_for(package_name)
+            .is_some_and(|authorization| authorization.approved_capabilities.contains(&permission))
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     fn enable_graph(
@@ -770,6 +1215,27 @@ impl PackageService {
                 cycle: cycle_from_stack(stack, package_name),
             });
         }
+        // A package replaced by an enabled replacement must not be silently
+        // re-enabled to satisfy another package's dependency edge; restoring
+        // it is the explicit user rollback path. Compatibility claims in the
+        // approval record are disclosure-only today: dependency substitution
+        // through a replacement stays fail-closed.
+        if !stack.is_empty()
+            && !self.enabled.contains_key(package_name)
+            && self.conflict_resolutions.iter().any(|diagnostic| {
+                diagnostic.reason == PackageConflictResolutionReason::PackageReplaces
+                    && diagnostic.loser.package_name == package_name
+                    && self.enabled.contains_key(&diagnostic.winner.package_name)
+            })
+        {
+            return Err(PackageServiceError::RelationDenied {
+                package_name: package_name.to_string(),
+                code: "clay.package_replacement.target_replaced",
+                detail: format!(
+                    "package `{package_name}` was replaced by user-approved replacement; dependents require explicit rollback of the replacement"
+                ),
+            });
+        }
 
         let installed = self
             .installed
@@ -780,8 +1246,9 @@ impl PackageService {
             .clone();
 
         // Clay-owned validation: must pass before any contribution is activated.
-        let record = assemble_package_record(&installed.package_json)
+        let mut record = assemble_package_record(&installed.package_json)
             .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
+        record.runtime_domain = crate::packages::bundled::runtime_domain(&installed.provenance);
         self.ensure_capability_grants(package_name, &record)?;
         let graph = PackageGraphPlan::from_relations(&record.manifest.clay.graph);
         if graph.requires_package_control() {
@@ -794,6 +1261,8 @@ impl PackageService {
             self.enable_graph(target, stack)?;
         }
         stack.pop();
+
+        self.verify_relation_authority(&record)?;
 
         for target in &resolved_graph.disables {
             self.record_package_control_resolution(

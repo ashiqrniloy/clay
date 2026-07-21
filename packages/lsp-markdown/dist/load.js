@@ -5,7 +5,6 @@ import { analyzerId, contributionId, lspMarkdownPackageManifest } from "./index.
 export async function loadLspMarkdownPackage() {
   const packageManifest = lspMarkdownPackageManifest();
   await serverRegisterDocumentAnalyzer({
-    packageManifest,
     analyzer: {
       id: analyzerId,
       contribution: contributionId,

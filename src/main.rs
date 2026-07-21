@@ -467,6 +467,14 @@ enum PackageCliSubcommand {
     Disable { package_name: String },
     /// Inspect metadata for a specific package.
     Inspect { package_name: String },
+    /// Approve an installed package for execution (writes a durable exact
+    /// approval record after host-side fact assembly).
+    Adopt { package_name: String },
+    /// Revoke a package's durable approval and disable it if enabled.
+    Revoke { package_name: String },
+    /// Roll back an active replacement: disable the replacement and restore
+    /// the named target package.
+    Rollback { target_name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -491,7 +499,7 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay restart\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay restart          Stop and replace the default background server on Linux, then exit.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
+const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay restart\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay package adopt <name>\n  clay package revoke <name>\n  clay package rollback <name>\n  clay <endpoint>\n\nModes:\n  clay                  Connect to the default local endpoint, start a background server if missing, then open the GUI.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Connect to the default local endpoint, or open a local fallback GUI if missing.\n  clay restart          Stop and replace the default background server on Linux, then exit.\n  clay smoke-gui        App-managed GUI smoke mode; starts an isolated child server, opens a client, then cleans up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect/adopt/revoke/rollback).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchDiagnostic {
@@ -877,7 +885,7 @@ fn parse_package_subcommand(args: impl Iterator<Item = OsString>) -> Result<Clay
     let mut args = args.peekable();
     let Some(op) = args.next() else {
         return Err(CliError::new(
-            "clay package requires a subcommand: add | remove | list | enable | disable | inspect",
+            "clay package requires a subcommand: add | remove | list | enable | disable | inspect | adopt | revoke | rollback",
         ));
     };
     match op.to_string_lossy().as_ref() {
@@ -949,8 +957,38 @@ fn parse_package_subcommand(args: impl Iterator<Item = OsString>) -> Result<Clay
                 },
             })
         }
+        "adopt" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package adopt requires a package name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Adopt {
+                    package_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        "revoke" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package revoke requires a package name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Revoke {
+                    package_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
+        "rollback" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package rollback requires a target name"))?;
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Rollback {
+                    target_name: name.to_string_lossy().into_owned(),
+                },
+            })
+        }
         unknown => Err(CliError::new(format!(
-            "unknown clay package subcommand `{unknown}`; expected: add | remove | list | enable | disable | inspect"
+            "unknown clay package subcommand `{unknown}`; expected: add | remove | list | enable | disable | inspect | adopt | revoke | rollback"
         ))),
     }
 }
@@ -959,9 +997,10 @@ fn run_package_subcommand(subcommand: PackageCliSubcommand) -> Result<(), Box<dy
     use clay::packages::manager::PnpmBackend;
     use clay::packages::service::PackageService;
 
-    // Default store: ~/.config/clay/packages
-    let store_root = dirs_home_config_clay_packages();
-    let mut service = PackageService::new(store_root, Box::new(PnpmBackend::new()));
+    // Default store: ~/.config/clay/packages. The durable approval store
+    // under the same root fails closed on corruption/unsafe permissions.
+    let store_root = clay::packages::service::default_store_root();
+    let mut service = PackageService::open(store_root, Box::new(PnpmBackend::new()))?;
 
     // A fresh service starts with an empty installed map. Repopulate it from
     // the package-manager store so `list`/`enable`/`disable`/`inspect`/`remove`
@@ -1040,22 +1079,66 @@ fn run_package_subcommand(subcommand: PackageCliSubcommand) -> Result<(), Box<dy
                 if let Some(docs) = &inspection.docs_path {
                     println!("Docs:        {docs}");
                 }
+                let adoption = match service.adoption_state(&package_name) {
+                    Some(clay::packages::service::AdoptionState::Pending) => {
+                        "pending adoption (cannot execute)"
+                    }
+                    Some(clay::packages::service::AdoptionState::Approved) => "approved",
+                    Some(clay::packages::service::AdoptionState::Stale) => {
+                        "stale approval (re-adopt required)"
+                    }
+                    Some(clay::packages::service::AdoptionState::Revoked) => "approval revoked",
+                    None => "unknown",
+                };
+                println!("Adoption:    {adoption}");
             }
             None => eprintln!("Package `{package_name}` is not installed."),
         },
+        PackageCliSubcommand::Adopt { package_name } => {
+            if service.inspect(&package_name).is_none() {
+                eprintln!("Package `{package_name}` is not installed.");
+                return Ok(());
+            }
+            let approval = service.approve_package(&package_name, "cli")?;
+            println!("Adopted {} {}", approval.package, approval.resolved_version);
+            println!("  capabilities: {}", approval.capabilities.join(", "));
+            if !approval.processes.is_empty() {
+                println!("  processes:    {}", approval.processes.join(", "));
+            }
+            for relation in &approval.relations {
+                println!(
+                    "  relation:     {} {} {}@{}",
+                    relation.operation,
+                    relation.package,
+                    relation.extension_point,
+                    relation.version
+                );
+            }
+            for replacement in &approval.replacements {
+                println!("  replaces:     {}", replacement.target);
+            }
+        }
+        PackageCliSubcommand::Revoke { package_name } => {
+            if service.inspect(&package_name).is_none() {
+                eprintln!("Package `{package_name}` is not installed.");
+                return Ok(());
+            }
+            let revoked = service.revoke_package_approval(&package_name)?;
+            if service.disable(&package_name).is_ok() {
+                println!("Disabled {package_name}");
+            }
+            if revoked {
+                println!("Revoked approval for {package_name}");
+            } else {
+                println!("No approval recorded for {package_name}");
+            }
+        }
+        PackageCliSubcommand::Rollback { target_name } => {
+            let replacement = service.rollback_replacement(&target_name)?;
+            println!("Disabled replacement {replacement}; restored {target_name}");
+        }
     }
     Ok(())
-}
-
-fn dirs_home_config_clay_packages() -> std::path::PathBuf {
-    // Prefer the platform config dir; fall back to the current directory.
-    let base = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from);
-    match base {
-        Some(home) => home.join(".config").join("clay").join("packages"),
-        None => std::path::PathBuf::from(".clay-packages"),
-    }
 }
 
 #[cfg(any(unix, windows))]

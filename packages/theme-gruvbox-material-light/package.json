@@ -19,57 +19,220 @@
     },
     "contributions": {
       "textStyles": [
-        { "token": "shellBg", "color": "#fbf1c7" },
-        { "token": "panelBg", "color": "#f2e5bc" },
-        { "token": "text", "color": "#504940" },
-        { "token": "placeholder", "color": "#a89984" },
-        { "token": "selection", "color": "#07667833" },
-        { "token": "caret", "color": "#504940" },
-        { "token": "scrollbar", "color": "#928374aa" },
-        { "token": "scrollbarTrack", "color": "#a8998422" },
-        { "token": "statusBg", "color": "#ebd9b1" },
-        { "token": "statusText", "color": "#504940" },
-        { "token": "diagnosticError", "color": "#c14a4a" },
-        { "token": "diagnosticWarning", "color": "#b47109" },
-        { "token": "diagnosticInfo", "color": "#45707a" },
-
-        { "token": "Keyword", "color": "#c14a4a", "bold": true },
-        { "token": "Modifier", "color": "#c35e0a" },
-        { "token": "Operator", "color": "#4c7a4d" },
-        { "token": "Comment", "color": "#a89984", "italic": true },
-        { "token": "String", "color": "#6c782e" },
-        { "token": "Number", "color": "#945e80" },
-        { "token": "Regexp", "color": "#4c7a4d" },
-        { "token": "Function", "color": "#b47109", "bold": true },
-        { "token": "Method", "color": "#b47109" },
-        { "token": "Macro", "color": "#945e80" },
-        { "token": "Namespace", "color": "#45707a" },
-        { "token": "Type", "color": "#b47109" },
-        { "token": "Class", "color": "#c35e0a" },
-        { "token": "Enum", "color": "#45707a" },
-        { "token": "Interface", "color": "#45707a" },
-        { "token": "Struct", "color": "#c35e0a" },
-        { "token": "TypeParameter", "color": "#c35e0a" },
-        { "token": "Parameter", "color": "#3c3836" },
-        { "token": "Variable", "color": "#3c3836" },
-        { "token": "Property", "color": "#3c3836" },
-        { "token": "EnumMember", "color": "#6c782e" },
-        { "token": "Event", "color": "#c35e0a" },
-        { "token": "Decorator", "color": "#945e80" },
-
-        { "token": "Heading1", "color": "#c14a4a", "bold": true },
-        { "token": "Heading2", "color": "#c35e0a", "bold": true },
-        { "token": "Heading3", "color": "#b47109", "bold": true },
-        { "token": "Heading4", "color": "#6c782e" },
-        { "token": "Heading5", "color": "#4c7a4d" },
-        { "token": "Heading6", "color": "#45707a" },
-        { "token": "ListItem", "color": "#504940" },
-        { "token": "Quote", "color": "#a89984", "italic": true },
-        { "token": "CodeBlock", "color": "#504940" },
-        { "token": "CodeSpan", "color": "#c35e0a" },
-        { "token": "Link", "color": "#45707a", "underline": true },
-        { "token": "Paragraph", "color": "#504940" }
+        {
+          "token": "shellBg",
+          "color": "#fbf1c7"
+        },
+        {
+          "token": "panelBg",
+          "color": "#f2e5bc"
+        },
+        {
+          "token": "text",
+          "color": "#504940"
+        },
+        {
+          "token": "placeholder",
+          "color": "#a89984"
+        },
+        {
+          "token": "selection",
+          "color": "#07667833"
+        },
+        {
+          "token": "caret",
+          "color": "#504940"
+        },
+        {
+          "token": "scrollbar",
+          "color": "#928374aa"
+        },
+        {
+          "token": "scrollbarTrack",
+          "color": "#a8998422"
+        },
+        {
+          "token": "statusBg",
+          "color": "#ebd9b1"
+        },
+        {
+          "token": "statusText",
+          "color": "#504940"
+        },
+        {
+          "token": "diagnosticError",
+          "color": "#c14a4a"
+        },
+        {
+          "token": "diagnosticWarning",
+          "color": "#b47109"
+        },
+        {
+          "token": "diagnosticInfo",
+          "color": "#45707a"
+        },
+        {
+          "token": "Keyword",
+          "color": "#c14a4a",
+          "bold": true
+        },
+        {
+          "token": "Modifier",
+          "color": "#c35e0a"
+        },
+        {
+          "token": "Operator",
+          "color": "#4c7a4d"
+        },
+        {
+          "token": "Comment",
+          "color": "#a89984",
+          "italic": true
+        },
+        {
+          "token": "String",
+          "color": "#6c782e"
+        },
+        {
+          "token": "Number",
+          "color": "#945e80"
+        },
+        {
+          "token": "Regexp",
+          "color": "#4c7a4d"
+        },
+        {
+          "token": "Function",
+          "color": "#b47109",
+          "bold": true
+        },
+        {
+          "token": "Method",
+          "color": "#b47109"
+        },
+        {
+          "token": "Macro",
+          "color": "#945e80"
+        },
+        {
+          "token": "Namespace",
+          "color": "#45707a"
+        },
+        {
+          "token": "Type",
+          "color": "#b47109"
+        },
+        {
+          "token": "Class",
+          "color": "#c35e0a"
+        },
+        {
+          "token": "Enum",
+          "color": "#45707a"
+        },
+        {
+          "token": "Interface",
+          "color": "#45707a"
+        },
+        {
+          "token": "Struct",
+          "color": "#c35e0a"
+        },
+        {
+          "token": "TypeParameter",
+          "color": "#c35e0a"
+        },
+        {
+          "token": "Parameter",
+          "color": "#3c3836"
+        },
+        {
+          "token": "Variable",
+          "color": "#3c3836"
+        },
+        {
+          "token": "Property",
+          "color": "#3c3836"
+        },
+        {
+          "token": "EnumMember",
+          "color": "#6c782e"
+        },
+        {
+          "token": "Event",
+          "color": "#c35e0a"
+        },
+        {
+          "token": "Decorator",
+          "color": "#945e80"
+        },
+        {
+          "token": "Heading1",
+          "color": "#c14a4a",
+          "bold": true
+        },
+        {
+          "token": "Heading2",
+          "color": "#c35e0a",
+          "bold": true
+        },
+        {
+          "token": "Heading3",
+          "color": "#b47109",
+          "bold": true
+        },
+        {
+          "token": "Heading4",
+          "color": "#6c782e"
+        },
+        {
+          "token": "Heading5",
+          "color": "#4c7a4d"
+        },
+        {
+          "token": "Heading6",
+          "color": "#45707a"
+        },
+        {
+          "token": "ListItem",
+          "color": "#504940"
+        },
+        {
+          "token": "Quote",
+          "color": "#a89984",
+          "italic": true
+        },
+        {
+          "token": "CodeBlock",
+          "color": "#504940"
+        },
+        {
+          "token": "CodeSpan",
+          "color": "#c35e0a"
+        },
+        {
+          "token": "Link",
+          "color": "#45707a",
+          "underline": true
+        },
+        {
+          "token": "Paragraph",
+          "color": "#504940"
+        }
       ]
-    }
+    },
+    "extensionPoints": [
+      {
+        "id": "theme-gruvbox-material-light.tokens",
+        "version": 1,
+        "operations": [
+          "replace"
+        ],
+        "contributionKinds": [
+          "themeTokens"
+        ],
+        "summary": "Derive from this theme and override typed token values."
+      }
+    ]
   }
 }

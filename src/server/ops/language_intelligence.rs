@@ -25,7 +25,7 @@ use crate::{
 
 use super::{
     ClayOpState,
-    decorations::{clay_error, optional_u64, package_from_options, parse_json, required_str},
+    decorations::{clay_error, optional_u64, parse_json, required_str},
 };
 
 #[op2]
@@ -40,7 +40,11 @@ pub(super) fn op_clay_language_register_intelligence_provider(
         .ok_or_else(|| clay_error("clay.language.invalid_provider: options must be an object"))?;
     reject_executable_fields(options)?;
 
-    let package = package_from_options(options, "parse-document")?;
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::ParseDocument,
+        )?;
     let provider_options = options
         .get("provider")
         .and_then(Value::as_object)
@@ -284,8 +288,10 @@ pub(super) fn op_clay_language_store_intelligence_result(
             "clay.language.invalid_result: result must be an object",
         ));
     }
-    state
-        .borrow::<Arc<ClayOpState>>()
-        .store_language_intelligence_result_json(result_json);
+    // Bridge ingress revalidation (Plan 061 task 7): reject stale/revoked
+    // provider results before they reach host state.
+    let clay_state = state.borrow::<Arc<ClayOpState>>().clone();
+    clay_state.current_package_record()?;
+    clay_state.store_language_intelligence_result_json(result_json);
     Ok(())
 }

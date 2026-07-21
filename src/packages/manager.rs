@@ -21,6 +21,11 @@ const PACKAGE_MANAGER_DIAGNOSTIC_LIMIT: usize = 4 * 1024;
 // ── Backend trait ────────────────────────────────────────────────────────────
 
 /// Source family for a package spec delegated to the package manager.
+///
+/// This is the family *claimed by the requested specifier*; it is not a trust
+/// decision. Trusted runtime placement comes only from the bundled inventory
+/// verification in `crate::packages::bundled`, never from
+/// `PackageSourceKind::ClayShipped` or `@clay/*` naming alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageSourceKind {
     ClayShipped,

@@ -37,6 +37,38 @@
         }
       ],
       "decorations": []
-    }
+    },
+    "extensionPoints": [
+      {
+        "id": "git.statusRegion",
+        "version": 1,
+        "operations": [
+          "replace"
+        ],
+        "contributionKinds": [
+          "sduiRegion"
+        ],
+        "scopes": [
+          "git.status"
+        ],
+        "summary": "Replace the Git status SDUI region."
+      },
+      {
+        "id": "git.contributions",
+        "version": 1,
+        "operations": [
+          "append"
+        ],
+        "contributionKinds": [
+          "command",
+          "decorationLayer",
+          "statusItem",
+          "panelContribution",
+          "componentContribution",
+          "sduiRegion"
+        ],
+        "summary": "Add package-owned commands, decorations, status items, and panels built on cached Git status."
+      }
+    ]
   }
 }

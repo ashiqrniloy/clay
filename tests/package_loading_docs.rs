@@ -97,7 +97,7 @@ fn package_loading_keeps_validation_and_parsing_out_of_typing_hot_path() {
 }
 
 #[test]
-fn unified_package_authority_model_is_documented() {
+fn package_extension_and_adoption_authority_is_documented() {
     let authority = read("docs/wiki/modules/third-party-runtime-authority.md");
     let security = read("docs/reference/primitives/package-security.md");
     let loading = read("docs/reference/primitives/package-loading.md");
@@ -106,43 +106,38 @@ fn unified_package_authority_model_is_documented() {
         read("decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md");
     let package_ops = read("src/server/ops/packages.rs");
 
+    // Implemented Plan 061 architecture (post-two-domain split).
     for phrase in [
-        "one package authority model",
-        "Package source (`@clay/*`, npm, GitHub, git URL, tarball, or local path) affects default trust prompts",
-        "install != enable != load != runtime execution != package-manager execution != client behavior delivery",
-        "Plan 035 replaces this limitation with a source-aware resolver",
-        "package-control",
-        "package-import",
-        "filesystem",
-        "network",
-        "shell",
-        "workspace-mutation",
-        "dependsOn",
-        "extends",
-        "disables",
-        "replaces",
-        "native-trust | sandboxed | restricted",
+        "Package Extension and Adoption Authority",
+        "BUNDLED_PACKAGES",
+        "verify_bundled_trust",
+        "Package authority in Clay is built on four layers",
+        "extension_points.rs",
+        "approvals.rs",
+        "PackageApprovalStore",
+        "adoption_state",
+        "approve_package",
+        "No code executes before adoption",
+        "rollback_replacement",
+        "enable_graph",
+        "dependOn",
+        "extend",
+        "disable",
+        "replace",
     ] {
         assert!(
             authority.contains(phrase),
-            "unified authority wiki must document `{phrase}`"
+            "post-Plan-061 authority wiki must document `{phrase}`"
         );
     }
 
+    // Decision log and reference docs retain provenance semantics.
     for phrase in [
         "Unified Package Trust and Authorization Policy",
-        "user/admin authorization is the grant",
-        "package_authority",
-        "runtime_profile = \"native-trust\"",
-        "capabilities = [\"mode-registration\", \"package-control\", \"network\"]",
-        "Unified Package Capability Model",
         "PackageAuthorizationRecord",
         "PackageService::authorize_package",
         "enable` fails closed",
-        "clay.capabilities",
         "clay.permissions` compatibility path",
-        "These capabilities are not categorically unavailable to user-installed packages",
-        "Powerful Capabilities Require Explicit Grants",
         "not categorically unavailable to user-installed packages",
     ] {
         assert!(

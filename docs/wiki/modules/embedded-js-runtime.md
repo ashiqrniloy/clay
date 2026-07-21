@@ -29,11 +29,60 @@ Clay embeds `deno_core` behind a persistent server-side runtime service. The run
 - Return typed Rust results/errors to callers rather than panicking on JavaScript exceptions or op validation failures.
 - Convert runtime failures into sanitized `RuntimeDiagnostic` values for server logs, tests, and client status display.
 
+## Two Runtime Trust Domains (Plan 061)
+
+Clay runs exactly two persistent `JsRuntime` per `ClayJsRuntimeService`: one **Trusted** domain for Clay core, bundled first-party packages, and user configuration evaluation, and one **ThirdParty** domain for user-authorized third-party packages. The split is structural, not profile-based: `RuntimeDomain::Trusted` is granted by a compiled bundled inventory (`BUNDLED_PACKAGES` with FNV-1a-64 fingerprints over canonical roots), and everything else is `ThirdParty` with no promotion path into the trusted domain.
+
+### Source
+
+- `src/packages/bundled.rs` — `BUNDLED_PACKAGES` inventory, `verify_bundled_trust`, `bundle_extension_points_match_real_contributions` test.
+- `src/server/js_runtime.rs` — `DomainRuntime`, `start_runtime_worker`, `dispatch_to_domain`, `replay_third_party_domain`, `production_reload`, `absorb_cross_domain_evaluation`, `harvest_op_state_evaluation`, `third_party_registrations_snapshot`.
+- `src/server/ops/mod.rs` — `init_trusted_extension` (67 ops) vs `init_package_extension` (35 ops); `THIRD_PARTY_FACADES` allowlist (13 public facades).
+- `src/server/cross_domain.rs` — cross-domain typed invocation, envelope validation, requester/target approval checks.
+- `plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md`
+
+### Domain Workers
+
+Each domain has its own `DomainRuntime` struct holding a worker thread, an mpsc sender for `RuntimeCommand`, a shared `ClayOpState`, and a monotonic generation counter. The trusted worker (`clay-js-runtime` thread) evaluates user configuration and trusted package load entries. The third-party worker (`clay-js-runtime-third-party` thread) evaluates only approved third-party package load entries. Both share a single `PackageService` and `PackageLoadEntryAllowlist` via `Arc`.
+
+### Op and Facade Partitioning
+
+- **Trusted extension** (67 ops): all Clay ops including admin/config-only (configuration evaluation, package loading, theme management, language-server grant, bridge dispatch).
+- **Package extension** (35 ops): public third-party ops only — mode registration/activation, command/key/palette registration, parse/completion/language-intelligence provider registration, SDUI/decoration/diagnostic publication, theme application, typography setting, status-item registration, bindKey/unbindKey, and 4 cross-domain bridge result ops.
+- **Facade allowlists**: trusted worker can import all 21 `clay:*` facades; third-party worker can import only 13 public facades. Missing facades fail at module-load time with `'not allowed in the server runtime boundary'` (fail-closed by import denial).
+- **Op absence enforcement**: calling a trusted-only op in the third-party runtime produces `TypeError: undefined is not a function` — fail-closed by type absence rather than runtime gating at op entry.
+
+### Cross-Domain Bridge
+
+The `op_clay_packages_load_in_package_domain` bridge op receives a validated third-party record from the trusted domain, dispatches an `Evaluate` command to the third-party worker, and absorbs the returned `ClayRuntimeEvaluation` registrations (parse handlers, completion providers, language intelligence providers, document analyzers, SDUI/decoration/diagnostic sets) into the trusted worker's `ClayOpState`. Runtime records are merged; command/mode/UI registries remain per-worker.
+
+Four bridge result ops (`runtime_record`, `parse_store_update`, `completion_store_result`, `language_store_intelligence_result`) are the only sanctioned internal data flow between domains after initial load routing.
+
+### Worker Replacement and Replay
+
+When the third-party worker is poisoned (timeout, heap limit, or send failure), `dispatch_to_domain` replaces the worker, rewires the cross-domain bridge sender, and calls `replay_third_party_domain` to re-dispatch `Evaluate` commands for all enabled third-party packages. This restores provider registrations without server restart. Tokens are deterministic (`{apiPrefix}:{providerId}:{index}`), so replayed registrations match existing coordinator entries.
+
+On trusted-domain config reload, `production_reload(current_service)` creates a fresh trusted worker while sharing the third-party `DomainRuntime` Arc, `PackageService` Arc, and `PackageLoadEntryAllowlist` Arc — so third-party packages, registrations, and language-server sessions survive config evaluation. Only trusted-worker resources are torn down; the third-party worker is never replaced on config reload.
+
+### Document-Analysis Workers
+
+Document-analysis workers are dynamically forked from the owning domain worker's `ClayOpState` via `new_document_analysis_worker`. They share the parent's `PackageService` and `load_entry_allowlist` but are NOT additional persistent runtimes. Timeout poisons the entire owning domain worker (not just the analysis worker), matching the exactly-two-persistent-runtimes topology.
+
+### Invariants
+
+- Exactly two persistent `JsRuntime` at steady state. Analysis workers are temporary and do not increase persistent runtime count.
+- Third-party trust domain is shared across all third-party packages (one disclosed trust cohort), not per-package V8 isolates. Cross-package mutation within the third-party runtime is possible and disclosed to users at adoption time.
+- No promotion path: `RuntimeDomain::ThirdParty` never becomes `Trusted` through any user action. Clay core (`@clay/core`) is not replaceable.
+- Op set for the third-party runtime is a strict compile-time subset of the trusted op set (enforced by `domain_extension_is_strict_subset` test).
+- Facade allowlist for the third-party runtime is a strict compile-time subset of the trusted facade allowlist.
+- Approval gating is durable: third-party packages require a `PackageApprovalRecord` persisted at `~/.config/clay/packages` before evaluation. No code executes before approval.
+- Two-runtime overhead vs one-runtime: ~5 MiB RSS, 2 extra threads, warm evaluation median < 265 μs (within task 1 baseline).
+
 ## How It Works
 
 `RuntimeGenerationStore` owns the active `{ id, ClayJsRuntimeService, diagnostics }` generation for the server. `IpcServer::trigger_developer_hot_reload` is the deterministic non-GUI reload trigger for tests and developer workflow; it is a thin wrapper around `IpcServer::reload_runtime_generation` and adds no package-manager, filesystem, network, shell, or third-party package authority. `IpcServer::reload_runtime_generation` builds the next `ClayJsRuntimeService` off to the side, evaluates configured `init.js`/default package loads on that fresh runtime, and swaps the store only after configuration evaluation succeeds. After a successful swap, `refresh_open_documents_after_reload` enumerates already-open server-owned documents, reruns the same generic selected-file classification/activation path for each document, and returns only follow-up `BehaviorManifest`, `DecorationSet`, or diagnostic messages; it does not send `DocumentOpened`/`DocumentReloaded` full-text snapshots. Failure records a sanitized runtime diagnostic and keeps the previous generation ID/service active. Existing connection tasks ask the store for `current()` before selected-file activation, so later opens use the newest successful generation without respawning IPC connections.
 
-`ClayJsRuntimeService` starts a dedicated `clay-js-runtime` worker thread when the service is constructed. That worker owns one `deno_core::JsRuntime`, one single-thread Tokio runtime for driving `run_event_loop`, one mutable `ClayModuleLoader`, and one shared `ClayOpState`. Public async methods (`evaluate_controlled_module`, `load_configuration_from_root*`, and default configuration loading) send `RuntimeCommand::Evaluate` requests over a channel and await a oneshot response; the caller never holds or shares the V8 runtime.
+`ClayJsRuntimeService` starts TWO dedicated worker threads when constructed: one trusted and one third-party. Each worker owns one `deno_core::JsRuntime`, one single-thread Tokio runtime for driving `run_event_loop`, one mutable `ClayModuleLoader`, and one shared `ClayOpState`. Public async methods (`evaluate_controlled_module`, `load_configuration_from_root*`, and default configuration loading) send `RuntimeCommand::Evaluate` requests over a channel and await a oneshot response; the caller never holds or shares the V8 runtime.
 
 The first evaluation is loaded as the runtime's main ES module. Later evaluations use Deno side modules with unique `clay://runtime/main-N.js` specifiers, so global JS state, imported package modules, the first-party `loadEntry` allowlist, and registered package metadata survive across evaluations. `ClayOpState::begin_evaluation` clears per-evaluation records/SDUI/decorations before each command while preserving long-lived package/mode/handler registries needed by Phase 18.7. `ClayOpState::set_runtime_context` updates the current workspace and document id for the command without rebuilding the runtime.
 

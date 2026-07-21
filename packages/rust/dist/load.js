@@ -34,16 +34,14 @@ export function rustGrammarContract() {
 }
 
 export async function loadRustPackage() {
-  const manifest = rustPackageManifest();
-
   // Register inert native grammar/vocabulary metadata first; syntax selection
   // remains independent of active major mode.
-  await serverRegisterSyntaxGrammar(rustGrammarContract());
+  await serverRegisterSyntaxGrammar({});
 
   // Register the Rust major-mode pattern. Documents opened with matching
   // extensions or file names will classify as `rust` and activate with the
   // package-supplied editor rules below.
-  await serverRegisterModePattern(manifest, {
+  await serverRegisterModePattern({
     modeId,
     displayName: "Rust",
     defaultFontRole: "monospace",
@@ -55,7 +53,7 @@ export async function loadRustPackage() {
   // Register the package-prefixed command metadata so it appears in help,
   // command palettes, and validated action intents.
   for (const command of rustCommands) {
-    await serverRegisterCommand(manifest, {
+    await serverRegisterCommand({
       commandId: command.id,
       displayName: command.userFacingName,
       routingPolicy: command.routingPolicy,
@@ -65,13 +63,12 @@ export async function loadRustPackage() {
 
   // Register every bounded static completion contribution from the manifest;
   // snippet syntax remains inert until client-local accept expansion.
-  await serverRegisterCompletionProvider({ packageManifest: manifest });
+  await serverRegisterCompletionProvider({});
 
   // Register an optional status-item contribution. The item is inert metadata
   // validated by Clay before any client publication.
-  await serverRegisterComponentContribution(manifest, rustStatusItem);
+  await serverRegisterComponentContribution(rustStatusItem);
 
-  return manifest;
 }
 
 // Default activation entry invoked by `loadPackage("@clay/rust")`.

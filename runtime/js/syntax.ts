@@ -18,12 +18,6 @@ function parseResult(json: string): unknown {
 }
 
 export type ServerRegisterSyntaxGrammarOptions = {
-  packageManifest?: unknown;
-  packageName?: string;
-  packageVersion?: string;
-  packagePrefix?: string;
-  apiPrefix?: string;
-  permissions?: string[];
   syntaxGrammar?: unknown;
   contribution?: unknown;
   languageId?: string;

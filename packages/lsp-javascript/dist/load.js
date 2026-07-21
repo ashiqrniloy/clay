@@ -5,7 +5,6 @@ import { analyzerId, contributionId, lspJavascriptPackageManifest } from "./inde
 export async function loadLspJavascriptPackage() {
   const packageManifest = lspJavascriptPackageManifest();
   await serverRegisterDocumentAnalyzer({
-    packageManifest,
     analyzer: {
       id: analyzerId,
       contribution: contributionId,

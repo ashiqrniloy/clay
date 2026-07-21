@@ -73,6 +73,131 @@ Authorization work happens at install, enable, load, reload, startup, explicit u
 
 Current implementation: `PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`, contribution provenance, and deterministic conflict diagnostics. `PackageAuthorizationRecord` stores package identity/source, approved capability list, runtime profile, and approver. `PackageService::authorize_package` records user/admin grants, `enable` fails closed on requested capabilities without matching grants, and `PackageInspection` shows requested capabilities, approved capabilities, runtime profile, and source provenance. `validate_manifest_value` parses package graph declarations (`dependsOn`, `extends`, `disables`, `replaces`) into `PackageGraphRelations`; `src/packages/graph.rs` builds the enable-time graph plan; `PackageService::enable` loads dependency/extension targets, reports missing targets/cycles deterministically, and requires an explicit `package-control` authorization grant before `disables` or `replaces` can withdraw another enabled package. Remaining gaps are durable on-disk authorization persistence, package-scoped revocation indexes, package-import boundary enforcement, and conflict override/extend/replace resolution.
 
+## Package Runtime Trust Domains and Extension Authority
+
+Plan 061 locks the two-runtime trust model approved by `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`. This section is the canonical schema contract; it partially supersedes the single-authority-model language above where the two conflict. Implementation lands through Plan 061 tasks. Status: trust-domain classification, the two-runtime split, package-scoped provenance, extension-point/relation schemas, and the durable approval store are implemented (tasks 3-6); cross-domain invocation, adoption UX, and replacement flows remain locked design contracts until their tasks land.
+
+Locked security rules:
+
+1. **Exact trust classification.** `Trusted` placement resolves only from a compiled bundled inventory bound to exact package name, version, root/source kind, and integrity/fingerprint. `@clay/*` naming, local/npm/git sources, and normal user authorization never promote code into the trusted runtime. Everything else is `ThirdParty`.
+2. **Owner-plus-user extension consent.** A third-party mutation of first-party behavior requires both a target-declared versioned extension point (owner consent) and an exact durable user approval (user consent). Neither alone is sufficient; package code cannot approve itself.
+3. **User-only full replacement.** Whole-package replacement activates only through explicit user approval; another package's graph edge cannot silently replace a package. Replacement code keeps its own provenance, capabilities, and third-party placement; it never acquires the target's identity, grants, language-server executables, or trusted runtime.
+4. **Stale approval rules.** An approval is invalid when the approved package's resolved version/integrity/root changes, requested capabilities/processes/relations/scopes change (re-approval covers only the exact new request), a target extension point's version changes, or the target is itself replaced. Approvals are generation-scoped, durable, inspectable, and revocable; revocation withdraws package-owned contributions through existing generation/cancellation machinery.
+5. **Third-party shared-cohort disclosure.** All adopted third-party packages execute in one shared runtime and can see/mutate each other; the adoption UI and docs state this plainly and never present the cohort as per-package isolation. Host APIs still stamp per-package provenance and enforce grants, relations, generations, and revocation per package.
+6. **Non-replaceable Clay core.** Clay core, `core.text`, `core.code`, server document authority, the native shell, and Rust bootstrap are not packages and cannot be disabled or replaced by any package relation.
+7. **No bearer authority.** String tokens, handles, or identities visible to JavaScript are forbidden as authority; caller provenance comes only from host-owned activation/capability state. No V8 objects, functions, promises, globals, or module instances cross the domain boundary; cross-domain values are bounded inert JSON.
+
+What existing primitives already provide (reuse, do not rebuild): `PackageService` enable/disable with transactional rollback and generation counter; `PackageAuthorizationRecord` exact identity/capability/profile matching; `LanguageServerGrant` fixed-contribution process authority with seal-on-load; `PackageGraphRelations`/`PackageGraphPlan` cycle-checked `dependsOn`/`extends`/`disables`/`replaces` resolution; `PackageConflictResolutionPolicy` user-override winners; `PackageLoadEntryAllowlist` package-root module confinement with per-package revocation; runtime/provider/document-analysis generations with stale-result rejection; completion/language-intelligence/parse provider registries with provenance; `RuntimeStateSnapshot` bounded publication; package UI/SDUI/theme/input validators. The new work is only: domain classification, extension-point declarations, structured relation requests, durable adoption/approval records, replacement records, and the cross-domain envelope.
+
+### `clay-extension-point-v1` — Extension-Point Declaration
+
+Inert target-package manifest metadata (`clay.extensionPoints` array, max 64 entries):
+
+```json
+{
+  "id": "markdown.completionProviders",
+  "version": 1,
+  "operations": ["append", "replace"],
+  "contributionKinds": ["completionProvider"],
+  "scopes": ["markdown.*"],
+  "summary": "Add or replace Markdown completion providers."
+}
+```
+
+Closed rules: `id` is package-prefixed `prefix.name` (max 64 chars, alphanumeric/dots/hyphens; the prefix segment must equal the owning lowercase api prefix, name segments may use camelCase contribution-id style); `version` is a positive integer bumped on incompatible change; `operations` is a non-empty subset of the closed enum `append`/`replace`; `contributionKinds` is a non-empty subset of the closed enum `modePattern`, `grammar`, `command`, `keyRoute`, `textTransform`, `completionProvider`, `decorationLayer`, `diagnosticSource`, `analyzer`, `intelligenceProvider`, `panelContribution`, `componentContribution`, `overlayContribution`, `themeTokens`, `sduiRegion`, `statusItem`; `scopes` holds max 32 entries of max 128 chars, each either an exact package-prefixed contribution ID or a single trailing `prefix.*` wildcard; `summary` is optional display text (max 280 chars) rendered alongside host facts, never as authority. Unknown fields, kinds, operations, cross-package prefixes, duplicate IDs, and oversize values fail closed at enable/load.
+
+### `clay-package-relation-v1` — Requested Relations and Scopes
+
+Structured entries in the adopting package manifest for mutation-bearing relations (`clay.dependsOn` stays a plain name array; `clay.imports`, `clay.extends`, `clay.overrides` use structured entries; `clay.disables`/`clay.replaces` stay name arrays gated by `package-control` plus user approval):
+
+```json
+{
+  "package": "@clay/markdown",
+  "extensionPoint": "markdown.completionProviders",
+  "version": 1,
+  "operation": "append",
+  "scopes": ["vendor-markdown.wikilinks"],
+  "justification": "Wikilink completion for Markdown documents."
+}
+```
+
+Closed rules: `package` is an exact installed package name; `extensionPoint`/`version`/`operation` must match a target declaration exactly; `scopes` follow the same caps and must name only the requester's own prefix; `justification` is optional display text (max 280 chars), never authority. Wildcards and transitive effects are computed host-side and shown at adoption; a request matching no declaration or no exact durable approval fails closed before any requester code executes.
+
+Implemented parsing/verification (Plan 061 task 6): `clay.extends` accepts legacy string targets or structured objects; `clay.imports`/`clay.overrides` accept structured objects (string entries are recorded as `dependsOn` targets); structured targets join graph resolution/cycle detection via the existing lists. `PackageService::enable` verifies each request against the enabled target's declared extension points (owner consent) and, for third-party requesters, against an exact durable approval (user consent); trusted-domain packages are pre-authorized by the bundled inventory. Max 64 relation requests per manifest.
+
+### `clay-package-approval-v1` — Durable Adoption/Approval Record
+
+Host-written record (never package-authored), one per adopted package:
+
+```toml
+[package_approval."@vendor/example"]
+package = "@vendor/example"
+resolved_version = "1.2.3"
+source = "npm:@vendor/example@1.2.3"
+integrity = "sha512-..."
+package_root = "/clay/packages/node_modules/@vendor/example"
+api_prefix = "example"
+capabilities = ["mode-registration", "completion-provider"]
+processes = ["example.server"]
+relations = [
+  { package = "@clay/markdown", extension_point = "markdown.completionProviders", version = 1, operation = "append", scopes = ["example.wikilinks"] },
+]
+replacements = []
+approved_by = "user"
+approved_at = "2026-07-21T00:00:00Z"
+revoked = false
+```
+
+Closed rules: identity fields bind name/resolved version/source/integrity/root/api-prefix exactly; `capabilities` and `processes` are the complete granted sets; `relations` uses the relation schema above; `replacements` uses the replacement schema below. Any identity or request-set change requires a new explicit approval; a narrower request may reuse an approval only when it is an exact subset of the approved sets. The store is host-owned, bounded, fail-closed on corruption, and re-verified at candidate-generation build time.
+
+Implemented store (Plan 061 task 6): `src/packages/approvals.rs` persists one JSON document at `<package store root>/clay-package-approvals.json` (format version 1, max 256 records, max 256 KiB) with owner-only permissions (Unix `0o600`) and atomic temp-file + fsync + rename writes. Loading fails closed on corruption, truncation, unknown version, duplicate records, oversize payloads, or unsafe permissions. `PackageService::open` is the durable constructor (used by the CLI); `PackageService::new` keeps an in-memory store for tests/ephemeral services. `approval_covers` enforces the stale-approval rules: exact identity match plus exact-subset capabilities/processes/relations; revocation is durable.
+
+### `clay-package-replacement-v1` — Replacement Record
+
+```json
+{
+  "target": "@clay/markdown",
+  "replacement": {
+    "package": "@vendor/markdown-plus",
+    "resolvedVersion": "2.0.0",
+    "source": "npm:@vendor/markdown-plus@2.0.0",
+    "integrity": "sha512-..."
+  },
+  "withdrawnContributions": ["markdown.mode", "markdown.grammar", "markdown.preview"],
+  "compatibilityClaims": ["mode:markdown", "apiPrefix:markdown"],
+  "rollback": { "restoreTarget": true }
+}
+```
+
+Closed rules: `target` must be an existing package-managed record (Clay core, `core.text`, `core.code`, shell, and bootstrap are not valid targets); `replacement` carries the replacement's own exact provenance; `withdrawnContributions` is the host-computed exact contribution ID list shown at approval; `compatibilityClaims` (max 32 entries, max 128 chars each) declares what dependents may rely on and is validated against the replacement's registered contributions at candidate build; activation is the atomic host-owned sequence in `package-loading.md` with candidate-failure rollback.
+
+### `clay-cross-domain-envelope-v1` — Domain-Safe Request/Result Envelope
+
+Rust-mediated only; never exposed as a JavaScript API shape:
+
+```json
+{
+  "requestId": 42,
+  "requester": { "package": "@vendor/example", "version": "1.2.3", "generation": 3 },
+  "target": { "package": "@clay/markdown", "extensionPoint": "markdown.completionProviders", "version": 1 },
+  "operation": "append",
+  "scopes": ["example.wikilinks"],
+  "approvalRef": "@vendor/example@1.2.3",
+  "deadlineMs": 250,
+  "payload": { "...": "bounded inert JSON" }
+}
+```
+
+Result:
+
+```json
+{ "requestId": 42, "status": "ok", "payload": { "...": "bounded inert JSON" } }
+```
+
+Closed rules: `status` is the closed enum `ok`/`error`/`denied`/`stale`/`revoked`/`timeout`; request and result payloads are each capped by `CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES` before allocation-heavy parsing; queues are bounded; `denied` covers missing approval/extension-point mismatches, `stale` covers generation/version mismatch, `revoked` covers withdrawn approval or package, `timeout` covers deadline expiry with cancellation. Provenance fields are host-stamped at the bridge, never requester-supplied.
+
+Implemented bridge (Plan 061 task 7): `src/server/cross_domain.rs` holds the typed envelope/result/status vocabulary (`CrossDomainRequestEnvelope`, `CrossDomainResultEnvelope`, closed `CrossDomainStatus`) and `validate_cross_domain_request`, the single ingress check: payload budget first, then requester enabled-at-version + third-party domain, approvalRef identity binding, target enabled + exact point/version/operation, and current durable-approval coverage (revoked → `revoked`, identity drift → `stale`, expansion/absence → `denied`). Lane ceilings: 16 pending requests, 250 ms deadline cap, 8192-byte payloads. Provider dispatch (`invoke_parse_handler`/`invoke_completion_provider`/`invoke_language_intelligence_provider`/`invoke_document_analyzer`) routes each command to the runtime domain owning the registration's host-enabled package record; timeout/heap results poison only the owning domain, which is replaced on next use, so a slow third-party provider cannot block the trusted runtime. The three result-bridge ops (`parse_store_update`, `completion_store_result`, `language_store_intelligence_result`) revalidate the executing package against the enabled set at ingress and reject stale/revoked results. Extension-point handlers consuming validated routes arrive with the first-party extension surfaces task.
+
 ## Unified Package Capability Model
 
 Packages request capabilities in Clay metadata; users/admins grant them. The manifest parser accepts `clay.capabilities` while preserving the older `clay.permissions` compatibility path; both feed the same `PackagePermission` vocabulary. Source may influence default prompts or pre-approval, but not the maximum authority available after approval.

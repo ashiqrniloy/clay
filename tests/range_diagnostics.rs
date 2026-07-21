@@ -544,7 +544,10 @@ fn diagnostics_facade_exposes_no_raw_op_or_additional_authority() {
 
     let op = std::fs::read_to_string("src/server/ops/diagnostics.rs").unwrap();
     assert!(op.contains("validate_diagnostic_publication"));
-    assert!(op.contains("render-decorations"));
+    // Provenance/permission checks resolve the host-stamped executing package
+    // against the enabled set with an approved render-decorations capability.
+    assert!(op.contains("require_current_package_capability"));
+    assert!(op.contains("RenderDecorations"));
     assert!(!op.contains("LanguageServer"));
     assert!(!op.contains("std::process"));
 }

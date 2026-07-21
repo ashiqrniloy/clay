@@ -108,6 +108,9 @@ enum SessionCommand {
     },
     Stop {
         session: LanguageServerSessionId,
+        package: String,
+        contribution: String,
+        descriptor_fingerprint: u64,
         reply: oneshot::Sender<Result<(), LanguageServerError>>,
     },
     RevokeForPackage {
@@ -251,12 +254,21 @@ impl LanguageServerProcessService {
             .map_err(|_| LanguageServerError::ServiceStopped)?
     }
 
-    pub async fn stop(&self, session: LanguageServerSessionId) -> Result<(), LanguageServerError> {
+    pub async fn stop(
+        &self,
+        session: LanguageServerSessionId,
+        package: String,
+        contribution: String,
+        descriptor_fingerprint: u64,
+    ) -> Result<(), LanguageServerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.inner
             .command_tx
             .send(SessionCommand::Stop {
                 session,
+                package,
+                contribution,
+                descriptor_fingerprint,
                 reply: reply_tx,
             })
             .await
@@ -396,8 +408,21 @@ async fn router_loop(command_rx: &mut mpsc::Receiver<SessionCommand>) {
                 .await;
                 let _ = reply.send(result);
             }
-            SessionCommand::Stop { session, reply } => {
-                let result = handle_stop(&mut sessions, session).await;
+            SessionCommand::Stop {
+                session,
+                package,
+                contribution,
+                descriptor_fingerprint,
+                reply,
+            } => {
+                let result = handle_stop(
+                    &mut sessions,
+                    session,
+                    &package,
+                    &contribution,
+                    descriptor_fingerprint,
+                )
+                .await;
                 let _ = reply.send(result);
             }
             SessionCommand::RevokeForPackage { package, reply } => {
@@ -550,7 +575,13 @@ async fn handle_read(
 async fn handle_stop(
     sessions: &mut HashMap<LanguageServerSessionId, Session>,
     session: LanguageServerSessionId,
+    package: &str,
+    contribution: &str,
+    descriptor_fingerprint: u64,
 ) -> Result<(), LanguageServerError> {
+    if let Some(entry) = sessions.get(&session) {
+        verify_identity(entry, package, contribution, descriptor_fingerprint)?;
+    }
     if let Some(mut session) = sessions.remove(&session) {
         let _ = session.child.start_kill();
         let _ = session.child.wait().await;

@@ -496,8 +496,11 @@ impl DocumentAnalysisCoordinator {
                     ));
                     continue;
                 }
+                // Analysis invokes through the owning domain runtime (Plan
+                // 061); no additional persistent JsRuntime is created per
+                // analyzer/document. The mailbox/budget worker struct stays.
                 let worker = spawn_worker(
-                    runtime.new_document_analysis_worker(metadata.document_id),
+                    runtime.clone(),
                     registration.clone(),
                     metadata.workspace_root_id,
                     self.outputs_tx.clone(),
@@ -1481,6 +1484,7 @@ export async function handleDocumentAnalysis(event) {{
                     "test",
                 )
                 .unwrap();
+            service.approve_package("@vendor/analysis", "test").unwrap();
             service.enable("@vendor/analysis").unwrap();
         }
         let module_specifier = "clay://packages/@vendor/analysis/analyzer.js";
@@ -1548,26 +1552,32 @@ export async function handleDocumentAnalysis(event) {{
     #[tokio::test]
     async fn resolver_owned_module_registers_through_language_facade() {
         let (runtime, registration, _root) = configured_runtime("registration");
-        let executable = &registration.package.contributions.language_servers[0].executable;
-        let manifest = package_value(executable);
-        let source = format!(
-            r#"
-            import {{ serverRegisterDocumentAnalyzer }} from "clay:language";
-            const registration = serverRegisterDocumentAnalyzer({{
-              packageManifest: {manifest},
-              analyzer: {{
+        // Host-stamped provenance: the evaluation runs under the enabled
+        // package's context; no caller manifest is involved.
+        let source = r#"
+            import { serverRegisterDocumentAnalyzer } from "clay:language";
+            const registration = serverRegisterDocumentAnalyzer({
+              analyzer: {
                 id: "analysis.worker",
                 contribution: "analysis.server",
                 modes: ["test"],
                 moduleSpecifier: "clay://packages/@vendor/analysis/analyzer.js",
                 exportName: "handleDocumentAnalysis"
-              }}
-            }});
+              }
+            });
             Deno.core.ops.op_clay_runtime_record(registration.analyzerId);
             "#
-        );
+        .to_string();
 
-        let evaluation = runtime.evaluate_controlled_module(source).await.unwrap();
+        let evaluation = runtime
+            .evaluate_entry_as_package(
+                crate::packages::bundled::RuntimeDomain::Trusted,
+                &registration.package,
+                crate::server::js_runtime::RuntimeEntry::ControlledSource(source),
+                "runtime.evaluate_as_package",
+            )
+            .await
+            .unwrap();
 
         assert_eq!(evaluation.op_records, ["analysis.worker"]);
         assert_eq!(evaluation.document_analyzers.len(), 1);
@@ -1576,6 +1586,7 @@ export async function handleDocumentAnalysis(event) {{
     #[tokio::test]
     async fn worker_preserves_open_change_outputs_requests_and_close_lifecycle() {
         let (runtime, registration, root) = configured_runtime("lifecycle");
+        let runtime_probe = runtime.clone();
         let coordinator = DocumentAnalysisCoordinator::default();
         let completion = CompletionCoordinator::new();
         let intelligence = LanguageIntelligenceCoordinator::new();
@@ -1592,6 +1603,10 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap()
             .unwrap();
         assert!(matches!(output, DocumentAnalysisOutput::Decorations(_)));
+        // Plan 061 task 4: analyzer registration, document open, and analysis
+        // invocation never create additional persistent runtimes beyond the
+        // two domain workers.
+        assert_eq!(runtime_probe.workers_started(), 2);
 
         assert!(!coordinator.change_document(7, 1, 2, 2, 2, " x".to_string()));
         let output = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())

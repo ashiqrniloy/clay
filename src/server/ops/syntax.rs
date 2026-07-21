@@ -4,11 +4,11 @@ use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Map, Value, json};
 
-use crate::{packages::record::assemble_package_record, server::syntax::SyntaxEngineTier};
+use crate::server::syntax::SyntaxEngineTier;
 
 use super::{
     ClayOpState,
-    decorations::{clay_error, parse_json, required_str},
+    decorations::{clay_error, parse_json},
 };
 
 #[op2]
@@ -46,13 +46,14 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
         .ok_or_else(|| clay_error("clay.syntax.invalid_grammar: options must be an object"))?;
     reject_prohibited_authority(options)?;
 
-    let package_value = package_value_from_options(options)?;
-    let package = assemble_package_record(&package_value).map_err(|error| {
-        clay_error(format!(
-            "clay.syntax.invalid_grammar: {:?}: {}",
-            error.rule, error.message
-        ))
-    })?;
+    // Grammar contributions come from the host-enabled record of the
+    // executing package (its on-disk package.json); caller-supplied grammar
+    // manifests are never consulted.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::ParseDocument,
+        )?;
     if package.contributions.syntax_grammars.is_empty() {
         return Err(clay_error(
             "clay.syntax.invalid_grammar: package must declare a syntaxGrammars contribution",
@@ -96,59 +97,6 @@ fn parse_engine_tier(tier: &str) -> Result<SyntaxEngineTier, JsErrorBox> {
             "clay.syntax.invalid_engine_preference: tier must be native, wasm, or javascript",
         )),
     }
-}
-
-fn package_value_from_options(options: &Map<String, Value>) -> Result<Value, JsErrorBox> {
-    if let Some(manifest) = options.get("packageManifest") {
-        return Ok(manifest.clone());
-    }
-
-    let package_name = required_str(options, "packageName", "clay.syntax.invalid_grammar")?;
-    let package_version = options
-        .get("packageVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("0.0.0");
-    let api_prefix = required_str(options, "packagePrefix", "clay.syntax.invalid_grammar")
-        .or_else(|_| required_str(options, "apiPrefix", "clay.syntax.invalid_grammar"))?;
-    let permissions = options
-        .get("permissions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            clay_error(
-                "clay.syntax.invalid_grammar: permissions must include parse-document and render-decorations",
-            )
-        })?;
-    let syntax_grammar = options
-        .get("syntaxGrammar")
-        .or_else(|| options.get("contribution"))
-        .cloned()
-        .unwrap_or_else(|| {
-            json!({
-                "languageId": options.get("languageId").cloned().unwrap_or(Value::Null),
-                "filePatterns": options.get("filePatterns").cloned().unwrap_or(Value::Null),
-                "grammar": options.get("grammar").cloned().unwrap_or(Value::Null),
-                "queries": options.get("queries").cloned().unwrap_or(Value::Null),
-                "styleMap": options.get("styleMap").cloned().unwrap_or(Value::Null),
-                "budgets": options.get("budgets").cloned().unwrap_or(Value::Null),
-            })
-        });
-
-    Ok(json!({
-        "name": package_name,
-        "version": package_version,
-        "type": "module",
-        "exports": { ".": "./dist/index.js" },
-        "clay": {
-            "apiPrefix": api_prefix,
-            "entry": "./dist/index.js",
-            "loadEntry": "./dist/load.js",
-            "permissions": permissions,
-            "modes": [],
-            "docs": "./docs/index.md",
-            "apiDependencies": ["clay.syntax.serverRegisterSyntaxGrammar"],
-            "contributions": { "syntaxGrammars": [syntax_grammar] }
-        }
-    }))
 }
 
 fn reject_prohibited_authority(options: &Map<String, Value>) -> Result<(), JsErrorBox> {

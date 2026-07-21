@@ -33,7 +33,6 @@ export async function authorizeLanguageServer(
 }
 
 export interface StartSessionOptions {
-  package: string;
   contribution: string;
   workspaceRootId: number | string;
 }
@@ -65,13 +64,17 @@ export async function startLanguageServerSession(
   if (!ops) {
     throw new Error("clay.language_server.runtime_unavailable: API requires the server runtime");
   }
-  const sessionId = JSON.parse(
+  // The session owner is the host-stamped executing package; the op response
+  // carries the host-resolved package/contribution identity used by the
+  // bounded session calls below.
+  const started = JSON.parse(
     await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null)),
-  ).sessionId as number;
+  ) as { sessionId: number; package: string; contribution: string };
+  const sessionId = started.sessionId;
   const identity = JSON.stringify({
     sessionId,
-    package: options.package,
-    contribution: options.contribution,
+    package: started.package,
+    contribution: started.contribution,
   });
   return {
     sessionId,
@@ -85,8 +88,8 @@ export async function startLanguageServerSession(
       ops.op_clay_language_server_read_bytes(
         JSON.stringify({
           sessionId,
-          package: options.package,
-          contribution: options.contribution,
+          package: started.package,
+          contribution: started.contribution,
           maxBytes,
           timeoutMs,
         }),
@@ -95,8 +98,8 @@ export async function startLanguageServerSession(
       ops.op_clay_language_server_send_message(
         JSON.stringify({
           sessionId,
-          package: options.package,
-          contribution: options.contribution,
+          package: started.package,
+          contribution: started.contribution,
           message,
         }),
       ).then(JSON.parse),
@@ -104,8 +107,8 @@ export async function startLanguageServerSession(
       ops.op_clay_language_server_read_message(
         JSON.stringify({
           sessionId,
-          package: options.package,
-          contribution: options.contribution,
+          package: started.package,
+          contribution: started.contribution,
           maxBytes,
           timeoutMs,
         }),
@@ -113,6 +116,6 @@ export async function startLanguageServerSession(
         .then(JSON.parse)
         .then((result: { message: string }) => result.message),
     stop: () =>
-      ops.op_clay_language_server_stop_session(JSON.stringify({ sessionId })).then(JSON.parse),
+      ops.op_clay_language_server_stop_session(identity).then(JSON.parse),
   };
 }

@@ -4,6 +4,8 @@ This guide explains how to design a Clay package and how packages are expected t
 
 Clay package APIs are evolving. This document intentionally distinguishes **current implemented public behavior**, **Phase 18.2 internal shell runtime behavior**, **Phase 18.3 runtime-backed slot UI contribution behavior**, **Phase 18.12 Clay-owned file browser behavior**, and **planned package-facing shell/layout/configuration behavior** so package authors and phase plans can update it iteratively as Clay's package architecture lands.
 
+The canonical inventory of reusable UI components, primitives, style variables, and theme tokens lives in the clay-ui skill catalog (`.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md`). Package UI must be composed from that catalog; update the catalog in the same change as any component or token addition.
+
 ## Goals
 
 A Clay package should be easy for users to load and safe for Clay to run:
@@ -1918,7 +1920,7 @@ Generic key behavior is `ClientFirstPredictable`: the Rust client executes inert
 
 - `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS = 16` — keypress-to-local-paint budget; no sync JS before paint.
 - `MODE_ACTIVATION_P95_BUDGET_MS = 100` — mode-activation budget.
-- `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES = 4096` — package manifest metadata payload budget (including inert `clay.contributions.*` declarations; sized to fit first-party theme packages' full `textStyles` mappings, Plan 046); oversize manifests are rejected with `ManifestValidationFailed`/`PayloadBudgetExceeded` at record time.
+- `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES = 8192` — package manifest metadata payload budget (including inert `clay.contributions.*` and versioned `clay.extensionPoints` declarations; sized to fit first-party theme packages' full `textStyles` mappings, Plan 046, raised for extension-point declarations in Plan 061); oversize manifests are rejected with `ManifestValidationFailed`/`PayloadBudgetExceeded` at record time.
 
 Mode/classification defaults are compile-time (no configuration-evaluation cost at paint/text time). Configuration evaluation is bounded to init.js/package load or explicit setting change by `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS = 25`.
 
@@ -2315,6 +2317,124 @@ The default decoration path is Tier 1 native. `parser.js` is registered only as 
 Status items and optional SDUI preview are inert `clay:ui`/`clay:sdui` contributions. Fixed panels consume a declared slot; transient overlays do not. Clay owns slot composition, action routing, focus, user-over-package precedence, typed style tokens, and Masonry rendering. A package cannot win a slot by load order and cannot use a status item or SDUI preview to bypass fixed-versus-transient rules.
 
 All package JavaScript runs at load, explicit command, explicit SDUI update, or bounded server parse/completion work—not in client keypress, paint, layout, scroll, pointer, or text-event hot paths. Behavior manifests, parse windows, decoration payloads, SDUI snapshots, completion items, and syntax cache retention remain subject to their typed budgets. Contributions preserve package provenance and require declared permissions; `loadPackage` grants no capabilities. Packages receive no filesystem, network, shell, AI, raw-op, native-widget, client-runtime, arbitrary WASM, third-party grammar, or LSP authority from this contract.
+
+## Extending and Replacing Packages (Plan 061)
+
+Clay runs exactly two JavaScript runtime trust domains: a trusted runtime for
+configuration and integrity-verified bundled packages, and one shared
+third-party runtime. Package code never imports another package's
+implementation modules and never sees raw ops; all cross-package composition
+flows through inert manifest metadata plus the public `clay:*` registration
+APIs. The canonical schemas and rejection rules live in
+`docs/reference/primitives/package-security.md#package-runtime-trust-domains-and-extension-authority`.
+
+### Declaring extension points (target/owner side)
+
+A package that allows others to build on it declares `clay.extensionPoints`
+(`clay-extension-point-v1`) in its manifest:
+
+```json
+"extensionPoints": [
+  {
+    "id": "myprefix.completionProviders",
+    "version": 1,
+    "operations": ["append", "replace"],
+    "contributionKinds": ["completionProvider"],
+    "scopes": ["myprefix.keywords"],
+    "summary": "Add or replace completion providers."
+  }
+]
+```
+
+Rules:
+
+- `id` is `apiPrefix.name`; the prefix segment must equal the package's own
+  `apiPrefix`. Bump `version` on any incompatible change.
+- `scopes` names the exact package-prefixed contribution IDs a relation may
+  mutate (or a single trailing `myprefix.*` wildcard). Every scope must name a
+  real contribution of the package.
+- Declarations are inert metadata; they grant nothing by themselves.
+
+### Requesting a relation (requester side)
+
+A package building on another declares structured relation entries
+(`clay-package-relation-v1`) in `clay.extends` (or `imports`/`overrides`):
+
+```json
+"extends": [
+  {
+    "package": "@clay/markdown",
+    "extensionPoint": "markdown.completionProviders",
+    "version": 1,
+    "operation": "append",
+    "scopes": [],
+    "justification": "Wikilink completions for Markdown."
+  }
+]
+```
+
+The requesting package then registers its own provider through the normal
+public API — it never touches the target's JavaScript:
+
+```javascript
+await serverRegisterCompletionProvider({ id: "myprefix.wikilinks", modes: ["markdown"], ... });
+```
+
+Enabling a third-party package with structured relations requires an exact
+durable user approval (`clay-package-approval-v1`) covering identity,
+capabilities, processes, and every requested relation. Version/integrity
+drift, scope expansion, or target replacement invalidates the approval;
+narrowing requires re-approval. Trusted bundled packages skip the durable
+approval requirement but still require the target's declared extension point.
+
+### Replacing a package
+
+Whole-package semantic rewrites use `replaces` plus a user-approved
+replacement record (`clay-package-replacement-v1`) instead of extension
+points. Replacement is host-owned and atomic, preserves replacement
+provenance, and never grants the target's trusted runtime placement, identity,
+or language-server grants.
+
+### What users see at adoption
+
+Installing a package never executes it. The first load of a third-party
+package opens a host-rendered authority overlay (native catalog components
+only — package code does not run and cannot render the prompt) showing
+identity/provenance, the shared third-party runtime disclosure, requested
+capabilities, external processes, dependency and mutation scopes, and any
+withdrawn contributions for replacements. The package executes only after an
+exact approval; rejection leaves it installed-but-disabled and re-prompts on
+the next load. Approvals go stale on version/integrity drift or target
+replacement and must be re-approved; expanded authority is shown as a diff.
+Adopted third-party packages execute in the shared third-party runtime,
+never in the trusted configuration runtime: `loadPackage` of a third-party
+spec routes its load entry through a host bridge into that runtime, a
+configuration reload leaves third-party providers and language-server
+sessions running untouched, and a crashed/timed-out third-party runtime is
+replaced once with only the current approved graph replayed.
+
+Users can inspect, disable, revoke, and roll back at any time from the same
+host UI. The CLI exposes the same single authority path:
+`clay package inspect <name>` (shows adoption state),
+`clay package adopt <name>` (writes the durable exact approval),
+`clay package revoke <name>` (revokes approval and disables the package),
+`clay package rollback <name>` (disables the active replacement of the named
+target, re-adopts the target if third-party, and re-enables it). A committed
+replacement revokes the replaced target's durable approval, so restoration is
+always this explicit action — never a silent reuse of the old approval — and
+dependency edges cannot silently re-enable a replaced target
+(`clay.package_replacement.target_replaced`).
+The full interaction contract (states, keyboard/focus, motion,
+layout) lives in
+`docs/wiki/modules/first-party-package-extension-api-review.md#adoption-and-replacement-interaction-contract-plan-061-task-9`.
+
+### `packages/lsp-shared`
+
+`packages/lsp-shared` is a private pure-JavaScript helper shared by the
+bundled LSP bridge packages. Decision (Plan 061 task 8): it stays private.
+Third-party language-server bridges use the public `clay:language-server`
+session APIs with their own approved fixed contribution; they do not import
+`lsp-shared` or any other package's modules.
 
 ## Minimal Package Checklist
 

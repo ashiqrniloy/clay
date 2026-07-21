@@ -33,6 +33,7 @@ export function lspMarkdownPackageManifest() {
         estimatedManifestBytes: 1500,
         hotPathPolicy: "authorized analyzer worker only; no keypress, paint, or client JavaScript",
       },
+      extensionPoints: [{"id": "lsp-markdown.providers", "version": 1, "operations": ["append", "replace"], "contributionKinds": ["completionProvider", "intelligenceProvider", "analyzer"], "scopes": ["lsp-markdown.completion", "lsp-markdown.intelligence"], "summary": "Add or replace language-server completion, intelligence, and analyzer providers. The language-server descriptor and grant are not mutable."}],
       contributions: {
         languageServers: [{
           id: contributionId,

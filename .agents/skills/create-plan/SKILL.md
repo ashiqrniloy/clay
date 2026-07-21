@@ -15,12 +15,16 @@ Create or update actionable, numbered, documentation-backed implementation plans
 4. Read current docs for relevant libraries, frameworks, SDKs, packages, crates, CLIs, or services. Prefer project-local docs, then documentation lookup tools. Record exact docs/API references in the plan.
 5. If `.agents/skills/project-patterns/` exists, use it before writing task approaches and cite relevant pattern files.
 6. For phase implementation plans that add or change an editor mode, language mode, JS package, extension point, or reusable capability, include a dedicated primitive-review task before implementation. The task must inventory existing primitives, document what can be achieved with them, plan only generic reusable new primitives when required, and then build package/mode functionality on top of those primitives.
-7. Load project-specific plan requirements deterministically:
+7. For any plan that touches Clay app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout), apply the UI requirements:
+   - Run `npx ui-skills start` first and load the smallest useful UI skill set before designing UI tasks.
+   - Load the `clay-ui` skill and read `.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md`.
+   - Tasks must reuse cataloged primitives and components first; building custom components outside the catalog requires explicit justification in the task's `Options Considered`.
+8. Load project-specific plan requirements deterministically:
    - Read `.agents/skills/create-plan/references/default.md` if it exists.
    - Read `.agents/skills/create-plan/references/<git-root-basename>.md` if it exists.
    - Apply all loaded requirements before finalizing tasks.
-8. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
-9. Write the plan using the structure below.
+9. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
+10. Write the plan using the structure below.
 
 ## Required Plan Structure
 

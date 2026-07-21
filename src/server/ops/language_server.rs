@@ -188,16 +188,21 @@ pub(super) async fn op_clay_language_server_start_session(
     let object = request.as_object().ok_or_else(|| {
         JsErrorBox::generic("clay.language_server.invalid_session: options must be an object")
     })?;
-    if object.len() != 3
-        || !object.contains_key("package")
+    if object.len() != 2
         || !object.contains_key("contribution")
         || !object.contains_key("workspaceRootId")
     {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_session: options require only package, contribution, and workspaceRootId",
+            "clay.language_server.invalid_session: options require only contribution and workspaceRootId",
         ));
     }
-    let package = required_string(object.get("package"), "package")?;
+    // The session-owning package is the host-stamped executing package, never
+    // a caller-supplied name: package A cannot start sessions as package B.
+    let package = {
+        let state_ref = state.borrow();
+        let clay = state_ref.borrow::<Arc<ClayOpState>>();
+        clay.current_package_record()?.manifest.name.clone()
+    };
     let contribution = required_string(object.get("contribution"), "contribution")?;
     let workspace_root_id = object
         .get("workspaceRootId")
@@ -221,7 +226,7 @@ pub(super) async fn op_clay_language_server_start_session(
             .package_service()
             .lock()
             .expect("package service mutex poisoned");
-        let (resolved_name, _, _) = ensure_package_installed_locked(&mut service, package)?;
+        let (resolved_name, _, _) = ensure_package_installed_locked(&mut service, &package)?;
         let grant = service
             .language_server_grant(&resolved_name, contribution)
             .ok_or_else(|| {
@@ -306,7 +311,12 @@ pub(super) async fn op_clay_language_server_start_session(
     spawn.cwd = cwd;
 
     let session_id = service.start(spawn).await.map_err(map_session_error)?;
-    serde_json::to_string(&json!({ "sessionId": session_id.as_u64() })).map_err(|error| {
+    serde_json::to_string(&json!({
+        "sessionId": session_id.as_u64(),
+        "package": package,
+        "contribution": contribution,
+    }))
+    .map_err(|error| {
         JsErrorBox::generic(format!(
             "clay.language_server.session_failed: failed to serialize result ({error})"
         ))
@@ -347,6 +357,23 @@ pub(super) async fn op_clay_language_server_send_bytes(
     send_session_bytes(state, session_id, package, contribution, bytes.to_vec()).await
 }
 
+/// Bind session traffic to the executing package: the host-stamped package
+/// context must name the session owner, so sibling packages cannot drive or
+/// stop sessions they do not own even if they learn the opaque session id.
+fn require_executing_package_owner(
+    clay_state: &Arc<ClayOpState>,
+    package: &str,
+) -> Result<(), JsErrorBox> {
+    let record = clay_state.current_package_record()?;
+    if record.manifest.name != package {
+        return Err(JsErrorBox::generic(format!(
+            "clay.language_server.session_owner_mismatch: executing package `{}` cannot drive a session owned by `{package}`",
+            record.manifest.name
+        )));
+    }
+    Ok(())
+}
+
 async fn send_session_bytes(
     state: Rc<RefCell<OpState>>,
     session_id: crate::server::language_server::LanguageServerSessionId,
@@ -355,6 +382,7 @@ async fn send_session_bytes(
     bytes: Vec<u8>,
 ) -> Result<(), JsErrorBox> {
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
+    require_executing_package_owner(&clay_state, &package)?;
     let fingerprint = require_current_fingerprint(&clay_state, &package, &contribution)?;
     clay_state
         .language_server_process()
@@ -404,6 +432,7 @@ async fn read_session_bytes(
     (session_id, package, contribution, max_bytes, timeout_ms): SessionReadRequest,
 ) -> Result<Vec<u8>, JsErrorBox> {
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
+    require_executing_package_owner(&clay_state, &package)?;
     let fingerprint = require_current_fingerprint(&clay_state, &package, &contribution)?;
     clay_state
         .language_server_process()
@@ -433,15 +462,24 @@ pub(super) async fn op_clay_language_server_stop_session(
     let object = request.as_object().ok_or_else(|| {
         JsErrorBox::generic("clay.language_server.invalid_stop: options must be an object")
     })?;
-    if object.len() != 1 || !object.contains_key("sessionId") {
+    if object.len() != 3 || !object.contains_key("sessionId") {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_stop: options require only sessionId",
+            "clay.language_server.invalid_stop: options require only sessionId, package, and contribution",
         ));
     }
     let session_id = require_session_id(object.get("sessionId"))?;
+    let (session_id, package, contribution) = {
+        let (_, package, contribution) = parse_session_identity(object)?;
+        (session_id, package, contribution)
+    };
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
+    require_executing_package_owner(&clay_state, &package)?;
+    let fingerprint = require_current_fingerprint(&clay_state, &package, &contribution)?;
     let service = clay_state.language_server_process();
-    service.stop(session_id).await.map_err(map_session_error)?;
+    service
+        .stop(session_id, package, contribution, fingerprint)
+        .await
+        .map_err(map_session_error)?;
     Ok("{}".to_string())
 }
 

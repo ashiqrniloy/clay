@@ -5,7 +5,7 @@ use deno_error::JsErrorBox;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    packages::record::{PackageRecord, assemble_package_record},
+    packages::record::PackageRecord,
     protocol::{
         CompletionItem, CompletionItemTextFormat,
         completion::{CompletionProvenance, CompletionProviderGeneration},
@@ -18,7 +18,7 @@ use crate::{
 
 use super::{
     ClayOpState,
-    decorations::{clay_error, optional_u64, parse_json, required_str},
+    decorations::{clay_error, optional_u64, parse_json},
 };
 
 const COMPLETION_DISABLE_TARGET_MAX_CHARS: usize = 128;
@@ -33,9 +33,12 @@ pub(super) fn op_clay_completion_store_result(
             "clay.completion.invalid_result: result exceeds payload budget",
         ));
     }
-    state
-        .borrow::<Arc<ClayOpState>>()
-        .store_completion_result_json(result_json);
+    // Bridge ingress revalidation (Plan 061 task 7): the executing package
+    // must still be enabled; stale/revoked provider results are rejected
+    // before they reach host state.
+    let clay_state = state.borrow::<Arc<ClayOpState>>().clone();
+    clay_state.current_package_record()?;
+    clay_state.store_completion_result_json(result_json);
     Ok(())
 }
 
@@ -128,14 +131,13 @@ pub(super) fn op_clay_completion_register_completion_provider(
         .unwrap_or("provideCompletion")
         .to_string();
 
-    let package = package_value_from_options(options).and_then(|value| {
-        assemble_package_record(&value).map_err(|error| {
-            clay_error(format!(
-                "clay.completion.invalid_provider: {:?}: {}",
-                error.rule, error.message
-            ))
-        })
-    })?;
+    // Provider contributions come from the host-enabled record of the
+    // executing package; caller-supplied manifests are never consulted.
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::CompletionProvider,
+        )?;
     if package.contributions.completion_providers.is_empty() {
         return Err(clay_error(
             "clay.completion.invalid_provider: package must declare a completionProviders contribution",
@@ -180,65 +182,6 @@ pub(super) fn op_clay_completion_register_completion_provider(
             "clay.completion.registration_failed: failed to serialize result ({error})"
         ))
     })
-}
-
-fn package_value_from_options(options: &Map<String, Value>) -> Result<Value, JsErrorBox> {
-    if let Some(manifest) = options.get("packageManifest") {
-        return Ok(manifest.clone());
-    }
-
-    let package_name = required_str(options, "packageName", "clay.completion.invalid_provider")?;
-    let package_version = options
-        .get("packageVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("0.0.0");
-    let api_prefix = required_str(options, "packagePrefix", "clay.completion.invalid_provider")
-        .or_else(|_| required_str(options, "apiPrefix", "clay.completion.invalid_provider"))?;
-    let permissions = options
-        .get("permissions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            clay_error(
-                "clay.completion.invalid_provider: permissions must include completion-provider",
-            )
-        })?;
-    let contribution = options
-        .get("completionProvider")
-        .or_else(|| options.get("contribution"))
-        .cloned()
-        .unwrap_or_else(|| {
-            json!({
-                "id": options.get("providerId").cloned().unwrap_or(Value::Null),
-                "priority": options.get("priority").cloned().unwrap_or(Value::Null),
-                "exclusive": options.get("exclusive").cloned().unwrap_or(Value::Null),
-                "triggerCharacters": trigger_characters(options),
-                "wordBoundaryChars": options
-                    .get("wordBoundaryChars")
-                    .cloned()
-                    .unwrap_or(Value::Null),
-                "items": options.get("items").cloned().unwrap_or(Value::Null),
-                "budgets": {
-                    "timeoutMs": options.get("timeoutMs").cloned().unwrap_or(Value::Null),
-                    "maxItems": options.get("maxItems").cloned().unwrap_or(Value::Null),
-                }
-            })
-        });
-
-    Ok(json!({
-        "name": package_name,
-        "version": package_version,
-        "type": "module",
-        "exports": { ".": "./dist/index.js" },
-        "clay": {
-            "apiPrefix": api_prefix,
-            "entry": "./dist/index.js",
-            "loadEntry": "./dist/load.js",
-            "permissions": permissions,
-            "modes": [],
-            "docs": "./docs/index.md",
-            "contributions": { "completionProviders": [contribution] }
-        }
-    }))
 }
 
 fn trigger_characters(options: &Map<String, Value>) -> Value {

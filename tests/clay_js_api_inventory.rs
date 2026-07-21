@@ -4200,10 +4200,10 @@ fn syntax_grammar_registration_api_has_public_facade_op_inventory_and_docs() {
         "embedded runtime facade must expose clay:syntax and wire the op"
     );
     assert!(
-        op.contains("assemble_package_record")
+        op.contains("require_current_package_capability")
             && op.contains("register_syntax_grammar_package")
             && op.contains("reject_prohibited_authority"),
-        "syntax op must reuse package validation, registry insertion, and authority rejection"
+        "syntax op must use host-stamped package provenance, registry insertion, and authority rejection"
     );
     for required in [
         "tree-sitter-wasm",

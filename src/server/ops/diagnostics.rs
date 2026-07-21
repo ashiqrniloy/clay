@@ -15,8 +15,7 @@ use crate::{
 use super::{
     ClayOpState,
     decorations::{
-        clay_error, optional_u64, package_from_options, parse_json, required_object, required_str,
-        required_u64,
+        clay_error, optional_u64, parse_json, required_object, required_str, required_u64,
     },
 };
 
@@ -31,7 +30,11 @@ pub(super) fn op_clay_diagnostics_publish_diagnostics(
         clay_error("clay.diagnostics.invalid_publication: options must be an object")
     })?;
     reject_forbidden_keys(options)?;
-    let package = package_from_options(options, "render-decorations")?;
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::RenderDecorations,
+        )?;
     let document_id = required_u64(
         options,
         "documentId",

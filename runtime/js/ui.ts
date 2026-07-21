@@ -2,21 +2,10 @@
 //
 // These helpers run inside Clay's constrained server-side JavaScript runtime and
 // delegate inert slot-aware UI contribution validation to Clay-owned ops.  The
-// public API accepts package manifests and declarative contribution data; raw
-// op names, Masonry widgets, native handles, CSS strings, renderer callbacks,
-// and client-side JavaScript hooks are not package-facing authorities.
-
-export interface PackageManifestLike {
-  name: string;
-  version: string;
-  clay: {
-    apiPrefix: string;
-    permissions: string[];
-    modes: string[];
-    entry: string;
-    loadEntry?: string;
-  };
-}
+// public API accepts declarative contribution data only; package provenance is
+// stamped host-side from the executing-package context. Raw op names, Masonry
+// widgets, native handles, CSS strings, renderer callbacks, and client-side
+// JavaScript hooks are not package-facing authorities.
 
 export type PanelSlot = "left" | "right" | "top" | "bottom";
 export type PanelVisibility = "visible" | "hidden" | "collapsed";
@@ -169,38 +158,33 @@ function encode(value: unknown): string {
 }
 
 export function serverRegisterPanelContribution(
-  manifest: PackageManifestLike,
   declaration: PanelContributionDefinition,
 ): Record<string, unknown> {
-  return JSON.parse(uiOps().op_clay_ui_register_panel_contribution(encode(manifest), encode(declaration))) as Record<string, unknown>;
+  return JSON.parse(uiOps().op_clay_ui_register_panel_contribution(encode(declaration))) as Record<string, unknown>;
 }
 
 export function serverRegisterComponentContribution(
-  manifest: PackageManifestLike,
   declaration: ComponentContributionDefinition,
 ): Record<string, unknown> {
-  return JSON.parse(uiOps().op_clay_ui_register_component_contribution(encode(manifest), encode(declaration))) as Record<string, unknown>;
+  return JSON.parse(uiOps().op_clay_ui_register_component_contribution(encode(declaration))) as Record<string, unknown>;
 }
 
 export function serverRegisterTransientOverlayContribution(
-  manifest: PackageManifestLike,
   declaration: TransientOverlayContributionDefinition,
 ): Record<string, unknown> {
-  return JSON.parse(uiOps().op_clay_ui_register_transient_overlay_contribution(encode(manifest), encode(declaration))) as Record<string, unknown>;
+  return JSON.parse(uiOps().op_clay_ui_register_transient_overlay_contribution(encode(declaration))) as Record<string, unknown>;
 }
 
 export function serverRegisterInputContribution(
-  manifest: PackageManifestLike,
   declaration: PackageInputContributionDefinition,
 ): Record<string, unknown> {
-  return JSON.parse(uiOps().op_clay_ui_register_input_contribution(encode(manifest), encode(declaration))) as Record<string, unknown>;
+  return JSON.parse(uiOps().op_clay_ui_register_input_contribution(encode(declaration))) as Record<string, unknown>;
 }
 
 export function serverRegisterUiStateScope(
-  manifest: PackageManifestLike,
   declaration: PackageUiStateScopeDefinition,
 ): Record<string, unknown> {
-  return JSON.parse(uiOps().op_clay_ui_register_ui_state_scope(encode(manifest), encode(declaration))) as Record<string, unknown>;
+  return JSON.parse(uiOps().op_clay_ui_register_ui_state_scope(encode(declaration))) as Record<string, unknown>;
 }
 
 export function serverSetLayoutOverride(
@@ -210,8 +194,7 @@ export function serverSetLayoutOverride(
 }
 
 export function serverRegisterThemeToken(
-  manifest: PackageManifestLike,
   declaration: PackageThemeTokenDeclaration,
 ): Record<string, unknown> {
-  return JSON.parse(uiOps().op_clay_ui_register_theme_token(encode(manifest), encode(declaration))) as Record<string, unknown>;
+  return JSON.parse(uiOps().op_clay_ui_register_theme_token(encode(declaration))) as Record<string, unknown>;
 }

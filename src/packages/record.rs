@@ -470,7 +470,7 @@ pub struct PackageApiDependency {
 /// Clay-owned validation rules pass.  It retains provenance on every accepted
 /// contribution descriptor so later conflict handling, diagnostics, generated
 /// documentation, and AI-agent discovery can identify the owning package.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct PackageRecord {
     /// The validated Phase 16.5 manifest (identity, prefix, permissions, modes, entries).
     pub manifest: ClayPackageManifest,
@@ -482,6 +482,25 @@ pub struct PackageRecord {
     pub performance: PackagePerformanceMetadata,
     /// Declared Clay JS API dependencies.
     pub api_dependencies: Vec<PackageApiDependency>,
+    /// Host-owned runtime trust domain. Defaults to `ThirdParty` at assembly;
+    /// `PackageService::enable` upgrades it to `Trusted` only after the
+    /// bundled inventory verifies exact name, version, canonical root, and
+    /// manifest integrity. Crate-internal: never exposed to JavaScript.
+    pub(crate) runtime_domain: crate::packages::bundled::RuntimeDomain,
+}
+
+impl PartialEq for PackageRecord {
+    /// Record identity is the validated manifest content. `runtime_domain` is
+    /// a host stamp derived from install provenance, so it is excluded:
+    /// comparing a caller-assembled record against an enabled host record must
+    /// not depend on who assembled it.
+    fn eq(&self, other: &Self) -> bool {
+        self.manifest == other.manifest
+            && self.contributions == other.contributions
+            && self.docs == other.docs
+            && self.performance == other.performance
+            && self.api_dependencies == other.api_dependencies
+    }
 }
 
 // ── Error types ──────────────────────────────────────────────────────────────
@@ -610,6 +629,7 @@ pub fn assemble_package_record(value: &Value) -> Result<PackageRecord, PackageRe
         docs,
         performance,
         api_dependencies,
+        runtime_domain: crate::packages::bundled::RuntimeDomain::ThirdParty,
     })
 }
 

@@ -1584,7 +1584,7 @@ fn is_package_owned_id(value: &str, api_prefix: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('.'))
 }
 
-struct ModeDiagnosticContext {
+pub(crate) struct ModeDiagnosticContext {
     package_name: Option<String>,
     package_version: Option<String>,
     api_prefix: Option<String>,
@@ -1601,7 +1601,7 @@ impl ModeDiagnosticContext {
         }
     }
 
-    fn from_classification(classification: &ModeClassification) -> Self {
+    pub(crate) fn from_classification(classification: &ModeClassification) -> Self {
         Self {
             package_name: Some(classification.package_name.clone()),
             package_version: Some(classification.package_version.clone()),
@@ -1610,7 +1610,11 @@ impl ModeDiagnosticContext {
         }
     }
 
-    fn diagnostic(&self, rule: ModeValidationRule, message: impl Into<Box<str>>) -> ModeDiagnostic {
+    pub(crate) fn diagnostic(
+        &self,
+        rule: ModeValidationRule,
+        message: impl Into<Box<str>>,
+    ) -> ModeDiagnostic {
         ModeDiagnostic {
             package_name: self.package_name.clone().map(String::into_boxed_str),
             package_version: self.package_version.clone().map(String::into_boxed_str),

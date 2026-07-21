@@ -25,6 +25,20 @@ Place this task after entry-gate/baseline tasks and before implementation or cle
 
 Decision source: `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`.
 
+## Package Runtime Trust-Domain Task
+
+Each Clay plan that adds or materially changes package execution, package loading, first-party packages, package extension points, package graph relations, or package-facing ops must include acceptance criteria and/or a dedicated task that preserves the two runtime trust domains.
+
+The task should require:
+
+- Trusted runtime classification comes from Clay's compiled bundled inventory and exact provenance/integrity, never `@clay/*` naming or normal user promotion.
+- The adopted-package runtime installs only documented public package ops and narrow host state; Clay-internal ops and trusted module roots are absent.
+- Cross-domain communication uses typed, bounded, inert Rust-mediated values with generation, payload, timeout, provenance, and revocation checks; no V8 objects/functions/globals/modules cross domains.
+- Third-party changes to first-party behavior require both a first-party-declared extension point and explicit user approval. Replacement preserves third-party provenance and never moves replacement code into the trusted runtime.
+- Tests prove cross-domain internal-op/module denial, stale-generation rejection, adoption/revocation, replacement rollback, and the documented lack of hostile isolation among third-party packages.
+
+Decision source: `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`.
+
 ## Package Default Loading Task
 
 Each Clay phase plan that implements or materially changes a JS package, package runtime capability, editor mode package, package loader, or package configuration surface must include acceptance criteria and/or a dedicated task for the package's end-user `init.js` loading experience.
@@ -156,3 +170,25 @@ Recommended task title:
 Place this task near the Clay JS API task and before the final project-wiki task when present.
 
 Decision source: `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`.
+
+## Clay UI Primitives-First Task
+
+Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout) must route through UI skill selection and reuse the established UI catalog before proposing new UI code.
+
+The plan should require:
+
+- Run `npx ui-skills start` before UI design or implementation tasks and load the smallest useful UI skill set (prefer 1, max 3).
+- Load the `clay-ui` skill (`.agents/skills/clay-ui/`) and read its `references/components.md` and `references/tokens.md` before writing UI tasks.
+- Reuse cataloged components, primitives, style variables, and theme tokens first; a custom component outside the catalog requires explicit justification in the task's `Options Considered`.
+- New components, primitives, tokens, or layout rules must be generic and reusable across packages, token-driven (no raw colors, CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled).
+- Component kinds, style variables, and token names are additive-only so existing packages keep working.
+- Keep the catalog current: the plan must include updating `.agents/skills/clay-ui/references/components.md` / `references/tokens.md` and `docs/reference/packages/creating-packages.md` for any UI surface change.
+- Preserve the shell layout contract: `main` slot plus optional `left`/`right`/`top`/`bottom` fixed panels whose sizes remain user-configurable (min/max/collapse/resize).
+
+Recommended task title:
+
+```markdown
+- [ ] Review Clay UI catalog and plan primitive/component reuse before UI work
+```
+
+Place this task after entry-gate/baseline tasks and before UI implementation tasks.

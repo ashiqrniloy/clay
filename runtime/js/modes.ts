@@ -37,16 +37,19 @@ export type ModePatternDeclaration = {
   keymaps?: unknown;
 };
 
-export function serverRegisterModePattern(packageManifest: unknown, declaration: ModePatternDeclaration): unknown {
-  const result = parse(requireOps().op_clay_modes_register_pattern(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
-  const manifest = packageManifest as { clay?: { apiPrefix?: string } } | null;
+// Package provenance is stamped host-side; the op response carries the
+// host-registered packagePrefix/modeId used to key inert activation payloads.
+export function serverRegisterModePattern(declaration: ModePatternDeclaration): unknown {
+  const result = parse(requireOps().op_clay_modes_register_pattern(JSON.stringify(declaration ?? null))) as {
+    packagePrefix?: string;
+    modeId?: string;
+  } | null;
   const mode = declaration as { modeId?: string; editorRules?: unknown; commands?: unknown; keymaps?: unknown } | null;
-  if (manifest?.clay?.apiPrefix && mode?.modeId) {
-    activationRegistry[activationKey(manifest.clay.apiPrefix, mode.modeId)] = {
-      packageManifest,
-      editorRules: mode.editorRules,
-      commands: mode.commands,
-      keymaps: mode.keymaps,
+  if (result?.packagePrefix && result?.modeId) {
+    activationRegistry[activationKey(result.packagePrefix, result.modeId)] = {
+      editorRules: mode?.editorRules,
+      commands: mode?.commands,
+      keymaps: mode?.keymaps,
     };
   }
   return result;
@@ -56,14 +59,13 @@ export function serverClassifyDocument(input: unknown): unknown {
   return parse(requireOps().op_clay_modes_classify_document(JSON.stringify(input ?? null)));
 }
 
-export function serverActivateMajorMode(packageManifest: unknown, input: unknown): unknown {
-  return parse(requireOps().op_clay_modes_activate_major_mode(JSON.stringify(packageManifest ?? null), JSON.stringify(input ?? null)));
+export function serverActivateMajorMode(input: unknown): unknown {
+  return parse(requireOps().op_clay_modes_activate_major_mode(JSON.stringify(input ?? null)));
 }
 
 export function serverActivateClassifiedMode(classification: unknown, input: unknown = {}): unknown {
   const classified = classification as { apiPrefix?: string; modeId?: string; documentId?: number } | null;
   const activation = activationRegistry[activationKey(String(classified?.apiPrefix), String(classified?.modeId))] as {
-    packageManifest: unknown;
     editorRules?: unknown;
     commands?: unknown;
     keymaps?: unknown;
@@ -71,7 +73,7 @@ export function serverActivateClassifiedMode(classification: unknown, input: unk
   if (!activation || classified?.documentId === undefined || !classified?.modeId) {
     throw new Error("clay.modes.activation_failed: classified mode has no registered activation metadata");
   }
-  return serverActivateMajorMode(activation.packageManifest, {
+  return serverActivateMajorMode({
     ...(input as Record<string, unknown>),
     documentId: classified.documentId,
     modeId: classified.modeId,

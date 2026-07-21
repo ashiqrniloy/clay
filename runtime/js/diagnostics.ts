@@ -29,12 +29,6 @@ export type DiagnosticSpanInput = {
 };
 
 export type ServerPublishDiagnosticsOptions = {
-  packageManifest?: unknown;
-  packageName?: string;
-  packageVersion?: string;
-  packagePrefix?: string;
-  apiPrefix?: string;
-  permissions?: string[];
   documentId: number;
   documentVersion: number;
   currentDocumentVersion?: number;

@@ -32,6 +32,7 @@ export function lspRustPackageManifest() {
         estimatedManifestBytes: 1500,
         hotPathPolicy: "authorized analyzer worker only; no keypress, paint, or client JavaScript",
       },
+      extensionPoints: [{"id": "lsp-rust.providers", "version": 1, "operations": ["append", "replace"], "contributionKinds": ["completionProvider", "intelligenceProvider", "analyzer"], "scopes": ["lsp-rust.completion", "lsp-rust.intelligence"], "summary": "Add or replace language-server completion, intelligence, and analyzer providers. The language-server descriptor and grant are not mutable."}],
       contributions: {
         languageServers: [{
           id: contributionId,

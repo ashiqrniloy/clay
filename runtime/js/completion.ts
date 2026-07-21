@@ -28,12 +28,6 @@ export type CompletionProviderItem =
     };
 
 export type ServerRegisterCompletionProviderOptions = {
-  packageManifest?: unknown;
-  packageName?: string;
-  packageVersion?: string;
-  packagePrefix?: string;
-  apiPrefix?: string;
-  permissions?: string[];
   completionProvider?: unknown;
   contribution?: unknown;
   providerId?: string;

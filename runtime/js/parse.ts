@@ -57,12 +57,6 @@ export type ServerRegisterParseHandlerOptions = {
   onParse?: never;
   function?: never;
   exportName?: string;
-  packageManifest?: unknown;
-  packageName?: string;
-  packageVersion?: string;
-  packagePrefix?: string;
-  apiPrefix?: string;
-  permissions?: string[];
   mode: string;
   parseUnit?: "file" | "region" | "line-group";
   viewportPriority?: boolean;

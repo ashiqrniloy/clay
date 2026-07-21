@@ -21,8 +21,10 @@ function parse<T>(json: string): T {
   return JSON.parse(json) as T;
 }
 
-export function serverRegisterCommand(packageManifest: unknown, declaration: unknown): unknown {
-  return parse(requireOps().op_clay_commands_register_command(JSON.stringify(packageManifest ?? null), JSON.stringify(declaration ?? null)));
+// Package provenance is stamped host-side from the executing-package context;
+// facades never accept caller manifests.
+export function serverRegisterCommand(declaration: unknown): unknown {
+  return parse(requireOps().op_clay_commands_register_command(JSON.stringify(declaration ?? null)));
 }
 
 export interface CommandExecutionResult {

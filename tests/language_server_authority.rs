@@ -251,7 +251,12 @@ async fn read_timeout_produces_typed_error_and_session_remains_stoppable() {
     );
 
     service
-        .stop(session)
+        .stop(
+            session,
+            "timeout.pkg".to_string(),
+            "timeout.srv".to_string(),
+            0,
+        )
         .await
         .expect("session still stoppable after timeout");
 }
@@ -316,7 +321,15 @@ async fn duplicate_contribution_root_session_is_rejected() {
         "duplicate contribution/root session must reject, got {duplicate:?}"
     );
 
-    service.stop(first).await.expect("first session stops");
+    service
+        .stop(
+            first,
+            "duplicate.pkg".to_string(),
+            "duplicate.srv".to_string(),
+            0,
+        )
+        .await
+        .expect("first session stops");
 }
 
 /// The concurrent-session cap is enforced and package withdrawal reaps every
@@ -549,7 +562,10 @@ async fn generic_fake_lsp_server_initialize_and_shutdown_through_process_service
             1_000,
         )
         .await;
-    service.stop(session).await.expect("stop fake session");
+    service
+        .stop(session, "fake.pkg".to_string(), "fake.srv".to_string(), 0)
+        .await
+        .expect("stop fake session");
 }
 
 /// Exit-early fake profile surfaces a typed child-exit error; stderr remains

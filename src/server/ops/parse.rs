@@ -8,7 +8,7 @@ use crate::{perf::budgets::SYNTAX_CACHE_BUDGET_BYTES, protocol::ParseUnit};
 
 use super::{
     ClayOpState,
-    decorations::{clay_error, optional_u64, package_from_options, parse_json, required_str},
+    decorations::{clay_error, optional_u64, parse_json, required_str},
 };
 
 #[op2]
@@ -21,7 +21,11 @@ pub(super) fn op_clay_parse_register_parse_handler(
     let options = options_value
         .as_object()
         .ok_or_else(|| clay_error("clay.parse.invalid_handler: options must be an object"))?;
-    let package = package_from_options(options, "parse-document")?;
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .require_current_package_capability(
+            crate::packages::permissions::PackagePermission::ParseDocument,
+        )?;
     let mode_id = required_str(options, "mode", "clay.parse.invalid_handler")?.to_string();
     let parse_unit = parse_unit(
         options
@@ -125,9 +129,11 @@ pub(super) fn op_clay_parse_store_update(
             "clay.parse.invalid_update: update must be an object",
         ));
     }
-    state
-        .borrow::<Arc<ClayOpState>>()
-        .store_parse_update_json(update_json);
+    // Bridge ingress revalidation (Plan 061 task 7): reject stale/revoked
+    // provider results before they reach host state.
+    let clay_state = state.borrow::<Arc<ClayOpState>>().clone();
+    clay_state.current_package_record()?;
+    clay_state.store_parse_update_json(update_json);
     Ok(())
 }
 

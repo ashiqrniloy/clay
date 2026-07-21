@@ -5,7 +5,6 @@ import { analyzerId, contributionId, lspRustPackageManifest } from "./index.js";
 export async function loadLspRustPackage() {
   const packageManifest = lspRustPackageManifest();
   await serverRegisterDocumentAnalyzer({
-    packageManifest,
     analyzer: {
       id: analyzerId,
       contribution: contributionId,

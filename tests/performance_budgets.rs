@@ -479,7 +479,9 @@ fn performance_budget_constants_are_exported() {
     assert_eq!(EDIT_ACK_PAYLOAD_BUDGET_BYTES, 128);
     // Plan 046: raised from 2048 to 4096 to fit first-party theme packages'
     // full inert `textStyles` mappings (~2.3 KB) alongside their manifest.
-    assert_eq!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, 4096);
+    // Plan 061 task 8: raised to 8192 to also fit versioned
+    // `clay.extensionPoints` declarations (largest: @clay/markdown ~5.5 KB).
+    assert_eq!(BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, 8192);
     assert_eq!(SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, 4096);
     assert_eq!(SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, 1024);
     assert_eq!(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, 16);

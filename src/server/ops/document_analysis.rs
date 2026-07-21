@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     ClayOpState,
-    decorations::{clay_error, package_from_options, parse_json, required_str},
+    decorations::{clay_error, parse_json, required_str},
 };
 
 #[op2]
@@ -42,12 +42,14 @@ pub(super) fn op_clay_language_register_document_analyzer(
         }
     }
 
-    let package = package_from_options(options, "parse-document")?;
-    if !package
-        .manifest
-        .clay
-        .permissions
-        .contains(&PackagePermission::LanguageServer)
+    let clay_state = state.borrow::<Arc<ClayOpState>>().clone();
+    let package =
+        clay_state.require_current_package_capability(PackagePermission::ParseDocument)?;
+    if !clay_state
+        .package_service()
+        .lock()
+        .expect("package service mutex poisoned")
+        .has_approved_capability(&package.manifest.name, PackagePermission::LanguageServer)
     {
         return Err(clay_error(
             "clay.language.invalid_analyzer: language-server permission is required",

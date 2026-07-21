@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use deno_core::{OpState, op2};
@@ -71,6 +73,16 @@ impl PackageLoadEntryAllowlist {
                     package_name: package_name.map(str::to_string),
                 },
             );
+    }
+
+    /// The opaque load-entry specifier recorded for a package, if any.
+    pub(crate) fn specifier_for_package(&self, package_name: &str) -> Option<String> {
+        self.entries
+            .lock()
+            .expect("package loadEntry allowlist mutex poisoned")
+            .iter()
+            .find(|(_, entry)| entry.package_name.as_deref() == Some(package_name))
+            .map(|(specifier, _)| specifier.clone())
     }
 
     /// Withdraw all module entries owned by a package. Returns the number of
@@ -385,8 +397,9 @@ pub(super) fn ensure_package_installed_locked(
     specifier: &str,
 ) -> Result<(String, PathBuf, bool), JsErrorBox> {
     if let Some((name, installed)) = service.installed_package_for_specifier(specifier) {
-        let bundled = installed.provenance.source_kind
-            == crate::packages::manager::PackageSourceKind::ClayShipped;
+        // Bundled treatment requires exact inventory verification; the
+        // requested source kind recorded at install time is only a claim.
+        let bundled = crate::packages::bundled::verify_bundled_trust(&installed.provenance).is_ok();
         return Ok((name, installed.package_root, bundled));
     }
 
@@ -423,6 +436,100 @@ pub(super) fn ensure_package_installed_locked(
         .install_from_value_at_root(package_json, package_root.clone())
         .map_err(|error| JsErrorBox::generic(format!("clay.packages.load_failed: {error}")))?;
     Ok((resolved_name, package_root, true))
+}
+
+/// Cross-domain bridge (Plan 061 task 12): execute an approved third-party
+/// package's load entry in the THIRD-PARTY runtime and absorb its
+/// registration payload so the outer configuration evaluation publishes it
+/// to server coordinators. Trusted-only op; package identity and the
+/// load-entry specifier are re-validated host-side against the enabled
+/// record and the module allowlist, never trusted from the caller.
+#[op2]
+#[string]
+pub(super) async fn op_clay_packages_load_in_package_domain(
+    state: Rc<RefCell<OpState>>,
+    #[string] request_json: String,
+) -> Result<String, JsErrorBox> {
+    let request = parse_json(&request_json, "clay.packages.invalid_request")?;
+    let name = request
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let version = request
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let specifier = request
+        .get("loadEntrySpecifier")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
+
+    let (context, allowlisted) = {
+        let service = clay_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        let record = service.enabled_record(&name, &version).ok_or_else(|| {
+            JsErrorBox::generic(format!(
+                "clay.packages.package_not_enabled: package `{name}` is not enabled"
+            ))
+        })?;
+        if record.runtime_domain != crate::packages::bundled::RuntimeDomain::ThirdParty {
+            return Err(JsErrorBox::generic(format!(
+                "clay.packages.load_failed: package `{name}` is not a third-party package"
+            )));
+        }
+        (
+            crate::server::ops::PackageContext::from_record(record),
+            clay_state.load_entry_allowlist().absolute_path(&specifier),
+        )
+    };
+    if allowlisted.is_none() {
+        return Err(JsErrorBox::generic(format!(
+            "clay.packages.load_failed: load entry `{specifier}` is not in the module allowlist"
+        )));
+    }
+    let sender = clay_state.third_party_commands().ok_or_else(|| {
+        JsErrorBox::generic("clay.packages.load_failed: third-party runtime is not available")
+    })?;
+
+    let source = format!(
+        "const module = await import({specifier:?});\nif (typeof module.default === 'function') {{ await module.default(); }}"
+    );
+    let (response, receiver) = tokio::sync::oneshot::channel();
+    sender
+        .send(crate::server::js_runtime::RuntimeCommand::Evaluate {
+            entry: crate::server::js_runtime::RuntimeEntry::ControlledSource(source),
+            workspace: None,
+            runtime_document_id: 1,
+            package_context: Some(context),
+            metric: "runtime.load_in_package_domain",
+            response,
+        })
+        .map_err(|_| {
+            JsErrorBox::generic("clay.packages.load_failed: third-party runtime worker stopped")
+        })?;
+    let evaluation = receiver
+        .await
+        .map_err(|_| {
+            JsErrorBox::generic("clay.packages.load_failed: third-party runtime worker stopped")
+        })?
+        .map_err(|error| {
+            JsErrorBox::generic(format!(
+                "clay.packages.load_failed: third-party load entry failed: {error}"
+            ))
+        })?;
+    clay_state.absorb_cross_domain_evaluation(&evaluation);
+    serde_json::to_string(&json!({
+        "name": name,
+        "version": version,
+        "domain": "third-party",
+    }))
+    .map_err(serialize_error("clay.packages.load_failed"))
 }
 
 #[op2]
@@ -477,8 +584,25 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
             canonical_package_root,
             Some(&record.manifest.name),
         );
+        // Stamp host-owned package provenance for the entry evaluation that
+        // follows this op (`loadPackage` imports the entry next): every
+        // package-facing registration/publication until the next activation
+        // resolves to this host-enabled record, never caller manifests.
+        // Third-party packages never stamp this (trusted) worker's context:
+        // their load entry executes in the third-party runtime through the
+        // cross-domain bridge op (Plan 061 task 12).
+        let domain = record.runtime_domain;
+        if domain == crate::packages::bundled::RuntimeDomain::Trusted {
+            clay_state.set_current_package(Some(crate::server::ops::PackageContext::from_record(
+                &record,
+            )));
+        }
 
         json!({
+            "domain": match domain {
+                crate::packages::bundled::RuntimeDomain::Trusted => "trusted",
+                crate::packages::bundled::RuntimeDomain::ThirdParty => "third-party",
+            },
             "name": record.manifest.name,
             "version": record.manifest.version,
             "apiPrefix": record.manifest.clay.api_prefix,
