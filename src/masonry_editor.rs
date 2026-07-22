@@ -1695,6 +1695,7 @@ impl EditorWidget {
             self.active_completion_request_id = None;
             self.active_language_intelligence_request_id = None;
             self.sdui.clear_active_menu();
+            self.enqueue_decoration_viewport_request();
             ctx.request_render();
             ctx.request_accessibility_update();
         }
@@ -4389,6 +4390,18 @@ mod tests {
         assert_eq!(widget.editor.visible_text(), "canonical");
         assert!(widget.status.runtime_diagnostic.is_none());
         assert!(widget.sdui.active_menu().is_none());
+    }
+
+    #[test]
+    fn local_commands_request_decorations_for_keyboard_driven_viewport_changes() {
+        let source = include_str!("masonry_editor.rs");
+        let local_command = source
+            .split("fn local_command")
+            .nth(1)
+            .and_then(|source| source.split("fn local_key").next())
+            .expect("local_command body");
+
+        assert!(local_command.contains("self.enqueue_decoration_viewport_request();"));
     }
 
     #[tokio::test]
