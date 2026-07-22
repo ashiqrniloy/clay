@@ -3,7 +3,7 @@ id: clay.editor.clientCutSelection
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientCutSelection
-js_facade: runtime/js/editor.ts::clientCutSelection
+js_facade: runtime/js/editor.js::clientCutSelection
 backing_rust: src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -102,7 +102,7 @@ Use `clay.editor.clientCutSelection` only as a documented command ID for `bindKe
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::clientCutSelection`
+- JS facade: `runtime/js/editor.js::clientCutSelection`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard`; `src/client/clipboard.rs::SystemClipboard`; `src/editor/surface.rs::EditorSurface::selected_text`
 

@@ -2,7 +2,7 @@
 
 ## Source
 
-- `runtime/js/ui.ts`
+- `runtime/js/ui.js`
 - `src/server/ops/ui.rs`
 - `src/server/ui.rs`
 - `src/server/js_runtime.rs`
@@ -50,7 +50,7 @@ The model is deliberately not a direct Masonry, CSS, HTML, or client-side JavaSc
 
 ## How It Works
 
-1. A package imports `clay:ui` inside Clay's constrained server-side JavaScript runtime. `runtime/js/ui.ts` defines the TypeScript-facing facade shape, while `src/server/js_runtime.rs` supplies the embedded module source for the controlled runtime.
+1. A package imports `clay:ui` inside Clay's constrained server-side JavaScript runtime. `runtime/js/ui.js` defines the TypeScript-facing facade shape, while `src/server/js_runtime.rs` supplies the embedded module source for the controlled runtime.
 2. The facade encodes the package manifest and declarative contribution object as JSON and calls one Clay-owned op from `src/server/ops/ui.rs`. Raw `Deno.core.ops` names are implementation details; package code should use the documented facade exports.
 3. Each op parses JSON, validates the package manifest with existing package-manifest rules, and delegates to `PackageUiRegistry` in `src/server/ui.rs`.
 4. `PackageUiRegistry` validates the declaration against the package prefix/provenance and the already-registered package commands. It rejects unsupported slots/policies, unregistered command actions, duplicate IDs, duplicate fixed-slot claims, raw op/native/widget/CSS/client-JS authority fields, unsupported/deferred component kinds, invalid typed style variables, raw colors, type-incompatible theme token fallbacks, and payloads over SDUI/component budget expectations.
@@ -96,38 +96,38 @@ serverRegisterPanelContribution(manifest, {
 ## Primitive Coverage
 
 - `PanelContribution`
-  - Owner/source: `runtime/js/ui.ts`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs`.
+  - Owner/source: `runtime/js/ui.js`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-panel-contribution.md`.
   - Validation: package-prefixed ID, `kind = fixed`, slot in `left`/`right`/`top`/`bottom`, allowed default visibility, bounded component tree, registered action targets, duplicate ID/slot rejection, prohibited authority rejection.
   - Runtime: fixed panels compose into `PaneSlotLayout`; the editor remains clipped/offset in `main` for paint and pointer hit-testing.
 
 - `ComponentContribution`
-  - Owner/source: `runtime/js/ui.ts`, `src/server/ui.rs`, `src/shell/components.rs`, `src/shell/package_ui.rs`.
+  - Owner/source: `runtime/js/ui.js`, `src/server/ui.rs`, `src/shell/components.rs`, `src/shell/package_ui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-component-contribution.md`.
   - Supported Phase 18.3 component kinds: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, and `statusItem`.
   - Deferred component kinds: `table`, `dropdown`, `collapse`, and `modal` fail with planned/deferred diagnostics instead of partially working semantics.
   - Style variables must reference typed Clay tokens or allowed enum values such as `variant` and `fontRole`; raw CSS, raw colors, concrete font families/sizes, and unsupported style keys are rejected. `fontRole` defaults to user-owned `ui`; only text-bearing panel, label, button, list, and statusItem components may select semantic `monospace` or `proportional`.
 
 - `TransientOverlayContribution`
-  - Owner/source: `runtime/js/ui.ts`, `src/server/ui.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`.
+  - Owner/source: `runtime/js/ui.js`, `src/server/ui.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-transient-overlay-contribution.md`.
   - Validation: package-prefixed overlay ID, supported anchor (`working-area`, `active-pane`, `main`, or `pointer`), focus policy (`none`, `restore`, or `trap`), dismissal policy (`manual`, `escape`, `outside`, or `escape-or-outside`), bounded component tree, registered actions, and prohibited authority rejection.
   - Runtime: overlays are versioned package UI state and compute overlay rectangles without adding fixed slots or mutating the Masonry child tree.
 
 - `PackageInputContribution`
-  - Owner/source: `runtime/js/ui.ts`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs`.
+  - Owner/source: `runtime/js/ui.js`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-input-contribution.md`.
   - Validation: package-prefixed input ID and component ID, scope (`component`, `panel`, or `overlay`), pointer click/drag policy, focus policy, selection policy, manifest-declared mode context, registered action targets, payload budget, and prohibited authority rejection.
   - Runtime: accepted declarations become `PackageInputRouting` values read as inert state; keyboard routing remains behavior-manifest/keybinding responsibility.
 
 - `PackageUiStateScope`
-  - Owner/source: `runtime/js/ui.ts`, `src/server/ops/ui.rs`, `src/server/ui.rs`.
+  - Owner/source: `runtime/js/ui.js`, `src/server/ops/ui.rs`, `src/server/ui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-ui-state-scope.md`.
   - Validation: package-prefixed state-scope ID, no hidden path segments, supported scope (`package-global`, `user-config`, `workspace`, `document`, `pane`, `component`, or `transient-overlay`), owner, lifetime, persistence, implementation status, targeted package ID, schema kind, payload budget, and prohibited authority rejection.
   - Runtime: accepted declarations are inert schema/lifecycle metadata only; registration does not accept state values, hidden globals, raw JSON blobs, or persisted workspace/document mutation authority.
 
 - `PackageThemeTokenDeclaration`
-  - Owner/source: `runtime/js/ui.ts`, `src/server/ui.rs`, `src/shell/theme.rs`, `src/masonry_sdui.rs`.
+  - Owner/source: `runtime/js/ui.js`, `src/server/ui.rs`, `src/shell/theme.rs`, `src/masonry_sdui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-theme-token.md`.
   - Validation: package-prefixed token name, token type (`color-role`, `spacing`, `radius`, `typography`, or `opacity`), non-empty description, and same-type Clay core fallback.
   - Runtime: `ThemeTokenResolver` resolves package tokens to core fallback values before native paint/layout reads them.
@@ -162,14 +162,14 @@ serverRegisterPanelContribution(manifest, {
 Focused verification commands:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib ui --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib shell --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib masonry_sdui --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test package_loading --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test package_primitive_gate --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_api_inventory --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_doc_registry --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs --quiet
+cargo test --lib ui --quiet
+cargo test --lib shell --quiet
+cargo test --lib masonry_sdui --quiet
+cargo test --test security package_loading:: --quiet
+cargo test --test security package_primitive_gate:: --quiet
+cargo test --test protocol clay_js_api_inventory:: --quiet
+cargo test --test protocol clay_js_doc_registry:: --quiet
+cargo test --test protocol primitives_docs:: --quiet
 ```
 
 ## Related

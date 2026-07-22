@@ -2,8 +2,8 @@
 
 ## Source
 
-- `runtime/js/ui.ts`
-- `runtime/js/configuration.ts`
+- `runtime/js/ui.js`
+- `runtime/js/configuration.js`
 - `src/server/ops/ui.rs`
 - `src/server/ops/configuration.rs`
 - `src/server/ui.rs`
@@ -57,7 +57,7 @@ These APIs are runtime-backed for declaration/override records. They do **not** 
 
 ## How It Works
 
-1. Package or configuration code imports documented facades from `clay:ui` and `clay:configuration`. The TypeScript-facing modules in `runtime/js/ui.ts` and `runtime/js/configuration.ts` serialize only declared records and call Clay-owned ops.
+1. Package or configuration code imports documented facades from `clay:ui` and `clay:configuration`. The TypeScript-facing modules in `runtime/js/ui.js` and `runtime/js/configuration.js` serialize only declared records and call Clay-owned ops.
 2. `src/server/ops/ui.rs` and `src/server/ops/configuration.rs` parse JSON at the server boundary. Raw `op_clay_*` names remain internal implementation details; public authors use the documented facade exports.
 3. `src/server/ui.rs` validates package-owned UI records against the package manifest/provenance, registered component IDs, registered command/action targets, manifest-declared input modes, package-prefixed IDs, allowed scopes/properties, payload budgets, and prohibited authority fields.
 4. `src/server/configuration.rs` records package option values as typed configuration records with explicit source/precedence information. Supported option names include `layout.defaultVisibility`, `layout.defaultSlot`, `layout.splitRatio`, `input.default`, `action.default`, `themeTokenRemap`, and `fallback`.
@@ -106,7 +106,7 @@ When adding a future package input/state/configuration primitive:
 3. Implement a typed server validator before exposing the API as runtime-backed.
 4. Keep package-facing data inert at the client boundary; native code should read validated structs, not execute package code.
 5. Add package manifest/conflict tests, facade/API inventory tests, generated registry tests, primitive docs tests, performance/hot-path tests, and wiki/index coverage.
-6. Regenerate `docs/generated/clay-js-api-registry.json` only when the freshness test asks for it, using `CARGO_TARGET_DIR=target/pi-verify cargo run --bin update-doc-registry --quiet`.
+6. Regenerate `docs/generated/clay-js-api-registry.json` only when the freshness test asks for it, using `cargo run --bin update-doc-registry --quiet`.
 
 ## Tests
 
@@ -114,18 +114,18 @@ Focused verification:
 
 ```text
 cargo fmt --check
-CARGO_TARGET_DIR=target/pi-verify cargo test --test package_loading --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test package_loading_docs --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test package_primitive_gate --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_api_inventory --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_doc_registry --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_facade_layout --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test rust_visibility_api_mapping --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test performance_budgets --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test performance_protocol --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test editor_performance_invariants --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test manual_smoke_docs --quiet
+cargo test --test security package_loading:: --quiet
+cargo test --test protocol package_loading_docs:: --quiet
+cargo test --test security package_primitive_gate:: --quiet
+cargo test --test protocol primitives_docs:: --quiet
+cargo test --test protocol clay_js_api_inventory:: --quiet
+cargo test --test protocol clay_js_doc_registry:: --quiet
+cargo test --test protocol clay_js_facade_layout:: --quiet
+cargo test --test security rust_visibility_api_mapping:: --quiet
+cargo test --test protocol performance_budgets:: --quiet
+cargo test --test protocol performance_protocol:: --quiet
+cargo test --test editor editor_performance_invariants:: --quiet
+cargo test --test protocol manual_smoke_docs:: --quiet
 ```
 
 Representative coverage:

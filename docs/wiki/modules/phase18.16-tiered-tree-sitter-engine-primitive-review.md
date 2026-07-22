@@ -24,8 +24,8 @@
 - `src/editor/theme.rs`
 - `src/editor/surface.rs`
 - `src/server/ops/syntax.rs`
-- `runtime/js/syntax.ts`
-- `runtime/js/parse.ts`
+- `runtime/js/syntax.js`
+- `runtime/js/parse.js`
 - `packages/rust/package.json`
 - `packages/typescript/package.json`
 - `packages/javascript/package.json`
@@ -74,8 +74,8 @@ Tier 1 is native compiled-in first-party Tree-sitter grammar data, Tier 2 is a h
 ### Package loading and JS parse bridge
 
 - `loadPackage("@clay/*")` already provides explicit user opt-in loading from `~/.config/clay/init.js` for first-party packages.
-- `runtime/js/syntax.ts` and `src/server/ops/syntax.rs` expose `clay:syntax.serverRegisterSyntaxGrammar` for inert grammar metadata registration.
-- `runtime/js/parse.ts` and `src/server/ops/parse.rs` expose `clay.parse.serverRegisterParseHandler`; Rust stores a handler token, not a JavaScript function value.
+- `runtime/js/syntax.js` and `src/server/ops/syntax.rs` expose `clay:syntax.serverRegisterSyntaxGrammar` for inert grammar metadata registration.
+- `runtime/js/parse.js` and `src/server/ops/parse.rs` expose `clay.parse.serverRegisterParseHandler`; Rust stores a handler token, not a JavaScript function value.
 - Existing Tier 3 package-JS parser fallback is represented by package parse handlers and should remain the fallback for grammar-less packages.
 
 ## Existing Achievements Reused As-Is
@@ -165,9 +165,9 @@ The implementation uses the existing `DecorationSet`, `StyleRegistry`, package p
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_16_tiered_engine_primitive_review_linked_and_complete`: documentation-as-code guard for this review, wiki links, generic gaps, rejected branches, hot-path split, and security markers.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Future implementation tests named in Plan 047: `syntax_pipeline_maps_captures_to_vocabulary_tokens`, `finish_task_publishes_runtime_diagnostic_for_handler_error`, `tier1_native_first_party_is_default_for_known_extensions`, `web_tree_sitter_runtime_is_bundled_and_loadable_without_network`, and `js_parser_fallback_still_runs_without_tree_sitter_grammar`.
-- Existing focused suites to preserve: `cargo test --test syntax_grammar`, `cargo test --test parse_coordinator`, `cargo test --test decoration_transport`, and `cargo test --test editor_performance_invariants`.
+- Existing focused suites to preserve: `cargo test --test runtime syntax_grammar::`, `cargo test --test runtime parse_coordinator::`, `cargo test --test editor decoration_transport::`, and `cargo test --test editor editor_performance_invariants::`.
 
 ## Related
 

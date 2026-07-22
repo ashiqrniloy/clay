@@ -3,7 +3,7 @@ id: clay.sdui.defineEditorView
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineEditorView
-js_facade: runtime/js/sdui.ts::defineEditorView
+js_facade: runtime/js/sdui.js::defineEditorView
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::EditorView
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -106,7 +106,7 @@ Use `clay.sdui.defineEditorView` when the user asks for runtime-backed Clay SDUI
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::defineEditorView`
+- JS facade: `runtime/js/sdui.js::defineEditorView`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::EditorView`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

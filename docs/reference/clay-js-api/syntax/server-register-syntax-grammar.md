@@ -3,7 +3,7 @@ id: clay.syntax.serverRegisterSyntaxGrammar
 kind: clay-js-api
 js_module: "clay:syntax"
 js_export: serverRegisterSyntaxGrammar
-js_facade: runtime/js/syntax.ts::serverRegisterSyntaxGrammar
+js_facade: runtime/js/syntax.js::serverRegisterSyntaxGrammar
 backing_rust: src/server/syntax.rs::SyntaxGrammarRegistry::register_package
 deno_op: op_clay_syntax_register_syntax_grammar
 deno_op_path: src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar
@@ -201,8 +201,8 @@ Prefer one-line `loadPackage("@clay/<language>")` for user setup. Package author
 
 ## Backing implementation
 
-- JS facade: `runtime/js/syntax.ts::serverRegisterSyntaxGrammar`
-- Runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_SYNTAX`
+- JS facade: `runtime/js/syntax.js::serverRegisterSyntaxGrammar`
+- Runtime facade: `src/server/facades.rs`
 - Op wrapper: `src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar`
 - Registry: `src/server/syntax.rs::SyntaxGrammarRegistry::register_package`
 - Package validation: `src/packages/record.rs::assemble_package_record`

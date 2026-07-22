@@ -3,7 +3,7 @@ id: clay.behavior.buildCodeEditingManifest
 kind: clay-js-api
 js_module: "clay:behavior"
 js_export: buildCodeEditingManifest
-js_facade: runtime/js/behavior.ts::buildCodeEditingManifest
+js_facade: runtime/js/behavior.js::buildCodeEditingManifest
 backing_rust: src/server/ops/modes.rs::op_clay_modes_register_pattern
 deno_op: op_clay_modes_register_pattern
 deno_op_path: src/server/ops/modes.rs::op_clay_modes_register_pattern
@@ -162,8 +162,8 @@ Prefer `clay.behavior.buildCodeEditingManifest` when authoring a language packag
 
 ## Backing implementation
 
-- Facade: `runtime/js/behavior.ts::buildCodeEditingManifest`
-- Embedded runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_BEHAVIOR`
+- Facade: `runtime/js/behavior.js::buildCodeEditingManifest`
+- Runtime include table: `src/server/facades.rs`
 - Consuming op: `src/server/ops/modes.rs::op_clay_modes_register_pattern`
 
 ## Lookup metadata

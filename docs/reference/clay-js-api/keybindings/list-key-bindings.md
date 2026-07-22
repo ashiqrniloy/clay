@@ -3,7 +3,7 @@ id: clay.keybindings.listKeyBindings
 kind: clay-js-api
 js_module: "clay:keybindings"
 js_export: listKeyBindings
-js_facade: runtime/js/keybindings.ts::listKeyBindings
+js_facade: runtime/js/keybindings.js::listKeyBindings
 backing_rust: src/protocol/mod.rs::BehaviorManifest::minimal_text_editing
 deno_op: op_clay_keybindings_list_key_bindings
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_list_key_bindings
@@ -95,7 +95,7 @@ Use `clay.keybindings.listKeyBindings` when the user asks for list key bindings 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/keybindings.ts::listKeyBindings`
+- JS facade: `runtime/js/keybindings.js::listKeyBindings`
 - Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_list_key_bindings` (`op_clay_keybindings_list_key_bindings`)
 - Backing Rust/current owner: `src/protocol/mod.rs::BehaviorManifest::minimal_text_editing`
 - Current implementation audit path: `src/protocol/mod.rs::BehaviorManifest; src/protocol/mod.rs::KeyBindingRule`

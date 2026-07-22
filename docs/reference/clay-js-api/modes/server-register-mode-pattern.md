@@ -3,7 +3,7 @@ id: clay.modes.serverRegisterModePattern
 kind: clay-js-api
 js_module: "clay:modes"
 js_export: serverRegisterModePattern
-js_facade: runtime/js/modes.ts::serverRegisterModePattern
+js_facade: runtime/js/modes.js::serverRegisterModePattern
 backing_rust: src/packages/modes.rs::ModeRegistry::register_mode
 deno_op: op_clay_modes_register_pattern
 deno_op_path: src/server/ops/modes.rs::op_clay_modes_register_pattern
@@ -125,7 +125,7 @@ Use `clay.modes.serverRegisterModePattern` when the user asks for Register Mode 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/modes.ts::serverRegisterModePattern`
+- JS facade: `runtime/js/modes.js::serverRegisterModePattern`
 - Deno op: `src/server/ops/modes.rs::op_clay_modes_register_pattern` (`op_clay_modes_register_pattern`)
 - Backing Rust/current owner: `src/packages/modes.rs::ModeRegistry::register_mode`
 - Current implementation audit path: `src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::ModeDeclaration`

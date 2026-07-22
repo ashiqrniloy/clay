@@ -15,7 +15,7 @@
 - `docs/wiki/modules/primitive-architecture.md`
 - `docs/wiki/modules/phase18.9-generic-text-code-modes-primitive-review.md`
 - `docs/wiki/modules/phase18.10-tree-sitter-grammar-primitive-review.md`
-- `docs/wiki/modules/phase18.11-completion-provider-framework-primitive-review.md`
+- `docs/wiki/modules/phase18.11-completion-provider-primitive-review.md`
 - `docs/wiki/modules/phase18.8-transient-menu-command-execution-primitive-review.md`
 - `docs/wiki/modules/phase18.3-slot-ui-primitive-review.md`
 - `docs/wiki/modules/phase18.4-input-state-config-primitive-review.md`
@@ -34,15 +34,15 @@
 - `src/server/parse_coordinator.rs`
 - `src/server/decorations.rs`
 - `src/server/command_execution.rs`
-- `runtime/js/modes.ts`
-- `runtime/js/commands.ts`
-- `runtime/js/completion.ts`
-- `runtime/js/syntax.ts`
-- `runtime/js/parse.ts`
-- `runtime/js/decorations.ts`
-- `runtime/js/ui.ts`
-- `runtime/js/configuration.ts`
-- `runtime/js/packages.ts`
+- `runtime/js/modes.js`
+- `runtime/js/commands.js`
+- `runtime/js/completion.js`
+- `runtime/js/syntax.js`
+- `runtime/js/parse.js`
+- `runtime/js/decorations.js`
+- `runtime/js/ui.js`
+- `runtime/js/configuration.js`
+- `runtime/js/packages.js`
 - `tests/primitives_docs.rs`
 
 ## Overview
@@ -57,7 +57,7 @@ The target outcome is three first-party language packages that each declare a ma
 
 - `src/packages/modes.rs::ModeRegistry` owns document classification, active major-mode state, fallback registration, and behavior manifest selection.
 - Phase 18.9 supplies always-on `core.text` and `core.code` fallback modes through `DocumentClassification` and `MajorModeActivation`.
-- `runtime/js/modes.ts` exposes `serverRegisterModePattern`, `serverClassifyDocument`, `serverActivateMajorMode`, and `serverActivateClassifiedMode` for package load-time mode registration and open-time activation.
+- `runtime/js/modes.js` exposes `serverRegisterModePattern`, `serverClassifyDocument`, `serverActivateMajorMode`, and `serverActivateClassifiedMode` for package load-time mode registration and open-time activation.
 - `@clay/rust`, `@clay/typescript`, and `@clay/javascript` can register their own major modes for `.rs`, `.ts`/`.tsx`, and `.js`/`.jsx`/`.mjs`/`.cjs` files. Classification rules must remain generic: file-extension patterns, MIME-type hints, shebang probes, and bounded leading-content probes. No language-specific Rust classification branches are permitted.
 
 ### Behavior manifests and text transforms
@@ -69,33 +69,33 @@ The target outcome is three first-party language packages that each declare a ma
 ### Command declaration and execution
 
 - `src/packages/commands.rs` and `src/server/ops/commands.rs` register package-prefixed command metadata with routing policy and authority.
-- `runtime/js/commands.ts` exposes `serverRegisterCommand`, `serverExecuteCommand`, and `serverListCommands`.
+- `runtime/js/commands.js` exposes `serverRegisterCommand`, `serverExecuteCommand`, and `serverListCommands`.
 - Phase 18.8 added the server-owned `CommandExecution` boundary in `src/server/command_execution.rs` so SDUI actions, package UI action intents, keybindings, and transient-menu selections all route through one validated path.
 - Language packages can declare commands such as "rust.toggleTestOutline" or "typescript.organizeImports" with inert metadata and server-side handlers; registration does not grant execution authority, which is re-checked at activation time.
 
 ### Syntax grammar contribution
 
 - Phase 18.10 implemented `SyntaxGrammarContribution` as a generic package-provided Tree-sitter grammar primitive.
-- `runtime/js/syntax.ts` and `src/server/ops/syntax.rs` expose `serverRegisterSyntaxGrammar` for grammar-only package load entries.
+- `runtime/js/syntax.js` and `src/server/ops/syntax.rs` expose `serverRegisterSyntaxGrammar` for grammar-only package load entries.
 - Active syntax grammar remains separate from active major mode: a document can be editable as `core.code` or a language major mode while a grammar supplies highlighting. This review records that active syntax grammar separate from active major mode is a reusable primitive boundary that language package expansion must preserve.
 - Phase 18.14 keeps the existing grammar contributions in `@clay/rust`, `@clay/typescript`, and `@clay/javascript` unchanged and adds mode/command/completion/configuration metadata alongside them.
 
 ### Completion trigger and result providers
 
 - Phase 18.11 implemented `CompletionTriggerAndResult` as a generic completion provider framework.
-- `runtime/js/completion.ts` exposes `serverRegisterCompletionProvider` for package load-time provider registration.
+- `runtime/js/completion.js` exposes `serverRegisterCompletionProvider` for package load-time provider registration.
 - The framework reuses behavior-manifest autocomplete triggers, client local-edit-first routing, a cancellable server-side `UiReactivePriority` lane, and `TransientMenuSession` for display/acceptance.
 - Language packages can register completion providers for keywords, snippets, and buffer-word augmentations. LSP, workspace-index, AI, network, shell, and filesystem-backed providers are out of scope for Phase 18.14.
 
 ### Parse handler bridge and incremental parse updates
 
-- `runtime/js/parse.ts` exposes `serverRegisterParseHandler` for server-side package parse handlers.
+- `runtime/js/parse.js` exposes `serverRegisterParseHandler` for server-side package parse handlers.
 - `src/server/parse_coordinator.rs` schedules cancellable background parse work, enforces parse-window budgets, rejects stale versions, and publishes viewport-prioritized results.
 - Language packages can register mode-scoped parse handlers that return inert decoration/folding/diagnostic data. The handler must not run in Masonry hot paths, block local paint, or access filesystem/network/shell/AI authority.
 
 ### Decoration transport
 
-- `runtime/js/decorations.ts` exposes `serverPublishDecorations` for bounded server-side decoration publication.
+- `runtime/js/decorations.js` exposes `serverPublishDecorations` for bounded server-side decoration publication.
 - `src/server/decorations.rs` validates document versions, byte ranges, style tokens, permissions, provenance, and `DECORATION_PAYLOAD_BUDGET_BYTES`.
 - Language packages can publish syntax, semantic, search-match, and diagnostic decoration spans derived from parse handlers or grammar contributions.
 
@@ -107,13 +107,13 @@ The target outcome is three first-party language packages that each declare a ma
 
 ### Package configuration and layout overrides
 
-- `runtime/js/configuration.ts` exposes `setPackageOption` for package-prefixed typed options.
-- `runtime/js/ui.ts` exposes `serverSetLayoutOverride` for user/package/mode layout defaults.
+- `runtime/js/configuration.js` exposes `setPackageOption` for package-prefixed typed options.
+- `runtime/js/ui.js` exposes `serverSetLayoutOverride` for user/package/mode layout defaults.
 - Language packages can expose options such as default panel visibility, preferred slot, formatter preferences, and theme-token remaps through documented `~/.config/clay/init.js` Clay JS APIs.
 
 ### Package loading and provenance
 
-- `runtime/js/packages.ts` exposes `loadPackage` as the one-line default end-user loader.
+- `runtime/js/packages.js` exposes `loadPackage` as the one-line default end-user loader.
 - Phase 18.6 generalized the resolver so bundled `@clay/*` packages and installed npm/GitHub/git/tarball/local-path packages share the same `PackageService` validation, authorization, package-root confinement, module-loader allowlist, and `loadEntry` execution path.
 - Language packages load with `await loadPackage("@clay/rust")`, `await loadPackage("@clay/typescript")`, or `await loadPackage("@clay/javascript")` from `~/.config/clay/init.js`.
 
@@ -216,14 +216,14 @@ Expected implementation artifacts:
 ## Tests
 
 - `tests/primitives_docs.rs`: static coverage that this review is linked from the wiki index and primitive architecture page; registry/backlog mention language-package-relevant primitives; the review records first-party language package expansion, active syntax grammar versus active major mode separation, hot-path split, and security boundaries.
-- `cargo test --test primitives_docs`: runs the primitive documentation coverage suite.
+- `cargo test --test protocol primitives_docs::`: runs the primitive documentation coverage suite.
 
 ## Related
 
 - [Primitive Architecture](primitive-architecture.md)
 - [Phase 18.9 Generic Text/Code Modes Primitive Review](phase18.9-generic-text-code-modes-primitive-review.md)
 - [Phase 18.10 Tree-sitter Grammar Primitive Review](phase18.10-tree-sitter-grammar-primitive-review.md)
-- [Phase 18.11 Completion Provider Framework Primitive Review](phase18.11-completion-provider-framework-primitive-review.md)
+- [Phase 18.11 Completion Provider Framework Primitive Review](phase18.11-completion-provider-primitive-review.md)
 - [Phase 18.8 Transient Menu and Command Execution Primitive Review](phase18.8-transient-menu-command-execution-primitive-review.md)
 - [Phase 18.3 Slot-Aware Package UI Primitive Review](phase18.3-slot-ui-primitive-review.md)
 - [Phase 18.4 Input, State, and Configuration Primitive Review](phase18.4-input-state-config-primitive-review.md)

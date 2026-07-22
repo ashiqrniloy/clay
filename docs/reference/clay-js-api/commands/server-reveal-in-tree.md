@@ -3,7 +3,7 @@ id: clay.commands.serverRevealInTree
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverRevealInTree
-js_facade: runtime/js/commands.ts::serverRevealInTree
+js_facade: runtime/js/commands.js::serverRevealInTree
 backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
@@ -89,7 +89,7 @@ Use `clay.commands.serverRevealInTree` only through the documented Clay JS facad
 
 ## Backing implementation
 
-- JS facade: `runtime/js/commands.ts::serverRevealInTree`
+- JS facade: `runtime/js/commands.js::serverRevealInTree`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
 - Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace`
 

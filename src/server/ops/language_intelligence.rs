@@ -62,14 +62,13 @@ pub(super) fn op_clay_language_register_intelligence_provider(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let token = format!(
-        "{}:{}:{}",
-        package.manifest.clay.api_prefix,
-        meta.id,
+    let token = super::registration_token(
+        &package.manifest.clay.api_prefix,
+        &meta.id,
         state
             .borrow::<Arc<ClayOpState>>()
             .language_intelligence_providers()
-            .len()
+            .len(),
     );
 
     let registration = JsLanguageIntelligenceProviderRegistration {

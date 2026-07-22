@@ -28,7 +28,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tokio::{sync::mpsc, task::JoinHandle, time::timeout};
+use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
@@ -706,13 +706,10 @@ struct CompletionCoordinatorInner {
 #[derive(Clone)]
 pub struct CompletionCoordinator {
     inner: Arc<Mutex<CompletionCoordinatorInner>>,
-    results_tx: mpsc::UnboundedSender<CompletionResultSet>,
-    results_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<CompletionResultSet>>>,
 }
 
 impl CompletionCoordinator {
     pub fn new() -> Self {
-        let (results_tx, results_rx) = mpsc::unbounded_channel();
         Self {
             inner: Arc::new(Mutex::new(CompletionCoordinatorInner {
                 registry: CompletionProviderRegistry::new(),
@@ -721,8 +718,6 @@ impl CompletionCoordinator {
                 current_generations: HashMap::new(),
                 stats: CompletionCoordinatorStats::default(),
             })),
-            results_tx,
-            results_rx: Arc::new(tokio::sync::Mutex::new(results_rx)),
         }
     }
 
@@ -816,6 +811,25 @@ impl CompletionCoordinator {
         abort_tasks(&mut inner, task_keys);
     }
 
+    /// Tear down document-scoped state when the final access holder closes a
+    /// document: version/generation tracking and active completion work for
+    /// the document (Plan 060 T6, P1-4).
+    pub(crate) fn remove_document(&self, document_id: DocumentId) {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("completion coordinator lock poisoned");
+        inner.current_versions.remove(&document_id);
+        inner.current_generations.remove(&document_id);
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|key| key.document_id == document_id)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+    }
+
     /// Disable a provider ID or package prefix and invalidate in-flight work
     /// from older generations. Registration metadata remains available so a
     /// fresh runtime generation can rebuild the registry.
@@ -889,15 +903,8 @@ impl CompletionCoordinator {
         for current in inner.current_generations.values_mut() {
             *current = (*current).max(active_generation);
         }
-        drop(inner);
-        self.drain_pending_results();
-    }
-
-    /// Drop already-queued completion results without waiting.
-    pub(crate) fn drain_pending_results(&self) {
-        if let Ok(mut results) = self.results_rx.try_lock() {
-            while results.try_recv().is_ok() {}
-        }
+        // Request-scoped oneshot replies make drained-queue cleanup obsolete:
+        // aborted tasks drop their sender and the waiter observes cancellation.
     }
 
     /// Snapshot of provider generations currently retained by the registry.
@@ -939,12 +946,16 @@ impl CompletionCoordinator {
     ///
     /// `provider_id` selects the provider to run. `window` is the server-
     /// prepared bounded document window the provider may read.
+    /// Schedule one completion request and return its request-scoped reply
+    /// receiver (Plan 060 T4, P0-3). Results route only to the requesting
+    /// connection; a superseded or failed task drops the sender so the caller
+    /// observes cancellation instead of stealing another request's result.
     pub fn schedule_completion(
         &self,
         provider_id: &str,
         request: CompletionRequest,
         window: CompletionDocumentWindow,
-    ) -> Result<(), CompletionCoordinatorError> {
+    ) -> Result<oneshot::Receiver<CompletionResultSet>, CompletionCoordinatorError> {
         request
             .validate()
             .map_err(CompletionCoordinatorError::InvalidRequest)?;
@@ -1000,6 +1011,7 @@ impl CompletionCoordinator {
             (provider, meta, task_key)
         };
 
+        let (reply_tx, reply_rx) = oneshot::channel();
         let coordinator = self.clone();
         let spawned_key = task_key.clone();
         let max_items = meta.max_items;
@@ -1011,7 +1023,7 @@ impl CompletionCoordinator {
                     Ok(inner_result) => inner_result,
                     Err(_elapsed) => Err(CompletionProviderError::Timeout),
                 };
-            coordinator.finish_task(spawned_key, outcome, max_items);
+            coordinator.finish_task(spawned_key, outcome, max_items, reply_tx);
         });
 
         self.inner
@@ -1019,7 +1031,7 @@ impl CompletionCoordinator {
             .expect("completion coordinator lock poisoned")
             .active_tasks
             .insert(task_key, task);
-        Ok(())
+        Ok(reply_rx)
     }
 
     fn finish_task(
@@ -1027,6 +1039,7 @@ impl CompletionCoordinator {
         task_key: TaskKey,
         result: Result<CompletionResultSet, CompletionProviderError>,
         max_items: usize,
+        reply_tx: oneshot::Sender<CompletionResultSet>,
     ) {
         let result = match result {
             Ok(result) => result,
@@ -1070,7 +1083,7 @@ impl CompletionCoordinator {
                 inner.active_tasks.remove(&task_key);
                 inner.stats.published_results += 1;
                 drop(inner);
-                let _ = self.results_tx.send(result);
+                let _ = reply_tx.send(result);
             }
             Err(_) => {
                 let mut inner = self
@@ -1168,10 +1181,6 @@ impl CompletionCoordinator {
             });
         }
         Ok(())
-    }
-
-    pub async fn next_result(&self) -> Option<CompletionResultSet> {
-        self.results_rx.lock().await.recv().await
     }
 
     pub fn stats(&self) -> CompletionCoordinatorStats {

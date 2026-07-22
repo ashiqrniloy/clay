@@ -3,7 +3,7 @@ id: clay.commands.serverExecuteCommand
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverExecuteCommand
-js_facade: runtime/js/commands.ts::serverExecuteCommand
+js_facade: runtime/js/commands.js::serverExecuteCommand
 backing_rust: src/server/ops/mod.rs::ClayOpState::execute_command; src/server/command_execution.rs::CommandExecutor::execute_workspace
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
@@ -89,7 +89,7 @@ Use `clay.commands.serverExecuteCommand` only through the documented Clay JS fac
 
 ## Backing implementation
 
-- JS facade: `runtime/js/commands.ts::serverExecuteCommand`
+- JS facade: `runtime/js/commands.js::serverExecuteCommand`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
 - Backing Rust/current owner: `src/server/ops/mod.rs::ClayOpState::execute_command; src/server/command_execution.rs::CommandExecutor::execute_workspace`
 

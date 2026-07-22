@@ -3,7 +3,7 @@ id: clay.ui.serverRegisterComponentContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterComponentContribution
-js_facade: runtime/js/ui.ts::serverRegisterComponentContribution
+js_facade: runtime/js/ui.js::serverRegisterComponentContribution
 backing_rust: src/server/ui.rs::PackageUiRegistry::register_component
 deno_op: op_clay_ui_register_component_contribution
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_register_component_contribution
@@ -149,7 +149,7 @@ Use `clay.ui.serverRegisterComponentContribution` when the user asks for a publi
 
 ## Backing implementation
 
-- JS facade: `runtime/js/ui.ts::serverRegisterComponentContribution`
+- JS facade: `runtime/js/ui.js::serverRegisterComponentContribution`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_component_contribution` (`op_clay_ui_register_component_contribution`)
 - Backing Rust/current owner: `src/server/ui.rs::PackageUiRegistry::register_component`
 - Component catalog and token validation: `src/shell/components.rs`; `src/shell/theme.rs`

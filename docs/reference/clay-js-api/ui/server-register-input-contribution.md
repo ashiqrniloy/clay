@@ -3,7 +3,7 @@ id: clay.ui.serverRegisterInputContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterInputContribution
-js_facade: runtime/js/ui.ts::serverRegisterInputContribution
+js_facade: runtime/js/ui.js::serverRegisterInputContribution
 backing_rust: src/server/ui.rs::PackageUiRegistry::register_input
 deno_op: op_clay_ui_register_input_contribution
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_register_input_contribution
@@ -169,7 +169,7 @@ Use this API for inert package input declarations only. Keep keyboard behavior i
 
 ## Backing implementation
 
-The public facade is `runtime/js/ui.ts::serverRegisterInputContribution`. The runtime op is `src/server/ops/ui.rs::op_clay_ui_register_input_contribution`, and the backing validator is `src/server/ui.rs::PackageUiRegistry::register_input`. Accepted declarations are copied into `src/shell/package_ui.rs::PackageInputRouting` for client/runtime reads.
+The public facade is `runtime/js/ui.js::serverRegisterInputContribution`. The runtime op is `src/server/ops/ui.rs::op_clay_ui_register_input_contribution`, and the backing validator is `src/server/ui.rs::PackageUiRegistry::register_input`. Accepted declarations are copied into `src/shell/package_ui.rs::PackageInputRouting` for client/runtime reads.
 
 ## Lookup metadata
 

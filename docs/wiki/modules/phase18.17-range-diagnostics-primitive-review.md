@@ -9,7 +9,7 @@
 - Patterns: `.agents/skills/project-patterns/references/language-capability-sequencing.md`, `mode-primitive-first.md`, `protocol-and-performance.md`, and `authority-boundaries.md`.
 - `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/protocol/parse.rs`.
 - `src/server/decorations.rs`, `src/server/parse_coordinator.rs`, `src/server/syntax.rs`, `src/server/ops/decorations.rs`.
-- `runtime/js/decorations.ts`, `src/client/mod.rs`, `src/masonry_editor.rs`.
+- `runtime/js/decorations.js`, `src/client/mod.rs`, `src/masonry_editor.rs`.
 - `src/editor/theme.rs`, `src/editor/surface.rs`, `src/editor/layout.rs`.
 - `tests/primitives_docs.rs`, `tests/parse_coordinator.rs`, `tests/decoration_transport.rs`, `tests/syntax_grammar.rs`, `tests/editor_performance_invariants.rs`.
 
@@ -55,9 +55,9 @@ Generic extraction can short-circuit on `root.has_error()`, walk only the bounde
 
 ### Package permissions and Clay JS publication
 
-`runtime/js/decorations.ts` and `src/server/ops/decorations.rs` expose `clay:decorations.serverPublishDecorations` under `render-decorations`. It can publish `kind: "diagnostic"`, but only as a visual `DecorationSpan`; it cannot represent message/code/source metadata or diagnostic-source replacement.
+`runtime/js/decorations.js` and `src/server/ops/decorations.rs` expose `clay:decorations.serverPublishDecorations` under `render-decorations`. It can publish `kind: "diagnostic"`, but only as a visual `DecorationSpan`; it cannot represent message/code/source metadata or diagnostic-source replacement.
 
-Implemented: `runtime/js/diagnostics.ts` and `src/server/ops/diagnostics.rs` expose `clay:diagnostics.serverPublishDiagnostics` under the same `render-decorations` permission. It publishes distinct bounded `DiagnosticSet` data with provenance validation, rejects executable/raw-authority fields, and grants no LSP process or extra authority.
+Implemented: `runtime/js/diagnostics.js` and `src/server/ops/diagnostics.rs` expose `clay:diagnostics.serverPublishDiagnostics` under the same `render-decorations` permission. It publishes distinct bounded `DiagnosticSet` data with provenance validation, rejects executable/raw-authority fields, and grants no LSP process or extra authority.
 
 ## Implemented Protocol and Validation Contract
 
@@ -67,7 +67,7 @@ Implemented: `runtime/js/diagnostics.ts` and `src/server/ops/diagnostics.rs` exp
 
 Typed limits live in `src/perf/budgets.rs`: `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, code/message/source/provenance field limits, and `DIAGNOSTIC_CACHE_BUDGET_BYTES`. `ServerMessage::DiagnosticSet` uses the normal codec. `IncrementalParseUpdate::diagnostic_update` implements the atomic inert side channel; `SyntaxDiagnosticCapture`/`SyntaxDiagnosticKind` define the engine-neutral local `ERROR`/`MISSING` shape for the next extraction task. Runtime-backed handlers may return inert `{ diagnostics: { source, spans } }` JSON, while Rust derives provenance from accepted package registration.
 
-Coverage lives in `tests/range_diagnostics.rs` and `tests/performance_protocol.rs`. Run `cargo test --test range_diagnostics` and `cargo test --test performance_protocol representative_diagnostic_chunk_payload_stays_bounded`.
+Coverage lives in `tests/range_diagnostics.rs` and `tests/performance_protocol.rs`. Run `cargo test --test editor range_diagnostics::` and `cargo test --test protocol performance_protocol::representative_diagnostic_chunk_payload_stays_bounded`.
 
 ## What Existing Primitives Already Achieve
 
@@ -169,15 +169,13 @@ This phase adds no filesystem, network, shell, AI, workspace mutation, language-
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_17_range_diagnostics_primitive_review_is_linked_and_complete`: locks inventory, generic gaps, zero-width anchoring, additive layers, hot-path split, authority boundary, and rejected shapes.
-- `tests/primitives_docs.rs::range_diagnostics_implementation_wiki_is_linked_and_complete`: locks the implementation wiki page and master-index link.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Implementation coverage: `tests/range_diagnostics.rs`, `tests/parse_coordinator.rs`, `tests/syntax_grammar.rs`, `tests/performance_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/clay_js_doc_registry.rs`, `tests/rust_visibility_api_mapping.rs`, `tests/manual_smoke_docs.rs`.
 
 Run:
 
 ```bash
-cargo test --test primitives_docs phase18_17_range_diagnostics_primitive_review_is_linked_and_complete
-cargo test --test primitives_docs range_diagnostics_implementation_wiki_is_linked_and_complete
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

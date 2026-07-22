@@ -3,7 +3,7 @@ id: clay.documents.serverGetDocumentStatus
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverGetDocumentStatus
-js_facade: runtime/js/documents.ts::serverGetDocumentStatus
+js_facade: runtime/js/documents.js::serverGetDocumentStatus
 backing_rust: src/server/workspace.rs::WorkspaceState::document_metadata
 deno_op: op_clay_documents_get_document_status
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_get_document_status
@@ -94,7 +94,7 @@ Use `clay.documents.serverGetDocumentStatus` only through the documented Clay JS
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::serverGetDocumentStatus`
+- JS facade: `runtime/js/documents.js::serverGetDocumentStatus`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_get_document_status` (`op_clay_documents_get_document_status`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::document_metadata`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`

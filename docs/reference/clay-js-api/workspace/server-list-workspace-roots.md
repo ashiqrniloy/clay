@@ -3,7 +3,7 @@ id: clay.workspace.serverListWorkspaceRoots
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverListWorkspaceRoots
-js_facade: runtime/js/workspace.ts::serverListWorkspaceRoots
+js_facade: runtime/js/workspace.js::serverListWorkspaceRoots
 backing_rust: src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root
 deno_op: op_clay_workspace_list_roots
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_list_roots
@@ -94,7 +94,7 @@ Use `clay.workspace.serverListWorkspaceRoots` only through the documented Clay J
 
 ## Backing implementation
 
-- JS facade: `runtime/js/workspace.ts::serverListWorkspaceRoots`
+- JS facade: `runtime/js/workspace.js::serverListWorkspaceRoots`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_roots` (`op_clay_workspace_list_roots`)
 - Backing Rust/current owner: `src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`

@@ -183,12 +183,12 @@ This review was the Phase 18.9 Task 1 primitive-first inventory. Its recommended
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_9_generic_text_code_modes_primitive_review_records_inventory_and_gaps`: verifies wiki/index and primitive-architecture links plus required primitive-review contents (inventory, genuine gaps, hot-path split, rejected shapes, no-new-authority text) and required registry mentions.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Implementation-time tests (later tasks): `tests/package_primitive_gate.rs` for built-in `core.*` mode registration/ownership, shebang/content-probe matching, precedence, bounded-prefix rejection, and fallback availability with no packages loaded; behavior-manifest tests for the electric-character manifest kind and `core.code` default rules; `tests/command_execution.rs` for mode discovery command results and no-authority invariants.
 - Run focused documentation coverage with:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs phase18_9_generic_text_code_modes_primitive_review_records_inventory_and_gaps --quiet
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

@@ -70,10 +70,22 @@ pub(super) async fn op_clay_documents_save_document(
         "documentId",
         "clay.documents.invalid_save_options",
     )?;
+    let known_version = options
+        .get("knownVersion")
+        .map(|value| parse_u64_value(value, "knownVersion", "clay.documents.invalid_save_options"))
+        .transpose()?
+        .unwrap_or(0);
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
-    let outcome = crate::server::workspace::save_document_unlocked(&workspace, document_id)
-        .await
-        .map_err(workspace_error("clay.documents.save_failed"))?;
+    // Runtime identity 0 bypasses an editable client lease, but an explicit
+    // caller version still cannot claim state newer than the canonical server.
+    let outcome = crate::server::workspace::save_document_unlocked(
+        &workspace,
+        document_id,
+        RUNTIME_CLIENT_ID,
+        known_version,
+    )
+    .await
+    .map_err(workspace_error("clay.documents.save_failed"))?;
     serialize_result(
         json!({
             "documentId": outcome.document_id.to_string(),
@@ -102,10 +114,14 @@ pub(super) async fn op_clay_documents_reload_document(
         .unwrap_or(false);
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
     let (metadata, text) = {
-        let outcome =
-            crate::server::workspace::reload_document_unlocked(&workspace, document_id, force)
-                .await
-                .map_err(workspace_error("clay.documents.reload_failed"))?;
+        let outcome = crate::server::workspace::reload_document_unlocked(
+            &workspace,
+            document_id,
+            RUNTIME_CLIENT_ID,
+            force,
+        )
+        .await
+        .map_err(workspace_error("clay.documents.reload_failed"))?;
         let metadata = workspace
             .lock()
             .await

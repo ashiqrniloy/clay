@@ -3,7 +3,7 @@ id: clay.sdui.defineList
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineList
-js_facade: runtime/js/sdui.ts::defineList
+js_facade: runtime/js/sdui.js::defineList
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::List
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -100,7 +100,7 @@ Use `clay.sdui.defineList` when the user asks for runtime-backed Clay SDUI schem
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::defineList`
+- JS facade: `runtime/js/sdui.js::defineList`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::List`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

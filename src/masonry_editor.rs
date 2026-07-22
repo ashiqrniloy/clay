@@ -63,9 +63,15 @@ pub enum EditorAction {
     ClientUiCommand(ClientUiCommandRoute),
     /// Native file dialog finished on a background thread (Linux portal must not
     /// block the Wayland/UI event loop or the chooser never appears).
-    OpenSelectedFile(std::path::PathBuf),
+    FileDialogCompleted {
+        generation: u64,
+        result: crate::client::FileDialogResult,
+    },
     /// Native folder dialog finished on a background thread.
-    OpenSelectedFolder(std::path::PathBuf),
+    FolderDialogCompleted {
+        generation: u64,
+        result: crate::client::FileDialogResult,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -752,7 +758,17 @@ impl EditorWidget {
             pending,
             last_activated_order: 0,
         };
-        self.sessions.insert(document_id, session)
+        let eviction = self.sessions.insert(document_id, session);
+        // LRU eviction closes the server-side document too (force: the
+        // evicted session's unsaved edits are discarded with the session), so
+        // document state does not accumulate past the retention budget
+        // (Plan 060 T6, P1-4).
+        if let Some(queue) = self.edit_queue.as_mut() {
+            for evicted_id in &eviction.evicted {
+                let _ = queue.enqueue_close_document(*evicted_id, true);
+            }
+        }
+        eviction.notice
     }
 
     /// Activate a retained session by document id without re-downloading text.

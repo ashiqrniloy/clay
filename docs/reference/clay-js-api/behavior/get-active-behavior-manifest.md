@@ -3,7 +3,7 @@ id: clay.behavior.getActiveBehaviorManifest
 kind: clay-js-api
 js_module: "clay:behavior"
 js_export: getActiveBehaviorManifest
-js_facade: runtime/js/behavior.ts::getActiveBehaviorManifest
+js_facade: runtime/js/behavior.js::getActiveBehaviorManifest
 backing_rust: src/client/behavior.rs::ClientBehaviorState::active_manifest
 deno_op: op_clay_behavior_get_active_manifest
 deno_op_path: src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest
@@ -91,7 +91,7 @@ Use `clay.behavior.getActiveBehaviorManifest` when the user asks for get active 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/behavior.ts::getActiveBehaviorManifest`
+- JS facade: `runtime/js/behavior.js::getActiveBehaviorManifest`
 - Deno op: `src/server/ops/behavior.rs::op_clay_behavior_get_active_manifest` (`op_clay_behavior_get_active_manifest`)
 - Backing Rust/current owner: `src/client/behavior.rs::ClientBehaviorState::active_manifest`
 - Current implementation audit path: `src/behavior/manifest.rs::validate_manifest; src/client/behavior.rs::ClientBehaviorState`

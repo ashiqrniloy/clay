@@ -7,9 +7,9 @@
 - `src/server/connection.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/workspace.rs`
-- `runtime/js/packages.ts`
-- `runtime/js/modes.ts`
-- `runtime/js/parse.ts`
+- `runtime/js/packages.js`
+- `runtime/js/modes.js`
+- `runtime/js/parse.js`
 - `packages/markdown/dist/load.js`
 - `docs/wiki/modules/embedded-js-runtime.md`
 - `docs/wiki/modules/package-loading.md`

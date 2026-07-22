@@ -13,7 +13,7 @@
 - `src/packages/record.rs` (completion provider contribution descriptor).
 - `src/shell/transient_menu.rs` (`CompletionMenuAcceptAction`, `TransientMenuAction`, `TransientMenuSession`).
 - `src/editor/surface.rs` (`accept_completion_with_event`, `finish_edit_with_operation`, `EditOperation::Replace`).
-- `runtime/js/completion.ts` (`serverRegisterCompletionProvider`, `serverListCompletionProvidersForTrigger`, `completionTriggerCharactersFromEditorRules`, prohibited authority fields).
+- `runtime/js/completion.js` (`serverRegisterCompletionProvider`, `serverListCompletionProvidersForTrigger`, `completionTriggerCharactersFromEditorRules`, prohibited authority fields).
 - `packages/{rust,typescript,javascript,markdown}/package.json` (`clay.contributions.completionProviders`).
 - `tests/completion_provider.rs`, `tests/primitives_docs.rs`, `tests/editor_performance_invariants.rs`, `tests/performance_protocol.rs`.
 
@@ -55,7 +55,7 @@ This review records the primitive inventory available after Phase 18.18 landed a
 
 ### Clay JS facade and permissions
 
-`runtime/js/completion.ts` exposes `serverRegisterCompletionProvider`, `serverDisableCompletion`, `serverListCompletionProvidersForTrigger`, and `completionTriggerCharactersFromEditorRules`. The register facade checks prohibited authority fields (`handler`, `callback`, `complete`, `function`, `clientJavaScript`, `nativeHandle`, `rawOps`, `module`) before delegating to `op_clay_completion_register_completion_provider`. The disable facade accepts exactly one non-empty `provider` or `packagePrefix`; facade and Rust op reject every extra field, and the op bounds targets at 128 characters. Completion providers declare only the `completion-provider` permission; disabling needs no package permission and no completion path grants filesystem, network, shell, AI, LSP, workspace, raw-op, or client-JavaScript authority.
+`runtime/js/completion.js` exposes `serverRegisterCompletionProvider`, `serverDisableCompletion`, `serverListCompletionProvidersForTrigger`, and `completionTriggerCharactersFromEditorRules`. The register facade checks prohibited authority fields (`handler`, `callback`, `complete`, `function`, `clientJavaScript`, `nativeHandle`, `rawOps`, `module`) before delegating to `op_clay_completion_register_completion_provider`. The disable facade accepts exactly one non-empty `provider` or `packagePrefix`; facade and Rust op reject every extra field, and the op bounds targets at 128 characters. Completion providers declare only the `completion-provider` permission; disabling needs no package permission and no completion path grants filesystem, network, shell, AI, LSP, workspace, raw-op, or client-JavaScript authority.
 
 ### Docs registry and wiki coverage
 
@@ -177,13 +177,13 @@ No new `PackagePermission` and no new decision log are required for this phase (
 - `src/server/connection.rs::static_package_completion_merges_equal_priority_plain_and_snippet_providers`: locks live static-provider merge and final result validation.
 - `src/server/js_runtime.rs::language_package_completion_trigger_metadata_is_queryable`: loads packages through `loadPackage`, observes both snippet providers and structured `textFormat: "snippet"` items through the public listing facade.
 - `tests/package_primitive_gate.rs`: locks string compatibility plus structured-item validation, mixed-format rejection, and insert-text budget enforcement.
-- `tests/primitives_docs.rs::phase18_19_completion_extensions_primitive_review_is_linked_and_complete`: locks inventory, tasks 4-8 implementation status/source/caps/session/suppression/disable/snippet-set behavior, hot-path split, authority boundary, and rejected shapes; also locks the primitive-registry pointer.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Implementation coverage (later tasks): `tests/clay_js_api_inventory.rs`/`tests/clay_js_doc_registry.rs` (authoritative descriptor and `serverDisableCompletion` docs/registry coverage).
 
 Run:
 
 ```bash
-cargo test --test primitives_docs phase18_19_completion_extensions_primitive_review_is_linked_and_complete
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

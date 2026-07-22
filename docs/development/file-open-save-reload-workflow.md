@@ -76,7 +76,7 @@ Opening the same document again replaces the active buffer without creating a du
 
 ### Server-first save (`serverSaveDocument`)
 
-Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server writes the canonical text to the authorized file path atomically (temp file + `fsync` + rename).
+Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server writes the canonical text to the authorized file path atomically (exclusive unpredictable temp file + `fsync` + permission restore + target-identity revalidation + rename).
 
 ```js
 bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
@@ -96,9 +96,11 @@ Save is asynchronous and non-blocking. The GUI remains responsive; typing contin
 
 | Platform | Atomic save | Permissions | Notes |
 |---|---|---|---|
-| Linux | POSIX atomic rename | rejects targets without write bits | temp in target directory, mode restored |
+| Linux | POSIX atomic rename | rejects targets without write bits | temp in target directory starts `0o600`, original mode restored (fail closed on restore error) |
 | macOS | POSIX atomic rename | rejects targets without write bits | same as Linux |
 | Windows | `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` | standard file permissions | Rust `std::fs::rename` path |
+
+The temp file is created with `OpenOptions::create_new` under an unpredictable name (process-random `RandomState` seed + counter) with up to 8 bounded collision retries, so a pre-created file or symlink at a guessed temp path is never truncated or followed. Immediately before the rename, the server revalidates the target's stable identity (Unix `(dev, ino)`, Windows volume serial + file index) plus length and modification time against what `prepare_save` observed: an external edit — including a same-length edit — or an atomic replacement during the temp write fails the save with `StaleFileMetadata` and preserves the external bytes instead of clobbering them.
 
 ### Dirty state
 
@@ -124,6 +126,8 @@ Dirty persists on:
 ### Server-first reload (`serverReloadDocument`)
 
 Reload replaces the editor text with the current on-disk version. Clean documents reload without friction; dirty documents require explicit force.
+
+Open and reload read through one opened handle: the server validates the handle's type and size against the openable-file budget, then reads with a hard ceiling of the budget plus one byte, so a file that grows or is swapped between validation and read stays bounded and is rejected with `FileTooLarge` instead of exhausting memory. The workspace mutex is never held across the disk read.
 
 ```js
 // Not typically bound to a direct key; reachable via Control Center or recovery menus.
@@ -196,7 +200,7 @@ bindKey("Ctrl+Tab", "clay.editor.clientShowOpenDocuments", { scope: "editor" });
 | Atomic save | `MoveFileExW` rename | POSIX atomic rename | POSIX atomic rename | N/A |
 | Markdown filters | extension filter list | portal glob filters | `setAllowedFileTypes` (deprecated) | N/A |
 | All-files fallback | `*.*` | `*` (normalized) | `allowsOtherFileTypes: true` | N/A |
-| Clipboard copy/cut/paste | `Ctrl+C`/`X`/`V` | `Ctrl+C`/`X`/`V` | `Cmd+C`/`X`/`V` | client `arboard` sink |
+| Clipboard copy/cut/paste | `Ctrl+C`/`X`/`V` | `Ctrl+C`/`X`/`V` | `Cmd+C`/`X`/`V` | persistent text-only client `arboard` sink |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same | `Cmd+Z` / `Cmd+Shift+Z` | 256-entry inverse stack |
 | IME preedit overlay | OS IME via Masonry | ibus/fcitx when available | OS IME via Masonry | paint-only until commit |
 | Snapshot retain (64 docs) | yes | yes | yes | yes |
@@ -247,6 +251,8 @@ Requests without a valid token create no file grant, workspace root, or document
 4. Switch back to the second file. Confirm its state is preserved.
 
 ### Platform-specific dialog validation
+
+On Linux, invoke the same file-dialog command repeatedly while the portal picker is open: only one file picker may exist. Cancel, invoke again, and confirm it reopens. Repeat independently for the folder picker; a stale completion must never act on a later generation.
 
 - **Windows:** Confirm the native open dialog shows a Markdown filter dropdown with all-files fallback.
 - **Linux:** Confirm the portal-native dialog opens (requires a portal-compliant desktop environment with `xdg-desktop-portal` running).

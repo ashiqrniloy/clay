@@ -3,7 +3,7 @@ id: clay.editor.serverInsertText
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: serverInsertText
-js_facade: runtime/js/editor.ts::serverInsertText
+js_facade: runtime/js/editor.js::serverInsertText
 backing_rust: src/server/document.rs::DocumentState::apply_edit
 deno_op: op_clay_editor_insert_text
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_insert_text
@@ -98,7 +98,7 @@ Use `clay.editor.serverInsertText` when the user asks for insert text through th
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::serverInsertText`
+- JS facade: `runtime/js/editor.js::serverInsertText`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_insert_text` (`op_clay_editor_insert_text`)
 - Backing Rust/current owner: `src/server/document.rs::DocumentState::apply_edit`
 - Current implementation audit path: `src/editor/surface.rs::EditorSurface::insert_text_with_event; src/server/document.rs::DocumentState::apply_edit`

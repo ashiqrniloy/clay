@@ -107,7 +107,7 @@ Phase 18.2 has implemented internally:
 
 Phase 18.3 now adds runtime-backed public APIs for package-owned slot UI contributions:
 
-- `clay:ui` facade imports are available in the server-side package runtime through `runtime/js/ui.ts` and `src/server/js_runtime.rs`.
+- `clay:ui` facade imports are available in the server-side package runtime through `runtime/js/ui.js` and `src/server/js_runtime.rs`.
 - `serverRegisterPanelContribution(manifest, declaration)` validates a fixed `PanelContribution` targeting `left`, `right`, `top`, or `bottom` slots and stores package provenance.
 - `serverRegisterComponentContribution(manifest, declaration)` validates a bounded Clay component tree/catalog contribution.
 - `serverRegisterTransientOverlayContribution(manifest, declaration)` validates an overlay/menu/dialog-like transient contribution with anchor, focus, and dismissal policies.

@@ -3,7 +3,7 @@ id: clay.language-server.startLanguageServerSession
 kind: clay-js-api
 js_module: "clay:language-server"
 js_export: startLanguageServerSession
-js_facade: runtime/js/language-server.ts::startLanguageServerSession
+js_facade: runtime/js/language-server.js::startLanguageServerSession
 backing_rust: src/server/language_server.rs::LanguageServerProcessService
 deno_op: op_clay_language_server_start_session
 deno_op_path: src/server/ops/language_server.rs::op_clay_language_server_start_session
@@ -120,7 +120,7 @@ Use only with an existing grant and documented contribution. Never expose raw pr
 
 ## Backing implementation
 
-- Facade: `runtime/js/language-server.ts::startLanguageServerSession`
+- Facade: `runtime/js/language-server.js::startLanguageServerSession`
 - Op: `src/server/ops/language_server.rs::op_clay_language_server_start_session`
 - Rust: `src/server/language_server.rs::LanguageServerProcessService`
 

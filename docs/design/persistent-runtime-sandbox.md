@@ -124,9 +124,9 @@ Initial measurable targets for the harness:
 
 ## Minimal Harness Status
 
-`src/server/runtime_sandbox.rs` and `src/bin/clay-runtime-sandbox.rs` implement the current internal harness only. It proves child spawn/handshake, controlled evaluation, parent timeout kill, fresh restart, payload-budget rejection, and absence of filesystem/network/shell globals. It uses newline-delimited JSON over child stdio rather than the final production protocol and is not wired into package loading.
+`src/server/runtime_sandbox.rs` and `src/bin/clay-runtime-sandbox.rs` implement the current internal harness only. It proves child spawn/handshake, controlled evaluation, parent timeout kill, fresh restart, payload-budget rejection, and absence of filesystem/network/shell globals. It uses newline-delimited JSON over child stdio rather than the final production protocol and is not wired into package loading. Parent framing is still bounded: `fill_buf`/`consume` retains no more than the negotiated payload ceiling plus one byte, excludes the newline from the payload budget, and kills then awaits the child on overflow, unterminated EOF, read failure, or malformed JSON. Production migration still requires the typed length-prefixed protocol above.
 
 ## Tests Required Before Implementation Completion
 
 - Design doc guard requires process boundary, bounded protocol, restart policy, parent-side validation, hot-path exclusion, runtime profiles, and user-authorized package source language.
-- `tests/runtime_sandbox_harness.rs` proves child start/evaluate, timeout kill/restart, oversized output rejection, and no filesystem/network/shell authority through the protocol by default.
+- `tests/runtime_sandbox_harness.rs` proves child start/evaluate, timeout kill/restart, bounded newline-terminated and unterminated overflow with child reaping, oversized valid output rejection, and no filesystem/network/shell authority through the protocol by default.

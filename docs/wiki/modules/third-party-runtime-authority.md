@@ -164,10 +164,10 @@ Language-server session spoofing is closed: `start_session` resolves identity ho
 Run focused coverage with:
 
 ```text
-cargo test --test package_graph        # extension point validation, structured relations, adoption lifecycle, replacement + rollback
-cargo test --test package_loading      # replacement withdraws trusted target atomically, LS lifecycles, adoption gating
-cargo test --test package_conflicts    # replacement edge approval, stale-on-commit
-cargo test --test primitives_docs      # op/extension/subset inventory tests, wiki doc completeness
+cargo test --test security package_graph::        # extension point validation, structured relations, adoption lifecycle, replacement + rollback
+cargo test --test security package_loading::      # replacement withdraws trusted target atomically, LS lifecycles, adoption gating
+cargo test --test security package_conflicts::    # replacement edge approval, stale-on-commit
+cargo test --test protocol primitives_docs::      # op/extension/subset inventory tests, wiki doc completeness
 cargo test --lib package_approval      # PackageApprovalStore round-trip, corruption, version drift
 cargo test --lib bundled_trust         # inventory matches source, extension points match real contributions
 cargo test --lib cross_domain          # cross-domain envelope validation, requester/target checks

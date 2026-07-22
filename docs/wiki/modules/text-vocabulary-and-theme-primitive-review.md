@@ -35,7 +35,7 @@ Phase 18.15 replaces the free-form `style_token: String` on `DecorationSpan` wit
 
 ### Theme token registration op and facade
 
-`op_clay_ui_register_theme_token` in `src/server/ops/ui.rs` (wired in `src/server/ops/mod.rs`) backs the `serverRegisterThemeToken(manifest, declaration)` facade in `runtime/js/ui.ts`. This is the inert runtime registration path packages use to declare typed theme tokens. Source: `src/server/ops/ui.rs`, `src/server/ops/mod.rs`, `runtime/js/ui.ts`.
+`op_clay_ui_register_theme_token` in `src/server/ops/ui.rs` (wired in `src/server/ops/mod.rs`) backs the `serverRegisterThemeToken(manifest, declaration)` facade in `runtime/js/ui.js`. This is the inert runtime registration path packages use to declare typed theme tokens. Source: `src/server/ops/ui.rs`, `src/server/ops/mod.rs`, `runtime/js/ui.js`.
 
 ### Decoration production (server side)
 
@@ -103,6 +103,6 @@ Implementation details live in [Editor Theme Registry](editor-theme-registry.md)
 - `src/editor/surface.rs` — `decoration_color`, the 14 color constants, `visible_decoration_ranges`, baseline lock test.
 - `src/shell/theme.rs` — SDUI `ThemeTokenType` / `ThemeTokenResolver` / `SduiThemeStyle`.
 - `src/packages/record.rs` — `ThemeTokenContributionDescriptor`, `parse_theme_token_contributions`, `reject_ui_prohibited_authority`.
-- `src/server/ops/ui.rs`, `runtime/js/ui.ts` — `op_clay_ui_register_theme_token` / `serverRegisterThemeToken`.
+- `src/server/ops/ui.rs`, `runtime/js/ui.js` — `op_clay_ui_register_theme_token` / `serverRegisterThemeToken`.
 - `src/perf/budgets.rs` — `DECORATION_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES`.
 - Plan 046 tasks 3–11 — implementation tasks that consume this review.

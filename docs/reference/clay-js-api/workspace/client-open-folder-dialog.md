@@ -3,7 +3,7 @@ id: clay.workspace.clientOpenFolderDialog
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: clientOpenFolderDialog
-js_facade: runtime/js/workspace.ts::clientOpenFolderDialog
+js_facade: runtime/js/workspace.js::clientOpenFolderDialog
 backing_rust: src/client/file_dialog.rs::open_folder_dialog; src/main.rs::handle_client_ui_command; src/server/connection.rs::ClientMessage::AddSelectedWorkspaceRoot
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -102,7 +102,7 @@ Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bind
 
 ## Backing implementation
 
-- JS facade: `runtime/js/workspace.ts::clientOpenFolderDialog`
+- JS facade: `runtime/js/workspace.js::clientOpenFolderDialog`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/client/file_dialog.rs::open_folder_dialog`; `src/main.rs::handle_client_ui_command`; `src/server/connection.rs::ClientMessage::AddSelectedWorkspaceRoot`
 

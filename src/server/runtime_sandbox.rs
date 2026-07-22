@@ -2,7 +2,7 @@ use std::{error::Error, fmt, path::Path, process::Stdio, time::Duration};
 
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
     time::{Instant, timeout},
 };
@@ -123,30 +123,91 @@ impl RuntimeSandboxSupervisor {
     }
 
     async fn read_frame(&mut self) -> Result<Value, RuntimeSandboxError> {
-        let mut line = String::new();
-        let bytes = self
-            .stdout
-            .read_line(&mut line)
-            .await
-            .map_err(RuntimeSandboxError::io)?;
-        if bytes == 0 {
-            return Err(RuntimeSandboxError::Protocol(
-                "sandbox child exited".to_owned(),
-            ));
+        let frame = match read_bounded_frame(&mut self.stdout, self.max_payload_bytes).await {
+            Ok(frame) => frame,
+            Err(FrameReadError::Io(error)) => {
+                self.kill().await;
+                return Err(RuntimeSandboxError::io(error));
+            }
+            Err(FrameReadError::Exited) => {
+                self.kill().await;
+                return Err(RuntimeSandboxError::Protocol(
+                    "sandbox child exited".to_owned(),
+                ));
+            }
+            Err(FrameReadError::Unterminated { len }) => {
+                self.kill().await;
+                return Err(RuntimeSandboxError::Protocol(format!(
+                    "sandbox child returned an unterminated frame after {len} bytes"
+                )));
+            }
+            Err(FrameReadError::TooLarge { len }) => {
+                self.kill().await;
+                return Err(RuntimeSandboxError::PayloadTooLarge {
+                    len,
+                    max: self.max_payload_bytes,
+                });
+            }
+        };
+        match serde_json::from_slice(&frame) {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                self.kill().await;
+                Err(RuntimeSandboxError::json(error))
+            }
         }
-        if bytes > self.max_payload_bytes {
-            self.kill().await;
-            return Err(RuntimeSandboxError::PayloadTooLarge {
-                len: bytes,
-                max: self.max_payload_bytes,
-            });
-        }
-        serde_json::from_str(&line).map_err(RuntimeSandboxError::json)
     }
 
     async fn kill(&mut self) {
         let _ = self.child.kill().await;
         let _ = self.child.wait().await;
+    }
+}
+
+#[derive(Debug)]
+enum FrameReadError {
+    Io(std::io::Error),
+    Exited,
+    Unterminated { len: usize },
+    TooLarge { len: usize },
+}
+
+/// Read one newline-delimited payload while retaining at most `max + 1`
+/// bytes. The delimiter is not part of the payload budget.
+async fn read_bounded_frame<R>(
+    reader: &mut R,
+    max_payload_bytes: usize,
+) -> Result<Vec<u8>, FrameReadError>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let capacity = max_payload_bytes.min(8 * 1024);
+    let mut frame = Vec::with_capacity(capacity);
+    loop {
+        let available = reader.fill_buf().await.map_err(FrameReadError::Io)?;
+        if available.is_empty() {
+            return Err(if frame.is_empty() {
+                FrameReadError::Exited
+            } else {
+                FrameReadError::Unterminated { len: frame.len() }
+            });
+        }
+
+        let remaining = max_payload_bytes.saturating_add(1) - frame.len();
+        if let Some(newline) = available.iter().position(|byte| *byte == b'\n')
+            && newline < remaining
+        {
+            frame.extend_from_slice(&available[..newline]);
+            reader.consume(newline + 1);
+            return Ok(frame);
+        }
+
+        let consumed = available.len().min(remaining);
+        frame.extend_from_slice(&available[..consumed]);
+        reader.consume(consumed);
+        if frame.len() > max_payload_bytes {
+            return Err(FrameReadError::TooLarge { len: frame.len() });
+        }
     }
 }
 

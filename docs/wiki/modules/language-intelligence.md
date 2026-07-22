@@ -6,7 +6,7 @@
 - `src/server/language_intelligence.rs`
 - `src/server/ops/language_intelligence.rs`
 - `src/server/js_runtime.rs`
-- `runtime/js/language.ts`
+- `runtime/js/language.js`
 - `src/server/connection.rs`
 - `src/client/behavior.rs`, `src/client/mod.rs`
 - `src/editor/surface.rs`, `src/masonry_editor.rs`
@@ -101,7 +101,6 @@ import { serverRegisterLanguageIntelligenceProvider } from "clay:language";
 import * as provider from "./provider.js";
 
 serverRegisterLanguageIntelligenceProvider({
-  packageManifest,
   id: "example.intelligence",
   modes: ["example"],
   features: ["hover", "definition", "codeAction", "signatureHelp"],
@@ -117,7 +116,7 @@ See the authoritative API page for complete options and errors.
 
 - **Primitive/category:** `LanguageIntelligenceRequestAndResult` and `LanguageIntelligenceProvider`.
 - **Owners:** `src/protocol/language_intelligence.rs` and `src/server/language_intelligence.rs`.
-- **Facade/op:** `runtime/js/language.ts::serverRegisterLanguageIntelligenceProvider` and `src/server/ops/language_intelligence.rs`.
+- **Facade/op:** `runtime/js/language.js::serverRegisterLanguageIntelligenceProvider` and `src/server/ops/language_intelligence.rs`.
 - **Permission:** `parse-document` for bounded open-document analysis; no implicit process/filesystem/network/shell authority.
 - **Budgets:** 512 B request, 16 KiB result, 64 KiB document window, 16 outstanding requests, 500 ms default/5000 ms maximum timeout, plus feature-specific count/string limits in `src/perf/budgets.rs`.
 - **Hot-path policy:** provider/JS/process work is cancellable server-side UI-reactive work; local edits and paint consume local or validated inert state only.
@@ -154,9 +153,9 @@ See the authoritative API page for complete options and errors.
 - `tests/performance_protocol.rs`: representative result payload ceiling.
 
 ```bash
-cargo test --test language_intelligence
-cargo test --test editor_performance_invariants
-cargo test --test performance_protocol
+cargo test --test runtime language_intelligence::
+cargo test --test editor editor_performance_invariants::
+cargo test --test protocol performance_protocol::
 ```
 
 ## Related

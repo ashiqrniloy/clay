@@ -3,7 +3,7 @@ id: clay.documents.serverOpenDocument
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverOpenDocument
-js_facade: runtime/js/documents.ts::serverOpenDocument
+js_facade: runtime/js/documents.js::serverOpenDocument
 backing_rust: src/server/workspace.rs::WorkspaceState::open_existing_file
 deno_op: op_clay_documents_open_document
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_open_document
@@ -99,7 +99,7 @@ Use `clay.documents.serverOpenDocument` only through the documented Clay JS faca
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::serverOpenDocument`
+- JS facade: `runtime/js/documents.js::serverOpenDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_open_document` (`op_clay_documents_open_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::open_existing_file`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`

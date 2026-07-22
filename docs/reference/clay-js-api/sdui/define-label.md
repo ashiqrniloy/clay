@@ -3,7 +3,7 @@ id: clay.sdui.defineLabel
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineLabel
-js_facade: runtime/js/sdui.ts::defineLabel
+js_facade: runtime/js/sdui.js::defineLabel
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::Label
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -100,7 +100,7 @@ Use `clay.sdui.defineLabel` when the user asks for runtime-backed Clay SDUI sche
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::defineLabel`
+- JS facade: `runtime/js/sdui.js::defineLabel`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::Label`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

@@ -573,7 +573,9 @@ await publishTree(
 
 Configuration can customize documented Clay behavior through Clay JS APIs. It must not implicitly grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority. Modular loading is constrained to local configuration files under the configuration root; it is not a package manager, extension loader, workspace scanner, network fetcher, shell runner, or client-side JavaScript execution hook. Permission-bearing APIs still require explicit documented permissions and server-side validation.
 
-## Plan 035 unified package authority configuration review
+## Historical Plan 035 unified package authority configuration review (superseded)
+
+> **Superseded by Plan 061 and the Plan 060 review below.** This section records the earlier single-runtime `RuntimeProfile` design only. Current trust classification uses two fixed runtime domains, exact bundled provenance/integrity, and durable out-of-band third-party adoption; normal configuration cannot select a runtime profile, promote a package, or authorize capabilities.
 
 Plan 035 unified first-party and third-party package authority. The configuration-relevant surfaces are user authorization/capability grants, runtime profile choices, package graph relations, package-control overrides, and conflict resolution overrides. Each must be a documented Clay JS/config API or explicitly documented CLI/UI state — never a hidden JSON/TOML/ad hoc key.
 
@@ -843,3 +845,40 @@ No hidden JSON/TOML/ad hoc keys are valid for Phase 20 daily editing. Rejected e
 Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Ordinary keypress routing, Masonry paint/layout, pointer, scroll, text-event handling, IME preedit paint, edit acknowledgement, pending-edit observation, and recovery-menu presentation do not execute configuration JavaScript.
 
 Phase 20 configuration does **not** invent clipboard-exfiltration, arbitrary filesystem, network, shell, package-manager, WASM, raw-op, or client-side JavaScript authority APIs. Broader package/configuration/AI authority over clipboard, filesystem, shell, network, and raw ops remains deferred (`decision-logs/2026-07-17-1841-phase20-daily-editing-semantics.md`). Binding a Phase 20 command through `bindKey` installs only an inert user-mediated route; clipboard cut/paste stay client-local after explicit user action, save/reload still consume server grants/leases, open dialogs still return selected-file capabilities only, and recovery menus only reuse existing `RequestResync` / save / reload / dismiss primitives.
+
+## Plan 060/061 configuration closure
+
+Plan 060 reviewed every user-visible behavior changed by the comprehensive remediation after Plan 061 established two package runtime trust domains. It promotes **no new configuration API**. Existing documented APIs already cover real user policy choices; implementation and security controls remain compiled and closed.
+
+### Existing user choices
+
+| Choice | Existing surface |
+|---|---|
+| Load an installed package from `init.js` | [`clay.packages.loadPackage`](packages/load-package.md) |
+| Adopt, inspect, revoke, or roll back a third-party package/replacement | `clay package adopt\|inspect\|revoke\|rollback` host CLI, never package JavaScript |
+| Approve a fixed language-server contribution for known roots | [`clay.language-server.authorizeLanguageServer`](language-server/authorize-language-server.md), before `loadPackage` seals authority |
+| Bind built-in/package commands | [`clay.keybindings.bindKey`](keybindings/bind-key.md) |
+| Select theme, typography, or validated syntax tier | [`setTheme`](theme/set-theme.md), [`setTypography`](theme/set-typography.md), [`setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) |
+| Set approved package UI defaults | [`setPackageOption`](configuration/set-package-option.md) and [`serverSetLayoutOverride`](ui/server-set-layout-override.md) |
+| Compose local configuration | [`loadConfigurationModule`](configuration/load-configuration-module.md), confined beneath `~/.config/clay/` |
+
+Third-party adoption and replacement approval remain host-owned durable decisions. JavaScript cannot approve itself, mint `PackageContext`, choose/promote `RuntimeDomain`, expand relation/replacement scope, disable consent checks, or move third-party code into the trusted runtime. `loadPackage` consumes an already-valid approval and routes execution by host provenance; it is not an authorization setting.
+
+### Fixed controls, not settings
+
+The following are correctness, security, resource, or repository-policy invariants and intentionally have no `init.js`, JSON/TOML, environment-variable, package-option, or hidden facade key:
+
+- connection identity stamping; document access holders, leases, version checks, close cleanup, and result subscriptions/routing;
+- maximum active connections/documents/sessions, per-connection result lanes, runtime diagnostics, coordinator queues, actor mailboxes, payload/frame budgets, timeouts, worker counts, and heap ceilings;
+- atomic-save temp naming, exclusive creation/retries, owner-only mode, sync/permission restoration, and target identity revalidation;
+- directory-listing worker concurrency, exact component-ignore grammar and line/pattern/character/read ceilings, git-root concurrency, cancellation cleanup, and deterministic ordering;
+- two runtime domains, package-context provenance, compiled bundled inventory/integrity, cross-domain envelopes/generations/deadlines/payloads, replay/restart policy, and shared-third-party-cohort semantics;
+- language-server session actor capacity, process stderr/message ceilings, revocation cleanup, and fixed executable/argv/environment contribution descriptors;
+- native-dialog generation/in-flight limits, platform backend selection, clipboard backend/lifetime, and file-dialog filters;
+- sandbox frame limits/child reaping, IPC endpoint ownership, audit-exception expiry, Cargo test-suite grouping, `debug=line-tables-only`, opt-in `debugging` profile, target-directory layout, and CI commands.
+
+Representative rejected keys include `runtime.domain`, `runtime.packageContext`, `crossDomain.payloadBytes`, `ipc.clientId`, `connections.maxActive`, `documents.maxPerClient`, `queue.capacity`, `completion.resultLaneCapacity`, `save.atomicMode`, `save.tempRetries`, `listing.maxConcurrency`, `listing.ignoreMaxPatterns`, `git.rootConcurrency`, `languageServer.sessionQueueCapacity`, `sandbox.frameBytes`, `dialog.maxInFlight`, `clipboard.backend`, `build.debugProfile`, and `build.targetDirectory`. The closed `setPackageOption` suffix allowlist rejects package-prefixed variants rather than storing inert, misleading state.
+
+`clay:configuration` remains trusted-only. Its exact facade surface is three runtime-backed APIs (`loadConfigurationModule`, `getConfigurationState`, `setPackageOption`) and three explicit planned/unavailable stubs (`setModePreference`, `setDecorationTheme`, `setParsePolicy`). Internal controls are absent from all `custom_properties` and public facades. Configuration evaluation stays in startup/reload/explicit setting work and adds no keypress, paint, layout, scroll, filesystem traversal, process, IPC, or parser hot-path work.
+
+Tests pin this closure in `src/server/configuration.rs::plan060_internal_security_and_performance_controls_are_not_configurable` and `tests/clay_js_api_inventory.rs::configuration_surface_is_closed_and_security_controls_are_not_properties`.

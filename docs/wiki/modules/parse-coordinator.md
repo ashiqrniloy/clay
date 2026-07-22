@@ -5,7 +5,7 @@
 - `src/server/parse_coordinator.rs`
 - `src/protocol/parse.rs`
 - `src/server/ops/parse.rs`
-- `runtime/js/parse.ts`
+- `runtime/js/parse.js`
 - `src/server/syntax.rs`
 - `src/server/connection.rs`
 - `src/server/mod.rs`
@@ -29,7 +29,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 - Sort invalidated ranges so viewport-intersecting work is handled first, using only generic byte-range metadata that token-stream adapters for Markdown, Python, or other modes can consume.
 - Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, every parse-produced decoration chunk and optional range-diagnostic metadata, their viewport/provenance identity, component payload budgets, and per-member `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
 - Instrument scheduled, cancelled, published, stale, and failed parse tasks through `ParseCoordinatorStats`.
-- Expose internal update and diagnostic receivers for later decoration/folding/runtime diagnostic publication paths through `next_update()` and `next_diagnostic()`.
+- Dual-publish updates/diagnostics to bounded internal test/tooling receivers and bounded access-scoped connection subscriptions; production connections never compete to drain a global receiver.
 
 ## How It Works
 
@@ -61,13 +61,15 @@ The spawned task calls the handler with a compact `ParseEditNotification`. For m
 
 These types are `rkyv`-serializable for future protocol/cache use, but the current coordinator keeps parse updates server-side for downstream decoration/folding consumption rather than adding them to hot edit-ack IPC messages.
 
-## Runtime Diagnostics
+## Output Routing and Runtime Diagnostics
 
-`ParseCoordinator` owns separate unbounded channels for `IncrementalParseUpdate` and `RuntimeDiagnostic`. `finish_task` publishes a sanitized `clay.parse.open_failed` diagnostic for handler failures, invalid decoration/update validation, parse-window or payload-budget failures, and stale-result rejection paths that must be visible to the runtime/UI without publishing a partial update. `parse_failure_diagnostic` reports only package prefix, mode ID, document ID, and a bounded reason category such as `handler failed` or `payload budget exceeded`; it does not forward handler text, paths, source text, query text, or parser internals. Consumers await `next_diagnostic()` outside the typing/paint path.
+`ParseCoordinator` dual-publishes through two bounded paths. Legacy internal/test receivers (`next_update` / `next_diagnostic`) use capacity-4096 `mpsc` lanes with non-blocking `try_send`; live connections use `OutputRouter` lanes (capacity 64 per client). `subscribe_document` adds a client only after workspace access is established, updates route by `document_id`, diagnostics broadcast only to registered clients, and `unsubscribe_client` / `remove_document` withdraw routes on disconnect/final close. Saturation drops output rather than growing memory or blocking edit acknowledgement.
+
+`finish_task` publishes a sanitized `clay.parse.open_failed` diagnostic for handler failures, invalid decoration/update validation, parse-window or payload-budget failures, and stale-result rejection paths that must be visible to the runtime/UI without publishing a partial update. `parse_failure_diagnostic` reports only package prefix, mode ID, document ID, and a bounded reason category such as `handler failed` or `payload budget exceeded`; it does not forward handler text, paths, source text, query text, or parser internals.
 
 ## Open-Time Flow
 
-`open_document_followup_messages` classifies and activates the document, schedules the grammar policy's bounded opening window (4 KiB for first-party native grammars), and returns the behavior manifest immediately. `schedule_open_parse` is enqueue-only, so initial text and mode state render before background syntax/parse work completes. When scrolling changes the visible byte range, the client sends a deduplicated metadata-only `DecorationViewportRequest`; `schedule_parse_window` validates the current document/version and schedules the already-registered document-selected native handler over a UTF-8-safe nonzero window. Later decorations arrive on `next_update()` and failures on `next_diagnostic()`; scheduling errors use sanitized runtime diagnostics.
+`open_document_followup_messages` classifies and activates the document, schedules the grammar policy's bounded opening window (4 KiB for first-party native grammars), and returns the behavior manifest immediately. `schedule_open_parse` is enqueue-only, so initial text and mode state render before background syntax/parse work completes. When scrolling changes the visible byte range, the client sends a deduplicated metadata-only `DecorationViewportRequest`; `schedule_parse_window` validates the current document/version and schedules the already-registered document-selected native handler over a UTF-8-safe nonzero window. Later decorations and failures arrive through that connection's bounded document subscription; internal tests/tooling may still use `next_update()` / `next_diagnostic()`. Scheduling errors use sanitized runtime diagnostics.
 
 ## Invariants and Constraints
 
@@ -76,6 +78,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - Parser execution stays server-side through the typed handler/runtime boundary; Rust never accepts executable callback fields in the op payload.
 - The client receives only later validated inert render/folding/diagnostic data; it does not receive parser functions or package JavaScript.
 - Stale results are discarded before publication, including old-runtime-generation task results after hot reload.
+- Live parse output is document/access scoped. Per-client lanes and legacy test lanes are bounded and use non-blocking publication; final close/disconnect removes routes and document task/version state.
 - Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; over-budget updates increment failed-task stats, emit sanitized diagnostics, and are not published.
 - Windowed parser input is bounded by `ParsePolicy::max_window_bytes` per snapshot and `SYNTAX_CACHE_BUDGET_BYTES`/`SyntaxMemoryBudget` across retained syntax windows.
 - Parse-produced decoration batches and diagnostics are validated atomically. Every decoration member must match the enclosing update's document/version/package and stay inside its viewport; each member independently satisfies decoration and incremental-update payload ceilings. Diagnostics match the enclosing viewport exactly and additionally use centralized field/count/range/payload sanitization.
@@ -124,7 +127,7 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 Run with:
 
 ```bash
-cargo test --test parse_coordinator
+cargo test --test runtime parse_coordinator::
 cargo test phase18_parse_and_decoration_facades_are_runtime_backed --lib
 cargo test js_parse_handler_bridge_runs_registered_markdown_handler --lib
 ```

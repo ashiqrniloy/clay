@@ -3,7 +3,7 @@ id: clay.editor.clientShowOpenDocuments
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientShowOpenDocuments
-js_facade: runtime/js/editor.ts::clientShowOpenDocuments
+js_facade: runtime/js/editor.js::clientShowOpenDocuments
 backing_rust: src/masonry_editor.rs::EditorWidget::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_editor.rs::EditorWidget::activate_document
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -96,7 +96,7 @@ Use `clay.editor.clientShowOpenDocuments` only as a documented command ID for `b
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::clientShowOpenDocuments`
+- JS facade: `runtime/js/editor.js::clientShowOpenDocuments`
 - Editor menu: `src/masonry_editor.rs::EditorWidget::show_open_documents_menu`
 - Activate path: `src/masonry_editor.rs::EditorWidget::activate_document`
 - Session store: `src/editor/document_session.rs::DocumentSessionStore`

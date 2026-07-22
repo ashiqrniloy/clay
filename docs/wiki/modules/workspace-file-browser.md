@@ -5,8 +5,8 @@
 - `src/server/workspace.rs`
 - `src/server/ops/workspace.rs`
 - `src/server/ops/commands.rs`
-- `runtime/js/workspace.ts`
-- `runtime/js/commands.ts`
+- `runtime/js/workspace.js`
+- `runtime/js/commands.js`
 - `src/shell/file_browser.rs`
 - `src/server/connection.rs`
 - `src/server/command_execution.rs`
@@ -24,7 +24,7 @@ The file browser is not a package widget. Packages may call documented Clay JS f
 ## Responsibilities
 
 - `WorkspaceState` owns root discovery, root deduplication, explicit user grants, single-file grants, bounded directory listing, ignore filtering, traversal checks, diagnostics, and cancellation token checks.
-- `src/server/ops/workspace.rs` exposes runtime ops behind `runtime/js/workspace.ts` facades: `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, `serverListDirectory`, `serverCreateListingCancelToken`, and `serverCancelListing`.
+- `src/server/ops/workspace.rs` exposes runtime ops behind `runtime/js/workspace.js` facades: `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, `serverListDirectory`, `serverCreateListingCancelToken`, and `serverCancelListing`.
 - `src/shell/file_browser.rs` builds Clay-owned UI state from a `WorkspaceState` snapshot and converts it to an inert `SduiTree` plus `TransientMenuSession` data.
 - `src/server/connection.rs` sends the file-browser SDUI snapshot during welcome when a workspace root exists and routes file-browser SDUI actions through workspace command execution. Directory navigation results are converted into refreshed file-browser `SduiSnapshot` messages.
 - `src/server/command_execution.rs` owns built-in workspace commands: `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.openDirectory`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser`.
@@ -47,7 +47,7 @@ The file browser is not a package widget. Packages may call documented Clay JS f
 - `MAX_LIST_DIRECTORY_ENTRIES`
 - `MAX_CHILD_COUNT_SCAN`
 
-The default ignore set is compiled into Clay (`.git`, `node_modules`, `target`). A single root-level `.gitignore` is parsed for simple name/glob patterns; nested `.gitignore` hierarchy semantics are intentionally out of scope for the first file browser. Listing returns a `FileListPage` containing entries, truncation/cancellation flags, and diagnostics. Permission-denied or unreadable children become per-entry diagnostics where possible instead of failing the whole page.
+The default ignore set is compiled into Clay (`.git`, `node_modules`, `target`). One optional root-level `.gitignore` supports only component-name rules: blank lines and lines beginning with `#` are skipped; other rules contain literal Unicode scalar values, `?` for one scalar, `*` for zero or more scalars with backtracking, and one optional trailing `/` for directory-only matching. Rules apply to each visited filename component; nested ignore files and path rules are not implemented. Negation, escaping, character classes, path separators, `**`, and malformed empty directory rules abort the listing with one diagnostic instead of being silently ignored and broadening traversal. Reads retain at most 1 MiB + 1 byte; parsing inspects at most 4,096 lines, stores at most 1,024 rules, and accepts at most 256 scalars per rule. Invalid UTF-8, non-regular/unreadable/oversized files, or limit overflow return an empty truncated page plus a bounded diagnostic. Missing `.gitignore` means compiled defaults only. Listing otherwise returns a `FileListPage` containing entries, truncation/cancellation flags, and diagnostics. Permission-denied or unreadable children become per-entry diagnostics where possible instead of failing the whole page.
 
 Cancellation uses server-owned token IDs backed by a process-local registry. `serverCreateListingCancelToken()` creates a token, `serverCancelListing(tokenId)` flips its atomic flag, and listing checks the flag cooperatively between directory reads. This keeps cancellation cheap and avoids holding the workspace lock only to cancel a long request.
 
@@ -99,7 +99,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 
 - Primitive/category: `WorkspaceRootDiscovery`, `BoundedFileListService`, Clay-owned file-browser composition, workspace command execution.
 - Rust owners: `src/server/workspace.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
-- Ops/facades: `op_clay_workspace_*`, `op_clay_commands_execute_command`, `runtime/js/workspace.ts`, `runtime/js/commands.ts`.
+- Ops/facades: `op_clay_workspace_*`, `op_clay_commands_execute_command`, `runtime/js/workspace.js`, `runtime/js/commands.js`.
 - Public docs: `docs/reference/clay-js-api/workspace/`, `docs/reference/clay-js-api/commands/server-execute-command.md`, `server-open-file.md`, `server-open-directory.md`, `server-reveal-in-tree.md`, and `docs/development/launch-and-gui-smoke.md#end-to-end-file-browser-workflow-smoke`.
 - Hot-path policy: discovery/listing/opening are server/runtime work; typing, local paint, layout, scroll, and package JavaScript hot paths do not list directories or scan workspaces.
 - Client-local scroll: `src/masonry_sdui.rs::SduiNativeState` keeps a vertical `scroll_offset` (pixels) for the Clay-owned left file-browser panel. `scrolls_point(size, point)` routes `PointerEvent::Scroll` to the file browser only when the pointer is inside the left panel; otherwise `src/masonry_editor.rs::on_pointer_event` scrolls the editor as before. `scroll_vertical_pixels`/`scroll_lines` treat positive deltas as scrolling down (revealing later rows), matching the editor scroll convention. The offset clamps to `[0, max_scroll]` where `max_scroll = (content_height - viewport_height).max(0)`, measured during paint with a `push_clip_layer` over the sidebar so scrolled-out rows never paint over the editor. Scrolling reveals only rows already present in the bounded snapshot and never relists directories, calls the server, runs package JavaScript, or enqueues workspace actions. The offset resets to zero whenever a new `SduiSnapshot` or `SduiTreeUpdate` is applied.
@@ -109,7 +109,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 
 - Workspace roots are server-owned, canonicalized, deduplicated, and bounded.
 - Marker files are a compiled closed set; packages cannot extend them.
-- Directory listing is bounded by depth/count/child-scan limits and compiled ignore defaults.
+- Directory listing is bounded by depth/count/child-scan and root-ignore byte/line/rule/rule-length limits. Unsupported root-ignore semantics abort visibly; they never degrade to a broader traversal.
 - All file opens re-check root or selected-file grant authority server-side.
 - Absolute paths are accepted only as explicit selected-file-style grants, not as raw package/client authority.
 - Save/save-as/rename/delete/file watchers/autosave/conflict UX remain deferred.
@@ -117,7 +117,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 
 ## Tests
 
-- `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, ignore rules, traversal rejection, cancellation, child counts, and diagnostics.
+- `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, `*` backtracking/`?`/Unicode/directory-only ignore rules, unsupported-rule and oversized-input fail-closed pages, traversal rejection, cancellation, child counts, and diagnostics.
 - `src/shell/file_browser.rs`: SDUI tree shape, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, fuzzy session filtering, command IDs, and list action opening through the workspace API.
 - `src/server/command_execution.rs`: workspace open/directory-navigation/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
 - `src/server/connection.rs`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot`; `file_browser_open_uses_generic_open_document_followups` opens as client 99 and proves that same client can immediately submit an accepted edit with the returned lease.
@@ -131,9 +131,9 @@ cargo test --lib server::workspace::tests::discover_root_for_path_finds_marker_a
 cargo test --lib server::workspace::tests::list_directory_returns_immediate_children --quiet
 cargo test --lib shell::file_browser --quiet
 cargo test --lib server::command_execution --quiet
-cargo test --test clay_js_api_inventory --quiet
-cargo test --test clay_js_doc_registry --quiet
-cargo test --test clay_js_facade_layout --quiet
+cargo test --test protocol clay_js_api_inventory:: --quiet
+cargo test --test protocol clay_js_doc_registry:: --quiet
+cargo test --test protocol clay_js_facade_layout:: --quiet
 ```
 
 ## Related

@@ -3,7 +3,7 @@ id: clay.editor.clientMoveCursor
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientMoveCursor
-js_facade: runtime/js/editor.ts::clientMoveCursor
+js_facade: runtime/js/editor.js::clientMoveCursor
 backing_rust: src/editor/surface.rs::EditorSurface::move_left
 deno_op: op_clay_editor_move_cursor
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_move_cursor
@@ -113,7 +113,7 @@ Use `clay.editor.clientMoveCursor` when the user asks for move cursor through th
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::clientMoveCursor`
+- JS facade: `runtime/js/editor.js::clientMoveCursor`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_move_cursor` (`op_clay_editor_move_cursor`)
 - Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::move_left`
 - Current implementation audit path: `src/editor/cursor.rs::CursorState; src/editor/surface.rs::EditorSurface::command_with_event`

@@ -3,7 +3,7 @@ id: clay.ui.serverSetLayoutOverride
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverSetLayoutOverride
-js_facade: runtime/js/ui.ts::serverSetLayoutOverride
+js_facade: runtime/js/ui.js::serverSetLayoutOverride
 backing_rust: src/server/ui.rs::PackageUiRegistry::set_layout_override
 deno_op: op_clay_ui_set_layout_override
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_set_layout_override
@@ -104,7 +104,7 @@ Use documented typed overrides only. Do not add Masonry-specific or package-spec
 
 ## Backing implementation
 
-- Facade: `runtime/js/ui.ts::serverSetLayoutOverride`
+- Facade: `runtime/js/ui.js::serverSetLayoutOverride`
 - Op: `src/server/ops/ui.rs::op_clay_ui_set_layout_override`
 - Rust: `src/server/ui.rs::PackageUiRegistry::set_layout_override`
 

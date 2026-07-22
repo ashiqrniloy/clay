@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "primitive_documents": [
+    { "id": "audit", "path": "docs/reference/primitives/audit.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "backlog", "path": "docs/reference/primitives/backlog.md", "indexes": ["docs/reference/primitives/index.md"] },
+    { "id": "diagnostics", "path": "docs/reference/primitives/diagnostics.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "implementation-gate", "path": "docs/reference/primitives/implementation-gate.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "index", "path": "docs/reference/primitives/index.md", "indexes": ["docs/index.md"] },
+    { "id": "language-intelligence", "path": "docs/reference/primitives/language-intelligence.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "markdown-mode-requirements", "path": "docs/reference/primitives/markdown-mode-requirements.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "package-loading", "path": "docs/reference/primitives/package-loading.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "package-security", "path": "docs/reference/primitives/package-security.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "parse-update-strategy", "path": "docs/reference/primitives/parse-update-strategy.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "registry", "path": "docs/reference/primitives/registry.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "rendering-strategy", "path": "docs/reference/primitives/rendering-strategy.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "shell-layout-strategy", "path": "docs/reference/primitives/shell-layout-strategy.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "syntax-vocabulary", "path": "docs/reference/primitives/syntax-vocabulary.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "typography", "path": "docs/reference/primitives/typography.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] }
+  ],
+  "package_documents": [
+    { "id": "creating-packages", "path": "docs/reference/packages/creating-packages.md", "indexes": ["docs/index.md"] },
+    { "id": "javascript", "path": "docs/reference/packages/javascript.md", "indexes": ["docs/index.md"], "package_name": "@clay/javascript", "manifest": "packages/javascript/package.json" },
+    { "id": "markdown", "path": "docs/reference/packages/markdown.md", "indexes": ["docs/index.md"], "package_name": "@clay/markdown", "manifest": "packages/markdown/package.json" },
+    { "id": "rust", "path": "docs/reference/packages/rust.md", "indexes": ["docs/index.md"], "package_name": "@clay/rust", "manifest": "packages/rust/package.json" },
+    { "id": "typescript", "path": "docs/reference/packages/typescript.md", "indexes": ["docs/index.md"], "package_name": "@clay/typescript", "manifest": "packages/typescript/package.json" }
+  ],
+  "security_contracts": [
+    {
+      "path": "docs/reference/primitives/package-security.md",
+      "markers": [
+        "never promote code into the trusted runtime",
+        "explicit user approval",
+        "caller provenance comes only from host-owned activation/capability state",
+        "No V8 objects, functions, promises, globals, or module instances cross"
+      ]
+    },
+    {
+      "path": "docs/reference/primitives/package-loading.md",
+      "markers": [
+        "PackageProvenance",
+        "bounded sanitized diagnostics",
+        "outside typing, paint, layout, scroll, and text-event handlers",
+        "package-root confinement"
+      ]
+    },
+    {
+      "path": "docs/reference/primitives/language-intelligence.md",
+      "markers": [
+        "never a shell string",
+        "trusted subprocess authority",
+        "reject out-of-root and external targets"
+      ]
+    },
+    {
+      "path": "docs/reference/primitives/rendering-strategy.md",
+      "markers": [
+        "server-validated inert declarations",
+        "No package JavaScript runs in client paint",
+        "raw `Deno.core.ops`"
+      ]
+    },
+    {
+      "path": "docs/reference/packages/creating-packages.md",
+      "markers": [
+        "It does not execute package JavaScript",
+        "no package JavaScript runs in Masonry paint",
+        "not through direct native widget access"
+      ]
+    }
+  ]
+}

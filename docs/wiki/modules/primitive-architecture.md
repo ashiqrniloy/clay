@@ -124,7 +124,7 @@ By default, package primitives cannot claim filesystem access outside already-op
 ## Tests
 
 - `tests/primitives_docs.rs`: static documentation coverage for links, registry categories, planned API stubs, security rules, Markdown requirements, shell/layout primitive rows, backlog phase mapping, package-security notes, and budget constants.
-- `cargo test --test primitives_docs`: runs the primitive documentation coverage suite, including the Phase 18.1 shell/layout registry and planned `clay:ui` inventory guards.
+- `cargo test --test protocol primitives_docs::`: runs the primitive documentation coverage suite, including the Phase 18.1 shell/layout registry and planned `clay:ui` inventory guards.
 - Manual wiki review: confirm this page and related Phase 16 wiki pages remain linked from `docs/wiki/index.md`.
 
 ## Related

@@ -6,7 +6,7 @@
 - `src/server/workspace.rs`
 - `src/server/mod.rs`
 - `src/server/ops/git.rs`
-- `runtime/js/git.ts`
+- `runtime/js/git.js`
 - `tests`: `cargo test server::git`; `cargo test git_facade_lists_refreshes_and_commands_statuses`
 - Plan: `plans/041-Phase18.13-Git-Discovery-Service-and-First-Party-Clay-Git-Package.md`
 - Primitive review: `docs/wiki/modules/phase18.13-git-discovery-primitive-review.md`
@@ -22,8 +22,8 @@ Packages do not run Git. They consume `clay:git` APIs backed by this service/cac
 ## Flow
 
 1. `WorkspaceState::directory_roots()` returns canonical directory workspace roots.
-2. `GitDiscoveryService::discover_workspace_statuses()` iterates those roots.
-3. Each root is canonicalized and checked as a directory before spawning anything.
+2. `GitDiscoveryService::discover_workspace_statuses()` starts one Tokio task per root; every discovery acquires a shared `GIT_ROOT_CONCURRENCY = 4` semaphore permit for its complete command sequence. Roots therefore run concurrently without creating unbounded Git subprocesses.
+3. Each permitted root is canonicalized and checked as a directory before spawning anything. Its commands remain strictly sequential (`repository root` → branch/detached head → status), while completed root snapshots are sorted back by workspace-root ID so results retain authority association.
 4. The service runs a closed command table only:
    - `git --no-optional-locks rev-parse --show-toplevel`
    - `git --no-optional-locks symbolic-ref --quiet --short HEAD`
@@ -55,11 +55,11 @@ Packages do not run Git. They consume `clay:git` APIs backed by this service/cac
 Run:
 
 ```bash
-CARGO_TARGET_DIR=target/pi-verify cargo test server::git --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test git_facade_lists_refreshes_and_commands_statuses --quiet
+cargo test server::git --quiet
+cargo test git_facade_lists_refreshes_and_commands_statuses --quiet
 ```
 
-Coverage includes repo/non-repo roots, branch and detached HEAD, dirty path counting, timeout, root-boundary rejection, known workspace-root iteration, status parser path de-duplication, cached reads, explicit refresh, coalesced same-root refreshes, independent multi-root refreshes, stale polling, last-error diagnostics preserving the previous snapshot, `clay:git` facade import/use, and server-first Git command execution.
+Coverage includes repo/non-repo roots, branch and detached HEAD, dirty path counting, timeout, root-boundary rejection, known workspace-root iteration, status parser path de-duplication, cached reads, explicit refresh, coalesced same-root refreshes, independent multi-root refreshes, stale polling, last-error diagnostics preserving the previous snapshot, `clay:git` facade import/use, and server-first Git command execution. Plan 060 T8's `workspace_discovery_bounds_root_concurrency_and_preserves_association` holds three fake roots at a rendezvous with a concurrency budget of two, proves only two start, then verifies each root's command order and returned ID/path association.
 
 Cache timing tests are deterministic under parallel load: the coalescing test
 uses a fake-git rendezvous (the leader's first command blocks on a release

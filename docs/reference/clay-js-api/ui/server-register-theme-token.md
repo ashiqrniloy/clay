@@ -3,7 +3,7 @@ id: clay.ui.serverRegisterThemeToken
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterThemeToken
-js_facade: runtime/js/ui.ts::serverRegisterThemeToken
+js_facade: runtime/js/ui.js::serverRegisterThemeToken
 backing_rust: src/server/ui.rs::PackageUiRegistry::register_theme_token
 deno_op: op_clay_ui_register_theme_token
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_register_theme_token
@@ -131,7 +131,7 @@ Use `clay.ui.serverRegisterThemeToken` when the user asks for a public Clay JS A
 
 ## Backing implementation
 
-- JS facade: `runtime/js/ui.ts::serverRegisterThemeToken`
+- JS facade: `runtime/js/ui.js::serverRegisterThemeToken`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_theme_token` (`op_clay_ui_register_theme_token`)
 - Backing Rust/current owner: `src/server/ui.rs::PackageUiRegistry::register_theme_token`
 - Token resolver: `src/shell/theme.rs::ThemeTokenResolver`

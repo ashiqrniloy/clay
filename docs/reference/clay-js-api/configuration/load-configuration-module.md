@@ -3,7 +3,7 @@ id: clay.configuration.loadConfigurationModule
 kind: clay-js-api
 js_module: "clay:configuration"
 js_export: loadConfigurationModule
-js_facade: runtime/js/configuration.ts::loadConfigurationModule
+js_facade: runtime/js/configuration.js::loadConfigurationModule
 backing_rust: src/server/configuration.rs::ConfigurationRuntime::load_module
 deno_op: op_clay_configuration_load_module
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_load_module
@@ -98,10 +98,10 @@ Use `clay.configuration.loadConfigurationModule` when the user asks how to split
 
 ## Backing implementation
 
-- JS facade: `runtime/js/configuration.ts::loadConfigurationModule`
+- JS facade: `runtime/js/configuration.js::loadConfigurationModule`
 - Deno op: `src/server/ops/configuration.rs::op_clay_configuration_load_module` (`op_clay_configuration_load_module`)
 - Backing Rust/current owner: `src/server/configuration.rs::ConfigurationRuntime::load_module`
-- Current implementation audit path: `runtime/js/configuration.ts::loadConfigurationModule`
+- Current implementation audit path: `runtime/js/configuration.js::loadConfigurationModule`
 
 ## Lookup metadata
 

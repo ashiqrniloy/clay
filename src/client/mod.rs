@@ -416,6 +416,21 @@ impl ClientEditQueue {
         })
     }
 
+    /// Notify the server that a document session is closed (explicit close or
+    /// client LRU eviction), so server-side document state can be released
+    /// when the last holder leaves. `force` discards unsaved edits.
+    pub(crate) fn enqueue_close_document(
+        &self,
+        document_id: DocumentId,
+        force: bool,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::CloseDocument {
+            client_id: self.client_id,
+            document_id,
+            force,
+        })
+    }
+
     pub fn enqueue_add_selected_workspace_root(
         &self,
         selected_path: PathBuf,
@@ -594,6 +609,10 @@ pub enum ClientConnectionEvent {
         document_id: DocumentId,
         version: DocumentVersion,
         dirty: bool,
+    },
+    DocumentClosed {
+        document_id: DocumentId,
+        closed: bool,
     },
     DocumentReloaded {
         metadata: DocumentMetadata,
@@ -1039,6 +1058,11 @@ async fn run_connection<S>(
                                 version,
                                 dirty,
                             })
+                            .await;
+                    }
+                    Ok(ServerMessage::DocumentClosed { document_id, closed }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::DocumentClosed { document_id, closed })
                             .await;
                     }
                     Ok(ServerMessage::DocumentReloaded { metadata, text }) => {

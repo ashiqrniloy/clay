@@ -597,6 +597,51 @@ mod tests {
         assert!(raw.to_string().contains("raw ops"));
     }
 
+    #[test]
+    fn plan060_internal_security_and_performance_controls_are_not_configurable() {
+        let runtime = runtime();
+        for suffix in [
+            "runtime.domain",
+            "runtime.packageContext",
+            "runtime.crossDomainPayloadBytes",
+            "ipc.clientId",
+            "ipc.connectionIdentity",
+            "queue.capacity",
+            "completion.resultLaneCapacity",
+            "documents.maxPerClient",
+            "documents.maxServer",
+            "connections.maxActive",
+            "save.atomicMode",
+            "save.tempRetries",
+            "listing.maxConcurrency",
+            "listing.ignoreMaxPatterns",
+            "git.rootConcurrency",
+            "languageServer.sessionQueueCapacity",
+            "sandbox.frameBytes",
+            "dialog.maxInFlight",
+            "clipboard.backend",
+            "build.debugProfile",
+            "build.targetDirectory",
+        ] {
+            let option = format!("audit.{suffix}");
+            let error = runtime
+                .set_package_option(&json!({
+                    "packagePrefix": "audit",
+                    "option": option,
+                    "value": 1
+                }))
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("unsupported package option"),
+                "internal setting {suffix} must fail closed: {error}"
+            );
+        }
+        assert_eq!(
+            runtime.state_json(),
+            r#"{"entryPoint":"./init.js","loadedModules":[],"packageOptions":[]}"#
+        );
+    }
+
     /// Phase 18.9 introduced hardcoded structural defaults (the core.text/
     /// core.code fallback modes, electric-character outdent, generic pair
     /// insertion and comment continuation) rather than runtime-configurable

@@ -3,7 +3,7 @@ id: clay.diagnostics.serverPublishDiagnostics
 kind: clay-js-api
 js_module: "clay:diagnostics"
 js_export: serverPublishDiagnostics
-js_facade: runtime/js/diagnostics.ts::serverPublishDiagnostics
+js_facade: runtime/js/diagnostics.js::serverPublishDiagnostics
 backing_rust: src/server/diagnostics.rs::validate_diagnostic_publication
 deno_op: op_clay_diagnostics_publish_diagnostics
 deno_op_path: src/server/ops/diagnostics.rs::op_clay_diagnostics_publish_diagnostics
@@ -157,8 +157,8 @@ Prefer this facade over raw ops or Rust internals. Keep publications viewport-bo
 
 ## Backing implementation
 
-- JS facade: `runtime/js/diagnostics.ts::serverPublishDiagnostics`
-- Runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_DIAGNOSTICS`
+- JS facade: `runtime/js/diagnostics.js::serverPublishDiagnostics`
+- Runtime facade: `src/server/facades.rs`
 - Op wrapper: `src/server/ops/diagnostics.rs::op_clay_diagnostics_publish_diagnostics`
 - Validator: `src/server/diagnostics.rs::validate_diagnostic_publication`
 - Protocol type: `src/protocol/diagnostics.rs::DiagnosticSet`

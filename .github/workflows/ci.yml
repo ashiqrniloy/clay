@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # One Linux job and one normal target directory keep every blocking gate on
+  # the same artifacts. Audit exceptions are documented in
+  # `docs/development/security.md` and expiry-checked by the protocol suite.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit
+      - run: cargo fmt --check
+      - run: cargo check --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all-targets
+      - name: Report build storage
+        if: always()
+        run: |
+          du -sh target/debug/deps target/debug/incremental target
+          printf 'Executable files in target/debug/deps: '
+          find target/debug/deps -maxdepth 1 -type f -executable | wc -l

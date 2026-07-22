@@ -1081,7 +1081,7 @@ fn markdown_large_file_configuration_does_not_grant_package_authority() {
         .expect("configuration reference must exist");
     let package_docs = std::fs::read_to_string("packages/markdown/docs/index.md")
         .expect("Markdown package docs must exist");
-    let configuration_runtime = std::fs::read_to_string("runtime/js/configuration.ts")
+    let configuration_runtime = std::fs::read_to_string("runtime/js/configuration.js")
         .expect("configuration facade must exist");
 
     for denied in [

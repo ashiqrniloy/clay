@@ -3,7 +3,7 @@ id: clay.editor.clientCopySelection
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientCopySelection
-js_facade: runtime/js/editor.ts::clientCopySelection
+js_facade: runtime/js/editor.js::clientCopySelection
 backing_rust: src/masonry_editor.rs::EditorWidget::copy_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -102,7 +102,7 @@ Use `clay.editor.clientCopySelection` only as a documented command ID for `bindK
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::clientCopySelection`
+- JS facade: `runtime/js/editor.js::clientCopySelection`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::copy_selection_to_system_clipboard`; `src/client/clipboard.rs::SystemClipboard`; `src/editor/surface.rs::EditorSurface::selected_text`
 

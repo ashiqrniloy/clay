@@ -3,7 +3,7 @@ id: clay.completion.completionTriggerCharactersFromEditorRules
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: completionTriggerCharactersFromEditorRules
-js_facade: runtime/js/completion.ts::completionTriggerCharactersFromEditorRules
+js_facade: runtime/js/completion.js::completionTriggerCharactersFromEditorRules
 backing_rust: src/server/ops/modes.rs::op_clay_modes_register_pattern
 deno_op: op_clay_completion_register_completion_provider
 deno_op_path: src/server/ops/completion.rs::op_clay_completion_register_completion_provider
@@ -114,8 +114,8 @@ Use `clay.completion.completionTriggerCharactersFromEditorRules` to keep complet
 
 ## Backing implementation
 
-- Facade: `runtime/js/completion.ts::completionTriggerCharactersFromEditorRules`
-- Embedded runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_COMPLETION`
+- Facade: `runtime/js/completion.js::completionTriggerCharactersFromEditorRules`
+- Runtime include table: `src/server/facades.rs`
 - Related op: `src/server/ops/completion.rs::op_clay_completion_register_completion_provider`
 - Related mode registration: `src/server/ops/modes.rs::op_clay_modes_register_pattern`
 

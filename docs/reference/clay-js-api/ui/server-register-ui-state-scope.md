@@ -3,7 +3,7 @@ id: clay.ui.serverRegisterUiStateScope
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterUiStateScope
-js_facade: runtime/js/ui.ts::serverRegisterUiStateScope
+js_facade: runtime/js/ui.js::serverRegisterUiStateScope
 backing_rust: src/server/ui.rs::PackageUiRegistry::register_ui_state_scope
 deno_op: op_clay_ui_register_ui_state_scope
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_register_ui_state_scope
@@ -152,7 +152,7 @@ Agents should keep package state lifecycle declarations generic and primitive-fi
 
 ## Backing implementation
 
-- Facade: `runtime/js/ui.ts::serverRegisterUiStateScope`
+- Facade: `runtime/js/ui.js::serverRegisterUiStateScope`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_ui_state_scope`
 - Registry validator: `src/server/ui.rs::PackageUiRegistry::register_ui_state_scope`
 - API inventory: `docs/reference/clay-js-api/api-inventory.toml`

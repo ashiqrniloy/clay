@@ -3,7 +3,7 @@ id: clay.packages.serverLoadPackage
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: serverLoadPackage
-js_facade: runtime/js/packages.ts::serverLoadPackage
+js_facade: runtime/js/packages.js::serverLoadPackage
 backing_rust: src/packages/record.rs::assemble_package_record
 deno_op: op_clay_packages_load_package
 deno_op_path: src/server/ops/packages.rs::op_clay_packages_load_package
@@ -123,7 +123,7 @@ Use `clay.packages.serverLoadPackage` only for package metadata validation and l
 
 ## Backing implementation
 
-- JS facade: `runtime/js/packages.ts::serverLoadPackage`
+- JS facade: `runtime/js/packages.js::serverLoadPackage`
 - Deno op: `src/server/ops/packages.rs::op_clay_packages_load_package` (`op_clay_packages_load_package`)
 - Rust function: `src/packages/record.rs::assemble_package_record`
 - Current owner: `src/packages/record.rs::PackageRecord`; `src/server/ops/packages.rs::op_clay_packages_load_package`

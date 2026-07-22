@@ -326,10 +326,10 @@ async fn builtin_buffer_word_provider_returns_unique_sorted_prefix_matches() {
         text: "pri private println prism pri println".to_string(),
     };
 
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion(BufferWordCompletionProvider::ID, request, window)
         .unwrap();
-    let result = coordinator.next_result().await.unwrap();
+    let result = reply_rx.await.unwrap();
 
     assert_eq!(result.status, CompletionStatus::Ok);
     assert_eq!(
@@ -374,10 +374,10 @@ async fn builtin_buffer_word_provider_returns_empty_when_no_match() {
         text: "xyz alpha beta".to_string(),
     };
 
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion(BufferWordCompletionProvider::ID, request, window)
         .unwrap();
-    let result = coordinator.next_result().await.unwrap();
+    let result = reply_rx.await.unwrap();
 
     assert_eq!(result.status, CompletionStatus::Empty);
     assert!(result.items.is_empty());
@@ -411,10 +411,10 @@ async fn builtin_buffer_word_provider_caps_result_payload() {
         text,
     };
 
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion(BufferWordCompletionProvider::ID, request, window)
         .unwrap();
-    let result = coordinator.next_result().await.unwrap();
+    let result = reply_rx.await.unwrap();
 
     assert_eq!(result.status, CompletionStatus::Ok);
     assert!(
@@ -604,25 +604,20 @@ async fn newer_request_supersedes_older_for_same_client_document() {
     let second = request(1, 101);
     let first_window = window_for(&first);
     let second_window = window_for(&second);
-    coordinator
+    let first_rx = coordinator
         .schedule_completion("core.words", first, first_window)
         .unwrap();
-    coordinator
+    let second_rx = coordinator
         .schedule_completion("core.words", second, second_window)
         .unwrap();
 
-    // Drain published results (bounded wait).
+    // The superseded request's reply is cancelled; the newer request publishes.
     let mut published_request_ids = Vec::new();
-    for _ in 0..4 {
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            coordinator.next_result(),
-        )
-        .await
-        {
-            Ok(Some(result)) => published_request_ids.push(result.request_id),
-            _ => break,
-        }
+    if let Ok(result) = first_rx.await {
+        published_request_ids.push(result.request_id);
+    }
+    if let Ok(result) = second_rx.await {
+        published_request_ids.push(result.request_id);
     }
 
     // At least the newer request must publish; the older may be aborted or
@@ -653,26 +648,14 @@ async fn provider_generation_replacement_drops_old_generation_results() {
     // generation-1 result is stale-dropped on finish.
     coordinator.bump_generation(old_request.document_id, 2);
 
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion("core.words", old_request, old_window)
         .unwrap();
 
-    // Allow the spawned task to finish; its generation-1 result must be
-    // stale-dropped, publishing nothing.
-    let mut published = 0;
-    for _ in 0..4 {
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            coordinator.next_result(),
-        )
-        .await
-        {
-            Ok(Some(_)) => published += 1,
-            _ => break,
-        }
-    }
-    assert_eq!(
-        published, 0,
+    // The generation-1 result is stale-dropped on finish; the request-scoped
+    // reply is cancelled instead of publishing.
+    assert!(
+        reply_rx.await.is_err(),
         "old-generation result must be stale-dropped, not published"
     );
     let stats = coordinator.stats();
@@ -702,19 +685,14 @@ async fn disabling_provider_invalidates_in_flight_generation_and_blocks_reschedu
         .register_builtin(builtin_meta("words", 0, 1), provider)
         .unwrap();
     let old_request = request(1, 205);
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion("core.words", old_request.clone(), window_for(&old_request))
         .unwrap();
 
     coordinator.disable_completion("core.words", 2);
 
     assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            coordinator.next_result()
-        )
-        .await
-        .is_err(),
+        reply_rx.await.is_err(),
         "disabled provider must publish no old-generation result"
     );
     let new_request = request(2, 206);
@@ -754,7 +732,7 @@ async fn stale_document_version_result_is_dropped_after_newer_request() {
 
     let old_request = request(1, 210);
     let old_window = window_for(&old_request);
-    coordinator
+    let old_rx = coordinator
         .schedule_completion("core.words", old_request, old_window)
         .unwrap();
 
@@ -764,21 +742,16 @@ async fn stale_document_version_result_is_dropped_after_newer_request() {
     newer_request.cursor_byte_offset = 12;
     let mut newer_window = window_for(&newer_request);
     newer_window.document_version = 43;
-    coordinator
+    let new_rx = coordinator
         .schedule_completion("core.words", newer_request, newer_window)
         .unwrap();
 
     let mut published_request_ids = Vec::new();
-    for _ in 0..4 {
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            coordinator.next_result(),
-        )
-        .await
-        {
-            Ok(Some(result)) => published_request_ids.push(result.request_id),
-            _ => break,
-        }
+    if let Ok(result) = old_rx.await {
+        published_request_ids.push(result.request_id);
+    }
+    if let Ok(result) = new_rx.await {
+        published_request_ids.push(result.request_id);
     }
 
     assert_eq!(published_request_ids, vec![211]);
@@ -827,7 +800,7 @@ async fn schedule_completion_returns_without_blocking_and_publishes_result() {
     let window = window_for(&request);
     // schedule_completion must return immediately (it only spawns).
     let started = std::time::Instant::now();
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion("core.words", request, window)
         .unwrap();
     let elapsed = started.elapsed();
@@ -836,13 +809,10 @@ async fn schedule_completion_returns_without_blocking_and_publishes_result() {
         "schedule_completion must not block: took {elapsed:?}"
     );
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        coordinator.next_result(),
-    )
-    .await
-    .expect("result must publish within timeout")
-    .expect("result must publish");
+    let result = tokio::time::timeout(std::time::Duration::from_millis(500), reply_rx)
+        .await
+        .expect("result must publish within timeout")
+        .expect("result must publish");
     assert_eq!(result.request_id, 300);
 }
 
@@ -910,10 +880,10 @@ async fn disabled_package_provider_falls_back_to_builtin_buffer_words() {
         byte_end: 19,
         text: "pri private println".to_string(),
     };
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion(BufferWordCompletionProvider::ID, request, window)
         .unwrap();
-    let result = coordinator.next_result().await.unwrap();
+    let result = reply_rx.await.unwrap();
 
     assert_eq!(result.status, CompletionStatus::Ok);
     assert!(result.items.iter().any(|item| item.label == "println"));
@@ -950,15 +920,11 @@ async fn oversized_result_is_rejected_before_publication() {
 
     let request = request(1, 420);
     let window = window_for(&request);
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion("core.words", request, window)
         .unwrap();
 
-    let published = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        coordinator.next_result(),
-    )
-    .await;
+    let published = reply_rx.await;
     assert!(
         published.is_err(),
         "invalid oversized result must not publish"
@@ -1078,10 +1044,10 @@ async fn lsp_compatible_completion_mapping_preserves_snippet_priority_exclusive_
         byte_end: 2,
         text: "x.".to_string(),
     };
-    coordinator
+    let reply_rx = coordinator
         .schedule_completion("lspcomp.completions", request, window)
         .unwrap();
-    let result = coordinator.next_result().await.unwrap();
+    let result = reply_rx.await.unwrap();
     assert_eq!(result.status, CompletionStatus::Ok);
     assert_eq!(result.items.len(), 1);
     assert_eq!(
@@ -1200,7 +1166,7 @@ async fn lsp_priority_100_non_exclusive_merges_with_base_and_honors_disable() {
         byte_end: 2,
         text: "x.".to_string(),
     };
-    coordinator
+    let _reply_rx = coordinator
         .schedule_completion("lsp-rust.completion", request.clone(), window.clone())
         .unwrap();
 

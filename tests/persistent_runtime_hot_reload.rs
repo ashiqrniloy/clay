@@ -23,7 +23,7 @@ async fn developer_hot_reload_trigger_reports_success_and_sanitized_failure() {
     );
     let mut config = ServerConfig::new(smoke_endpoint("developer-hot-reload-trigger"));
     config.configuration_root = Some(root.clone());
-    let server = IpcServer::new(config);
+    let server = IpcServer::try_new(config).expect("test server config is valid");
 
     let loaded = server.trigger_developer_hot_reload().await;
     assert!(loaded.reloaded);
@@ -56,7 +56,7 @@ async fn developer_hot_reload_keeps_runtime_authority_denials_after_success() {
     );
     let mut config = ServerConfig::new(smoke_endpoint("developer-hot-reload-authority-denial"));
     config.configuration_root = Some(root.clone());
-    let server = IpcServer::new(config);
+    let server = IpcServer::try_new(config).expect("test server config is valid");
 
     let loaded = server.trigger_developer_hot_reload().await;
     assert!(loaded.reloaded);
@@ -90,7 +90,7 @@ async fn failed_reload_keeps_generation_and_sanitized_diagnostic_without_advanci
     );
     let mut config = ServerConfig::new(smoke_endpoint("developer-hot-reload-failed-keeps"));
     config.configuration_root = Some(root.clone());
-    let server = IpcServer::new(config);
+    let server = IpcServer::try_new(config).expect("test server config is valid");
 
     let loaded = server.trigger_developer_hot_reload().await;
     assert!(loaded.reloaded);

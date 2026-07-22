@@ -34,7 +34,7 @@ Roadmap Phase 19 depends on Phase 18.7 and the Phase 18.8-18.14 package-capabili
 - Plan 045 is not complete and is not an active gate. Its web-tree-sitter-only engine choice was explicitly superseded by approved decision `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md` and completed Plan 047, which preserves Plan 045's binding non-blocking open-parse and parse-error diagnostic work.
 - Plan 033 is complete and remains the implemented partial Phase 19 baseline.
 
-Therefore Plans 036-053 are complete **or explicitly superseded**, and every active roadmap prerequisite is satisfied. Treating unchecked superseded Plan 045 as completed would be inaccurate; `tests/primitives_docs.rs::phase19_hot_reload_behavior_update_primitive_review` locks the factual gate instead.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 
 ## Existing Primitive Inventory
 
@@ -147,9 +147,9 @@ These are reusable lifecycle/protocol primitives. No gap justifies `if rust`, `i
 
 ## Tests
 
-- `cargo test --test primitives_docs phase19_hot_reload_behavior_update_primitive_review`
-- `tests/primitives_docs.rs::phase19_hot_reload_behavior_update_primitive_review` verifies active entry gates, explicit Plan 045 supersession, Plan 033 baseline completion, wiki indexing, all contribution categories, atomicity/fan-out/client-install gaps, budgets, hot-path policy, security boundaries, and the generic-only rule.
-- Existing focused baseline: `cargo test --test persistent_runtime_hot_reload`.
+cargo test --test protocol primitives_docs::
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
+- Existing focused baseline: `cargo test --test runtime persistent_runtime_hot_reload::`.
 
 ## Related
 

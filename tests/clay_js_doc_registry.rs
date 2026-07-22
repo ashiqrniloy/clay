@@ -185,7 +185,7 @@ fn syntax_engine_api_docs_registry_are_fresh() {
     });
     let docs_index = std::fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
     let syntax_facade =
-        std::fs::read_to_string(root.join("runtime/js/syntax.ts")).expect("read syntax facade");
+        std::fs::read_to_string(root.join("runtime/js/syntax.js")).expect("read syntax facade");
     let syntax_ops =
         std::fs::read_to_string(root.join("src/server/ops/syntax.rs")).expect("read syntax ops");
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
@@ -644,7 +644,7 @@ fn generated_registry_preserves_configuration_metadata() {
     assert_eq!(cursor_style.js_export, "clientSetCursorStyle");
     assert_eq!(
         cursor_style.js_facade,
-        "runtime/js/editor.ts::clientSetCursorStyle"
+        "runtime/js/editor.js::clientSetCursorStyle"
     );
     assert_eq!(
         cursor_style.backing_rust,
@@ -826,7 +826,7 @@ fn generated_registry_contains_client_open_file_dialog_command_api() {
     assert_eq!(entry.js_export, "clientOpenFileDialog");
     assert_eq!(
         entry.js_facade,
-        "runtime/js/documents.ts::clientOpenFileDialog"
+        "runtime/js/documents.js::clientOpenFileDialog"
     );
     assert_eq!(entry.stability, "runtime-backed-command");
     assert!(entry.key_bindings.is_empty());
@@ -1633,7 +1633,7 @@ fn diagnostics_api_docs_and_generated_registry_are_fresh() {
         "render-decorations",
         "language-server process",
         "raw `Deno.core.ops`",
-        "runtime/js/diagnostics.ts::serverPublishDiagnostics",
+        "runtime/js/diagnostics.js::serverPublishDiagnostics",
         "op_clay_diagnostics_publish_diagnostics",
         "src/server/diagnostics.rs::validate_diagnostic_publication",
     ] {

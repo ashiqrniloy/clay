@@ -21,7 +21,7 @@ This review pins reusable primitives before implementation. It also locks the na
 
 ### Configuration, bootstrap, and live client delivery
 
-`runtime/js/theme.ts`, `src/server/ops/theme.rs`, `src/server/js_runtime.rs`, `src/server/mod.rs`, `src/server/connection.rs`, `src/client/mod.rs`, and `src/masonry_editor.rs` already carry one inert appearance snapshot end-to-end. `setTheme` validates and stores `ActiveTheme`, bootstrap sends `ServerMessage::ActiveTheme`, and `ClientConnectionEvent::ActiveTheme` installs a new `StyleRegistry` before paint.
+`runtime/js/theme.js`, `src/server/ops/theme.rs`, `src/server/js_runtime.rs`, `src/server/mod.rs`, `src/server/connection.rs`, `src/client/mod.rs`, and `src/masonry_editor.rs` already carry one inert appearance snapshot end-to-end. `setTheme` validates and stores `ActiveTheme`, bootstrap sends `ServerMessage::ActiveTheme`, and `ClientConnectionEvent::ActiveTheme` installs a new `StyleRegistry` before paint.
 
 That delivery path is reusable for configuration evaluation, atomic replacement, bootstrap ordering, runtime reload, and live event application. `ActiveTheme` itself is not reusable typography state: it contains a theme specifier and `TextThemeOverride` color/attribute data, while a font-stack/size change changes shaping and geometry. Typography therefore needs a separate snapshot and event, not fields added to `ActiveTheme`.
 
@@ -126,7 +126,7 @@ This phase adds no font-file/byte/path/URL authority, font download, network, fi
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_16_5_typography_primitive_review_is_linked_and_complete`: locks inventory, generic gaps, hot-path split, fallback, authority, and rejected-shape markers.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - `src/editor/typography.rs`: `document_line_height_uses_largest_document_profile_not_ui` locks the shared baseline; `ui_variants_scale_from_configured_role_size` locks title/body/status scale ownership.
 - `src/masonry_sdui.rs`: `ui_size_change_scales_row_hit_and_accessibility_bounds_together` and `package_component_font_role_uses_selected_profile_without_concrete_sizes` lock shared UI geometry and package role use.
 - `src/server/ui.rs`: `package_component_font_role_is_semantic_and_text_only` rejects concrete and structural-component typography.
@@ -138,7 +138,7 @@ This phase adds no font-file/byte/path/URL authority, font download, network, fi
 Run:
 
 ```bash
-cargo test --test primitives_docs
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

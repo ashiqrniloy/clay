@@ -17,7 +17,7 @@
 - `src/shell/package_ui.rs`
 - `src/editor/{surface,typography}.rs`
 - `src/perf/budgets.rs`
-- `runtime/js/packages.ts`
+- `runtime/js/packages.js`
 - `tests/persistent_runtime_hot_reload.rs`
 - `tests/runtime_update_protocol.rs`
 - `tests/parse_coordinator.rs`
@@ -56,7 +56,7 @@ Current Phase 19 boundary (Plan 054 complete): candidate preparation/commit thro
 
 1. `RuntimeGenerationStore` stores `{ id, ClayJsRuntimeService, Arc<ClayRuntimeEvaluation>, diagnostics }` plus a commit mutex.
 2. `IpcServer::reload_runtime_generation` constructs the next service off to the side and evaluates configuration while the current generation remains active.
-3. Configuration reruns `~/.config/clay/init.js`; package authors normally call `await loadPackage("@clay/markdown")` there. `runtime/js/packages.ts` keeps `globalThis.__clayLoadedPackages` as a per-generation idempotence cache.
+3. Configuration reruns `~/.config/clay/init.js`; package authors normally call `await loadPackage("@clay/markdown")` there. `runtime/js/packages.js` keeps `globalThis.__clayLoadedPackages` as a per-generation idempotence cache.
 4. `prepare_runtime_generation_candidate` clones expected active behavior/SDUI/theme/typography, stages replacements, validates package UI through `PackageUiRuntimeState`, validates the final syntax snapshot, validates decoration/diagnostic sets, registers all executable adapters into temporary coordinators, verifies document-analyzer package/process grants, builds and validates one complete `RuntimeStateSnapshot` (including encode against the 1 MiB frame ceiling), and captures bounded open-document refresh metadata.
 5. `execute_reload_command` validates the Clay-owned command through `CommandExecutor` and uses an immediate `try_lock_owned` attempt guard. Concurrent requests return `CommandExecutionRule::ReloadInProgress` instead of queueing or starting a second evaluation.
 6. `commit_runtime_generation` acquires `ScopedLockTarget::Behavior`, compares expected generation and active snapshots, installs already-validated generation-owned registrations/state, swaps the generation store once, calls `cancel_older_runtime_generations` across parse/completion/intelligence/analysis coordinators (abort older work and drain queued outputs), shuts down previous-generation language-server sessions, publishes the committed `RuntimeStateSnapshot` on the capacity-16 runtime-state broadcast, and drops the behavior lock before document refresh. Typography broadcasts only after commit; lagged runtime-state receivers recover from the latest complete snapshot rather than replaying intermediate generations.
@@ -68,7 +68,7 @@ Current Phase 19 boundary (Plan 054 complete): candidate preparation/commit thro
 ## Primitive Coverage
 
 - Runtime generation primitive: `RuntimeGenerationStore` in `src/server/mod.rs`.
-- package cache invalidation primitive: per-generation `loadPackage` cache in `runtime/js/packages.ts` plus `PackageLoadEntryAllowlist` in `src/server/js_runtime.rs`.
+- package cache invalidation primitive: per-generation `loadPackage` cache in `runtime/js/packages.js` plus `PackageLoadEntryAllowlist` in `src/server/js_runtime.rs`.
 - parse-handler generation replacement primitive: `ParseCoordinator::register_handler_for_generation`, `cancel_older_generations`, `cancel_generation`, `cancel_package`, and task-generation validation in `src/server/parse_coordinator.rs`; package-scoped cancellation reuses the same primitive for revocation.
 - Contribution cleanup primitive: `cancel_older_runtime_generations` plus `withdraw_package_contributions` in `src/server/mod.rs`, mirrored by `ModeRegistry::unregister_package_modes` and `CommandRegistry::remove_package_commands`.
 - Language-server generation teardown: `LanguageServerProcessService::shutdown_all` via `ClayJsRuntimeService::shutdown_generation_resources`.
@@ -96,18 +96,18 @@ Future packages should reuse `loadPackage`, `clay:modes`, and `clay:parse` regis
 ## Tests
 
 - `cargo test candidate_ --lib`: invalid candidate changes no active state; valid candidate advances retained generation state once.
-- `cargo test --test runtime_update_protocol`: snapshot/ack codec round trips, complete install surface, and oversized/invalid rejection.
+- `cargo test --test runtime runtime_update_protocol::`: snapshot/ack codec round trips, complete install surface, and oversized/invalid rejection.
 - `cargo test --lib client::runtime_state masonry_editor::tests::client_installs masonry_editor::tests::invalid_snapshot masonry_editor::tests::runtime_install`: atomic client install, fail-close without ack, caret/viewport preservation, and single layout invalidation.
 - `cargo test --lib behavior::tests runtime_generation_tests::edit_sent_before_snapshot runtime_generation_tests::previous_generation_edit runtime_generation_tests::grace_never`: grace accept/reject/lease and InvalidBehaviorVersion snapshot republish.
 - `cargo test --lib runtime_generation_tests`: candidate commit, concurrent-attempt rejection, failure lock release, timeout rollback, typography publication, package cache replacement, open-document refresh, snapshot fan-out, lag recovery, spoofed-ack rejection, duplex-barrier edit-ack non-blocking, failed-reload diagnostic/snapshot absence, multi-client one-generation install, and LSP authority/cleanup regression.
 - `cargo test --lib locks::tests`: generic range/document/behavior/workspace conflict and RAII release semantics.
 - `cargo test --lib behavior::tests`: BehaviorGraceState accept/expire/cap and grace-boundary rejection.
-- `cargo test --test command_execution reload_command_is_server_first_behavior_locked_and_discoverable`: command metadata and shared validation.
-- `cargo test --test persistent_runtime_hot_reload`: success, rollback, sanitized diagnostics, authority-denial regression, and failed-reload generation preservation.
-- `cargo test --test parse_coordinator`: generation replacement, cancellation, stale result rejection, and handler failure instrumentation.
-- `cargo test --test package_loading_docs`: docs-as-code coverage for hot reload lifecycle, package author docs, and wiki links.
-- `cargo test --test performance_protocol phase19_runtime_state_snapshot_and_grace_budgets_are_locked`: Phase 19 budget constant locks.
-- `cargo test --test runtime_update_protocol`: snapshot/ack codec round trips, complete install surface, oversized/invalid rejection, and diff-review payload under frame ceiling.
+- `cargo test --test runtime command_execution::reload_command_is_server_first_behavior_locked_and_discoverable`: command metadata and shared validation.
+- `cargo test --test runtime persistent_runtime_hot_reload::`: success, rollback, sanitized diagnostics, authority-denial regression, and failed-reload generation preservation.
+- `cargo test --test runtime parse_coordinator::`: generation replacement, cancellation, stale result rejection, and handler failure instrumentation.
+- `cargo test --test protocol package_loading_docs::`: docs-as-code coverage for hot reload lifecycle, package author docs, and wiki links.
+- `cargo test --test protocol performance_protocol::phase19_runtime_state_snapshot_and_grace_budgets_are_locked`: Phase 19 budget constant locks.
+- `cargo test --test runtime runtime_update_protocol::`: snapshot/ack codec round trips, complete install surface, oversized/invalid rejection, and diff-review payload under frame ceiling.
 
 ## Related
 

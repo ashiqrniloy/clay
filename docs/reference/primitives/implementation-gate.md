@@ -91,8 +91,8 @@ Phase 18 still owns Markdown-specific rendering and parse primitives such as `De
 Run the focused implementation and documentation checks after changing this gate:
 
 ```text
-cargo test --test package_primitive_gate
-cargo test --test primitives_docs
+cargo test --test security package_primitive_gate::
+cargo test --test protocol primitives_docs::
 ```
 
 `tests/primitives_docs.rs` verifies that this page is linked from `docs/reference/primitives/index.md` and `docs/index.md`, covers the scope/security/handoff contract, references the canonical security document, and keeps package validation and mode activation out of typing-hot-path documentation. `tests/package_primitive_gate.rs` verifies manifest validation, permission validation, mode classification/activation, command registration, ambiguous key binding rejection, and inert text transform validation.

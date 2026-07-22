@@ -3,7 +3,7 @@ id: clay.sdui.definePanel
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: definePanel
-js_facade: runtime/js/sdui.ts::definePanel
+js_facade: runtime/js/sdui.js::definePanel
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::Panel
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -106,7 +106,7 @@ Use `clay.sdui.definePanel` when the user asks for runtime-backed Clay SDUI sche
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::definePanel`
+- JS facade: `runtime/js/sdui.js::definePanel`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::Panel`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

@@ -3,7 +3,7 @@ id: clay.sdui.defineStack
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineStack
-js_facade: runtime/js/sdui.ts::defineStack
+js_facade: runtime/js/sdui.js::defineStack
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::Stack
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -100,7 +100,7 @@ Use `clay.sdui.defineStack` when the user asks for runtime-backed Clay SDUI sche
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::defineStack`
+- JS facade: `runtime/js/sdui.js::defineStack`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::Stack`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

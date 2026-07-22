@@ -108,6 +108,10 @@ use self::{
 
 pub(crate) use self::packages::PackageLoadEntryAllowlist;
 
+pub(super) fn registration_token(api_prefix: &str, contribution_id: &str, index: usize) -> String {
+    format!("{api_prefix}:{contribution_id}:{index}")
+}
+
 /// Server-owned state shared with explicit Clay JavaScript ops.
 struct ClayRuntimeContext {
     workspace: Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>>,
@@ -1599,6 +1603,14 @@ mod domain_extension_tests {
 
     fn op_names(extension: &deno_core::Extension) -> BTreeSet<&'static str> {
         extension.ops.iter().map(|decl| decl.name).collect()
+    }
+
+    #[test]
+    fn package_registration_tokens_have_one_stable_format() {
+        assert_eq!(
+            super::registration_token("markdown", "preview", 2),
+            "markdown:preview:2"
+        );
     }
 
     #[test]

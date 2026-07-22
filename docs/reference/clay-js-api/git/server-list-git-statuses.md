@@ -3,7 +3,7 @@ id: clay.git.serverListGitStatuses
 kind: clay-js-api
 js_module: "clay:git"
 js_export: serverListGitStatuses
-js_facade: runtime/js/git.ts::serverListGitStatuses
+js_facade: runtime/js/git.js::serverListGitStatuses
 backing_rust: src/server/git.rs::GitStatusCache::list_cached
 deno_op: op_clay_git_list_statuses
 deno_op_path: src/server/ops/git.rs::op_clay_git_list_statuses
@@ -93,7 +93,7 @@ Use `clay.git.serverListGitStatuses` only through the documented `clay:git` faca
 
 ## Backing implementation
 
-- JS facade: `runtime/js/git.ts::serverListGitStatuses`
+- JS facade: `runtime/js/git.js::serverListGitStatuses`
 - Deno op: `src/server/ops/git.rs::op_clay_git_list_statuses` (`op_clay_git_list_statuses`)
 - Backing Rust/current owner: `src/server/git.rs::GitStatusCache::list_cached`
 

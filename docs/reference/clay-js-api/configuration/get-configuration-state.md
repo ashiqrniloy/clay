@@ -3,7 +3,7 @@ id: clay.configuration.getConfigurationState
 kind: clay-js-api
 js_module: "clay:configuration"
 js_export: getConfigurationState
-js_facade: runtime/js/configuration.ts::getConfigurationState
+js_facade: runtime/js/configuration.js::getConfigurationState
 backing_rust: src/server/configuration.rs::ConfigurationState
 deno_op: op_clay_configuration_get_state
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_get_state
@@ -110,10 +110,10 @@ Use `clay.configuration.getConfigurationState` when the user asks for Clay confi
 
 ## Backing implementation
 
-- JS facade: `runtime/js/configuration.ts::getConfigurationState`
+- JS facade: `runtime/js/configuration.js::getConfigurationState`
 - Deno op: `src/server/ops/configuration.rs::op_clay_configuration_get_state` (`op_clay_configuration_get_state`)
 - Backing Rust/current owner: `src/server/configuration.rs::ConfigurationState`
-- Current implementation audit path: `runtime/js/configuration.ts::getConfigurationState`
+- Current implementation audit path: `runtime/js/configuration.js::getConfigurationState`
 
 ## Lookup metadata
 

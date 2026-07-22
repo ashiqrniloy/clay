@@ -43,7 +43,7 @@ Phase 16 keeps the mode/package primitive architecture as documentation-as-code,
 ## Code Examples
 
 ```bash
-cargo test --test primitives_docs
+cargo test --test protocol primitives_docs::
 ```
 
 ```rust
@@ -63,15 +63,8 @@ assert!(index.contains("reference/primitives/markdown-mode-requirements.md"));
 
 ## Tests
 
-- `tests/primitives_docs.rs::markdown_mode_requirements_doc_linked_from_index`: verifies `docs/index.md` links the Markdown mode requirements document.
-- `tests/primitives_docs.rs::markdown_mode_prerequisites_reference_registry_entries`: verifies Markdown prerequisite rows cite primitive registry entries.
-- `tests/primitives_docs.rs::markdown_mode_requirements_cover_phase18_poc_contract`: verifies Markdown POC detection, behavior, decoration, command, budget, and security requirements stay documented.
-- `tests/primitives_docs.rs::primitive_public_api_stubs_exist_with_required_phase16_metadata`: verifies Phase 17/18 primitive API metadata has required permissions/security notes and primitive backlog/registry traces, with implemented Phase 16.5 entries separated from deferred planned stubs.
-- `tests/primitives_docs.rs::primitive_implementation_gate_doc_linked_from_indexes`: verifies `docs/reference/primitives/implementation-gate.md` is linked from the primitives index, docs index, and backlog handoff.
-- `tests/primitives_docs.rs::primitive_gate_doc_covers_scope_security_and_handoff`: verifies the gate reference covers scope, security validation, prohibited authorities, and Phase 17/18 handoff.
-- `tests/primitives_docs.rs::primitive_gate_doc_keeps_validation_out_of_typing_hot_path`: verifies package validation and mode activation remain outside ordinary typing, paint, and text-event paths.
-- `tests/primitives_docs.rs::phase16_configuration_api_stubs_cover_reviewed_surfaces`: verifies planned configuration stubs cover package options, mode preferences, decoration themes, parse policies, init.js security, and the deferred package enable/disable decision.
-- `cargo test --test primitives_docs`: runs the primitive documentation coverage suite.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
+- `cargo test --test protocol primitives_docs::`: runs the primitive documentation coverage suite.
 
 ## Related
 

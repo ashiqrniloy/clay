@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::{cell::RefCell, error::Error, fmt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipboardError {
@@ -29,20 +29,43 @@ pub trait ClipboardSink {
 #[derive(Debug, Default)]
 pub struct SystemClipboard;
 
+// X11 clipboard ownership is process-backed: dropping the provider immediately
+// after a write can lose the selection when no clipboard manager is running.
+// Explicit clipboard commands run on the GUI thread, so retain one text-only
+// backend for that thread's lifetime; no polling or hot-path reads are added.
+thread_local! {
+    static SYSTEM_CLIPBOARD: RefCell<Option<arboard::Clipboard>> = const { RefCell::new(None) };
+}
+
+fn with_system_clipboard<T>(
+    operation: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+) -> Result<T, ClipboardError> {
+    SYSTEM_CLIPBOARD
+        .try_with(|clipboard| {
+            let mut clipboard = clipboard
+                .try_borrow_mut()
+                .map_err(|_| ClipboardError::new("clipboard is already in use"))?;
+            if clipboard.is_none() {
+                *clipboard = Some(arboard::Clipboard::new().map_err(|error| {
+                    ClipboardError::new(format!("clipboard unavailable: {error}"))
+                })?);
+            }
+            let clipboard = clipboard
+                .as_mut()
+                .ok_or_else(|| ClipboardError::new("clipboard initialization failed"))?;
+            operation(clipboard).map_err(|error| ClipboardError::new(error.to_string()))
+        })
+        .map_err(|_| ClipboardError::new("clipboard thread is shutting down"))?
+}
+
 impl ClipboardSink for SystemClipboard {
     fn set_text(&mut self, text: String) -> Result<(), ClipboardError> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|error| ClipboardError::new(format!("clipboard unavailable: {error}")))?;
-        clipboard
-            .set_text(text)
+        with_system_clipboard(|clipboard| clipboard.set_text(text))
             .map_err(|error| ClipboardError::new(format!("clipboard write failed: {error}")))
     }
 
     fn get_text(&mut self) -> Result<String, ClipboardError> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|error| ClipboardError::new(format!("clipboard unavailable: {error}")))?;
-        clipboard
-            .get_text()
+        with_system_clipboard(arboard::Clipboard::get_text)
             .map_err(|error| ClipboardError::new(format!("clipboard read failed: {error}")))
     }
 }
@@ -59,7 +82,7 @@ pub fn read_text_from_system_clipboard() -> Result<String, ClipboardError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardError, ClipboardSink};
+    use super::{ClipboardError, ClipboardSink, SystemClipboard};
 
     #[derive(Default)]
     struct MemoryClipboard {
@@ -118,6 +141,21 @@ mod tests {
 
         let error = clipboard.get_text().unwrap_err();
         assert_eq!(error.to_string(), "no display");
+    }
+
+    #[test]
+    #[ignore = "requires a live desktop clipboard and temporarily replaces its text"]
+    fn live_system_clipboard_round_trip() {
+        let mut clipboard = SystemClipboard;
+        let previous = clipboard.get_text().ok();
+        let marker = format!("clay-clipboard-smoke-{}", std::process::id());
+
+        clipboard.set_text(marker.clone()).unwrap();
+        assert_eq!(clipboard.get_text().unwrap(), marker);
+
+        if let Some(previous) = previous {
+            clipboard.set_text(previous).unwrap();
+        }
     }
 
     #[test]

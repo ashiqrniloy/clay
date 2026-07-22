@@ -3,7 +3,7 @@ id: clay.editor.serverDeleteRange
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: serverDeleteRange
-js_facade: runtime/js/editor.ts::serverDeleteRange
+js_facade: runtime/js/editor.js::serverDeleteRange
 backing_rust: src/server/document.rs::DocumentState::apply_edit
 deno_op: op_clay_editor_delete_range
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_delete_range
@@ -98,7 +98,7 @@ Use `clay.editor.serverDeleteRange` when the user asks for delete text range thr
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::serverDeleteRange`
+- JS facade: `runtime/js/editor.js::serverDeleteRange`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_delete_range` (`op_clay_editor_delete_range`)
 - Backing Rust/current owner: `src/server/document.rs::DocumentState::apply_edit`
 - Current implementation audit path: `src/editor/surface.rs::EditorSurface::backspace_with_event; src/editor/surface.rs::EditorSurface::delete_forward_with_event; src/server/document.rs::DocumentState::apply_edit`

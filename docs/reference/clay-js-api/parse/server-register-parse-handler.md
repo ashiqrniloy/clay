@@ -3,7 +3,7 @@ id: clay.parse.serverRegisterParseHandler
 kind: clay-js-api
 js_module: "clay:parse"
 js_export: serverRegisterParseHandler
-js_facade: runtime/js/parse.ts::serverRegisterParseHandler
+js_facade: runtime/js/parse.js::serverRegisterParseHandler
 backing_rust: src/server/parse_coordinator.rs::ParseCoordinator::register_handler
 deno_op: op_clay_parse_register_parse_handler
 deno_op_path: src/server/ops/parse.rs::op_clay_parse_register_parse_handler
@@ -178,8 +178,8 @@ Prefer this facade over raw ops or direct Rust calls. Keep parse work cancellabl
 
 ## Backing implementation
 
-- JS facade: `runtime/js/parse.ts::serverRegisterParseHandler`
-- Runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_PARSE`
+- JS facade: `runtime/js/parse.js::serverRegisterParseHandler`
+- Runtime facade: `src/server/facades.rs`
 - Op wrapper: `src/server/ops/parse.rs::op_clay_parse_register_parse_handler`
 - Coordinator: `src/server/parse_coordinator.rs::ParseCoordinator`
 - Protocol type: `src/protocol/parse.rs::IncrementalParseUpdate`

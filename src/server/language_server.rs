@@ -32,7 +32,8 @@ use tokio::time::timeout;
 
 use crate::perf::budgets::{
     LANGUAGE_SERVER_MAX_SESSIONS, LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
-    LANGUAGE_SERVER_READ_TIMEOUT_MS, LANGUAGE_SERVER_STDERR_BUDGET_BYTES,
+    LANGUAGE_SERVER_READ_TIMEOUT_MS, LANGUAGE_SERVER_SESSION_COMMAND_CAPACITY,
+    LANGUAGE_SERVER_STDERR_BUDGET_BYTES,
 };
 
 /// Opaque, non-guessable identifier for one live language-server session.
@@ -70,16 +71,55 @@ pub struct LanguageServerSpawn {
 }
 
 #[derive(Debug)]
-struct Session {
+struct SessionHandle {
     package_name: String,
     contribution_id: String,
     descriptor_fingerprint: u64,
     cwd: PathBuf,
+    command_tx: mpsc::Sender<SessionActorCommand>,
+    stop_tx: Option<oneshot::Sender<()>>,
+    task: Option<JoinHandle<()>>,
+}
+
+#[derive(Debug)]
+struct SessionProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
-    stderr: Arc<tokio::sync::Mutex<Vec<u8>>>,
+    stderr: Arc<tokio::sync::Mutex<StderrCapture>>,
     stderr_task: Option<JoinHandle<()>>,
+}
+
+#[derive(Debug)]
+enum SessionActorCommand {
+    Write {
+        bytes: Vec<u8>,
+        reply: oneshot::Sender<Result<(), LanguageServerError>>,
+    },
+    Read {
+        max_bytes: usize,
+        timeout_ms: u64,
+        reply: oneshot::Sender<Result<Vec<u8>, LanguageServerError>>,
+    },
+}
+
+impl SessionActorCommand {
+    fn reply_error(self, error: LanguageServerError) {
+        match self {
+            Self::Write { reply, .. } => {
+                let _ = reply.send(Err(error));
+            }
+            Self::Read { reply, .. } => {
+                let _ = reply.send(Err(error));
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct StderrCapture {
+    bytes: Vec<u8>,
+    truncated: bool,
 }
 
 #[derive(Debug)]
@@ -127,10 +167,10 @@ enum SessionCommand {
 
 /// Host-owned language-server process/session service.
 ///
-/// Cheap to construct: the background runtime thread is spawned lazily on the
-/// first session start, so configurations and tests that never start a server
-/// pay no thread cost. All child process I/O runs on that dedicated thread,
-/// isolated from the persistent JavaScript worker and the Masonry render path.
+/// The service owns one dedicated current-thread Tokio runtime. Its central
+/// router handles only bounded identity/table routing; each child process and
+/// its stdio live in an independent session actor on that runtime, isolated
+/// from persistent JavaScript workers and the Masonry render path.
 #[derive(Clone)]
 pub struct LanguageServerProcessService {
     inner: Arc<ServiceInner>,
@@ -149,9 +189,9 @@ impl Default for LanguageServerProcessService {
 
 impl LanguageServerProcessService {
     pub fn new() -> Self {
-        // Channel capacity 64 is far above the bounded concurrent-session cap
-        // (`LANGUAGE_SERVER_MAX_SESSIONS`); the router drains one command at a
-        // time and a queued command never lingers behind more than a handful.
+        // Central ingress is bounded above the session cap. The router performs
+        // only table/identity checks and non-blocking actor dispatch; child I/O
+        // never runs in this loop.
         let (command_tx, command_rx) = mpsc::channel(64);
         let inner = Arc::new(ServiceInner {
             command_tx,
@@ -357,7 +397,7 @@ fn spawn_router_thread(mut command_rx: mpsc::Receiver<SessionCommand>) {
 }
 
 async fn router_loop(command_rx: &mut mpsc::Receiver<SessionCommand>) {
-    let mut sessions: HashMap<LanguageServerSessionId, Session> = HashMap::new();
+    let mut sessions: HashMap<LanguageServerSessionId, SessionHandle> = HashMap::new();
     while let Some(command) = command_rx.recv().await {
         match command {
             SessionCommand::Start {
@@ -375,18 +415,14 @@ async fn router_loop(command_rx: &mut mpsc::Receiver<SessionCommand>) {
                 descriptor_fingerprint,
                 bytes,
                 reply,
-            } => {
-                let result = handle_write(
-                    &mut sessions,
-                    session,
-                    &package,
-                    &contribution,
-                    descriptor_fingerprint,
-                    bytes,
-                )
-                .await;
-                let _ = reply.send(result);
-            }
+            } => route_actor_command(
+                &mut sessions,
+                session,
+                &package,
+                &contribution,
+                descriptor_fingerprint,
+                SessionActorCommand::Write { bytes, reply },
+            ),
             SessionCommand::Read {
                 session,
                 package,
@@ -395,19 +431,18 @@ async fn router_loop(command_rx: &mut mpsc::Receiver<SessionCommand>) {
                 max_bytes,
                 timeout_ms,
                 reply,
-            } => {
-                let result = handle_read(
-                    &mut sessions,
-                    session,
-                    &package,
-                    &contribution,
-                    descriptor_fingerprint,
+            } => route_actor_command(
+                &mut sessions,
+                session,
+                &package,
+                &contribution,
+                descriptor_fingerprint,
+                SessionActorCommand::Read {
                     max_bytes,
                     timeout_ms,
-                )
-                .await;
-                let _ = reply.send(result);
-            }
+                    reply,
+                },
+            ),
             SessionCommand::Stop {
                 session,
                 package,
@@ -415,41 +450,66 @@ async fn router_loop(command_rx: &mut mpsc::Receiver<SessionCommand>) {
                 descriptor_fingerprint,
                 reply,
             } => {
-                let result = handle_stop(
-                    &mut sessions,
-                    session,
-                    &package,
-                    &contribution,
-                    descriptor_fingerprint,
-                )
-                .await;
-                let _ = reply.send(result);
+                let handle = match sessions.get(&session) {
+                    Some(handle) => {
+                        match verify_identity(
+                            handle,
+                            &package,
+                            &contribution,
+                            descriptor_fingerprint,
+                        ) {
+                            Ok(()) => sessions.remove(&session),
+                            Err(error) => {
+                                let _ = reply.send(Err(error));
+                                continue;
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                tokio::spawn(async move {
+                    if let Some(handle) = handle {
+                        stop_actor(handle).await;
+                    }
+                    let _ = reply.send(Ok(()));
+                });
             }
             SessionCommand::RevokeForPackage { package, reply } => {
-                let count = handle_revoke(&mut sessions, &package).await;
-                let _ = reply.send(count);
+                let matching: Vec<_> = sessions
+                    .iter()
+                    .filter(|(_, session)| session.package_name == package)
+                    .map(|(id, _)| *id)
+                    .collect();
+                let handles: Vec<_> = matching
+                    .iter()
+                    .filter_map(|id| sessions.remove(id))
+                    .collect();
+                let count = handles.len();
+                tokio::spawn(async move {
+                    stop_actors(handles).await;
+                    let _ = reply.send(count);
+                });
             }
             SessionCommand::ShutdownAll { reply } => {
-                let count = handle_shutdown_all(&mut sessions).await;
-                let _ = reply.send(count);
+                let handles: Vec<_> = sessions.drain().map(|(_, handle)| handle).collect();
+                let count = handles.len();
+                tokio::spawn(async move {
+                    stop_actors(handles).await;
+                    let _ = reply.send(count);
+                });
             }
             SessionCommand::SessionCount { reply } => {
                 let _ = reply.send(sessions.len());
             }
         }
     }
-    // Channel closed (service dropped / shutdown): reap every session.
-    for (_, mut session) in sessions.drain() {
-        let _ = session.child.start_kill();
-        let _ = session.child.wait().await;
-        if let Some(handle) = session.stderr_task.take() {
-            handle.abort();
-        }
-    }
+    // Channel closed (service dropped / runtime replacement): stop and reap
+    // every actor before the dedicated runtime exits.
+    stop_actors(sessions.drain().map(|(_, handle)| handle).collect()).await;
 }
 
 fn handle_start(
-    sessions: &mut HashMap<LanguageServerSessionId, Session>,
+    sessions: &mut HashMap<LanguageServerSessionId, SessionHandle>,
     session_id: LanguageServerSessionId,
     spawn: LanguageServerSpawn,
 ) -> Result<(), LanguageServerError> {
@@ -491,62 +551,123 @@ fn handle_start(
         .stderr
         .take()
         .ok_or(LanguageServerError::MissingPipe)?;
-    let stderr_buffer = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let stderr_task = tokio::spawn(read_capped_stderr(stderr, Arc::clone(&stderr_buffer)));
-    let session = Session {
-        package_name: spawn.package_name.clone(),
-        contribution_id: spawn.contribution_id.clone(),
-        descriptor_fingerprint: spawn.descriptor_fingerprint,
-        cwd: spawn.cwd,
+    let stderr_capture = Arc::new(tokio::sync::Mutex::new(StderrCapture::default()));
+    let stderr_task = tokio::spawn(read_capped_stderr(stderr, Arc::clone(&stderr_capture)));
+    let process = SessionProcess {
         child,
         stdin,
         stdout,
-        stderr: stderr_buffer,
+        stderr: stderr_capture,
         stderr_task: Some(stderr_task),
     };
-    sessions.insert(session_id, session);
+    let (command_tx, command_rx) = mpsc::channel(LANGUAGE_SERVER_SESSION_COMMAND_CAPACITY);
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let task = tokio::spawn(session_actor(process, command_rx, stop_rx));
+    sessions.insert(
+        session_id,
+        SessionHandle {
+            package_name: spawn.package_name,
+            contribution_id: spawn.contribution_id,
+            descriptor_fingerprint: spawn.descriptor_fingerprint,
+            cwd: spawn.cwd,
+            command_tx,
+            stop_tx: Some(stop_tx),
+            task: Some(task),
+        },
+    );
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_write(
-    sessions: &mut HashMap<LanguageServerSessionId, Session>,
+fn route_actor_command(
+    sessions: &mut HashMap<LanguageServerSessionId, SessionHandle>,
     session: LanguageServerSessionId,
     package: &str,
     contribution: &str,
     descriptor_fingerprint: u64,
-    bytes: Vec<u8>,
+    command: SessionActorCommand,
+) {
+    let Some(handle) = sessions.get(&session) else {
+        command.reply_error(LanguageServerError::UnknownSession);
+        return;
+    };
+    if let Err(error) = verify_identity(handle, package, contribution, descriptor_fingerprint) {
+        command.reply_error(error);
+        return;
+    }
+    match handle.command_tx.try_send(command) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(command)) => {
+            command.reply_error(LanguageServerError::SessionBusy)
+        }
+        Err(mpsc::error::TrySendError::Closed(command)) => {
+            command.reply_error(LanguageServerError::UnknownSession);
+            sessions.remove(&session);
+        }
+    }
+}
+
+async fn session_actor(
+    mut process: SessionProcess,
+    mut command_rx: mpsc::Receiver<SessionActorCommand>,
+    mut stop_rx: oneshot::Receiver<()>,
+) {
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut stop_rx => break,
+            command = command_rx.recv() => {
+                let Some(command) = command else { break };
+                match command {
+                    SessionActorCommand::Write { bytes, reply } => {
+                        tokio::select! {
+                            biased;
+                            _ = &mut stop_rx => break,
+                            result = actor_write(&mut process, &bytes) => {
+                                let _ = reply.send(result);
+                            }
+                        }
+                    }
+                    SessionActorCommand::Read { max_bytes, timeout_ms, reply } => {
+                        tokio::select! {
+                            biased;
+                            _ = &mut stop_rx => break,
+                            result = actor_read(&mut process, max_bytes, timeout_ms) => {
+                                let _ = reply.send(result);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = process.child.start_kill();
+    let _ = process.child.wait().await;
+    if let Some(task) = process.stderr_task.take() {
+        task.abort();
+    }
+}
+
+async fn actor_write(
+    process: &mut SessionProcess,
+    bytes: &[u8],
 ) -> Result<(), LanguageServerError> {
-    let entry = sessions
-        .get_mut(&session)
-        .ok_or(LanguageServerError::UnknownSession)?;
-    verify_identity(entry, package, contribution, descriptor_fingerprint)?;
-    entry
+    process
         .stdin
-        .write_all(&bytes)
+        .write_all(bytes)
         .await
         .map_err(|error| LanguageServerError::Io(error.to_string()))?;
-    entry
+    process
         .stdin
         .flush()
         .await
         .map_err(|error| LanguageServerError::Io(error.to_string()))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_read(
-    sessions: &mut HashMap<LanguageServerSessionId, Session>,
-    session: LanguageServerSessionId,
-    package: &str,
-    contribution: &str,
-    descriptor_fingerprint: u64,
+async fn actor_read(
+    process: &mut SessionProcess,
     max_bytes: usize,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, LanguageServerError> {
-    let entry = sessions
-        .get_mut(&session)
-        .ok_or(LanguageServerError::UnknownSession)?;
-    verify_identity(entry, package, contribution, descriptor_fingerprint)?;
     let limit = max_bytes.max(1);
     let mut buffer = vec![0u8; limit];
     let read_result = timeout(
@@ -555,12 +676,12 @@ async fn handle_read(
         } else {
             timeout_ms.min(LANGUAGE_SERVER_READ_TIMEOUT_MS)
         }),
-        entry.stdout.read(&mut buffer),
+        process.stdout.read(&mut buffer),
     )
     .await;
     match read_result {
         Ok(Ok(0)) => {
-            let detail = sanitize_session_stderr(&entry.stderr).await;
+            let detail = sanitize_session_stderr(&process.stderr).await;
             Err(LanguageServerError::ChildExitedWith { detail })
         }
         Ok(Ok(count)) => {
@@ -572,62 +693,25 @@ async fn handle_read(
     }
 }
 
-async fn handle_stop(
-    sessions: &mut HashMap<LanguageServerSessionId, Session>,
-    session: LanguageServerSessionId,
-    package: &str,
-    contribution: &str,
-    descriptor_fingerprint: u64,
-) -> Result<(), LanguageServerError> {
-    if let Some(entry) = sessions.get(&session) {
-        verify_identity(entry, package, contribution, descriptor_fingerprint)?;
+async fn stop_actor(mut handle: SessionHandle) {
+    if let Some(stop_tx) = handle.stop_tx.take() {
+        let _ = stop_tx.send(());
     }
-    if let Some(mut session) = sessions.remove(&session) {
-        let _ = session.child.start_kill();
-        let _ = session.child.wait().await;
-        if let Some(handle) = session.stderr_task.take() {
-            handle.abort();
-        }
+    if let Some(task) = handle.task.take() {
+        let _ = task.await;
     }
-    Ok(())
 }
 
-async fn handle_revoke(
-    sessions: &mut HashMap<LanguageServerSessionId, Session>,
-    package: &str,
-) -> usize {
-    let matching: Vec<LanguageServerSessionId> = sessions
-        .iter()
-        .filter(|(_, session)| session.package_name == package)
-        .map(|(id, _)| *id)
-        .collect();
-    let count = matching.len();
-    for id in matching {
-        if let Some(mut session) = sessions.remove(&id) {
-            let _ = session.child.start_kill();
-            let _ = session.child.wait().await;
-            if let Some(handle) = session.stderr_task.take() {
-                handle.abort();
-            }
-        }
+async fn stop_actors(handles: Vec<SessionHandle>) {
+    let mut tasks = tokio::task::JoinSet::new();
+    for handle in handles {
+        tasks.spawn(stop_actor(handle));
     }
-    count
-}
-
-async fn handle_shutdown_all(sessions: &mut HashMap<LanguageServerSessionId, Session>) -> usize {
-    let count = sessions.len();
-    for (_, mut session) in sessions.drain() {
-        let _ = session.child.start_kill();
-        let _ = session.child.wait().await;
-        if let Some(handle) = session.stderr_task.take() {
-            handle.abort();
-        }
-    }
-    count
+    while tasks.join_next().await.is_some() {}
 }
 
 fn verify_identity(
-    session: &Session,
+    session: &SessionHandle,
     package: &str,
     contribution: &str,
     descriptor_fingerprint: u64,
@@ -641,7 +725,7 @@ fn verify_identity(
     Ok(())
 }
 
-async fn read_capped_stderr<R>(mut reader: R, buffer: Arc<tokio::sync::Mutex<Vec<u8>>>)
+async fn read_capped_stderr<R>(mut reader: R, capture: Arc<tokio::sync::Mutex<StderrCapture>>)
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -650,13 +734,14 @@ where
         match reader.read(&mut chunk).await {
             Ok(0) => break,
             Ok(read) => {
-                let mut guard = buffer.lock().await;
-                let remaining = LANGUAGE_SERVER_STDERR_BUDGET_BYTES.saturating_sub(guard.len());
-                if remaining == 0 {
-                    break;
-                }
-                let take = read.min(remaining);
-                guard.extend_from_slice(&chunk[..take]);
+                let mut capture = capture.lock().await;
+                let remaining =
+                    LANGUAGE_SERVER_STDERR_BUDGET_BYTES.saturating_sub(capture.bytes.len());
+                let retained = read.min(remaining);
+                capture.bytes.extend_from_slice(&chunk[..retained]);
+                capture.truncated |= retained < read;
+                // Continue reading/discarding after retention fills so a child
+                // cannot block forever on a full stderr pipe.
             }
             Err(_) => break,
         }
@@ -673,12 +758,12 @@ fn sanitize_stderr(bytes: &[u8]) -> String {
         .to_string()
 }
 
-/// Best-effort sanitized snapshot of accumulated child stderr. The router is
-/// single-threaded so the lock is uncontended; stderr is capped at
-/// `LANGUAGE_SERVER_STDERR_BUDGET_BYTES` by the reader task.
-async fn sanitize_session_stderr(stderr: &Arc<tokio::sync::Mutex<Vec<u8>>>) -> String {
-    let guard = stderr.lock().await;
-    sanitize_stderr(&guard)
+/// Best-effort sanitized snapshot of accumulated child stderr. Retention is
+/// capped at `LANGUAGE_SERVER_STDERR_BUDGET_BYTES`; the reader keeps draining
+/// and discarding after the cap so the child pipe cannot fill.
+async fn sanitize_session_stderr(stderr: &Arc<tokio::sync::Mutex<StderrCapture>>) -> String {
+    let capture = stderr.lock().await;
+    sanitize_stderr(&capture.bytes)
 }
 
 #[derive(Debug)]
@@ -691,6 +776,7 @@ pub enum LanguageServerError {
     UnknownSession,
     IdentityMismatch,
     SessionAlreadyRunning,
+    SessionBusy,
     TooManySessions { max: usize },
     PayloadTooLarge { len: usize, max: usize },
     ServiceStopped,
@@ -717,6 +803,7 @@ impl std::fmt::Display for LanguageServerError {
             Self::SessionAlreadyRunning => {
                 f.write_str("language-server session already running for contribution and root")
             }
+            Self::SessionBusy => f.write_str("language-server session command queue is full"),
             Self::TooManySessions { max } => {
                 write!(f, "language-server session cap reached ({max})")
             }
@@ -745,6 +832,29 @@ mod tests {
     #[test]
     fn sanitize_stderr_strips_control_and_caps_length() {
         assert_eq!(sanitize_stderr(b"hello\x00\x07 world\n"), "hello world");
+    }
+
+    #[tokio::test]
+    async fn capped_stderr_retains_prefix_and_drains_remainder_to_eof() {
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let capture = Arc::new(tokio::sync::Mutex::new(StderrCapture::default()));
+        let reader_task = tokio::spawn(read_capped_stderr(reader, Arc::clone(&capture)));
+        let payload = vec![b'x'; LANGUAGE_SERVER_STDERR_BUDGET_BYTES + 8192];
+        let writer_task = tokio::spawn(async move {
+            writer.write_all(&payload).await?;
+            writer.shutdown().await
+        });
+
+        timeout(Duration::from_secs(2), writer_task)
+            .await
+            .expect("stderr writer must not block after retention fills")
+            .expect("writer task")
+            .expect("reader must keep the pipe open through EOF");
+        reader_task.await.expect("stderr reader task");
+        let capture = capture.lock().await;
+        assert_eq!(capture.bytes.len(), LANGUAGE_SERVER_STDERR_BUDGET_BYTES);
+        assert!(capture.truncated);
+        assert!(capture.bytes.iter().all(|byte| *byte == b'x'));
     }
 
     // Self-check: the service actually spawns a fixed fake child, exchanges a

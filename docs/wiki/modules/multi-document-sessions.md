@@ -6,7 +6,7 @@
 - `src/masonry_editor.rs`
 - `src/client/mod.rs` (`ClientSyncState`, `ClientEditQueue`)
 - `src/client/clipboard.rs`
-- `runtime/js/editor.ts`
+- `runtime/js/editor.js`
 
 ## Overview
 
@@ -28,14 +28,14 @@ Phase 20 replaces the single-editor-buffer model with a bounded client-local mul
 3. `activate_document` is client-local: it exchanges the active surface, swaps sync state, and requests render/layout/accessibility refresh. No server round-trip is needed for switching.
 4. `DocumentOpened` no longer calls `apply_resync_snapshot` at the connection layer — the widget installs authority for the newly active document itself, preventing `DocumentOpened` from wiping live sync state for the current document.
 5. `ResyncSnapshot` has a two-path guard: when no document has been opened yet (bootstrap/default state, `has_opened_document` false), it applies unconditionally to the active editor. When `has_opened_document` is true, `document_id` is validated against the session map, preventing stale resyncs for background documents.
-6. Eviction removes the least-recently-used session when the store exceeds `CLIENT_DOCUMENT_SESSION_MAX`. Evicted sessions are dropped; re-opening an evicted document requires a fresh server `DocumentOpened` snapshot.
+6. Eviction removes the least-recently-used session when the store exceeds `CLIENT_DOCUMENT_SESSION_MAX`. `SessionEviction` returns each evicted document ID; `EditorWidget` enqueues `CloseDocument(force: true)` so server access and document-scoped coordinator state do not outlive the retained client session. Re-opening requires a fresh server `DocumentOpened` snapshot.
 7. Each retained session stashes its own `EditorStatus`, dirty flag, `ClientSyncState`, and document metadata. Switching restores the corresponding status chrome, undo stack, and pending-edit queue.
 
 ## Invariants and Constraints
 
 - `EditorSurface` is non-`Clone`; stashing uses `std::mem::take` with explicit restoration of non-`Clone` state (`behavior_manifest`, theme specifier, typography).
-- `DocumentSessionStore` is bounded at 64 (`CLIENT_DOCUMENT_SESSION_MAX`); eviction is silent and does not preserve unsaved edits (dirty documents should be saved before eviction under user control).
-- Server authority is unchanged: the server still owns the canonical document registry, leases, and dirty state. Multi-document sessions are a client-local UI convenience.
+- `DocumentSessionStore` is bounded at 64 (`CLIENT_DOCUMENT_SESSION_MAX`); eviction discards the retained session's unsaved edits and therefore sends `CloseDocument(force: true)`. Explicit dirty-document close without force remains server-rejected.
+- Server authority is unchanged: the server owns the canonical document registry, leases, dirty state, access-holder set, and final-holder teardown. Multi-document sessions are a client-local UI convenience.
 - `EditorSurface::set_theme_specifier` is used to restore the theme label after `std::mem::take` stashing, since `set_active_theme` is the normal path but is not available after surface replacement.
 - Duplicate-open detection is server-side by canonical path; the client multi-document store is keyed by `DocumentId`, not path.
 - Pending edits for backgrounded documents are preserved in stashed `ClientSyncState` and restored on activation.
@@ -45,7 +45,8 @@ Phase 20 replaces the single-editor-buffer model with a bounded client-local mul
 - `src/masonry_editor.rs`: `retain_prior_session_on_second_file_open` validates stash/switch behavior.
 - `src/masonry_editor.rs`: `document_switch_restores_edit_history_and_dirty_state` validates undo stack and dirty flag restoration.
 - `src/masonry_editor.rs`: `show_open_documents_menu_lists_all_sessions_with_active_and_dirty_markers` validates transient menu composition.
-- `src/masonry_editor.rs`: `session_eviction_drops_least_recently_used` validates LRU eviction at `CLIENT_DOCUMENT_SESSION_MAX`.
+- `src/masonry_editor.rs`: `session_eviction_drops_least_recently_used` validates LRU eviction at `CLIENT_DOCUMENT_SESSION_MAX`; queue tests cover forwarding evicted IDs as `CloseDocument`.
+- `src/server/connection.rs`: close/disconnect tests prove shared-document survival, final-holder registry teardown, access loss, and cleanup when peer close races asynchronous output.
 - `src/client/mod.rs`: `stale_ack_for_backgrounded_document_is_silently_ignored` validates document-scoped sync acks.
 - `src/client/mod.rs`: `client_forwards_document_opened_without_replacing_live_sync_state` validates `DocumentOpened` no longer resets sync at connection layer.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot` and `opened_file_edits_continue_as_deltas` validate multi-doc bootstrap guards.

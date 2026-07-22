@@ -3,7 +3,7 @@ id: clay.documents.serverSaveDocument
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverSaveDocument
-js_facade: runtime/js/documents.ts::serverSaveDocument
+js_facade: runtime/js/documents.js::serverSaveDocument
 backing_rust: src/server/workspace.rs::WorkspaceState::save_document
 deno_op: op_clay_documents_save_document
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_save_document
@@ -16,7 +16,7 @@ visibility: public
 permissions: ["workspace-write", "document-read"]
 key_bindings: []
 custom_properties: []
-security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+security: The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `clay.documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, save, dirty-state, js-api]
 app_visible: true
@@ -59,7 +59,7 @@ console.log(saved.dirty);
 ## Options
 
 - `documentId` (`string`): Open document to save.
-- `knownVersion` (`number`, optional): Version the caller believes it is saving; future runtime checks may reject stale callers.
+- `knownVersion` (`number`, optional): Confirmed server version known by the caller. Values at or below the canonical version are accepted; a value newer than the server is rejected as protocol/state confusion. Omission uses the server-internal baseline.
 
 ## Key bindings
 
@@ -85,15 +85,15 @@ Current Phase 13 facade/runtime status is runtime-backed for server-side configu
 
 ## Errors
 
-The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
+The runtime fails if arguments are malformed; `documentId` or `knownVersion` is not an unsigned integer/string; `knownVersion` claims a version newer than canonical server state; the document is not open in the server workspace registry; the file is missing, replaced, changed externally, permission-denied, outside its authorized root, or an unsupported type; or exclusive temp creation, permission restoration, sync, identity revalidation, or atomic replacement fails. Failures preserve external target bytes and keep the document dirty.
 
 ## Permissions and security
 
 Requires: `workspace-write, document-read`.
 
-Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+`clay:documents` is trusted-only and absent from the shared third-party package runtime. Trusted configuration executes with server-internal identity rather than borrowing a connection's editable lease; this does not let third-party packages forge identity or save another connection's document. The op accepts only an already-open document ID, validates any explicit `knownVersion` against canonical state, and reaches disk only through workspace-owned root/path/file-identity checks.
 
-The server owns filesystem/workspace authority and canonical documents. The client and Clay JS facade receive sanitized metadata, snapshots for explicit open/reload/resync paths, and typed errors; they do not receive raw host filesystem authority.
+Save uses a bounded snapshot plus an unpredictable, exclusive, owner-only same-directory temp file. Clay restores required permissions, syncs, revalidates the target's platform identity immediately before replacement, and fails closed on external edits or swaps. The API returns sanitized metadata and typed errors, never raw file handles or arbitrary paths; it does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect arbitrary user files, access the network, or expose runtime user content beyond the requested authorized document metadata/snapshot.
 
@@ -103,7 +103,7 @@ Use `clay.documents.serverSaveDocument` only through the documented Clay JS faca
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::serverSaveDocument`
+- JS facade: `runtime/js/documents.js::serverSaveDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_save_document` (`op_clay_documents_save_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::save_document`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`

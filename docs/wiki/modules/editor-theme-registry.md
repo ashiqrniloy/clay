@@ -16,7 +16,7 @@
 - `src/server/connection.rs`
 - `src/client/mod.rs`
 - `src/masonry_editor.rs`
-- `runtime/js/theme.ts`
+- `runtime/js/theme.js`
 - `packages/theme-gruvbox-material-dark/package.json`
 - `packages/theme-gruvbox-material-light/package.json`
 - `tests/theme_packages.rs`
@@ -89,7 +89,7 @@ Theme packages require no special permission. They are inert manifest data plus 
 
 ### 4. `setTheme` resolves one active theme
 
-`runtime/js/theme.ts::setTheme` is the public facade. It calls `op_clay_theme_set_theme`, but raw `Deno.core.ops` is not the user-facing API.
+`runtime/js/theme.js::setTheme` is the public facade. It calls `op_clay_theme_set_theme`, but raw `Deno.core.ops` is not the user-facing API.
 
 `src/server/ops/theme.rs::op_clay_theme_set_theme`:
 
@@ -158,7 +158,7 @@ let color = style.color;
 
 - **Primitive/category:** editor text theme registry and two-axis decoration styling.
 - **Owner:** `src/editor/theme.rs` plus protocol vocabulary in `src/protocol/decorations.rs`.
-- **Public JS API:** `clay.theme.setTheme` in `runtime/js/theme.ts`; authoritative docs in `docs/reference/clay-js-api/theme/set-theme.md`.
+- **Public JS API:** `clay.theme.setTheme` in `runtime/js/theme.js`; authoritative docs in `docs/reference/clay-js-api/theme/set-theme.md`.
 - **Deno op:** `op_clay_theme_set_theme` in `src/server/ops/theme.rs`.
 - **Protocol shape:** `TextThemeOverride` and `ActiveTheme` in `src/protocol/mod.rs`; sent as `ServerMessage::ActiveTheme`.
 - **Package contribution:** `clay.contributions.textStyles` parsed by `src/packages/record.rs`.
@@ -187,7 +187,7 @@ let color = style.color;
 - `src/server/js_runtime.rs`: `set_theme_resolves_first_party_gruvbox_theme` validates runtime facade/op resolution.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`: Clay JS API documentation, generated registry, and facade coverage.
 - `tests/selected_file_markdown_smoke.rs`: selected-file bootstrap skips `ActiveTheme` while waiting for file-open capability.
-- Commands: `cargo test --lib editor::theme`, `cargo test --test theme_packages`, `cargo test --test decoration_transport`, `cargo test --test editor_performance_invariants`, `cargo test --test clay_js_api_inventory --test clay_js_doc_registry --test clay_js_facade_layout`.
+- Commands: `cargo test --lib editor::theme`, `cargo test --test editor theme_packages::`, `cargo test --test editor decoration_transport::`, `cargo test --test editor editor_performance_invariants::`, `cargo test --test protocol`.
 
 ## Phase 20 verification
 

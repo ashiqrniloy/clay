@@ -15,12 +15,12 @@
 - `docs/wiki/modules/phase18.9-generic-text-code-modes-primitive-review.md`
 - `src/server/workspace.rs`
 - `src/server/ops/workspace.rs`
-- `runtime/js/workspace.ts`
+- `runtime/js/workspace.js`
 - `src/shell/layout.rs`
 - `src/shell/package_ui.rs`
 - `src/masonry_shell.rs`
 - `src/masonry_sdui.rs`
-- `runtime/js/ui.ts`
+- `runtime/js/ui.js`
 - `src/server/command_execution.rs`
 - `src/server/control_center.rs`
 - `src/shell/transient_menu.rs`
@@ -39,7 +39,7 @@ The headline finding is that most of the file browser can be built without new R
 - `src/server/workspace.rs::WorkspaceState` is the server-side source of truth for workspace roots and open file documents. It already stores `WorkspaceRoot { id, authority }` values with `WorkspaceAuthority::Directory { canonical_path }` and `WorkspaceAuthority::SingleFile { canonical_path }`.
 - `WorkspaceState::add_root` canonicalizes a path, deduplicates by canonical path, and returns a stable `WorkspaceRootId`. It rejects paths that are not directories (for directory roots) and already handles `WorkspaceRootMetadata` display names/paths via `list_root_metadata`.
 - `WorkspaceState::open_existing_file` opens a file that is already inside a known root, while `WorkspaceState::open_selected_file` creates a single-file grant for a browser-picked file outside any root. The selected-file grant flow is the existing path for user-exposed files that are not under a workspace root.
-- `src/server/ops/workspace.rs::op_clay_workspace_list_roots` exposes root metadata to the controlled server runtime, and `runtime/js/workspace.ts::serverListWorkspaceRoots` is the stable Clay JS facade. No direct client filesystem access is exposed.
+- `src/server/ops/workspace.rs::op_clay_workspace_list_roots` exposes root metadata to the controlled server runtime, and `runtime/js/workspace.js::serverListWorkspaceRoots` is the stable Clay JS facade. No direct client filesystem access is exposed.
 - `docs/wiki/modules/server-file-workspace.md` documents the server-owned workspace model, canonical path registry, duplicate-open identity, file-backed dirty state, and authority boundaries.
 
 ### Shell layout and slots
@@ -59,7 +59,7 @@ The headline finding is that most of the file browser can be built without new R
 
 ### Package UI components and action intents
 
-- `runtime/js/ui.ts` exposes `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and related `clay:ui` facades. The component catalog includes `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, and `statusItem`.
+- `runtime/js/ui.js` exposes `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and related `clay:ui` facades. The component catalog includes `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, and `statusItem`.
 - Tree-like rendering can be composed from generic `list`, `flex`/`stack`, and `label`/`button` components; no file-browser-specific Rust tree widget is required for the smallest working product.
 - `UiActionIntent` carries only a registered command ID and bounded primitive arguments. File browser actions (open, reveal) will normalize to registered commands such as `clay.workspace.openFile` and `clay.workspace.revealInTree`.
 - `docs/wiki/modules/slot-aware-package-ui.md` documents the runtime-backed contribution registry, component catalog, fixed panel and transient overlay composition, action validation, and security boundaries.
@@ -202,12 +202,12 @@ Allowed authority remains narrow:
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_12_workspace_discovery_primitive_review_records_inventory_and_gaps`: verifies wiki/index and primitive-architecture links plus required primitive-review contents.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Implementation-time tests (later tasks) should cover startup cwd root discovery, opened-file ancestry with and without markers, marker detection, canonical-path dedup, closed marker-set rejection, explicit user grant, listing depth/count bounds, ignore rules, traversal-escape rejection, cancellation, refresh, permission-denied diagnostics, and UI structural observations that prove the left panel and fuzzy-open compose existing primitives.
 - Run focused documentation coverage with:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs phase18_12_workspace_discovery_primitive_review_records_inventory_and_gaps --quiet
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

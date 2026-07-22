@@ -528,7 +528,7 @@ fn runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline()
 
 #[test]
 fn diagnostics_facade_exposes_no_raw_op_or_additional_authority() {
-    let facade = std::fs::read_to_string("runtime/js/diagnostics.ts").unwrap();
+    let facade = std::fs::read_to_string("runtime/js/diagnostics.js").unwrap();
     assert!(facade.contains("export function serverPublishDiagnostics"));
     assert!(facade.contains("op_clay_diagnostics_publish_diagnostics"));
     assert!(!facade.contains("export function op_clay"));

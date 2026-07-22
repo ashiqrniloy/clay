@@ -14,11 +14,11 @@
 - `packages/markdown/dist/index.js`
 - `packages/markdown/dist/load.js`
 - `packages/markdown/package.json`
-- `runtime/js/behavior.ts`
-- `runtime/js/completion.ts`
-- `runtime/js/modes.ts`
-- `runtime/js/commands.ts`
-- `runtime/js/ui.ts`
+- `runtime/js/behavior.js`
+- `runtime/js/completion.js`
+- `runtime/js/modes.js`
+- `runtime/js/commands.js`
+- `runtime/js/ui.js`
 - `src/server/ops/modes.rs`
 - `src/server/ops/completion.rs`
 - `src/server/ops/commands.rs`
@@ -112,7 +112,7 @@ On document open, generic classification returns the package/mode key. `ClayRunt
 
 `clay:behavior` exposes `buildCodeEditingManifest(options)`, a pure helper that turns language-specific parameters (`indentSize`, `lineComment`, `electricOutdentCharacters`, `autocompleteTriggers`, optional `pairs`/`blockCommentStart`/`blockCommentEnd`) into the `editorRules` shape validated by `op_clay_modes_register_pattern`. This keeps the three packages from hand-rolling editor rules that could drift from the server validator.
 
-The helper is implemented in `runtime/js/behavior.ts` and mirrored in the hardcoded `CLAY_FACADE_BEHAVIOR` string in `src/server/js_runtime.rs` because Clay's server runtime currently injects facade source as inline strings rather than compiling `runtime/js/*.ts` dynamically.
+The helper is implemented in `runtime/js/behavior.js` and included directly by `src/server/facades.rs`; no second inline body exists.
 
 ### Completion trigger wiring
 
@@ -159,44 +159,37 @@ bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 Package load entry (excerpt from `packages/rust/dist/load.js`):
 
 ```js
-import { loadPackage } from "clay:packages";
 import { serverRegisterSyntaxGrammar } from "clay:syntax";
 import { serverRegisterModePattern } from "clay:modes";
 import { serverRegisterCommand } from "clay:commands";
-import { serverRegisterCompletionProvider, completionTriggerCharactersFromEditorRules } from "clay:completion";
+import { serverRegisterCompletionProvider } from "clay:completion";
 import { serverRegisterComponentContribution } from "clay:ui";
-import { buildCodeEditingManifest } from "clay:behavior";
-import { rustPackageManifest, rustGrammarContract, rustCommands, rustCompletionProvider, rustStatusItem } from "./index.js";
+import {
+  modeId, rustCommands, rustEditorRules, rustStatusItem,
+  supportedExtensions, supportedFileNames,
+} from "./index.js";
 
 export default async function loadRustPackage() {
-  const packageManifest = rustPackageManifest();
-  await serverRegisterSyntaxGrammar(rustGrammarContract(packageManifest));
-  await serverRegisterModePattern(packageManifest, {
-    modeId: "rust",
+  // Host-stamped package context selects manifest declarations and grants.
+  await serverRegisterSyntaxGrammar({});
+  await serverRegisterModePattern({
+    modeId,
     displayName: "Rust",
-    extensions: ["rs"],
-    fileNames: ["Cargo.toml"],
-    editorRules: buildCodeEditingManifest({
-      indentSize: 4,
-      lineComment: "//",
-      electricOutdentCharacters: ["}"],
-      autocompleteTriggers: [".", ":"],
-    }),
+    defaultFontRole: "monospace",
+    extensions: supportedExtensions,
+    fileNames: supportedFileNames,
+    editorRules: rustEditorRules,
   });
-  await serverRegisterCommand(packageManifest, rustCommands[0]);
-  await serverRegisterCompletionProvider({
-    packageManifest,
-    ...rustCompletionProvider,
-    triggerCharacters: completionTriggerCharactersFromEditorRules(
-      buildCodeEditingManifest({
-        indentSize: 4,
-        lineComment: "//",
-        electricOutdentCharacters: ["}"],
-        autocompleteTriggers: [".", ":"],
-      })
-    ),
-  });
-  await serverRegisterComponentContribution(packageManifest, rustStatusItem);
+  for (const command of rustCommands) {
+    await serverRegisterCommand({
+      commandId: command.id,
+      displayName: command.userFacingName,
+      routingPolicy: command.routingPolicy,
+      permissions: command.permissions,
+    });
+  }
+  await serverRegisterCompletionProvider({});
+  await serverRegisterComponentContribution(rustStatusItem);
 }
 ```
 
@@ -204,13 +197,13 @@ export default async function loadRustPackage() {
 
 | Primitive | Used for | Source |
 |-----------|----------|--------|
-| `SyntaxGrammarContribution` | Syntax highlighting (unchanged from Phase 18.10) | `src/server/ops/syntax.rs`, `runtime/js/syntax.ts` |
-| `MajorModeActivation` / `serverRegisterModePattern` | Mode registration and pattern probes | `src/server/ops/modes.rs`, `runtime/js/modes.ts` |
-| `EditorBehaviorRules` / `buildCodeEditingManifest` | Indentation, pairs, comments, electric outdent, autocomplete triggers | `runtime/js/behavior.ts`, `src/server/ops/modes.rs` |
-| `CommandExecution` / `serverRegisterCommand` | `rust.toggleLineComment`, `typescript.toggleLineComment`, `javascript.toggleLineComment` | `src/server/ops/commands.rs`, `runtime/js/commands.ts` |
-| `CompletionTriggerAndResult` / `serverRegisterCompletionProvider` | Priority-0 static keyword/Markdown-construct providers | `src/server/completion.rs`, `src/server/ops/completion.rs`, `runtime/js/completion.ts` |
-| `serverListCompletionProvidersForTrigger` | Query providers by trigger character | `src/server/ops/completion.rs`, `runtime/js/completion.ts` |
-| `ComponentContribution` / `statusItem` | Mode status item in editor chrome | `src/server/ops/ui.rs`, `runtime/js/ui.ts`, `src/shell/components.rs` |
+| `SyntaxGrammarContribution` | Syntax highlighting (unchanged from Phase 18.10) | `src/server/ops/syntax.rs`, `runtime/js/syntax.js` |
+| `MajorModeActivation` / `serverRegisterModePattern` | Mode registration and pattern probes | `src/server/ops/modes.rs`, `runtime/js/modes.js` |
+| `EditorBehaviorRules` / `buildCodeEditingManifest` | Indentation, pairs, comments, electric outdent, autocomplete triggers | `runtime/js/behavior.js`, `src/server/ops/modes.rs` |
+| `CommandExecution` / `serverRegisterCommand` | `rust.toggleLineComment`, `typescript.toggleLineComment`, `javascript.toggleLineComment` | `src/server/ops/commands.rs`, `runtime/js/commands.js` |
+| `CompletionTriggerAndResult` / `serverRegisterCompletionProvider` | Priority-0 static keyword/Markdown-construct providers | `src/server/completion.rs`, `src/server/ops/completion.rs`, `runtime/js/completion.js` |
+| `serverListCompletionProvidersForTrigger` | Query providers by trigger character | `src/server/ops/completion.rs`, `runtime/js/completion.js` |
+| `ComponentContribution` / `statusItem` | Mode status item in editor chrome | `src/server/ops/ui.rs`, `runtime/js/ui.js`, `src/shell/components.rs` |
 | `loadPackage` / first-party package authority | One-line opt-in loading | `src/server/ops/packages.rs`, `src/packages/record.rs` |
 
 Permissions required: `mode-registration`, `mode-activation`, `command-registration`, `completion-provider`, `parse-document`, `render-decorations`. Not requested: filesystem, network, shell, AI, WASM authority, raw ops, native UI, client runtime, package control, workspace mutation.
@@ -252,25 +245,20 @@ Hot-path policy: parse/highlight work and completion resolution run as backgroun
 - `tests/completion_provider.rs::completion_registration_has_no_per_language_rust_branch`
 - `src/server/js_runtime.rs::build_code_editing_manifest_produces_valid_editor_rules`
 - `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`
-- `tests/package_loading_docs.rs::phase18_14_language_package_default_init_js_loading_is_documented`
-- `tests/package_loading_docs.rs::package_author_guide_documents_first_party_language_contract`
-- `tests/package_loading_docs.rs::package_author_guide_documents_markdown_decoration_preview_split`
-- `tests/package_loading_docs.rs::phase18_14_ui_layout_authoring_contract_is_documented`
-- `tests/package_loading_docs.rs::phase18_14_behavior_manifest_helper_is_documented`
-- `tests/package_loading_docs.rs::phase18_14_configuration_contract_defers_user_tunable_keys`
+- Package reference documentation uses generic manifest/API/security validators in `tests/package_loading_docs.rs`; executable package/runtime tests remain authoritative for behavior.
 - `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix`
 - `tests/manual_smoke_docs.rs::first_party_syntax_fixtures_exist_per_language`
 - `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract`
 - `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings`
-- `tests/primitives_docs.rs::phase18_14_language_package_expansion_primitive_review_records_inventory_and_gaps`
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 
 Run the relevant suites:
 
 ```bash
 cargo test --lib packages
-CARGO_TARGET_DIR=target/pi-verify cargo test --test package_loading_docs
-CARGO_TARGET_DIR=target/pi-verify cargo test --test manual_smoke_docs
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs
+cargo test --test protocol package_loading_docs::
+cargo test --test protocol manual_smoke_docs::
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

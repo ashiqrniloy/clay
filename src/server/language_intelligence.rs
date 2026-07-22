@@ -825,6 +825,25 @@ impl LanguageIntelligenceCoordinator {
         abort_tasks(&mut inner, task_keys);
     }
 
+    /// Tear down document-scoped state when the final access holder closes a
+    /// document: version/generation tracking and active intelligence work for
+    /// the document (Plan 060 T6, P1-4).
+    pub(crate) fn remove_document(&self, document_id: DocumentId) {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("language intelligence coordinator lock poisoned");
+        inner.current_versions.remove(&document_id);
+        inner.current_generations.remove(&document_id);
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|key| key.document_id == document_id)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys);
+    }
+
     pub fn disable_provider(
         &self,
         target: impl Into<String>,

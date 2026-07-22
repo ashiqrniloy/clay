@@ -3,7 +3,7 @@ id: clay.keybindings.bindKey
 kind: clay-js-api
 js_module: "clay:keybindings"
 js_export: bindKey
-js_facade: runtime/js/keybindings.ts::bindKey
+js_facade: runtime/js/keybindings.js::bindKey
 backing_rust: src/protocol/mod.rs::KeyBindingRule
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -160,7 +160,7 @@ Use `clay.keybindings.bindKey` when the user asks for bind key through the Clay 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/keybindings.ts::bindKey`
+- JS facade: `runtime/js/keybindings.js::bindKey`
 - Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/protocol/mod.rs::KeyBindingRule`
 - Current implementation audit path: `src/protocol/mod.rs::KeyBindingRule; src/client/behavior.rs::ClientBehaviorState::route_key`

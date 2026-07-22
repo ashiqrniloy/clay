@@ -3,7 +3,7 @@ id: clay.ui.serverRegisterTransientOverlayContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterTransientOverlayContribution
-js_facade: runtime/js/ui.ts::serverRegisterTransientOverlayContribution
+js_facade: runtime/js/ui.js::serverRegisterTransientOverlayContribution
 backing_rust: src/server/ui.rs::PackageUiRegistry::register_overlay
 deno_op: op_clay_ui_register_transient_overlay_contribution
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_register_transient_overlay_contribution
@@ -153,7 +153,7 @@ Use `clay.ui.serverRegisterTransientOverlayContribution` when the user asks for 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/ui.ts::serverRegisterTransientOverlayContribution`
+- JS facade: `runtime/js/ui.js::serverRegisterTransientOverlayContribution`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_transient_overlay_contribution` (`op_clay_ui_register_transient_overlay_contribution`)
 - Backing Rust/current owner: `src/server/ui.rs::PackageUiRegistry::register_overlay`
 - Runtime composition path: `src/shell/package_ui.rs::PackageUiRuntimeState`; `src/masonry_sdui.rs::SduiNativeState`

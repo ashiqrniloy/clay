@@ -3,7 +3,7 @@ id: clay.keybindings.unbindKey
 kind: clay-js-api
 js_module: "clay:keybindings"
 js_export: unbindKey
-js_facade: runtime/js/keybindings.ts::unbindKey
+js_facade: runtime/js/keybindings.js::unbindKey
 backing_rust: src/protocol/mod.rs::KeyBindingRule
 deno_op: op_clay_keybindings_unbind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_unbind_key
@@ -107,7 +107,7 @@ Use `clay.keybindings.unbindKey` when the user asks for unbind key through the C
 
 ## Backing implementation
 
-- JS facade: `runtime/js/keybindings.ts::unbindKey`
+- JS facade: `runtime/js/keybindings.js::unbindKey`
 - Deno op: `src/server/ops/keybindings.rs::op_clay_keybindings_unbind_key` (`op_clay_keybindings_unbind_key`)
 - Backing Rust/current owner: `src/protocol/mod.rs::KeyBindingRule`
 - Current implementation audit path: `src/protocol/mod.rs::KeyBindingRule`

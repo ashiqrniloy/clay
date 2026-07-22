@@ -3,7 +3,7 @@ id: clay.completion.serverDisableCompletion
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: serverDisableCompletion
-js_facade: runtime/js/completion.ts::serverDisableCompletion
+js_facade: runtime/js/completion.js::serverDisableCompletion
 backing_rust: src/server/completion.rs::CompletionProviderRegistry::disable_completion
 deno_op: op_clay_completion_disable
 deno_op_path: src/server/ops/completion.rs::op_clay_completion_disable
@@ -104,8 +104,8 @@ Prefer one call per target. Use `packagePrefix` to suppress every provider from 
 
 ## Backing implementation
 
-- Facade: `runtime/js/completion.ts::serverDisableCompletion`
-- Embedded runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_COMPLETION`
+- Facade: `runtime/js/completion.js::serverDisableCompletion`
+- Runtime include table: `src/server/facades.rs`
 - Deno op: `src/server/ops/completion.rs::op_clay_completion_disable`
 - Disabled set: `src/server/ops/mod.rs::ClayOpState::disabled_completion_providers`
 - Selection filtering: `src/server/completion.rs::CompletionProviderRegistry` + `completion_provider_is_disabled`

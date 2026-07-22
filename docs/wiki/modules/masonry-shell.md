@@ -135,9 +135,9 @@ Phase 18.2 is an internal runtime foundation, not a public package UI API releas
 - `src/masonry_editor.rs::tests::fixed_package_panel_shrinks_editor_hit_region`: validates visible package fixed panels offset the editor hit region instead of letting panel coordinates place the caret under the panel.
 - `src/main.rs::tests::connection_event_action_is_dispatched_to_shell_editor_child`: validates GUI connection-event user events target the shell-owned editor child.
 - `src/main.rs::tests::driver_routes_editor_actions_to_shell_editor_child`: validates `AppDriver` editor action routing uses the shell editor child ID even if a shell/root source is reported.
-- Command: `CARGO_TARGET_DIR=target/pi-verify cargo test --lib shell --quiet`
-- Command: `CARGO_TARGET_DIR=target/pi-verify cargo test --lib masonry_shell --quiet`
-- Command: `CARGO_TARGET_DIR=target/pi-verify cargo test --lib main --quiet`
+- Command: `cargo test --lib shell --quiet`
+- Command: `cargo test --lib masonry_shell --quiet`
+- Command: `cargo test --lib main --quiet`
 
 ## Related
 

@@ -3,7 +3,7 @@ id: clay.completion.serverRegisterCompletionProvider
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: serverRegisterCompletionProvider
-js_facade: runtime/js/completion.ts::serverRegisterCompletionProvider
+js_facade: runtime/js/completion.js::serverRegisterCompletionProvider
 backing_rust: src/server/completion.rs::CompletionProviderMeta
 deno_op: op_clay_completion_register_completion_provider
 deno_op_path: src/server/ops/completion.rs::op_clay_completion_register_completion_provider
@@ -177,8 +177,8 @@ Prefer `loadPackage("@vendor/provider")` from user configuration. Package load e
 
 ## Backing implementation
 
-- Facade: `runtime/js/completion.ts::serverRegisterCompletionProvider`
-- Embedded runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_COMPLETION`
+- Facade: `runtime/js/completion.js::serverRegisterCompletionProvider`
+- Runtime include table: `src/server/facades.rs`
 - Deno op: `src/server/ops/completion.rs::op_clay_completion_register_completion_provider`
 - Metadata shape: `src/server/completion.rs::CompletionProviderMeta`
 

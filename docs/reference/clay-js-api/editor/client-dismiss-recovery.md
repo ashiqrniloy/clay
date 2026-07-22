@@ -3,7 +3,7 @@ id: clay.editor.clientDismissRecovery
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientDismissRecovery
-js_facade: runtime/js/editor.ts::clientDismissRecovery
+js_facade: runtime/js/editor.js::clientDismissRecovery
 backing_rust: src/masonry_editor.rs::EditorWidget::dismiss_recovery
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -91,7 +91,7 @@ Use `clay.editor.clientDismissRecovery` only as a documented command ID for `bin
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::clientDismissRecovery`
+- JS facade: `runtime/js/editor.js::clientDismissRecovery`
 - Editor: `src/masonry_editor.rs::EditorWidget::dismiss_recovery`
 - Keybinding allowlist: `src/server/ops/keybindings.rs`
 

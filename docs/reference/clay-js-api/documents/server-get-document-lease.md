@@ -3,7 +3,7 @@ id: clay.documents.serverGetDocumentLease
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverGetDocumentLease
-js_facade: runtime/js/documents.ts::serverGetDocumentLease
+js_facade: runtime/js/documents.js::serverGetDocumentLease
 backing_rust: src/server/document.rs::DocumentState::acquire_access
 deno_op: op_clay_documents_get_document_lease
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_get_document_lease
@@ -91,7 +91,7 @@ Use `clay.documents.serverGetDocumentLease` when the user asks for get document 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::serverGetDocumentLease`
+- JS facade: `runtime/js/documents.js::serverGetDocumentLease`
 - Future Deno op: `src/server/ops/documents.rs::op_clay_documents_get_document_lease` (`op_clay_documents_get_document_lease`)
 - Backing Rust/current owner: `src/server/document.rs::DocumentState::acquire_access`
 - Current implementation audit path: `src/server/document.rs::DocumentState::acquire_access; src/server/document.rs::DocumentState::release_access`

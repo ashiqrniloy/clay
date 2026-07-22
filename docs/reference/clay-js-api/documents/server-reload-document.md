@@ -3,7 +3,7 @@ id: clay.documents.serverReloadDocument
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverReloadDocument
-js_facade: runtime/js/documents.ts::serverReloadDocument
+js_facade: runtime/js/documents.js::serverReloadDocument
 backing_rust: src/server/workspace.rs::WorkspaceState::reload_document
 deno_op: op_clay_documents_reload_document
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_reload_document
@@ -96,7 +96,7 @@ Use `clay.documents.serverReloadDocument` only through the documented Clay JS fa
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::serverReloadDocument`
+- JS facade: `runtime/js/documents.js::serverReloadDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_reload_document` (`op_clay_documents_reload_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::reload_document`
 - Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`

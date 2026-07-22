@@ -28,7 +28,7 @@ use crate::{
         DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS,
     },
     protocol::{
-        CompletionItem, CompletionProvenance, CompletionRequest, CompletionResultSet,
+        ClientId, CompletionItem, CompletionProvenance, CompletionRequest, CompletionResultSet,
         DecorationSet, DiagnosticSet, DocumentId, DocumentMetadata, DocumentVersion,
         LanguageIntelligenceRequest, LanguageIntelligenceResult, RuntimeDiagnostic,
         WorkspaceRootId,
@@ -352,6 +352,44 @@ pub(crate) struct DocumentAnalysisCoordinator {
     inner: Arc<Mutex<CoordinatorInner>>,
     outputs_tx: mpsc::Sender<DocumentAnalysisOutput>,
     outputs_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<DocumentAnalysisOutput>>>,
+    /// Plan 060 T4 (P0-3): authorized per-connection subscriptions. Analysis
+    /// decorations/diagnostics route only to connections that opened the
+    /// document; worker failure diagnostics broadcast to every subscriber.
+    output_router:
+        Arc<std::sync::Mutex<crate::server::output_router::OutputRouter<DocumentAnalysisOutput>>>,
+}
+
+/// Worker-facing publication sink: every payload is routed to authorized
+/// per-connection subscriptions and mirrored into the bounded global channel
+/// (retained for tests and internal tooling).
+#[derive(Clone)]
+pub(crate) struct AnalysisOutputSink {
+    global_tx: mpsc::Sender<DocumentAnalysisOutput>,
+    router:
+        Arc<std::sync::Mutex<crate::server::output_router::OutputRouter<DocumentAnalysisOutput>>>,
+}
+
+impl AnalysisOutputSink {
+    /// Route the payload to authorized subscriptions, then mirror it into the
+    /// bounded global channel. Returns false when the global channel is full
+    /// (the worker treats that as a queue-limit failure, unchanged semantics).
+    fn try_send(&self, output: DocumentAnalysisOutput) -> bool {
+        {
+            let router = self.router.lock().expect("analysis output router poisoned");
+            match &output {
+                DocumentAnalysisOutput::Decorations(set) => {
+                    router.route_document(set.document_id, &output);
+                }
+                DocumentAnalysisOutput::Diagnostics(set) => {
+                    router.route_document(set.document_id, &output);
+                }
+                DocumentAnalysisOutput::Diagnostic(_) => {
+                    router.broadcast(&output);
+                }
+            }
+        }
+        self.global_tx.try_send(output).is_ok()
+    }
 }
 
 impl fmt::Debug for DocumentAnalysisCoordinator {
@@ -384,7 +422,49 @@ impl Default for DocumentAnalysisCoordinator {
             })),
             outputs_tx,
             outputs_rx: Arc::new(tokio::sync::Mutex::new(outputs_rx)),
+            output_router: Arc::new(std::sync::Mutex::new(
+                crate::server::output_router::OutputRouter::default(),
+            )),
         }
+    }
+}
+
+impl DocumentAnalysisCoordinator {
+    /// Register one connection's authorized analysis-output channel
+    /// (Plan 060 T4). Called once per accepted connection.
+    pub(crate) fn subscribe_client(
+        &self,
+        client_id: ClientId,
+    ) -> mpsc::Receiver<DocumentAnalysisOutput> {
+        self.output_router
+            .lock()
+            .expect("analysis output router poisoned")
+            .subscribe_client(client_id)
+    }
+
+    /// Authorize `client_id` to receive analysis output for `document_id`.
+    pub(crate) fn subscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
+        self.output_router
+            .lock()
+            .expect("analysis output router poisoned")
+            .subscribe_document(document_id, client_id);
+    }
+
+    /// Withdraw `client_id`'s analysis subscription for one document (explicit
+    /// close; the document may remain open for other connections).
+    pub(crate) fn unsubscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
+        self.output_router
+            .lock()
+            .expect("analysis output router poisoned")
+            .unsubscribe_document(document_id, client_id);
+    }
+
+    /// Remove every subscription held by one connection (disconnect).
+    pub(crate) fn unsubscribe_client(&self, client_id: ClientId) {
+        self.output_router
+            .lock()
+            .expect("analysis output router poisoned")
+            .unsubscribe_client(client_id);
     }
 }
 
@@ -503,7 +583,10 @@ impl DocumentAnalysisCoordinator {
                     runtime.clone(),
                     registration.clone(),
                     metadata.workspace_root_id,
-                    self.outputs_tx.clone(),
+                    AnalysisOutputSink {
+                        global_tx: self.outputs_tx.clone(),
+                        router: Arc::clone(&self.output_router),
+                    },
                 );
                 inner.workers.insert(key.clone(), worker);
             }
@@ -890,6 +973,7 @@ impl DocumentAnalysisCoordinator {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) async fn next_output(&self) -> Option<DocumentAnalysisOutput> {
         self.outputs_rx.lock().await.recv().await
     }
@@ -1017,7 +1101,7 @@ fn spawn_worker(
     runtime: ClayJsRuntimeService,
     registration: JsDocumentAnalyzerRegistration,
     workspace_root_id: WorkspaceRootId,
-    outputs: mpsc::Sender<DocumentAnalysisOutput>,
+    outputs: AnalysisOutputSink,
 ) -> AnalysisWorker {
     let mailbox = Arc::new(AnalysisMailbox::default());
     let active_documents = Arc::new(Mutex::new(HashMap::new()));
@@ -1090,7 +1174,7 @@ fn spawn_worker(
 fn publish_invocation_outputs(
     package: &PackageRecord,
     active_documents: &Mutex<HashMap<DocumentId, ActiveDocument>>,
-    outputs: &mpsc::Sender<DocumentAnalysisOutput>,
+    outputs: &AnalysisOutputSink,
     invocation: DocumentAnalysisInvocation,
 ) -> (DocumentAnalysisResponse, bool) {
     let mut output_failed = false;
@@ -1103,9 +1187,7 @@ fn publish_invocation_outputs(
         if current.is_some_and(|document| document.version == set.document_version)
             && let Ok(set) = validate_decoration_publication(package, set.document_version, set)
         {
-            output_failed |= outputs
-                .try_send(DocumentAnalysisOutput::Decorations(set))
-                .is_err();
+            output_failed |= !outputs.try_send(DocumentAnalysisOutput::Decorations(set));
         }
     }
     if let Some(set) = invocation.diagnostics {
@@ -1117,9 +1199,7 @@ fn publish_invocation_outputs(
         if current.is_some_and(|document| document.version == set.document_version)
             && let Ok(set) = validate_diagnostic_publication(package, set.document_version, set)
         {
-            output_failed |= outputs
-                .try_send(DocumentAnalysisOutput::Diagnostics(set))
-                .is_err();
+            output_failed |= !outputs.try_send(DocumentAnalysisOutput::Diagnostics(set));
         }
     }
     (invocation.response, output_failed)

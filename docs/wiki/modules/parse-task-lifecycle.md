@@ -124,14 +124,13 @@ When package parsing lags:
 
 ## Tests
 
-- `tests/primitives_docs.rs::parse_strategy_doc_linked_from_index`: verifies the parse strategy is linked from `docs/index.md`.
-- `tests/primitives_docs.rs::incremental_parse_budget_constant_exists`: verifies `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` compiles through `src/perf/budgets.rs`.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - `tests/parse_coordinator.rs`: covers permission-gated registration, superseded task cancellation, runtime-generation handler replacement/cancellation, package-scoped cancellation with handler withdrawal, stale-result discard, payload bounds, failed-task instrumentation, and proof that parse delays do not block edit acknowledgement.
 - `src/server/js_runtime.rs::js_parse_handler_bridge_runs_registered_markdown_handler`: verifies `loadPackage("@clay/markdown")` registers a live JS parse handler, `ParseCoordinator::schedule_parse_with_windows` invokes it, and `next_update` receives validated decoration output.
 - `src/server/js_runtime.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`: verifies executable callback fields and missing `parse-document` permissions are rejected.
 - `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`: verifies a looping JS handler is bounded by registered `timeoutMs` instead of the larger service timeout.
-- `cargo test --test primitives_docs`: runs the Phase 16 primitive documentation coverage suite.
-- `cargo test --test parse_coordinator`: runs the implemented coordinator coverage.
+- `cargo test --test protocol primitives_docs::`: runs the Phase 16 primitive documentation coverage suite.
+- `cargo test --test runtime parse_coordinator::`: runs the implemented coordinator coverage.
 
 ## Related
 

@@ -234,10 +234,10 @@ Manual verification:
 Representative checks:
 
 ```bash
-cargo test --test syntax_grammar
-cargo test --test parse_coordinator
-cargo test --test manual_smoke_docs
-cargo test --test editor_performance_invariants
+cargo test --test runtime syntax_grammar::
+cargo test --test runtime parse_coordinator::
+cargo test --test protocol manual_smoke_docs::
+cargo test --test editor editor_performance_invariants::
 ```
 
 Security/performance contract: engine selection, package loading, query compilation, artifact validation, and parse work happen at init/package-load/open/reclassification or background time. No network fetch, shell/package-manager execution, native-library load, client-side JavaScript, parser work, configuration evaluation, or blocking IPC is allowed in keypress, paint, layout, scroll, pointer, or text-event handlers. Tier 2 package assets remain first-party, resolver-validated, and package-root-confined; third-party grammar trust is deferred to Phase 23 and a separate security decision.
@@ -335,8 +335,8 @@ The repeatable matrix is `plan057_first_party_languages_keep_continuity_across_e
 Representative commands:
 
 ```bash
-cargo test --test syntax_grammar plan057
-cargo test --test decoration_transport rapid_local_versions
+cargo test --test runtime syntax_grammar::plan057
+cargo test --test editor decoration_transport::rapid_local_versions
 cargo bench --bench first_party_language_baselines first_party_incremental_edit -- --sample-size 10 --warm-up-time 1 --measurement-time 2
 ```
 
@@ -457,7 +457,7 @@ Phase 20 daily-editing verification is Linux-primary (CI and agent-run). Windows
 |---|---|---|---|---|
 | Native file-open dialog | xdg-desktop-portal `OpenFile` | COM `IFileOpenDialog` | `NSOpenPanel` | `Unsupported` diagnostic |
 | Native folder dialog | xdg-desktop-portal (`directory=true`) | COM `IFileOpenDialog` | `NSOpenPanel` directory mode | `Unsupported` diagnostic |
-| Clipboard copy/cut/paste | `arboard` + native `Ctrl+C`/`X`/`V` | `arboard` + native `Ctrl+C`/`X`/`V` | `arboard` + native `Cmd+C`/`X`/`V` | same client sink; no dialog dependency |
+| Clipboard copy/cut/paste | persistent text-only `arboard` + native `Ctrl+C`/`X`/`V` | persistent text-only `arboard` + native `Ctrl+C`/`X`/`V` | persistent text-only `arboard` + native `Cmd+C`/`X`/`V` | same explicit-command sink; no dialog dependency |
 | Undo / redo | native `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same as Linux | native `Cmd+Z` / `Cmd+Shift+Z` | client inverse-edit stack |
 | IME preedit / commit | Masonry `Ime::{Preedit,Commit}` (ibus/fcitx when available) | OS IME via winit/Masonry | OS IME via winit/Masonry | preedit paint-only until commit |
 | Save / reload / conflict menus | server-first; bind `Ctrl+S` in `init.js` | same | same (`Cmd` bindings via `init.js` if desired) | no client filesystem write |
@@ -496,12 +496,27 @@ cargo test --all-targets
 
 Recorded result for this task: all three commands pass on Linux. Automated coverage includes clipboard cut/paste, undo/redo inverse edits, IME preedit unit paths, multi-document retain/switch, dirty/save/conflict recovery menus, pending-edit/disconnect/resync recovery, capability-token/workspace authorization, and hot-path guards that keep clipboard/save/JS work off ordinary paint.
 
+#### Plan 060 dialog and clipboard backend validation (2026-07-22)
+
+Native portal dialogs now reserve independent file/folder generations in `Driver`. Repeated file commands while a file picker is open and repeated folder commands while a folder picker is open are ignored; file and folder pickers do not block each other. Every selected/cancelled/unsupported/failed completion clears only its matching generation, stale completions are ignored, spawn failure clears immediately, and exit/window close clears both. Event-proxy send failure occurs only after loop shutdown, when `Driver` and its state are dropped. No dialog manager, custom component, animation, polling, or extra thread pool was added.
+
+Clipboard backend simplification was tested but not forced. Masonry 0.4 keeps copypasta in private event-loop state: widgets can emit writes and native `Ctrl/Cmd+V` is intercepted, but `DriverCtx` has no clipboard read API for the bindable `clientPasteClipboard` fallback. Copypasta 0.10's Linux `ClipboardContext` is X11-only; its Wayland path needs a raw display pointer owned by Masonry. Consequently `arboard` remains the direct fallback on Linux/Windows/macOS. Its unused default image feature is disabled, removing 11 image-codec packages from the lock graph (582 to 571 resolved packages), and `SystemClipboard` now keeps one GUI-thread-lifetime text backend so X11 ownership survives between commands without relying on a clipboard manager; dropping the UI thread still runs backend shutdown/handoff. Clipboard access remains synchronous only during explicit copy/cut/paste commands—no polling or hot-path reads.
+
+This Linux host was GNOME Wayland with XWayland (`WAYLAND_DISPLAY=wayland-0`, `DISPLAY=:0`). The ignored live round-trip passed both with the normal Wayland-session environment and with `WAYLAND_DISPLAY` removed (explicit X11 path):
+
+```bash
+cargo test --lib client::clipboard::tests::live_system_clipboard_round_trip -- --ignored --exact --test-threads=1
+env -u WAYLAND_DISPLAY cargo test --lib client::clipboard::tests::live_system_clipboard_round_trip -- --ignored --exact --test-threads=1
+```
+
+Pure Wayland without XWayland is not claimed: Masonry 0.4 itself constructs the X11 copypasta alias, so replacing arboard cannot improve that boundary without an upstream event-loop API. macOS and Windows source/API parity was reviewed (`NSPasteboard`/Win32 text support in both libraries), but those hosts were not executed; use their checklist below before any future backend deletion.
+
 Live boot check: `cargo run -- smoke-gui --config-fixture file-browser-workflow` opens the GUI on Linux and observes `Ime::Enabled` / empty `Ime::Preedit` / `Ime::Disabled` plus ordinary `EditAck` sync while typing. Interactive portal file-open, save-conflict, multi-document switcher, and full CJK composition remain on the manual checklist below (not fully automatable from this agent session).
 
 Manual Linux checklist (interactive; extends the end-to-end file browser workflow above):
 
 1. `cargo run -- smoke-gui --config-fixture file-browser-workflow`
-2. `Ctrl+O` opens the portal file picker; cancel is a non-error no-op; selecting a Markdown file opens through the selected-file grant path.
+2. `Ctrl+O` opens the portal file picker; while it is open, repeat `Ctrl+O` and confirm no second picker appears. Cancel is a non-error no-op; trigger it again to confirm state reset, then select a Markdown file through the selected-file grant path. Repeat the same duplicate/cancel/reopen check for `Ctrl+Shift+O`; file and folder generations are independent.
 3. Cut/paste/undo/redo via native chords; optional fixture binds (`Ctrl+Shift+X`/`V`) route the same client UI commands.
 4. With ibus/fcitx available, compose CJK/accented text: preedit underlines without changing canonical text; commit inserts once; Escape/focus loss cancels composition.
 5. Dirty → `Ctrl+S` save clears dirty; external on-disk change while dirty opens the stale-save recovery menu; dirty reload without force offers save-first.
@@ -621,15 +636,15 @@ Automated fake/real coverage:
 
 ```bash
 # Deterministic (no host language servers required)
-cargo test --test lsp_bridge
-cargo test --test language_server_authority
-cargo test --test performance_protocol phase18_21
-cargo test --test editor_performance_invariants document_analysis
+cargo test --test runtime lsp_bridge::
+cargo test --test security language_server_authority::
+cargo test --test protocol performance_protocol::phase18_21
+cargo test --test editor editor_performance_invariants::document_analysis
 node --test tests/fixtures/lsp/fake-server/fake-server.test.mjs tests/fixtures/lsp/fake-server/matrix.test.mjs
 
 # Opt-in real servers (skip with explicit reason when a binary is missing)
-CLAY_LSP_REAL_SMOKE=1 cargo test --test lsp_real_servers -- --nocapture
-CLAY_LSP_REAL_SMOKE=1 cargo test --test lsp_bridge -- --nocapture
+CLAY_LSP_REAL_SMOKE=1 cargo test --test runtime lsp_real_servers:: -- --nocapture
+CLAY_LSP_REAL_SMOKE=1 cargo test --test runtime lsp_bridge:: -- --nocapture
 
 # Advisory baselines remain Tree-sitter/first-party language benches; LSP child
 # timings stay environment-gated rather than Criterion CI gates.

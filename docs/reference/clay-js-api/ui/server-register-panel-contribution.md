@@ -3,7 +3,7 @@ id: clay.ui.serverRegisterPanelContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterPanelContribution
-js_facade: runtime/js/ui.ts::serverRegisterPanelContribution
+js_facade: runtime/js/ui.js::serverRegisterPanelContribution
 backing_rust: src/server/ui.rs::PackageUiRegistry::register_panel
 deno_op: op_clay_ui_register_panel_contribution
 deno_op_path: src/server/ops/ui.rs::op_clay_ui_register_panel_contribution
@@ -152,7 +152,7 @@ Use `clay.ui.serverRegisterPanelContribution` when the user asks for a public Cl
 
 ## Backing implementation
 
-- JS facade: `runtime/js/ui.ts::serverRegisterPanelContribution`
+- JS facade: `runtime/js/ui.js::serverRegisterPanelContribution`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_panel_contribution` (`op_clay_ui_register_panel_contribution`)
 - Backing Rust/current owner: `src/server/ui.rs::PackageUiRegistry::register_panel`
 - Runtime composition path: `src/shell/package_ui.rs::PackageUiRuntimeState`; `src/masonry_sdui.rs::SduiNativeState`

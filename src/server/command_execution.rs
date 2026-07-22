@@ -200,10 +200,10 @@ impl CommandExecutor {
         validate(&command, &request)?;
 
         let status = match request.command_id.as_str() {
-            "clay.modes.listActiveModes" => CommandExecutionStatus::Discovery(
+            LIST_ACTIVE_MODES_COMMAND_ID => CommandExecutionStatus::Discovery(
                 DiscoveryResult::ActiveModes(mode_registry.list_active_modes()),
             ),
-            "clay.modes.explainActiveMode" => {
+            EXPLAIN_ACTIVE_MODE_COMMAND_ID => {
                 let document_id = discovery_document_id(&request.arguments, &request.command_id)?;
                 CommandExecutionStatus::Discovery(DiscoveryResult::ModeExplanation(
                     mode_registry.explain_active_mode(document_id),
@@ -259,7 +259,7 @@ impl CommandExecutor {
         validate(command, &request)?;
 
         let status = match request.command_id.as_str() {
-            "clay.workspace.openFile" | "clay.workspace.openFuzzyFile" => {
+            OPEN_FILE_COMMAND_ID | OPEN_FUZZY_FILE_COMMAND_ID => {
                 execute_open(
                     workspace,
                     client_id,
@@ -268,7 +268,7 @@ impl CommandExecutor {
                 )
                 .await?
             }
-            "clay.workspace.openDirectory" => {
+            OPEN_DIRECTORY_COMMAND_ID => {
                 let (root_id, relative_path) =
                     navigate_directory_arguments(&request.arguments, &request.command_id)?;
                 workspace
@@ -287,7 +287,7 @@ impl CommandExecutor {
                     relative_path,
                 })
             }
-            "clay.workspace.revealInTree" => {
+            REVEAL_IN_TREE_COMMAND_ID => {
                 let document_id = reveal_document_id(&request.arguments, &request.command_id)?;
                 workspace
                     .document_metadata(document_id, client_id)
@@ -295,7 +295,7 @@ impl CommandExecutor {
                     .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Revealed)
             }
-            "clay.workspace.toggleFileBrowser" => {
+            TOGGLE_FILE_BROWSER_COMMAND_ID => {
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Toggled)
             }
             _ => {
@@ -338,10 +338,10 @@ impl CommandExecutor {
         validate(&command, &request)?;
 
         let status = match request.command_id.as_str() {
-            "clay.git.listStatuses" => CommandExecutionStatus::Git(GitCommandResult::Statuses(
-                git_status_cache.list_cached(workspace).await,
-            )),
-            "clay.git.refreshStatus" => {
+            LIST_GIT_STATUSES_COMMAND_ID => CommandExecutionStatus::Git(
+                GitCommandResult::Statuses(git_status_cache.list_cached(workspace).await),
+            ),
+            REFRESH_GIT_STATUS_COMMAND_ID => {
                 let root_id = git_workspace_root_id(&request.arguments, &request.command_id)?;
                 let root = workspace
                     .directory_roots()
@@ -378,25 +378,13 @@ impl CommandExecutor {
     }
 }
 
-/// Phase 18.12 workspace command IDs. Routed through
-/// [`CommandExecutor::execute_workspace`] so they resolve against
-/// [`WorkspaceState`] root/grant APIs.
-pub(crate) const WORKSPACE_COMMAND_IDS: &[&str] = &[
-    "clay.workspace.openFile",
-    "clay.workspace.revealInTree",
-    "clay.workspace.openFuzzyFile",
-    "clay.workspace.openDirectory",
-    "clay.workspace.toggleFileBrowser",
-];
-
 pub(crate) fn is_workspace_command(command_id: &str) -> bool {
-    WORKSPACE_COMMAND_IDS.contains(&command_id)
+    builtin_definition(command_id)
+        .is_some_and(|command| command.kind == BuiltinCommandKind::Workspace)
 }
 
-pub(crate) const GIT_COMMAND_IDS: &[&str] = &["clay.git.listStatuses", "clay.git.refreshStatus"];
-
 pub(crate) fn is_git_command(command_id: &str) -> bool {
-    GIT_COMMAND_IDS.contains(&command_id)
+    builtin_definition(command_id).is_some_and(|command| command.kind == BuiltinCommandKind::Git)
 }
 
 /// Execute an open command: in-root files use [`WorkspaceState::open_existing_file`];
@@ -574,17 +562,69 @@ fn validate(
     Ok(())
 }
 
-/// Phase 18.9 built-in mode-discovery command IDs, reachable through the
-/// Control Center and the command execution path. Internal to the crate: the
-/// routing decision lives in `ops/mod.rs` and command resolution here.
-pub(crate) const MODE_DISCOVERY_COMMAND_IDS: &[&str] =
-    &["clay.modes.listActiveModes", "clay.modes.explainActiveMode"];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuiltinCommandKind {
+    General,
+    Reload,
+    ModeDiscovery,
+    Workspace,
+    Git,
+}
 
-/// Internal routing predicate: `ops/mod.rs` uses it to route discovery commands
-/// through [`CommandExecutor::execute_discovery`] (ModeRegistry access) instead
-/// of the plain `execute` path.
+#[derive(Clone, Copy, Debug)]
+struct BuiltinCommandDefinition {
+    id: &'static str,
+    display_name: &'static str,
+    kind: BuiltinCommandKind,
+}
+
+macro_rules! builtin_commands {
+    ($($name:ident => ($id:literal, $display_name:literal, $kind:ident)),+ $(,)?) => {
+        $(pub(crate) const $name: &str = $id;)+
+        const BUILTIN_COMMAND_DEFINITIONS: &[BuiltinCommandDefinition] = &[
+            $(BuiltinCommandDefinition {
+                id: $name,
+                display_name: $display_name,
+                kind: BuiltinCommandKind::$kind,
+            }),+
+        ];
+        const BUILTIN_SERVER_COMMAND_IDS: &[&str] = &[$($name),+];
+    };
+}
+
+builtin_commands! {
+    CONTROL_CENTER_COMMAND_ID => ("clay.controlCenter.open", "Open Control Center", General),
+    RELOAD_CONFIGURATION_COMMAND_ID => ("clay.runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
+    REFRESH_WORKSPACE_COMMAND_ID => ("workspace.refresh", "Refresh Workspace", General),
+    FOCUS_ACTIVE_DOCUMENT_COMMAND_ID => ("document.focus_active", "Focus Active Document", General),
+    OPEN_RECENT_DOCUMENT_COMMAND_ID => ("document.open_recent", "Open Recent Document", General),
+    LIST_ACTIVE_MODES_COMMAND_ID => ("clay.modes.listActiveModes", "List Active Modes", ModeDiscovery),
+    EXPLAIN_ACTIVE_MODE_COMMAND_ID => ("clay.modes.explainActiveMode", "Explain Active Mode", ModeDiscovery),
+    OPEN_FILE_COMMAND_ID => ("clay.workspace.openFile", "Open File", Workspace),
+    REVEAL_IN_TREE_COMMAND_ID => ("clay.workspace.revealInTree", "Reveal in File Tree", Workspace),
+    OPEN_FUZZY_FILE_COMMAND_ID => ("clay.workspace.openFuzzyFile", "Open File by Name", Workspace),
+    OPEN_DIRECTORY_COMMAND_ID => ("clay.workspace.openDirectory", "Open Directory", Workspace),
+    TOGGLE_FILE_BROWSER_COMMAND_ID => ("clay.workspace.toggleFileBrowser", "Toggle File Browser", Workspace),
+    LIST_GIT_STATUSES_COMMAND_ID => ("clay.git.listStatuses", "List Git Statuses", Git),
+    REFRESH_GIT_STATUS_COMMAND_ID => ("clay.git.refreshStatus", "Refresh Git Status", Git),
+    HOVER_COMMAND_ID => ("clay.language.hover", "Hover", General),
+    GO_TO_DEFINITION_COMMAND_ID => ("clay.language.goToDefinition", "Go to Definition", General),
+    CODE_ACTIONS_COMMAND_ID => ("clay.language.codeActions", "Code Actions", General),
+    SIGNATURE_HELP_COMMAND_ID => ("clay.language.signatureHelp", "Signature Help", General),
+    PREVIEW_EDIT_COMMAND_ID => ("clay.language.previewEdit", "Preview Edit (Deferred)", General),
+    DISMISS_LANGUAGE_RESULT_COMMAND_ID => ("clay.language.dismissResult", "Dismiss Language Result", General),
+    NAVIGATE_DEFINITION_COMMAND_ID => ("clay.language.navigateDefinition", "Navigate Definition", General),
+}
+
+fn builtin_definition(command_id: &str) -> Option<&'static BuiltinCommandDefinition> {
+    BUILTIN_COMMAND_DEFINITIONS
+        .iter()
+        .find(|command| command.id == command_id)
+}
+
 pub(crate) fn is_mode_discovery_command(command_id: &str) -> bool {
-    MODE_DISCOVERY_COMMAND_IDS.contains(&command_id)
+    builtin_definition(command_id)
+        .is_some_and(|command| command.kind == BuiltinCommandKind::ModeDiscovery)
 }
 
 /// Extract the `documentId` argument for `clay.modes.explainActiveMode`.
@@ -604,106 +644,33 @@ fn discovery_document_id(
     Ok(document_id)
 }
 
-pub(crate) const RELOAD_CONFIGURATION_COMMAND_ID: &str = "clay.runtime.reloadConfiguration";
-
 pub(crate) fn is_reload_command(command_id: &str) -> bool {
-    command_id == RELOAD_CONFIGURATION_COMMAND_ID
+    builtin_definition(command_id).is_some_and(|command| command.kind == BuiltinCommandKind::Reload)
 }
 
 pub fn builtin_server_command_ids() -> &'static [&'static str] {
-    &[
-        "clay.controlCenter.open",
-        RELOAD_CONFIGURATION_COMMAND_ID,
-        "workspace.refresh",
-        "document.focus_active",
-        "document.open_recent",
-        "clay.modes.listActiveModes",
-        "clay.modes.explainActiveMode",
-        "clay.workspace.openFile",
-        "clay.workspace.revealInTree",
-        "clay.workspace.openFuzzyFile",
-        "clay.workspace.openDirectory",
-        "clay.workspace.toggleFileBrowser",
-        "clay.git.listStatuses",
-        "clay.git.refreshStatus",
-        "clay.language.hover",
-        "clay.language.goToDefinition",
-        "clay.language.codeActions",
-        "clay.language.signatureHelp",
-        "clay.language.previewEdit",
-        "clay.language.dismissResult",
-        "clay.language.navigateDefinition",
-    ]
+    BUILTIN_SERVER_COMMAND_IDS
 }
 
 pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
-    match command_id {
-        "clay.controlCenter.open"
-        | RELOAD_CONFIGURATION_COMMAND_ID
-        | "workspace.refresh"
-        | "document.focus_active"
-        | "document.open_recent"
-        | "clay.modes.listActiveModes"
-        | "clay.modes.explainActiveMode"
-        | "clay.workspace.openFile"
-        | "clay.workspace.revealInTree"
-        | "clay.workspace.openFuzzyFile"
-        | "clay.workspace.openDirectory"
-        | "clay.workspace.toggleFileBrowser"
-        | "clay.git.listStatuses"
-        | "clay.git.refreshStatus"
-        | "clay.language.hover"
-        | "clay.language.goToDefinition"
-        | "clay.language.codeActions"
-        | "clay.language.signatureHelp"
-        | "clay.language.previewEdit"
-        | "clay.language.dismissResult"
-        | "clay.language.navigateDefinition" => Some(RegisteredCommand {
-            package_name: "clay".to_string(),
-            package_version: env!("CARGO_PKG_VERSION").to_string(),
-            api_prefix: "clay".to_string(),
-            command_id: command_id.to_string(),
-            display_name: builtin_display_name(command_id).to_string(),
-            routing_policy: if is_reload_command(command_id) {
-                RoutingPolicy::ServerFirstWithLock {
-                    lock_scope: crate::protocol::LockScope::Behavior,
-                }
-            } else {
-                RoutingPolicy::ServerFirst
-            },
-            key_bindings: Vec::new(),
-            custom_properties: Default::default(),
-            permissions: Vec::new(),
-        }),
-        _ => None,
-    }
-}
-
-fn builtin_display_name(command_id: &str) -> &'static str {
-    match command_id {
-        "clay.controlCenter.open" => "Open Control Center",
-        RELOAD_CONFIGURATION_COMMAND_ID => "Reload Configuration and Packages",
-        "workspace.refresh" => "Refresh Workspace",
-        "document.focus_active" => "Focus Active Document",
-        "document.open_recent" => "Open Recent Document",
-        "clay.modes.listActiveModes" => "List Active Modes",
-        "clay.modes.explainActiveMode" => "Explain Active Mode",
-        "clay.workspace.openFile" => "Open File",
-        "clay.workspace.revealInTree" => "Reveal in File Tree",
-        "clay.workspace.openFuzzyFile" => "Open File by Name",
-        "clay.workspace.openDirectory" => "Open Directory",
-        "clay.workspace.toggleFileBrowser" => "Toggle File Browser",
-        "clay.git.listStatuses" => "List Git Statuses",
-        "clay.git.refreshStatus" => "Refresh Git Status",
-        "clay.language.hover" => "Hover",
-        "clay.language.goToDefinition" => "Go to Definition",
-        "clay.language.codeActions" => "Code Actions",
-        "clay.language.signatureHelp" => "Signature Help",
-        "clay.language.previewEdit" => "Preview Edit (Deferred)",
-        "clay.language.dismissResult" => "Dismiss Language Result",
-        "clay.language.navigateDefinition" => "Navigate Definition",
-        _ => "Built-in Command",
-    }
+    let definition = builtin_definition(command_id)?;
+    Some(RegisteredCommand {
+        package_name: "clay".to_string(),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
+        api_prefix: "clay".to_string(),
+        command_id: definition.id.to_string(),
+        display_name: definition.display_name.to_string(),
+        routing_policy: if definition.kind == BuiltinCommandKind::Reload {
+            RoutingPolicy::ServerFirstWithLock {
+                lock_scope: crate::protocol::LockScope::Behavior,
+            }
+        } else {
+            RoutingPolicy::ServerFirst
+        },
+        key_bindings: Vec::new(),
+        custom_properties: Default::default(),
+        permissions: Vec::new(),
+    })
 }
 
 fn validate_routing(command: &RegisteredCommand) -> Result<(), CommandExecutionDiagnostic> {
@@ -824,7 +791,7 @@ fn diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
     use serde_json::json;
 
@@ -880,12 +847,32 @@ mod tests {
     }
 
     #[test]
+    fn builtin_command_table_owns_unique_ids_and_registration_fields() {
+        let ids: HashSet<_> = BUILTIN_COMMAND_DEFINITIONS
+            .iter()
+            .map(|command| command.id)
+            .collect();
+        assert_eq!(ids.len(), BUILTIN_COMMAND_DEFINITIONS.len());
+        for definition in BUILTIN_COMMAND_DEFINITIONS {
+            let command = builtin_server_command(definition.id).expect("defined command resolves");
+            assert_eq!(command.display_name, definition.display_name);
+            assert_eq!(
+                matches!(
+                    command.routing_policy,
+                    RoutingPolicy::ServerFirstWithLock { .. }
+                ),
+                definition.kind == BuiltinCommandKind::Reload
+            );
+        }
+    }
+
+    #[test]
     fn known_builtin_server_command_executes_with_typed_result() {
         let result = CommandExecutor::new()
             .execute(
                 &CommandRegistry::new(),
                 CommandExecutionRequest {
-                    command_id: "clay.controlCenter.open".to_string(),
+                    command_id: CONTROL_CENTER_COMMAND_ID.to_string(),
                     arguments: Value::Null,
                     target: CommandExecutionTarget::Global,
                     provenance: None,
@@ -894,7 +881,7 @@ mod tests {
             )
             .expect("execute built-in command");
 
-        assert_eq!(result.command_id, "clay.controlCenter.open");
+        assert_eq!(result.command_id, CONTROL_CENTER_COMMAND_ID);
         assert_eq!(result.routing_policy, RoutingPolicy::ServerFirst);
         assert_eq!(result.status, CommandExecutionStatus::Accepted);
     }
@@ -957,11 +944,16 @@ mod tests {
             "checkout", "switch", "stage", "add", "commit", "reset", "rebase", "stash", "push",
             "pull", "fetch", "merge", "revert", "tag",
         ];
+        let commands: Vec<_> = BUILTIN_COMMAND_DEFINITIONS
+            .iter()
+            .filter(|command| command.kind == BuiltinCommandKind::Git)
+            .map(|command| command.id)
+            .collect();
         assert_eq!(
-            GIT_COMMAND_IDS,
-            &["clay.git.listStatuses", "clay.git.refreshStatus"]
+            commands,
+            [LIST_GIT_STATUSES_COMMAND_ID, REFRESH_GIT_STATUS_COMMAND_ID]
         );
-        for &command in GIT_COMMAND_IDS {
+        for command in commands {
             for &word in MUTATING_WORDS {
                 assert!(
                     !command.contains(word),
@@ -1019,7 +1011,8 @@ mod tests {
 
         use super::super::{
             CommandExecutionRequest, CommandExecutionRule, CommandExecutionStatus,
-            CommandExecutionTarget, CommandExecutor, WorkspaceActionResult,
+            CommandExecutionTarget, CommandExecutor, OPEN_FILE_COMMAND_ID,
+            REVEAL_IN_TREE_COMMAND_ID, TOGGLE_FILE_BROWSER_COMMAND_ID, WorkspaceActionResult,
         };
         use crate::packages::commands::CommandRegistry;
         use crate::server::workspace::WorkspaceState;
@@ -1039,7 +1032,7 @@ mod tests {
 
         fn open_request(root_id: u64, relative_path: &str) -> CommandExecutionRequest {
             CommandExecutionRequest {
-                command_id: "clay.workspace.openFile".to_string(),
+                command_id: OPEN_FILE_COMMAND_ID.to_string(),
                 arguments: json!({
                     "workspaceRootId": root_id,
                     "relativePath": relative_path,
@@ -1068,7 +1061,7 @@ mod tests {
                 .await
                 .expect("open command should execute");
 
-            assert_eq!(result.command_id, "clay.workspace.openFile");
+            assert_eq!(result.command_id, OPEN_FILE_COMMAND_ID);
             let CommandExecutionStatus::Workspace(WorkspaceActionResult::Opened(snapshot)) =
                 result.status
             else {
@@ -1094,7 +1087,7 @@ mod tests {
             workspace.add_root(root).unwrap();
 
             let request = CommandExecutionRequest {
-                command_id: "clay.workspace.openFile".to_string(),
+                command_id: OPEN_FILE_COMMAND_ID.to_string(),
                 arguments: json!({ "absolutePath": outside.join("external.txt").to_string_lossy() }),
                 target: CommandExecutionTarget::Global,
                 provenance: None,
@@ -1135,7 +1128,7 @@ mod tests {
                     &mut workspace,
                     1,
                     CommandExecutionRequest {
-                        command_id: "clay.workspace.revealInTree".to_string(),
+                        command_id: REVEAL_IN_TREE_COMMAND_ID.to_string(),
                         arguments: json!({ "documentId": opened.document_id }),
                         target: CommandExecutionTarget::Global,
                         provenance: None,
@@ -1145,7 +1138,7 @@ mod tests {
                 .await
                 .expect("reveal command should execute");
 
-            assert_eq!(result.command_id, "clay.workspace.revealInTree");
+            assert_eq!(result.command_id, REVEAL_IN_TREE_COMMAND_ID);
             assert_eq!(
                 result.status,
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Revealed)
@@ -1163,7 +1156,7 @@ mod tests {
                     &mut workspace,
                     1,
                     CommandExecutionRequest {
-                        command_id: "clay.workspace.toggleFileBrowser".to_string(),
+                        command_id: TOGGLE_FILE_BROWSER_COMMAND_ID.to_string(),
                         arguments: Value::Null,
                         target: CommandExecutionTarget::Global,
                         provenance: None,
@@ -1173,7 +1166,7 @@ mod tests {
                 .await
                 .expect("toggle command should execute");
 
-            assert_eq!(result.command_id, "clay.workspace.toggleFileBrowser");
+            assert_eq!(result.command_id, TOGGLE_FILE_BROWSER_COMMAND_ID);
             assert_eq!(
                 result.status,
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Toggled)
@@ -1189,7 +1182,7 @@ mod tests {
                     &mut workspace,
                     1,
                     CommandExecutionRequest {
-                        command_id: "clay.workspace.openFile".to_string(),
+                        command_id: OPEN_FILE_COMMAND_ID.to_string(),
                         arguments: Value::Null,
                         target: CommandExecutionTarget::Global,
                         provenance: None,

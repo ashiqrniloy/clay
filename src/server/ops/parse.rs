@@ -64,11 +64,10 @@ pub(super) fn op_clay_parse_register_parse_handler(
     }
     reject_executable_handler(options)?;
 
-    let token = format!(
-        "{}:{}:{}",
-        package.manifest.clay.api_prefix,
-        mode_id,
-        state.borrow::<Arc<ClayOpState>>().parse_handlers().len()
+    let token = super::registration_token(
+        &package.manifest.clay.api_prefix,
+        &mode_id,
+        state.borrow::<Arc<ClayOpState>>().parse_handlers().len(),
     );
     let meta = crate::server::parse_coordinator::ParseHandlerMeta {
         package_prefix: package.manifest.clay.api_prefix.clone(),

@@ -3,7 +3,7 @@ id: clay.commands.serverListCommands
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverListCommands
-js_facade: runtime/js/commands.ts::serverListCommands
+js_facade: runtime/js/commands.js::serverListCommands
 backing_rust: src/packages/commands.rs::CommandRegistry::list
 deno_op: op_clay_commands_list_commands
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_list_commands
@@ -101,7 +101,7 @@ Use `clay.commands.serverListCommands` when the user asks for List Commands thro
 
 ## Backing implementation
 
-- JS facade: `runtime/js/commands.ts::serverListCommands`
+- JS facade: `runtime/js/commands.js::serverListCommands`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_list_commands` (`op_clay_commands_list_commands`)
 - Backing Rust/current owner: `src/packages/commands.rs::CommandRegistry::list`
 - Current implementation audit path: `src/packages/commands.rs::CommandRegistry; src/packages/commands.rs::RegisteredCommand`

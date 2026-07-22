@@ -9,7 +9,7 @@
 - `src/server/language_server.rs`
 - `src/server/ops/language_server.rs`
 - `src/server/ops/mod.rs`
-- `runtime/js/language-server.ts`
+- `runtime/js/language-server.js`
 - `src/server/js_runtime.rs`
 - `src/perf/budgets.rs`
 - `tests/language_server_authority.rs`
@@ -58,18 +58,19 @@ Bundled `NativeTrust` explicitly filters out `language-server`. Enablement re-re
 
 ## Process and Concurrency Model
 
-`LanguageServerProcessService` owns a dedicated `clay-language-server` standard thread with a current-thread Tokio runtime. Deno worker commands are sequential, so this separate router prevents a long language-server read from blocking unrelated JS evaluation. Callers communicate over a bounded Tokio command channel and receive operation results through oneshot channels.
+`LanguageServerProcessService` owns a dedicated `clay-language-server` standard thread with a current-thread Tokio runtime. Callers communicate over a bounded central command channel and receive operation results through oneshot channels. The central router now performs only short table/identity operations: every session has an independent Tokio actor with a bounded queue (`LANGUAGE_SERVER_SESSION_COMMAND_CAPACITY = 8`) and exclusively owns its child/stdin/stdout/stderr. A read blocked on one child therefore cannot hold the router or another session's actor. Full actor ingress rejects immediately as `SessionBusy` rather than blocking the central router.
 
 ```text
 package facade start/send/read/stop
   -> private deno_core op
   -> PackageService exact-grant revalidation
-  -> LanguageServerProcessService command channel
-  -> dedicated Tokio router/session table
+  -> bounded central command channel
+  -> router: exact session identity/table lookup + bounded try_send
+  -> session-owned actor queue/task
   -> fixed child process with piped stdin/stdout/stderr
 ```
 
-Session IDs are allocated atomically before commands enter the router. The serialized router rejects a second live session with the same package, contribution fingerprint, and canonical workspace root, enforcing one session per approved contribution/root. The router table is capped at `LANGUAGE_SERVER_MAX_SESSIONS`. Each `Session` stores package/contribution/fingerprint identity, child/stdin/stdout, bounded stderr, and approved root metadata. Service drop closes the command channel; router shutdown kills and waits for all children, with `kill_on_drop` as final protection.
+Session IDs are allocated atomically before commands enter the router. The router rejects a second live session with the same package, contribution fingerprint, and canonical workspace root, enforcing one session per approved contribution/root. Its table is capped at `LANGUAGE_SERVER_MAX_SESSIONS`; each `SessionHandle` stores exact identity/root metadata plus actor sender, stop signal, and task handle. `SessionProcess` exists only inside the actor. Stop/revoke/shutdown remove table entries immediately, signal actors independently of queue fullness, then kill/reap children asynchronously; service drop stops and reaps all actors before the dedicated runtime exits. `kill_on_drop` remains final protection.
 
 ## Launch and I/O
 
@@ -88,15 +89,15 @@ Phase 18.21 replaces the text-only `send`/`read` with exact byte `sendBytes`/`re
 
 `LanguageServerError` distinguishes unauthorized/mismatched sessions, unknown sessions, too many sessions, payload overflow, spawn/I/O failure, timeout, child exit, and invalid roots. Facade ops translate failures to stable Clay error codes and do not expose raw process handles or unrestricted stderr.
 
-Every operation rechecks the current grant using package name, contribution ID, and descriptor fingerprint. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which kills and reaps every owned session. Runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_generation_resources` so previous-generation sessions end immediately; service replacement/drop closes the route and performs the same cleanup.
+Every operation first rechecks the current grant in the op layer, then the central router rechecks package name, contribution ID, and descriptor fingerprint immediately before actor ingress. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which removes and signals every owned actor; runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_generation_resources`. Actor stop signals interrupt an in-flight read/write and are not queued behind ordinary actor commands.
 
 ## Primitive Coverage
 
 - **Primitive/category:** `LanguageServerSession`.
 - **Owner:** `src/server/language_server.rs::LanguageServerProcessService`.
-- **Facade/ops:** `runtime/js/language-server.ts`; private authorize/start/send/read/stop ops in `src/server/ops/language_server.rs`.
+- **Facade/ops:** `runtime/js/language-server.js`; private authorize/start/send/read/stop ops in `src/server/ops/language_server.rs`.
 - **Permission:** deny-by-default `language-server`, plus exact pre-load `LanguageServerGrant` for contribution and roots.
-- **Budgets:** 16 sessions, 1 MiB message, 64 KiB stderr, 30-second read timeout.
+- **Budgets:** 16 sessions, 8 queued commands per session, 1 MiB message, 64 KiB retained stderr, 30-second read timeout. Stderr keeps draining/discarding to EOF after the retained prefix fills and records a bounded truncation flag, preventing child pipe backpressure.
 - **Hot-path policy:** async dedicated server thread; absent from Masonry/client edit/paint/layout paths.
 - **Reuse rule:** every Phase 18.21 LSP bridge uses this session service and keeps framing/server policy package-side; no per-language process launcher belongs in core.
 
@@ -126,16 +127,17 @@ Bridge release notes must repeat trusted-subprocess containment language and mus
 
 ## Tests
 
-- `tests/language_server_authority.rs`: shell/external executable rejection, pre-spawn byte budget, bad cwd spawn error, timeout with stoppable session, sanitized child exit, duplicate contribution/root rejection, session cap, package-withdrawal reaping, lossless split-UTF-8 round-trip, fragmented LSP frame reassembly, oversize byte write/read rejection. 14 tests total.
+- `tests/language_server_authority.rs`: shell/external executable rejection, pre-spawn byte budget, bad cwd spawn error, timeout with stoppable session, sanitized child exit, duplicate contribution/root rejection, session cap, package-withdrawal reaping, lossless split-UTF-8 round-trip, fragmented LSP frame reassembly, oversize byte write/read rejection, cross-session head-of-line isolation, and bounded actor-ingress rejection. 16 tests total.
+- `src/server/language_server.rs`: `capped_stderr_retains_prefix_and_drains_remainder_to_eof` uses a small duplex pipe and an over-cap payload to prove retained bytes/truncation stay bounded while the writer still reaches normal EOF.
 - `tests/package_loading.rs`: descriptor validation, no bundled auto-grant, exact grant enablement, and revocation failure.
 - `src/server/js_runtime.rs`: grant-before-load, unknown-root rejection, and loaded-package self-grant denial.
 - `tests/editor_performance_invariants.rs`: process service and `tokio::process::Command` absent from editor/client hot paths.
 - `tests/package_loading_docs.rs`, `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`: configuration/API/security documentation and registry freshness.
 
 ```bash
-cargo test --test language_server_authority
-cargo test --test package_loading
-cargo test --test editor_performance_invariants
+cargo test --test security language_server_authority::
+cargo test --test security package_loading::
+cargo test --test editor editor_performance_invariants::
 ```
 
 ## Related

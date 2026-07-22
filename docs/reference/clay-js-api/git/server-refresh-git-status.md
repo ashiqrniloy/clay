@@ -3,7 +3,7 @@ id: clay.git.serverRefreshGitStatus
 kind: clay-js-api
 js_module: "clay:git"
 js_export: serverRefreshGitStatus
-js_facade: runtime/js/git.ts::serverRefreshGitStatus
+js_facade: runtime/js/git.js::serverRefreshGitStatus
 backing_rust: src/server/git.rs::GitStatusCache::refresh_root
 deno_op: op_clay_git_refresh_status
 deno_op_path: src/server/ops/git.rs::op_clay_git_refresh_status
@@ -15,7 +15,11 @@ phase: Phase 18.13
 visibility: public
 permissions: []
 key_bindings: []
-custom_properties: ["workspaceRootId:WorkspaceRootId=required"]
+custom_properties:
+  - name: workspaceRootId
+    type: WorkspaceRootId
+    default: required
+    description: Authorized workspace root to refresh.
 security: Runs only Clay's closed read-only Git discovery commands under the selected workspace root; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
 agent_guidance: Use `clay.git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.
 lookup_tags: [git, refresh, status, branch, workspace, phase18.13, js-api]
@@ -94,7 +98,7 @@ Use `clay.git.serverRefreshGitStatus` only through the documented `clay:git` fac
 
 ## Backing implementation
 
-- JS facade: `runtime/js/git.ts::serverRefreshGitStatus`
+- JS facade: `runtime/js/git.js::serverRefreshGitStatus`
 - Deno op: `src/server/ops/git.rs::op_clay_git_refresh_status` (`op_clay_git_refresh_status`)
 - Backing Rust/current owner: `src/server/git.rs::GitStatusCache::refresh_root`
 

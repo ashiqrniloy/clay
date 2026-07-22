@@ -3,7 +3,7 @@ id: clay.editor.clientRedo
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientRedo
-js_facade: runtime/js/editor.ts::clientRedo
+js_facade: runtime/js/editor.js::clientRedo
 backing_rust: src/masonry_editor.rs::EditorWidget::redo; src/editor/surface.rs::EditorSurface::redo_with_event; src/editor/history.rs::EditHistory
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -102,7 +102,7 @@ Use `clay.editor.clientRedo` only as a documented command ID for `bindKey`. Avoi
 
 ## Backing implementation
 
-- JS facade: `runtime/js/editor.ts::clientRedo`
+- JS facade: `runtime/js/editor.js::clientRedo`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::redo`; `src/editor/surface.rs::EditorSurface::redo_with_event`; `src/editor/history.rs::EditHistory`
 

@@ -102,9 +102,9 @@ let activation = registry.activate_major_mode(&manifest, classification)?;
 Run focused coverage with:
 
 ```text
-cargo test --test package_primitive_gate
-cargo test --test command_execution
-cargo test --test editor_performance_invariants
+cargo test --test security package_primitive_gate::
+cargo test --test runtime command_execution::
+cargo test --test editor editor_performance_invariants::
 ```
 
 ## Phase 18.9 mode discovery

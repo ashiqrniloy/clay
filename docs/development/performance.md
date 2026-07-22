@@ -124,7 +124,7 @@ Use deterministic work-count tests as blocking gates:
 ```text
 cargo test --lib server::syntax::tests
 cargo test --lib server::parse_coordinator::tests
-cargo test --test performance_protocol syntax_pipeline_metrics
+cargo test --test protocol performance_protocol::syntax_pipeline_metrics
 ```
 
 Use the existing five-language Criterion fixture for advisory latency and throughput distributions:
@@ -215,15 +215,15 @@ Phase 14 splits budgets into two categories:
 
 | Focus area | Initial budget | Enforcement |
 | --- | --- | --- |
-| Client edit payload (`ClientMessage::Edit`) | <= 512 bytes | `cargo test --test performance_protocol` (`representative_protocol_payloads_fit_phase14_budgets`) |
-| Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 128 bytes | `cargo test --test performance_protocol` |
-| Behavior manifest payload (`ServerMessage::BehaviorManifest`) | <= 2048 bytes | `cargo test --test performance_protocol` |
-| Package manifest metadata (`clay.*` incl. contributions and extension points) | <= 8192 bytes | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`; `cargo test --test performance_budgets` |
-| SDUI snapshot payload (`ServerMessage::SduiSnapshot`) | <= 4096 bytes | `cargo test --test performance_protocol` |
-| SDUI update payload (`ServerMessage::SduiUpdate`) | <= 1024 bytes | `cargo test --test performance_protocol` |
-| Client edit queue depth and responsiveness | bounded queue (default capacity 256), no blocking enqueue on full queue | `cargo test --test performance_protocol` (`client_edit_queue_reports_depth_without_blocking_input`) |
-| Ordinary typing route | local shadow update must happen before server acknowledgement | `cargo test --test performance_protocol` (`ordinary_edit_updates_shadow_before_ack`) |
-| Viewport/layout invariants | viewport-bounded extraction and targeted layout invalidation invariants hold | `cargo test --test editor_performance_invariants` |
+| Client edit payload (`ClientMessage::Edit`) | <= 512 bytes | `cargo test --test protocol performance_protocol::` (`representative_protocol_payloads_fit_phase14_budgets`) |
+| Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 128 bytes | `cargo test --test protocol performance_protocol::` |
+| Behavior manifest payload (`ServerMessage::BehaviorManifest`) | <= 2048 bytes | `cargo test --test protocol performance_protocol::` |
+| Package manifest metadata (`clay.*` incl. contributions and extension points) | <= 8192 bytes | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`; `cargo test --test protocol performance_budgets::` |
+| SDUI snapshot payload (`ServerMessage::SduiSnapshot`) | <= 4096 bytes | `cargo test --test protocol performance_protocol::` |
+| SDUI update payload (`ServerMessage::SduiUpdate`) | <= 1024 bytes | `cargo test --test protocol performance_protocol::` |
+| Client edit queue depth and responsiveness | bounded queue (default capacity 256), no blocking enqueue on full queue | `cargo test --test protocol performance_protocol::` (`client_edit_queue_reports_depth_without_blocking_input`) |
+| Ordinary typing route | local shadow update must happen before server acknowledgement | `cargo test --test protocol performance_protocol::` (`ordinary_edit_updates_shadow_before_ack`) |
+| Viewport/layout invariants | viewport-bounded extraction and targeted layout invalidation invariants hold | `cargo test --test editor editor_performance_invariants::` |
 | Bench target integrity | benchmark scaffolding compiles in CI-friendly mode | `cargo bench --no-run` |
 
 ### SDUI Payload Budget Findings
@@ -268,7 +268,7 @@ cargo bench --bench protocol_server_baselines -- --baseline-lenient phase14-base
 
 Use `--baseline-lenient` only on target-specific Criterion commands. On this codebase, `cargo bench --benches -- --baseline-lenient ...` can route the flag to a non-Criterion bench harness and fail before the comparison runs.
 
-Investigate only sustained regressions across repeated local runs. Phase 18.7 repeated local protocol comparisons showed stable nanosecond-scale regressions versus the old Phase 14 baseline for `hello_roundtrip` (~+28–32%) and `client_edit/16` (~+19–20%), while larger payloads and server-document groups varied between regression, no-change, and improvement. No deterministic payload budget regressed (`cargo test --test performance_protocol` passed), and the benchmark code path changed only by Clippy-equivalent match simplification, so the Phase 18.7 result is accepted as a machine/local-baseline refresh signal rather than a protocol shape blocker.
+Investigate only sustained regressions across repeated local runs. Phase 18.7 repeated local protocol comparisons showed stable nanosecond-scale regressions versus the old Phase 14 baseline for `hello_roundtrip` (~+28–32%) and `client_edit/16` (~+19–20%), while larger payloads and server-document groups varied between regression, no-change, and improvement. No deterministic payload budget regressed (`cargo test --test protocol performance_protocol::` passed), and the benchmark code path changed only by Clippy-equivalent match simplification, so the Phase 18.7 result is accepted as a machine/local-baseline refresh signal rather than a protocol shape blocker.
 
 ### Security and authority guardrails for profiling/benchmark workflows
 
@@ -327,7 +327,7 @@ Hard guards and regression tests:
 - `markdown_structural_sdui_snapshot_matches_fixture` keeps Markdown preview/status smoke coverage structural and headless; the fixture publishes inert `Markdown Preview` SDUI labels without screenshots, GPU work, or client-side package JavaScript.
 - Parser correctness evidence remains in the package/runtime tests: the `markdown-it` token-stream adapter emits required span kinds, keeps parser-specific data behind `packages/markdown/dist/parser.js`, avoids `mdast-util-from-markdown` imports, and verifies the UTF-8 fixture `# Hé 🦀` maps to exact Clay byte ranges.
 - `markdown_it_adapter_large_fixture_span_counts_are_stable` runs the package adapter over a deterministic repeated token-stream fixture and proves stable nonzero span counts for headings, strong/emphasis, inline code, fenced code blocks, and unordered/ordered list markers.
-- Clay JS API docs/registry lookup is checked separately by `cargo test --test clay_js_doc_registry`, while package docs path lookup remains covered by `markdown_package_docs_path_is_required_and_resolvable`.
+- Clay JS API docs/registry lookup is checked separately by `cargo test --test protocol clay_js_doc_registry::`, while package docs path lookup remains covered by `markdown_package_docs_path_is_required_and_resolvable`.
 
 Advisory local Markdown benchmark findings:
 
@@ -436,18 +436,18 @@ Phase 18.21 keeps Rust core LSP-wire neutral. Deterministic hard guards cover se
 
 | Focus area | Budget | Enforcement |
 | --- | --- | --- |
-| Language-server stdin/stdout chunk | <= 1048576 bytes (`LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`) | `cargo test --test language_server_authority` / `performance_protocol` |
-| Language-server stderr retain | <= 65536 bytes (`LANGUAGE_SERVER_STDERR_BUDGET_BYTES`) | `cargo test --test language_server_authority` |
-| Concurrent language-server sessions | <= 16 (`LANGUAGE_SERVER_MAX_SESSIONS`) | `cargo test --test language_server_authority` |
-| Document-analysis workers | <= 4 (`DOCUMENT_ANALYSIS_MAX_WORKERS`) | `cargo test --test editor_performance_invariants` / `performance_protocol` |
-| Document-analysis worker heap | <= 67108864 bytes (`DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES`) | `cargo test --test performance_protocol` |
-| Documents per analysis worker | <= 32 | `cargo test --test performance_protocol` |
+| Language-server stdin/stdout chunk | <= 1048576 bytes (`LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`) | `cargo test --test security language_server_authority::` / `performance_protocol` |
+| Language-server stderr retain | <= 65536 bytes (`LANGUAGE_SERVER_STDERR_BUDGET_BYTES`) | `cargo test --test security language_server_authority::` |
+| Concurrent language-server sessions | <= 16 (`LANGUAGE_SERVER_MAX_SESSIONS`) | `cargo test --test security language_server_authority::` |
+| Document-analysis workers | <= 4 (`DOCUMENT_ANALYSIS_MAX_WORKERS`) | `cargo test --test editor editor_performance_invariants::` / `performance_protocol` |
+| Document-analysis worker heap | <= 67108864 bytes (`DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES`) | `cargo test --test protocol performance_protocol::` |
+| Documents per analysis worker | <= 32 | `cargo test --test protocol performance_protocol::` |
 | Synced document text | <= 262144 bytes (`DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES`) | document-analysis unit tests + performance locks |
 | Analysis input mailbox | <= 64 events / 2097152 bytes | document-analysis unit tests |
 | Analysis output queue | <= 64 events / 524288 bytes | document-analysis unit tests |
 | Pending child requests | <= 8 | shared LSP client + performance locks |
-| Decoration / diagnostics / completion / intelligence payloads | <= 8192 / 8192 / 16384 / 16384 bytes | `cargo test --test performance_protocol` |
-| Fake-server bridge matrix latency | < 5 s wall clock for open/init/request/shutdown across four packages | `cargo test --test performance_protocol fake_server_bridge_matrix` |
+| Decoration / diagnostics / completion / intelligence payloads | <= 8192 / 8192 / 16384 / 16384 bytes | `cargo test --test protocol performance_protocol::` |
+| Fake-server bridge matrix latency | < 5 s wall clock for open/init/request/shutdown across four packages | `cargo test --test protocol performance_protocol::fake_server_bridge_matrix` |
 
 ### Advisory measurements
 
@@ -458,7 +458,7 @@ cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp
 cargo bench --bench first_party_language_baselines -- --baseline-lenient pre-lsp
 ```
 
-- Real rust-analyzer / typescript-language-server / marksman open/init/request latency is measured only under `CLAY_LSP_REAL_SMOKE=1` via `cargo test --test lsp_real_servers -- --nocapture`. Do not promote those timings to Criterion CI gates.
+- Real rust-analyzer / typescript-language-server / marksman open/init/request latency is measured only under `CLAY_LSP_REAL_SMOKE=1` via `cargo test --test runtime lsp_real_servers:: -- --nocapture`. Do not promote those timings to Criterion CI gates.
 - Edit acknowledgement and local paint must never wait on worker/JS/subprocess work; see `tests/editor_performance_invariants.rs`.
 
 ## Phase 19 hot-reload runtime-state budgets
@@ -469,7 +469,7 @@ Phase 19 keeps reload evaluation/commit off the ordinary edit and paint paths. C
 
 | Focus area | Budget | Enforcement |
 | --- | --- | --- |
-| Runtime-state broadcast capacity | 16 (`RUNTIME_STATE_BROADCAST_CAPACITY`) | `cargo test --test performance_protocol phase19_runtime_state_snapshot_and_grace_budgets_are_locked` |
+| Runtime-state broadcast capacity | 16 (`RUNTIME_STATE_BROADCAST_CAPACITY`) | `cargo test --test protocol performance_protocol::phase19_runtime_state_snapshot_and_grace_budgets_are_locked` |
 | Snapshot document / diagnostic caps | 64 / 32 | same + `RuntimeStateSnapshot::validate` |
 | Snapshot hard frame ceiling | <= 1 MiB (`DEFAULT_MAX_FRAME_SIZE`) | prepare encode-check + `tests/runtime_update_protocol.rs` |
 | Diff-upgrade review payload | 768 KiB p95 (`RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES`) | budget lock + representative encode test |
@@ -481,10 +481,10 @@ Phase 19 keeps reload evaluation/commit off the ordinary edit and paint paths. C
 ### Focused verification
 
 ```text
-cargo test --test persistent_runtime_hot_reload
-cargo test --test runtime_update_protocol
-cargo test --test performance_protocol phase19_runtime_state
-cargo test --test editor_performance_invariants runtime_generation_install
+cargo test --test runtime persistent_runtime_hot_reload::
+cargo test --test runtime runtime_update_protocol::
+cargo test --test protocol performance_protocol::phase19_runtime_state
+cargo test --test editor editor_performance_invariants::runtime_generation_install
 cargo test --lib typing_and_edit_ack_continue_while_candidate
 cargo test --lib failed_reload_broadcasts_diagnostic_but_no_generation_snapshot
 cargo test --lib successful_reload_is_observed_as_one_generation_by_all_clients
@@ -496,7 +496,7 @@ cargo test --lib reload_preserves_authority_denials_and_cleans_old_lsp_worker
 Run the fixture tests after changing generator logic:
 
 ```text
-cargo test --test perf_fixtures
+cargo test --test protocol perf_fixtures::
 ```
 
 Run focused profiling-hook tests after changing metric collection logic:
@@ -509,16 +509,16 @@ cargo test editor_visible_extraction_records_metric_when_enabled
 Run protocol/queue performance guards after changing client edit queue, server acknowledgement/rejection, or codec payload handling:
 
 ```text
-cargo test --test performance_protocol
+cargo test --test protocol performance_protocol::
 ```
 
 Run Phase 18.21 fake-server and budget locks after changing LSP bridge or document-analysis limits:
 
 ```text
-cargo test --test lsp_bridge
-cargo test --test language_server_authority
-cargo test --test performance_protocol phase18_21
-cargo test --test editor_performance_invariants document_analysis
+cargo test --test runtime lsp_bridge::
+cargo test --test security language_server_authority::
+cargo test --test protocol performance_protocol::phase18_21
+cargo test --test editor editor_performance_invariants::document_analysis
 ```
 
 Run the benchmark compile check after changing benchmark scaffolding or the measured non-interactive paths:

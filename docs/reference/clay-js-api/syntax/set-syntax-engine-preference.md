@@ -3,7 +3,7 @@ id: clay.syntax.setSyntaxEnginePreference
 kind: clay-js-api
 js_module: "clay:syntax"
 js_export: setSyntaxEnginePreference
-js_facade: runtime/js/syntax.ts::setSyntaxEnginePreference
+js_facade: runtime/js/syntax.js::setSyntaxEnginePreference
 backing_rust: src/server/syntax.rs::SyntaxGrammarRegistry::set_engine_preference
 deno_op: op_clay_syntax_set_engine_preference
 deno_op_path: src/server/ops/syntax.rs::op_clay_syntax_set_engine_preference
@@ -120,7 +120,7 @@ Prefer zero-config Tier 1 native defaults. Use this only when a user explicitly 
 
 ## Backing implementation
 
-- Facade: `runtime/js/syntax.ts::setSyntaxEnginePreference`
+- Facade: `runtime/js/syntax.js::setSyntaxEnginePreference`
 - Deno op: `src/server/ops/syntax.rs::op_clay_syntax_set_engine_preference`
 - Rust owner: `src/server/syntax.rs::SyntaxGrammarRegistry::set_engine_preference`
 

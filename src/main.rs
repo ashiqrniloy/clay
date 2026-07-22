@@ -34,6 +34,9 @@ struct Driver {
     window_id: WindowId,
     /// Present in the live app; unit tests that only check action targeting may omit it.
     proxy: Option<EventLoopProxy>,
+    dialog_generation: u64,
+    file_dialog_in_flight: Option<u64>,
+    folder_dialog_in_flight: Option<u64>,
 }
 
 impl Driver {
@@ -44,45 +47,100 @@ impl Driver {
         self.editor_widget_id
     }
 
-    fn spawn_native_dialog_command(&self, command: clay::client::ClientUiCommandRoute) {
+    fn next_dialog_generation(&mut self) -> Option<u64> {
+        self.dialog_generation = self.dialog_generation.checked_add(1)?;
+        Some(self.dialog_generation)
+    }
+
+    fn reserve_file_dialog(&mut self) -> Option<u64> {
+        if self.file_dialog_in_flight.is_some() {
+            return None;
+        }
+        let generation = self.next_dialog_generation()?;
+        self.file_dialog_in_flight = Some(generation);
+        Some(generation)
+    }
+
+    fn reserve_folder_dialog(&mut self) -> Option<u64> {
+        if self.folder_dialog_in_flight.is_some() {
+            return None;
+        }
+        let generation = self.next_dialog_generation()?;
+        self.folder_dialog_in_flight = Some(generation);
+        Some(generation)
+    }
+
+    fn finish_file_dialog(&mut self, generation: u64) -> bool {
+        if self.file_dialog_in_flight != Some(generation) {
+            return false;
+        }
+        self.file_dialog_in_flight = None;
+        true
+    }
+
+    fn finish_folder_dialog(&mut self, generation: u64) -> bool {
+        if self.folder_dialog_in_flight != Some(generation) {
+            return false;
+        }
+        self.folder_dialog_in_flight = None;
+        true
+    }
+
+    fn clear_native_dialogs(&mut self) {
+        self.file_dialog_in_flight = None;
+        self.folder_dialog_in_flight = None;
+    }
+
+    fn spawn_native_dialog_command(&mut self, command: clay::client::ClientUiCommandRoute) {
         let Some(proxy) = self.proxy.clone() else {
             return;
         };
+        let (generation, is_file) = match command.command_id.as_str() {
+            "clay.documents.clientOpenFileDialog" => {
+                let Some(generation) = self.reserve_file_dialog() else {
+                    return;
+                };
+                (generation, true)
+            }
+            "clay.workspace.clientOpenFolderDialog" => {
+                let Some(generation) = self.reserve_folder_dialog() else {
+                    return;
+                };
+                (generation, false)
+            }
+            _ => return,
+        };
         let window_id = self.window_id;
         let editor_widget_id = self.editor_widget_id;
-        let _ = std::thread::Builder::new()
+        let spawn = std::thread::Builder::new()
             .name("clay-native-dialog".into())
             .spawn(move || {
-                let result = handle_client_ui_command(&command);
-                let action = match result {
-                    ClientUiCommandResult::None => return,
-                    ClientUiCommandResult::SelectedFile(path) => {
-                        EditorAction::OpenSelectedFile(path)
+                let action = if is_file {
+                    EditorAction::FileDialogCompleted {
+                        generation,
+                        result: clay::client::open_markdown_file_dialog(),
                     }
-                    ClientUiCommandResult::SelectedFolder(path) => {
-                        EditorAction::OpenSelectedFolder(path)
-                    }
-                    ClientUiCommandResult::ConnectionEvent(event) => {
-                        EditorAction::ClientConnection(event)
-                    }
-                    ClientUiCommandResult::CopySelection
-                    | ClientUiCommandResult::CutSelection
-                    | ClientUiCommandResult::PasteClipboard
-                    | ClientUiCommandResult::Undo
-                    | ClientUiCommandResult::Redo
-                    | ClientUiCommandResult::ShowOpenDocuments
-                    | ClientUiCommandResult::RequestResync
-                    | ClientUiCommandResult::DismissRecovery => {
-                        // Native dialog commands only produce path/diagnostic outcomes.
-                        return;
+                } else {
+                    EditorAction::FolderDialogCompleted {
+                        generation,
+                        result: clay::client::open_folder_dialog(),
                     }
                 };
+                // Failure means the event loop is already shutting down; its Driver
+                // (and therefore all in-flight state) is being dropped.
                 let _ = proxy.send_event(MasonryUserEvent::Action(
                     window_id,
                     Box::new(action),
                     editor_widget_id,
                 ));
             });
+        if spawn.is_err() {
+            if is_file {
+                self.finish_file_dialog(generation);
+            } else {
+                self.finish_folder_dialog(generation);
+            }
+        }
     }
 }
 
@@ -101,6 +159,11 @@ impl AppDriver for Driver {
         }
     }
 
+    fn on_close_requested(&mut self, _window_id: WindowId, ctx: &mut DriverCtx<'_, '_>) {
+        self.clear_native_dialogs();
+        ctx.exit();
+    }
+
     fn on_action(
         &mut self,
         window_id: WindowId,
@@ -113,7 +176,10 @@ impl AppDriver for Driver {
         };
 
         match *action {
-            EditorAction::ExitRequested => ctx.exit(),
+            EditorAction::ExitRequested => {
+                self.clear_native_dialogs();
+                ctx.exit();
+            }
             EditorAction::ClientConnection(event) => {
                 let editor_widget_id = self.editor_action_target(widget_id);
                 ctx.render_root(window_id)
@@ -136,37 +202,27 @@ impl AppDriver for Driver {
                 // Blocking the Wayland event loop prevents the portal chooser from presenting.
                 self.spawn_native_dialog_command(command);
             }
-            EditorAction::OpenSelectedFile(path) => {
-                let editor_widget_id = self.editor_action_target(widget_id);
-                ctx.render_root(window_id)
-                    .edit_widget(editor_widget_id, |mut widget| {
-                        if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
-                            let changed = editor
-                                .widget
-                                .request_selected_file_open(path)
-                                .is_some_and(|event| editor.widget.apply_connection_event(event));
-                            if changed {
-                                editor.ctx.request_render();
-                                editor.ctx.request_accessibility_update();
-                            }
-                        }
-                    });
+            EditorAction::FileDialogCompleted { generation, result } => {
+                if self.finish_file_dialog(generation) {
+                    apply_native_dialog_completion(
+                        window_id,
+                        ctx,
+                        self.editor_action_target(widget_id),
+                        result,
+                        SelectedPathKind::File,
+                    );
+                }
             }
-            EditorAction::OpenSelectedFolder(path) => {
-                let editor_widget_id = self.editor_action_target(widget_id);
-                ctx.render_root(window_id)
-                    .edit_widget(editor_widget_id, |mut widget| {
-                        if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
-                            let changed = editor
-                                .widget
-                                .request_selected_workspace_root(path)
-                                .is_some_and(|event| editor.widget.apply_connection_event(event));
-                            if changed {
-                                editor.ctx.request_render();
-                                editor.ctx.request_accessibility_update();
-                            }
-                        }
-                    });
+            EditorAction::FolderDialogCompleted { generation, result } => {
+                if self.finish_folder_dialog(generation) {
+                    apply_native_dialog_completion(
+                        window_id,
+                        ctx,
+                        self.editor_action_target(widget_id),
+                        result,
+                        SelectedPathKind::Folder,
+                    );
+                }
             }
             EditorAction::ClientUiCommand(command) => match handle_client_ui_command(&command) {
                 ClientUiCommandResult::None => {}
@@ -415,6 +471,48 @@ fn client_dialog_result_to_command_result(
             ))
         }
     }
+}
+
+fn apply_native_dialog_completion(
+    window_id: WindowId,
+    ctx: &mut DriverCtx<'_, '_>,
+    editor_widget_id: WidgetId,
+    result: clay::client::FileDialogResult,
+    kind: SelectedPathKind,
+) {
+    let result = client_dialog_result_to_command_result(result, kind);
+    ctx.render_root(window_id)
+        .edit_widget(editor_widget_id, |mut widget| {
+            let Some(mut editor) = widget.try_downcast::<EditorWidget>() else {
+                return;
+            };
+            let changed = match result {
+                ClientUiCommandResult::None => false,
+                ClientUiCommandResult::SelectedFile(path) => editor
+                    .widget
+                    .request_selected_file_open(path)
+                    .is_some_and(|event| editor.widget.apply_connection_event(event)),
+                ClientUiCommandResult::SelectedFolder(path) => editor
+                    .widget
+                    .request_selected_workspace_root(path)
+                    .is_some_and(|event| editor.widget.apply_connection_event(event)),
+                ClientUiCommandResult::ConnectionEvent(event) => {
+                    editor.widget.apply_connection_event(event)
+                }
+                ClientUiCommandResult::CopySelection
+                | ClientUiCommandResult::CutSelection
+                | ClientUiCommandResult::PasteClipboard
+                | ClientUiCommandResult::Undo
+                | ClientUiCommandResult::Redo
+                | ClientUiCommandResult::ShowOpenDocuments
+                | ClientUiCommandResult::RequestResync
+                | ClientUiCommandResult::DismissRecovery => false,
+            };
+            if changed {
+                editor.ctx.request_render();
+                editor.ctx.request_accessibility_update();
+            }
+        });
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1152,7 +1250,7 @@ fn run_server(
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(IpcServer::new(config).run())
+        .block_on(async { IpcServer::try_new(config)?.run().await })
         .map_err(|error| LaunchError::server_start_failed(endpoint, error.to_string()))?;
     Ok(())
 }
@@ -1561,6 +1659,9 @@ fn run_editor(
             editor_widget_id,
             window_id,
             proxy: Some(proxy),
+            dialog_generation: 0,
+            file_dialog_in_flight: None,
+            folder_dialog_in_flight: None,
         },
         default_property_set(),
     )?;
@@ -2134,6 +2235,35 @@ mod tests {
     }
 
     #[test]
+    fn native_dialog_generations_limit_duplicates_and_reject_stale_results() {
+        let mut driver = Driver {
+            editor_widget_id: WidgetId::next(),
+            window_id: WindowId::next(),
+            proxy: None,
+            dialog_generation: 0,
+            file_dialog_in_flight: None,
+            folder_dialog_in_flight: None,
+        };
+
+        let file_generation = driver.reserve_file_dialog().expect("first file dialog");
+        let folder_generation = driver.reserve_folder_dialog().expect("first folder dialog");
+        assert_eq!(driver.reserve_file_dialog(), None);
+        assert_eq!(driver.reserve_folder_dialog(), None);
+
+        assert!(driver.finish_file_dialog(file_generation));
+        let next_file_generation = driver.reserve_file_dialog().expect("next file dialog");
+        assert_ne!(next_file_generation, file_generation);
+        assert!(!driver.finish_file_dialog(file_generation));
+        assert_eq!(driver.file_dialog_in_flight, Some(next_file_generation));
+        assert!(driver.finish_file_dialog(next_file_generation));
+
+        driver.clear_native_dialogs();
+        assert_eq!(driver.file_dialog_in_flight, None);
+        assert_eq!(driver.folder_dialog_in_flight, None);
+        assert!(!driver.finish_folder_dialog(folder_generation));
+    }
+
+    #[test]
     fn driver_routes_editor_actions_to_shell_editor_child() {
         let editor_widget_id = WidgetId::next();
         let shell_or_source_widget_id = WidgetId::next();
@@ -2141,6 +2271,9 @@ mod tests {
             editor_widget_id,
             window_id: WindowId::next(),
             proxy: None,
+            dialog_generation: 0,
+            file_dialog_in_flight: None,
+            folder_dialog_in_flight: None,
         };
 
         assert_eq!(

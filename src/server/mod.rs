@@ -12,6 +12,7 @@ pub mod decorations;
 pub mod diagnostics;
 pub(crate) mod document;
 pub(crate) mod document_analysis;
+mod facades;
 #[allow(dead_code)]
 pub(crate) mod git;
 #[allow(dead_code)]
@@ -23,6 +24,7 @@ pub mod language_server;
 pub(crate) mod locks;
 #[allow(dead_code)]
 mod ops;
+pub(crate) mod output_router;
 pub mod parse_coordinator;
 #[doc(hidden)]
 pub mod runtime_sandbox;
@@ -412,7 +414,11 @@ pub struct IpcServer {
     /// Resolved active theme snapshot (Plan 046 task 7 `setTheme`) shipped to the
     /// client during the welcome handshake. `None` = Clay default theme.
     active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
-    runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_diagnostics: Arc<Mutex<connection::RuntimeDiagnosticStore>>,
+    /// Active-connection ceiling: each accepted connection must hold one
+    /// permit for its lifetime; excess connections are refused at accept time
+    /// instead of spawning unbounded tasks (Plan 060 T6, P1-10).
+    connection_permits: Arc<tokio::sync::Semaphore>,
     #[allow(dead_code)]
     parse_coordinator: ParseCoordinator,
     completion: crate::server::completion::CompletionCoordinator,
@@ -477,8 +483,9 @@ impl ReloadCandidateBarrier {
 }
 
 impl IpcServer {
+    #[cfg(test)]
     pub fn new(config: ServerConfig) -> Self {
-        Self::try_new(config).expect("configured workspace roots must be valid")
+        Self::try_new(config).expect("test server config must be valid")
     }
 
     pub fn try_new(config: ServerConfig) -> Result<Self, ServerError> {
@@ -503,7 +510,12 @@ impl IpcServer {
             workspace: Arc::new(Mutex::new(workspace)),
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             active_theme: Arc::new(Mutex::new(None)),
-            runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            runtime_diagnostics: Arc::new(
+                Mutex::new(connection::RuntimeDiagnosticStore::default()),
+            ),
+            connection_permits: Arc::new(tokio::sync::Semaphore::new(
+                crate::perf::budgets::MAX_ACTIVE_CONNECTIONS,
+            )),
             parse_coordinator: ParseCoordinator::default(),
             completion: crate::server::completion::CompletionCoordinator::new(),
             document_analysis:
@@ -888,7 +900,7 @@ impl IpcServer {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
             });
-        let runtime_diagnostics = self.runtime_diagnostics.lock().await.clone();
+        let runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
         let runtime_snapshot = build_runtime_state_snapshot(
             generation_id,
             behavior.manifest().clone(),
@@ -1136,6 +1148,14 @@ impl IpcServer {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
+        let Ok(permit) = self.connection_permits.clone().try_acquire_owned() else {
+            eprintln!(
+                "clay server: active connection limit ({}) reached; refusing connection",
+                crate::perf::budgets::MAX_ACTIVE_CONNECTIONS
+            );
+            drop(stream);
+            return;
+        };
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
         let document = Arc::clone(&self.document);
         let behavior = Arc::clone(&self.behavior);
@@ -1151,6 +1171,8 @@ impl IpcServer {
         let reload_server = IpcServer::clone(self);
         let codec = self.codec;
         connections.spawn(async move {
+            // The permit lives exactly as long as the connection task.
+            let _permit = permit;
             if let Err(error) = handle_connection_with_analysis(
                 stream,
                 client_id,
@@ -1538,7 +1560,31 @@ fn validate_socket_path(socket_path: &Path) -> Result<(), ServerError> {
     }
 
     validate_parent_directory_ownership(parent, &metadata)?;
+    validate_parent_directory_mode(parent, &metadata)?;
 
+    Ok(())
+}
+
+/// Reject endpoint parent directories that are group- or world-writable: any
+/// local user could then replace or pre-create the socket. The one sanctioned
+/// exception is a sticky shared directory (`/tmp`-style, mode `0o1777`),
+/// where the sticky bit prevents non-owners from removing or replacing the
+/// socket entry (Plan 060 T6, P1-10).
+#[cfg(unix)]
+fn validate_parent_directory_mode(
+    parent: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), ServerError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = metadata.permissions().mode() & 0o1777;
+    if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+        return Err(ServerError::InvalidEndpoint(format!(
+            "socket parent {} is group/world-writable (mode {mode:04o}) without the sticky bit; \
+             refusing to create an IPC endpoint another local user could replace",
+            parent.display()
+        )));
+    }
     Ok(())
 }
 
@@ -2507,6 +2553,7 @@ Deno.core.ops.op_clay_runtime_record("still-cached");"#,
                 .runtime_diagnostics
                 .lock()
                 .await
+                .snapshot()
                 .iter()
                 .any(|diagnostic| diagnostic.code == "clay.packages.not_installed")
         );
@@ -2651,6 +2698,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 .runtime_diagnostics
                 .lock()
                 .await
+                .snapshot()
                 .iter()
                 .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
         );
@@ -3835,6 +3883,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 .runtime_diagnostics
                 .lock()
                 .await
+                .snapshot()
                 .iter()
                 .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
         );
@@ -4152,7 +4201,12 @@ mod tests {
             },
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             active_theme: Arc::new(Mutex::new(None)),
-            runtime_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            runtime_diagnostics: Arc::new(Mutex::new(
+                super::connection::RuntimeDiagnosticStore::default(),
+            )),
+            connection_permits: Arc::new(tokio::sync::Semaphore::new(
+                crate::perf::budgets::MAX_ACTIVE_CONNECTIONS,
+            )),
             parse_coordinator: ParseCoordinator::default(),
             completion: crate::server::completion::CompletionCoordinator::new(),
             document_analysis:
@@ -4290,6 +4344,24 @@ mod tests {
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 
+    #[test]
+    fn production_server_binaries_use_fallible_constructor() {
+        for path in ["src/main.rs", "src/bin/clay-server.rs"] {
+            let source = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
+            )
+            .expect("read production binary source");
+            assert!(
+                source.contains("IpcServer::try_new"),
+                "{path} must use try_new"
+            );
+            assert!(
+                !source.contains("IpcServer::new"),
+                "{path} must not use the panic constructor"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn default_server_starts_without_workspace_sdui_snapshot() {
         let socket_path = unique_socket_path("no-default-sdui");
@@ -4297,6 +4369,80 @@ mod tests {
 
         assert!(server.sdui.lock().await.snapshot_message(1).is_none());
 
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    /// Unix endpoint parent policy: group/world-writable parents are rejected
+    /// unless the sticky bit marks a sanctioned shared-temp policy; the
+    /// default owner-only runtime directory stays valid (Plan 060 T6, P1-10).
+    #[cfg(unix)]
+    #[test]
+    fn socket_parent_mode_policy() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "clay-parent-mode-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let socket = root.join("clay.sock");
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        super::validate_socket_path(&socket).expect("owner-only parent must be accepted");
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+        let error = super::validate_socket_path(&socket)
+            .expect_err("world-writable parent without sticky bit must be rejected");
+        assert!(
+            error.to_string().contains("group/world-writable"),
+            "unexpected error: {error}"
+        );
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o1777)).unwrap();
+        super::validate_socket_path(&socket).expect("sticky shared parent must be accepted");
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = fs::remove_dir(root);
+    }
+
+    /// The accept loop refuses connections once every permit is held, and a
+    /// released permit lets the next connection spawn (disconnected clients
+    /// release capacity) (Plan 060 T6, P1-10).
+    #[tokio::test]
+    async fn connection_limit_refuses_excess_and_recovers() {
+        let socket_path = unique_socket_path("connection-limit");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let permits: Vec<_> = (0..crate::perf::budgets::MAX_ACTIVE_CONNECTIONS)
+            .map(|_| {
+                server
+                    .connection_permits
+                    .clone()
+                    .try_acquire_owned()
+                    .expect("permits available")
+            })
+            .collect();
+
+        let (stream, _client) = tokio::io::duplex(1024);
+        let mut connections = tokio::task::JoinSet::new();
+        server.spawn_connection(stream, &mut connections);
+        assert!(
+            connections.is_empty(),
+            "exhausted permits must refuse the connection without spawning"
+        );
+
+        drop(permits);
+        let (stream, _client) = tokio::io::duplex(1024);
+        server.spawn_connection(stream, &mut connections);
+        assert!(
+            !connections.is_empty(),
+            "a released permit must let the next connection spawn"
+        );
+        connections.abort_all();
+        let _ = fs::remove_file(&socket_path);
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 

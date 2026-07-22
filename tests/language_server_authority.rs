@@ -178,11 +178,10 @@ async fn frames_fragmented_across_reads_reassemble_without_transport_changes() {
 }
 
 #[test]
-fn exact_byte_facade_is_present_in_source_and_embedded_runtime() {
-    let source = std::fs::read_to_string("runtime/js/language-server.ts")
+fn exact_byte_facade_is_present_in_authoritative_runtime_source() {
+    let source = std::fs::read_to_string("runtime/js/language-server.js")
         .expect("language-server facade readable");
-    let embedded =
-        std::fs::read_to_string("src/server/js_runtime.rs").expect("runtime source readable");
+    let table = std::fs::read_to_string("src/server/facades.rs").expect("facade table readable");
     for marker in [
         "sendBytes",
         "readBytes",
@@ -191,13 +190,8 @@ fn exact_byte_facade_is_present_in_source_and_embedded_runtime() {
         "Uint8Array",
     ] {
         assert!(source.contains(marker), "source facade missing {marker}");
-        assert!(
-            embedded.contains(marker),
-            "embedded facade missing {marker}"
-        );
     }
-    assert!(source.contains("byte-framed adapters must use readBytes"));
-    assert!(embedded.contains("Byte-framed adapters use sendBytes/readBytes"));
+    assert!(table.contains("include_str!(\"../../runtime/js/language-server.js\")"));
 }
 
 /// A launch whose cwd is not a real directory fails with a typed spawn error
@@ -383,6 +377,143 @@ async fn session_cap_is_enforced_and_withdrawal_reaps_owned_sessions() {
             "reaped session must be gone, got {result:?}"
         );
     }
+}
+
+/// A read blocked on one child is owned by that session actor. Another
+/// session can still write, read, and stop within its own deadline instead of
+/// waiting behind the blocked read in the central identity router.
+#[cfg(unix)]
+#[tokio::test]
+async fn hung_session_does_not_delay_another_session() {
+    let root = fake_workspace_root("lang-server-hol");
+    let hung_executable = fake_sleep_child(&root);
+    let responsive_executable = write_fake_executable(
+        &root,
+        "fake-responsive",
+        b"#!/bin/sh\nwhile IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; done\n",
+    );
+    let service = LanguageServerProcessService::new();
+    let hung = service
+        .start(fake_spawn(&hung_executable, &root, "hung.pkg", "hung.srv"))
+        .await
+        .expect("hung child starts");
+    let responsive = service
+        .start(fake_spawn(
+            &responsive_executable,
+            &root,
+            "responsive.pkg",
+            "responsive.srv",
+        ))
+        .await
+        .expect("responsive child starts");
+
+    let hung_service = service.clone();
+    let blocked_read = tokio::spawn(async move {
+        hung_service
+            .read(
+                hung,
+                "hung.pkg".to_string(),
+                "hung.srv".to_string(),
+                0,
+                64,
+                2_000,
+            )
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let responsive_work = async {
+        service
+            .write(
+                responsive,
+                "responsive.pkg".to_string(),
+                "responsive.srv".to_string(),
+                0,
+                b"hello\n".to_vec(),
+            )
+            .await?;
+        let bytes = service
+            .read(
+                responsive,
+                "responsive.pkg".to_string(),
+                "responsive.srv".to_string(),
+                0,
+                64,
+                500,
+            )
+            .await?;
+        assert!(bytes.starts_with(b"echo:hello"));
+        service
+            .stop(
+                responsive,
+                "responsive.pkg".to_string(),
+                "responsive.srv".to_string(),
+                0,
+            )
+            .await
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(1), responsive_work)
+        .await
+        .expect("responsive session must not wait behind hung session")
+        .expect("responsive session succeeds");
+
+    service
+        .stop(hung, "hung.pkg".to_string(), "hung.srv".to_string(), 0)
+        .await
+        .expect("stop interrupts hung session");
+    assert!(blocked_read.await.unwrap().is_err());
+}
+
+/// Per-session ingress is bounded. Once one read is active and the actor queue
+/// is full, excess work fails immediately as `SessionBusy` instead of growing
+/// memory or blocking the central router.
+#[cfg(unix)]
+#[tokio::test]
+async fn session_actor_queue_rejects_excess_work() {
+    let root = fake_workspace_root("lang-server-queue-cap");
+    let executable = fake_sleep_child(&root);
+    let service = LanguageServerProcessService::new();
+    let session = service
+        .start(fake_spawn(&executable, &root, "queue.pkg", "queue.srv"))
+        .await
+        .expect("sleep child starts");
+
+    let mut tasks = tokio::task::JoinSet::new();
+    // Internal queue capacity is deliberately not public API. Sixty-four
+    // concurrent writes exceeds the compiled eight-command session lane.
+    for _ in 0..64 {
+        let service = service.clone();
+        tasks.spawn(async move {
+            service
+                .read(
+                    session,
+                    "queue.pkg".to_string(),
+                    "queue.srv".to_string(),
+                    0,
+                    64,
+                    5_000,
+                )
+                .await
+        });
+    }
+
+    let busy = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while let Some(result) = tasks.join_next().await {
+            if matches!(result.unwrap(), Err(LanguageServerError::SessionBusy)) {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .expect("excess request must be rejected promptly");
+    assert!(busy);
+
+    service
+        .stop(session, "queue.pkg".to_string(), "queue.srv".to_string(), 0)
+        .await
+        .expect("stop interrupts queued actor");
+    tasks.abort_all();
 }
 
 #[cfg(unix)]

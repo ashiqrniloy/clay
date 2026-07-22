@@ -62,13 +62,15 @@ impl DocumentSessionStore {
         self.sessions.get_mut(&document_id)
     }
 
-    /// Insert or replace a retained session. Returns a sanitized eviction notice
-    /// when an inactive LRU session was dropped to stay within the ceiling.
+    /// Insert or replace a retained session. Returns the sanitized eviction
+    /// notice plus the evicted document IDs (so the caller can notify the
+    /// server with `CloseDocument`) when inactive LRU sessions were dropped
+    /// to stay within the ceiling.
     pub(crate) fn insert(
         &mut self,
         document_id: DocumentId,
         mut session: RetainedDocumentSession,
-    ) -> Option<String> {
+    ) -> SessionEviction {
         self.activation_clock = self.activation_clock.saturating_add(1);
         session.last_activated_order = self.activation_clock;
         self.touch_lru(document_id);
@@ -136,23 +138,33 @@ impl DocumentSessionStore {
         self.lru.push_back(document_id);
     }
 
-    fn evict_if_needed(&mut self) -> Option<String> {
+    fn evict_if_needed(&mut self) -> SessionEviction {
         // Active document is never stored in this map; ceiling applies to retained
         // inactive sessions only. Total client sessions ≈ retained + 1 active.
         let max_retained = CLIENT_DOCUMENT_SESSION_MAX.saturating_sub(1).max(1);
-        let mut notice = None;
+        let mut eviction = SessionEviction::default();
         while self.sessions.len() > max_retained {
             let Some(evict_id) = self.lru.pop_front() else {
                 break;
             };
             if self.sessions.remove(&evict_id).is_some() {
-                notice = Some(format!(
+                eviction.evicted.push(evict_id);
+                eviction.notice = Some(format!(
                     "Closed least-recently used document session (doc {evict_id}) to stay within the open-document limit."
                 ));
             }
         }
-        notice
+        eviction
     }
+}
+
+/// Result of a retained-session insert: an optional user-facing eviction
+/// notice and the server document IDs whose sessions were dropped (the caller
+/// notifies the server so document state is released).
+#[derive(Debug, Default)]
+pub(crate) struct SessionEviction {
+    pub(crate) notice: Option<String>,
+    pub(crate) evicted: Vec<DocumentId>,
 }
 
 #[cfg(test)]
@@ -181,8 +193,18 @@ mod tests {
     #[test]
     fn insert_retains_and_lists_inactive_sessions() {
         let mut store = DocumentSessionStore::default();
-        assert!(store.insert(10, sample_session(10, "a.md")).is_none());
-        assert!(store.insert(11, sample_session(11, "b.md")).is_none());
+        assert!(
+            store
+                .insert(10, sample_session(10, "a.md"))
+                .notice
+                .is_none()
+        );
+        assert!(
+            store
+                .insert(11, sample_session(11, "b.md"))
+                .notice
+                .is_none()
+        );
         assert_eq!(store.len(), 2);
         let list = store.list_with_active(12, Some("c.md"), true);
         assert_eq!(list.len(), 3);
@@ -199,14 +221,16 @@ mod tests {
             assert!(
                 store
                     .insert(id as DocumentId, sample_session(id as DocumentId, "x"))
+                    .notice
                     .is_none()
             );
         }
-        let notice = store.insert(
+        let eviction = store.insert(
             (max_retained as DocumentId) + 1,
             sample_session((max_retained as DocumentId) + 1, "newest"),
         );
-        assert!(notice.is_some(), "expected eviction notice");
+        assert!(eviction.notice.is_some(), "expected eviction notice");
+        assert_eq!(eviction.evicted, vec![1], "evicted id must be reported");
         assert!(!store.contains(1), "oldest session should be evicted");
         assert!(store.contains((max_retained as DocumentId) + 1));
         assert_eq!(store.len(), max_retained);

@@ -57,7 +57,7 @@ The client connection task converts decoded `ServerMessage::SduiSnapshot` and `S
 
 The schema stays separate from the `rkyv` codec boundary even though payload types derive `Archive`, `Serialize`, and `Deserialize` for protocol use.
 
-Public programmatic documentation for SDUI lives under `docs/reference/clay-js-api/sdui/`. Those pages define the `clay:sdui` facade exports (`definePanel`, `defineLabel`, `defineButton`, `defineList`, `defineEditorView`, `defineFlex`, and `defineStack`) and are linked from `docs/index.md` for generated registry lookup. In Phase 13, `runtime/js/sdui.ts` and the embedded runtime ESM facade call `op_clay_sdui_define_node` for inert helper objects and `op_clay_sdui_publish_tree` for explicit publication. Publication converts the JSON object graph into typed Rust `SduiTree` state at the server boundary; the client still receives only typed `SduiSnapshot`/`SduiUpdate` protocol messages and never executable JavaScript.
+Public programmatic documentation for SDUI lives under `docs/reference/clay-js-api/sdui/`. Those pages define the `clay:sdui` facade exports (`definePanel`, `defineLabel`, `defineButton`, `defineList`, `defineEditorView`, `defineFlex`, and `defineStack`) and are linked from `docs/index.md` for generated registry lookup. In Phase 13, `runtime/js/sdui.js` included through `src/server/facades.rs` calls `op_clay_sdui_define_node` for inert helper objects and `op_clay_sdui_publish_tree` for explicit publication. Publication converts the JSON object graph into typed Rust `SduiTree` state at the server boundary; the client still receives only typed `SduiSnapshot`/`SduiUpdate` protocol messages and never executable JavaScript.
 
 ## Payload Costs and Codec Scope
 

@@ -14,7 +14,7 @@
 - `docs/development/{ui-observability,launch-and-gui-smoke,performance}.md`
 - `docs/reference/clay-js-api/{editor/client-copy-selection,documents/server-save-document,documents/client-open-file-dialog,workspace/client-open-folder-dialog}.md`
 - `docs/reference/primitives/{index,registry,syntax-vocabulary,typography}.md`
-- Local `masonry 0.4.0` / `masonry_core 0.4.0` IME + `masonry_testing` docs; local `arboard 3.6.1` clipboard API
+- Local `masonry 0.4.0` / `masonry_core 0.4.0` IME + `masonry_testing` docs; local text-only `arboard 3.6.1` clipboard API (default image feature disabled)
 
 ## Overview
 
@@ -31,13 +31,13 @@ Roadmap Phase 20 starts after the package/mode path and hot-reload semantics are
 - Phase 18.8 command execution / transient menus, Phase 18.12 selected-file grant/file-browser, and Windows file-open dialog backends already exist for reuse.
 - The roadmap Phase 19 heading still lacks an explicit `Complete` suffix; that is documentation lag, not an incomplete implementation gate. Plan 054 completion is the factual entry gate for Phase 20.
 
-Therefore Phase 20 may begin implementation after this primitive review and the follow-on semantics decision task. Treating unchecked Phase 20 product gaps as blockers for the entry gate itself would be inaccurate; `tests/primitives_docs.rs::phase20_daily_editing_product_hardening_primitive_review` locks the factual gate instead.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 
 ## Existing Primitive Inventory
 
 | Focus area | Existing generic primitive and owner | What already works | Phase 20 gap |
 | --- | --- | --- | --- |
-| Clipboard | `ClipboardSink` / `SystemClipboard` in `src/client/clipboard.rs`; `clay.editor.clientCopySelection` / `clientCutSelection` / `clientPasteClipboard`; `EditorWidget` cut/copy/paste helpers | Explicit user copy/cut/paste via `set_text`/`get_text`; cut deletes after copy; paste inserts/replaces as ordinary local edits; failures become sanitized runtime diagnostics; fake/memory sinks support tests; Phase 20 does not invent package/config/AI clipboard-contents APIs | Done for cut/paste command path |
+| Clipboard | `ClipboardSink` / GUI-thread-lifetime `SystemClipboard` in `src/client/clipboard.rs`; `clay.editor.clientCopySelection` / `clientCutSelection` / `clientPasteClipboard`; `EditorWidget` cut/copy/paste helpers | Explicit user copy/cut/paste via `set_text`/`get_text`; cut deletes after copy; paste inserts/replaces as ordinary local edits; persistent text-only backend preserves X11 ownership; failures become sanitized runtime diagnostics; fake/memory sinks support tests; Phase 20 does not invent package/config/AI clipboard-contents APIs | Done for cut/paste command path |
 | Undo/redo | Optimistic local edit + `ClientMessage::Edit` validation; leases/region locks; resync recovery; `EditHistory` in `src/editor/history.rs`; `clay.editor.clientUndo` / `clientRedo` | Ordinary insert/delete/replace edits apply locally then acknowledge; stale/lease rejection recovers through existing resync; bounded inverse-edit undo/redo (256) emits normal edits | Done for inverse-edit undo/redo command path. Entry-gate gap was: No History/undo/redo stack anywhere in `src/`; no inverse-edit recording; no undo/redo command IDs or chords |
 | IME/composition | Masonry/winit `TextEvent::Ime`; `EditorWidget::on_text_event`; `CompositionState` in `src/editor/composition.rs` | `Ime::Enabled`/`Preedit`/`Commit`/`Disabled` handled; preedit is paint-only; `Ime::Commit(text)` clears overlay and inserts through `EditorCommand::Insert`; `set_ime_area` from layout/event; cancel on Disabled/focus loss/undo/redo/load | Done for preedit overlay + commit path. Entry-gate gap was: `Ime::{Enabled,Preedit,Disabled}` ignored; no preedit overlay/paint; no `set_ime_area`; composition cancel on focus loss/document switch undefined |
 | Theme system | Phase 18.15 `StyleRegistry`, `ActiveTheme`, `clay.theme.setTheme`, Gruvbox Material themes, typography profiles | Inert theme packages, bootstrap/live theme install, vocabulary-token paint, status/chrome colors | **Satisfied by Phase 18.15.** Phase 20 verification closed: status/chrome already resolve through `StyleRegistry`; added theme-label observability + status-chrome AA contrast checks only — do not rebuild themes |
@@ -121,9 +121,9 @@ Approved in `decision-logs/2026-07-17-1841-phase20-daily-editing-semantics.md`:
 
 ## Tests
 
-- `cargo test --test primitives_docs phase20_daily_editing_product_hardening_primitive_review`
-- `tests/primitives_docs.rs::phase20_daily_editing_product_hardening_primitive_review` verifies Plan 054 entry-gate evidence, Phase 18.15 theme supersession note, all focus-area gap rows, client-local vs server-first ownership, no-hot-path rule, security boundaries, and the generic-only rule.
-- `cargo test --test primitives_docs`
+cargo test --test protocol primitives_docs::
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
+- `cargo test --test protocol primitives_docs::`
 - `cargo fmt --check`
 
 ## Related

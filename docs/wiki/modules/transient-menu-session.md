@@ -117,9 +117,9 @@ Phase 18.20's `language_intelligence_result_to_menu_session` adapter keeps intel
 Run with:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib transient_menu --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib shell --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib masonry_sdui --quiet
+cargo test --lib transient_menu --quiet
+cargo test --lib shell --quiet
+cargo test --lib masonry_sdui --quiet
 ```
 
 ## Related

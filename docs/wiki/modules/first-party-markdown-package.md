@@ -78,9 +78,9 @@ Phase 18 keeps Markdown verification split between hard deterministic guards and
 Run focused coverage with:
 
 ```text
-cargo test --test package_loading
-cargo test --test markdown_mode
-cargo test --test performance_budgets
+cargo test --test security package_loading::
+cargo test --test editor markdown_mode::
+cargo test --test protocol performance_budgets::
 cargo bench --no-run
 node --check tools/bench/markdown-parser.mjs
 node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8

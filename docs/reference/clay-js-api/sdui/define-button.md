@@ -3,7 +3,7 @@ id: clay.sdui.defineButton
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineButton
-js_facade: runtime/js/sdui.ts::defineButton
+js_facade: runtime/js/sdui.js::defineButton
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::Button
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -106,7 +106,7 @@ Use `clay.sdui.defineButton` when the user asks for runtime-backed Clay SDUI sch
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::defineButton`
+- JS facade: `runtime/js/sdui.js::defineButton`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::Button`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

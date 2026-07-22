@@ -39,7 +39,7 @@ Typography is architecturally separate from `ActiveTheme`/`StyleRegistry`: the t
 
 ### Configuration and server state
 
-`runtime/js/theme.ts::setTypography` validates its object input in JS, then calls `op_clay_theme_set_typography`. The op (`src/server/ops/typography.rs`) enforces a raw `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES` cap before parsing, requires exactly `monospace`/`proportional`/`ui` keys each with only `families` and `size`, then hands a parsed `ActiveTypography` to `ClayOpState::set_active_typography`.
+`runtime/js/theme.js::setTypography` validates its object input in JS, then calls `op_clay_theme_set_typography`. The op (`src/server/ops/typography.rs`) enforces a raw `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES` cap before parsing, requires exactly `monospace`/`proportional`/`ui` keys each with only `families` and `size`, then hands a parsed `ActiveTypography` to `ClayOpState::set_active_typography`.
 
 Server state lives in `ActiveTypographyState` (`src/server/mod.rs`): an `Arc<Mutex<ActiveTypography>>` plus a `broadcast::Sender` (capacity 16). `replace()` validates the whole candidate, and if all three profiles are byte-identical to the current snapshot it returns `None` and emits nothing — duplicate calls and reloads that reproduce the prior configuration do not churn clients. On a real change it bumps `revision` (`saturating_add(1)`), swaps the snapshot, and broadcasts. `RuntimeGenerationStore` exposes `active_typography()`, `subscribe_typography()`, and `replace_typography()` delegates.
 
@@ -112,7 +112,7 @@ setTypography({
 Package mode default and style-map role:
 
 ```js
-serverRegisterModePattern(packageManifest, {
+serverRegisterModePattern({
   modeId: "example-code",
   defaultFontRole: "monospace",
 });
@@ -133,7 +133,7 @@ for run in style_runs {
 ## Primitive Coverage
 
 - `SemanticTypographyRole` — field-level extension of existing mode/decoration/syntax/UI primitives, not a new package setter or permission. Owning modules: `src/protocol/mod.rs`, `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`, `src/server/ui.rs`, `src/packages/record.rs`.
-- JS facade/op: `clay.theme.setTypography` (`runtime/js/theme.ts`) → `op_clay_theme_set_typography` (`src/server/ops/typography.rs`). No separate package typography op exists; the only public surface is the user-facing setter documented in [`set-typography.md`](../../reference/clay-js-api/theme/set-typography.md).
+- JS facade/op: `clay.theme.setTypography` (`runtime/js/theme.js`) → `op_clay_theme_set_typography` (`src/server/ops/typography.rs`). No separate package typography op exists; the only public surface is the user-facing setter documented in [`set-typography.md`](../../reference/clay-js-api/theme/set-typography.md).
 - Validation/budgets: `MAX_FONT_FAMILIES_PER_PROFILE=8`, `MAX_FONT_FAMILY_BYTES=128`, `MIN_FONT_SIZE=6.0`, `MAX_FONT_SIZE=96.0`, `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES=1024`; `FontProfile::validate()` requires a non-empty stack, a trailing generic fallback, finite bounded size, and no control characters; `ActiveTypography::validate()` validates all three profiles.
 - Hot-path policy: configuration/protocol/normalization run outside paint/input/layout; native hot paths read cached `TypographyRegistry`/profile/style/layout state only — no package JavaScript, IPC, filesystem/network access, font download, or server-side installed-font discovery. `typography_updates_do_not_enter_editor_hot_paths` guards this.
 - Future-mode reuse: declare `defaultFontRole` and optional style-map/decoration `fontRole` only; no language-name branches in client/editor/server rendering code. `first_party_modes_declare_roles_without_rendering_language_branches` statically asserts absence of mode-id string literals in layout/surface/editor/sdui sources.
@@ -165,8 +165,8 @@ for run in style_runs {
 - `tests/typography_protocol.rs`: wire/validation, first-party `defaultFontRole` declarations, no language-name rendering branches.
 - `tests/editor_performance_invariants.rs`: `typography_geometry_uses_shared_profile_baseline_not_fixed_font_size`, `typography_updates_do_not_enter_editor_hot_paths`.
 - `tests/markdown_mode.rs`: `core_and_markdown_modes_publish_semantic_document_font_defaults`.
-- `tests/primitives_docs.rs`: `typography_primitive_is_registered_documented_and_indexed`, `typography_documentation_checks_do_not_mutate_generated_files`.
-- `tests/package_loading_docs.rs`: `package_author_docs_pin_semantic_role_and_concrete_font_prohibition`.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
+- Package reference documentation uses generic manifest/API/security validators in `tests/package_loading_docs.rs`; executable package/runtime tests remain authoritative for behavior.
 - `tests/manual_smoke_docs.rs`: `phase18_16_5_typography_smoke_covers_fallback_geometry_and_authority`.
 
 Run focused:
@@ -174,11 +174,11 @@ Run focused:
 ```bash
 cargo test --lib editor
 cargo test --lib masonry_sdui
-cargo test --test typography_protocol
-cargo test --test editor_performance_invariants
-cargo test --test primitives_docs
-cargo test --test package_loading_docs
-cargo test --test manual_smoke_docs
+cargo test --test editor typography_protocol::
+cargo test --test editor editor_performance_invariants::
+cargo test --test protocol primitives_docs::
+cargo test --test protocol package_loading_docs::
+cargo test --test protocol manual_smoke_docs::
 ```
 
 ## Related

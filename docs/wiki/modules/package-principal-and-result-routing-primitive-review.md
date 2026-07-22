@@ -2,7 +2,7 @@
 
 ## Status
 
-Review completed on 2026-07-20 and finalized on 2026-07-21. The approved architecture uses two fixed runtime trust domains, package-scoped provenance, and explicit user-approved composition. See `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md` and Plan 061.
+Review completed on 2026-07-20 and finalized on 2026-07-21. Plan 061 and Plan 060 tasks 4/6/8 subsequently implemented every gap recorded here. The approved architecture uses two fixed runtime trust domains, host-stamped package provenance, explicit user-approved composition, request-owned replies, bounded authorized output subscriptions, and session-owned LSP actors. See `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`, Plan 061, and the implementation outcome below.
 
 ## Source
 
@@ -17,13 +17,22 @@ Review completed on 2026-07-20 and finalized on 2026-07-21. The approved archite
 
 ## Overview
 
-Current package records, grants, package generations, handler generations, request IDs, cancellation, and language-server grants are useful enforcement primitives. They validate what a named package may do, but most package-facing ops still trust JavaScript to name that package by supplying a manifest or package string. All loaded packages currently share one `JsRuntime`, one broad `ClayOpState`, raw `Deno.core.ops`, module caches, and `globalThis` handler registries.
+Clay and integrity-verified bundled packages now share the trusted runtime; adopted third-party packages share a second runtime. Distinct op/module allowlists create the hard first/third-party boundary. Host-stamped `PackageContext` provenance plus exact enabled records, grants, approval records, and graph edges governs supported mutations within the disclosed third-party cohort, which is intentionally not a hostile sibling sandbox.
 
-Approved remediation deliberately does not isolate every package. Clay and integrity-verified bundled packages share a trusted runtime; adopted third-party packages share a second runtime. Distinct op/module allowlists create the hard first/third-party boundary. Host-stamped package provenance plus exact approved graph edges governs supported mutations within the third-party cohort, which is explicitly not a hostile sibling sandbox.
+Completion and language-intelligence replies are request-owned `oneshot`s. Parse and document-analysis streaming output uses bounded `OutputRouter` subscriptions established only after document access; connections no longer race shared receivers. Independent bounded LSP session actors remove cross-session head-of-line blocking without changing fixed-contribution process authority.
 
-Current result producers validate versions and package provenance well, but parse, parse diagnostics, document-analysis outputs, and completion results use shared receivers. Every connection competes to drain those receivers. Language intelligence already demonstrates the correct request-specific primitive: a `oneshot::Receiver` returned by `schedule`.
+## Implementation Outcome
 
-## Existing Primitive and Gap Matrix
+- Plan 061 replaced caller-assembled manifests/package strings at package-facing op ingress with host-stamped context and exact current enabled-record lookup; disable/revoke/reload clears stale context and registrations.
+- Trusted and third-party workers install separate op extensions and facade allowlists. Cross-domain values are typed, inert, bounded, generation/deadline checked, and approval revalidated.
+- `PackageApprovalStore` persists exact adoption/relation/replacement consent; first-party replacement keeps third-party provenance and supports explicit rollback.
+- `CompletionCoordinator::schedule_completion` and language intelligence return per-request replies. `ParseCoordinator` and `DocumentAnalysisCoordinator` dual-publish to bounded test channels and access-scoped connection routers.
+- Connection identity is stamped by the Hello-owned task; forged legacy IDs fail before dispatch. Document access holders, close/disconnect cleanup, and coordinator teardown define subscription lifetime.
+- LSP sessions own bounded actor queues and child I/O; identity/grant/revocation checks remain host-owned.
+
+The matrix below records the **pre-implementation 2026-07-20 baseline** used to choose these changes. Its “gap” column is historical, not current behavior.
+
+## Baseline Primitive and Gap Matrix
 
 | Area | Existing primitive and owner | What it already enforces | Generic gap |
 | --- | --- | --- | --- |
@@ -177,7 +186,7 @@ Measure one-runtime versus two-runtime startup, resident memory, heap use, reloa
 - Documentation gate:
 
 ```bash
-cargo test --test primitives_docs package_principal_and_result_routing_primitive_review
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

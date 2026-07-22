@@ -15,7 +15,7 @@
 - `docs/wiki/modules/control-center.md`
 - `src/packages/commands.rs`
 - `src/server/control_center.rs`
-- `runtime/js/commands.ts`
+- `runtime/js/commands.js`
 - `src/protocol/sdui.rs`
 - `src/masonry_sdui.rs`
 - `src/shell/package_ui.rs`
@@ -34,7 +34,7 @@ This review completes the primitive-first gate before implementation. It invento
 ### Command metadata and behavior routes
 
 - `src/packages/commands.rs::CommandRegistry` is the current source of truth for package-owned command metadata. It validates package provenance, `command-registration`, package-prefixed command IDs, display names, routing policies, key bindings, custom properties, duplicate IDs, undeclared permissions, and executable text-transform fields.
-- `runtime/js/commands.ts` exposes `serverRegisterCommand` and `serverListCommands` through the controlled server runtime. These facades serialize package manifests and declarations to Clay-owned ops; raw `Deno.core.ops` names are not public API.
+- `runtime/js/commands.js` exposes `serverRegisterCommand` and `serverListCommands` through the controlled server runtime. These facades serialize package manifests and declarations to Clay-owned ops; raw `Deno.core.ops` names are not public API.
 - `docs/reference/clay-js-api/commands/server-register-command.md` and `server-list-commands.md` document registration/listing as runtime-backed metadata APIs. Registration does not grant execution authority.
 - `src/protocol/mod.rs`, `src/behavior/manifest.rs`, `src/client/behavior.rs`, and `src/editor/surface.rs` define behavior-manifest command declarations and routing policies. `ClientFirstPredictable` and `ClientFirstRequiresAck` remain Rust-known client edit authorities; package commands must route through server-first/UI/background policies.
 
@@ -56,7 +56,7 @@ This review completes the primitive-first gate before implementation. It invento
 ### Package UI, input, state, and configuration primitives
 
 - `src/server/ui.rs::PackageUiRegistry` validates `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, and theme-token declarations for package prefix/provenance, supported fields, bounded payloads, action targets, and prohibited authority fields.
-- `runtime/js/ui.ts` exposes package UI facades through `clay:ui`; public docs live under `docs/reference/clay-js-api/ui/`.
+- `runtime/js/ui.js` exposes package UI facades through `clay:ui`; public docs live under `docs/reference/clay-js-api/ui/`.
 - `PackageInputContribution` already records inert component/panel/overlay action-routing metadata. It should feed command intents, not introduce raw native event callbacks or client-side JavaScript.
 - `PackageUiStateScope` includes `transient-overlay` state scope, but it is schema/lifecycle metadata, not an active command-palette state machine.
 
@@ -174,7 +174,7 @@ Allowed authority remains narrow:
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_8_transient_menu_command_execution_review_records_inventory_and_gaps`: verifies wiki/index links and required primitive-review contents.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - `src/shell/transient_menu.rs` unit tests cover prompt/query/item bounds, selection wrapping, activation, cancellation, provenance, accessibility labels, focus policy, cancelled-session activation rejection, inert action-only items, and budget truncation for the `TransientMenuSession` implementation.
 - `src/server/control_center.rs` unit tests cover opening from the registry snapshot, built-in command inclusion, query filtering by label/id/detail/provenance, selected command execution through `CommandExecutor`, empty-filter rejection, and exclusion of client-first/native-client-UI commands.
 - `tests/command_execution.rs` integration/security tests cover unknown command rejection, client-first/client-ui routing rejection, provenance mismatch, undeclared permission, malformed/oversize arguments, invalid document target, workspace-mutation target requirement, and duplicate command ID rejection.
@@ -184,7 +184,7 @@ Allowed authority remains narrow:
 - Run focused documentation coverage with:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs phase18_8_transient_menu_command_execution_review_records_inventory_and_gaps --quiet
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

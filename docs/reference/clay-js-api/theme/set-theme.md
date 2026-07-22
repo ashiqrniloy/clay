@@ -3,7 +3,7 @@ id: clay.theme.setTheme
 kind: clay-js-api
 js_module: "clay:theme"
 js_export: setTheme
-js_facade: runtime/js/theme.ts::setTheme
+js_facade: runtime/js/theme.js::setTheme
 backing_rust: src/server/ops/theme.rs::op_clay_theme_set_theme; src/editor/theme.rs::StyleRegistry::from_active_theme
 deno_op: op_clay_theme_set_theme
 deno_op_path: src/server/ops/theme.rs::op_clay_theme_set_theme
@@ -15,7 +15,11 @@ phase: Phase 18.15
 visibility: public
 permissions: []
 key_bindings: []
-custom_properties: ["specifier:string=required"]
+custom_properties:
+  - name: specifier
+    type: string
+    default: required
+    description: Bundled first-party theme package specifier.
 security: Accepts only bundled first-party @clay/* theme specifiers, reads static package.json textStyles contributions, and sends inert RGBA/style-attribute data to the client; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.
 agent_guidance: Use setTheme("@clay/theme-gruvbox-material-dark") or setTheme("@clay/theme-gruvbox-material-light") from init.js. Do not expose arbitrary CSS, theme code execution, raw color ops, or third-party theme loading through this API.
 lookup_tags: [theme, syntax, colors, gruvbox, init]
@@ -81,7 +85,7 @@ Prefer the shipped `@clay/theme-gruvbox-material-dark` or `@clay/theme-gruvbox-m
 
 ## Backing implementation
 
-`runtime/js/theme.ts::setTheme` calls `op_clay_theme_set_theme`, which resolves package `textStyles` into `ActiveTheme`; `EditorSurface` converts it to `StyleRegistry` before paint.
+`runtime/js/theme.js::setTheme` calls `op_clay_theme_set_theme`, which resolves package `textStyles` into `ActiveTheme`; `EditorSurface` converts it to `StyleRegistry` before paint.
 
 ## Lookup metadata
 

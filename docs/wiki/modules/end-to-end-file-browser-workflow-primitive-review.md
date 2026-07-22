@@ -56,7 +56,7 @@ Most of the workflow already maps to generic Clay primitives. The remaining gaps
 
 - `SelectionState` stores anchor/focus offsets and exposes normalized ranges.
 - `EditorSurface` owns the local editor buffer and selection, and `EditorSurface::selected_text()` uses `EditorBuffer::text_range` to extract UTF-8-safe text ranges from the `crop::Rope`.
-- The native client owns input, selection, and OS clipboard writes through the small `src/client/clipboard.rs` `arboard` wrapper. Clipboard support is write-only and limited to explicit user copy of the current selection.
+- The native client owns input, selection, and explicit OS clipboard reads/writes through the small `src/client/clipboard.rs` text-only `arboard` wrapper. Copy/cut can write only selected editor text; paste can read only after an explicit Clay-owned user command. One GUI-thread-lifetime backend preserves X11 selection ownership between commands without polling.
 
 ## Generic Workflow Primitive Gaps
 

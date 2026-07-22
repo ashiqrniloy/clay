@@ -3,7 +3,7 @@ id: clay.packages.serverValidatePackageManifest
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: serverValidatePackageManifest
-js_facade: runtime/js/packages.ts::serverValidatePackageManifest
+js_facade: runtime/js/packages.js::serverValidatePackageManifest
 backing_rust: src/packages/manifest.rs::validate_manifest_value
 deno_op: op_clay_packages_validate_manifest
 deno_op_path: src/server/ops/packages.rs::op_clay_packages_validate_manifest
@@ -113,7 +113,7 @@ Use `clay.packages.serverValidatePackageManifest` when the user asks for Validat
 
 ## Backing implementation
 
-- JS facade: `runtime/js/packages.ts::serverValidatePackageManifest`
+- JS facade: `runtime/js/packages.js::serverValidatePackageManifest`
 - Deno op: `src/server/ops/packages.rs::op_clay_packages_validate_manifest` (`op_clay_packages_validate_manifest`)
 - Backing Rust/current owner: `src/packages/manifest.rs::validate_manifest_value`
 - Current implementation audit path: `src/packages/manifest.rs::ClayPackageManifest; src/packages/manifest.rs::validate_manifest_value`

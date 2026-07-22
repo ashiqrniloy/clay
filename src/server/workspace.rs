@@ -22,9 +22,17 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use tokio::{fs as tokio_fs, io::AsyncWriteExt, sync::Mutex};
+use tokio::{
+    fs as tokio_fs,
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::Mutex,
+};
 
-use crate::perf::budgets::MAX_OPENABLE_FILE_BYTES;
+use crate::perf::budgets::{
+    MAX_AUXILIARY_READ_BYTES, MAX_DOCUMENTS_PER_CLIENT, MAX_GITIGNORE_LINES,
+    MAX_GITIGNORE_PATTERN_CHARS, MAX_GITIGNORE_PATTERNS, MAX_OPENABLE_FILE_BYTES,
+    MAX_SERVER_DOCUMENTS,
+};
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion, FileErrorCode,
 };
@@ -105,6 +113,15 @@ pub(crate) struct FileDocumentState {
 pub(crate) struct FileMetadata {
     len: u64,
     modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CloseDocumentOutcome {
+    pub(crate) document_id: DocumentId,
+    pub(crate) version: DocumentVersion,
+    /// True when this close removed the last access holder and the registry
+    /// entry; the caller must tear down document-scoped coordinator state.
+    pub(crate) closed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +224,18 @@ impl Default for FileListRequest {
     }
 }
 
+/// Authority snapshot for one directory traversal. Created while holding the
+/// workspace lock, then moved to `spawn_blocking`; no workspace state is read
+/// during filesystem traversal.
+#[derive(Debug)]
+pub(crate) struct DirectoryListingPlan {
+    root_id: WorkspaceRootId,
+    root_path: PathBuf,
+    relative_path: PathBuf,
+    max_depth: usize,
+    max_entries: usize,
+}
+
 #[derive(Debug)]
 pub(crate) struct OpenDocument {
     file_state: FileDocumentState,
@@ -281,7 +310,6 @@ enum OpenPrepare {
 /// a concurrent open that wins the registry race does not leave an orphan root.
 struct SelectedOpenPlan {
     canonical_path: PathBuf,
-    metadata: FileMetadata,
     display_path: PathBuf,
     client_id: ClientId,
 }
@@ -296,6 +324,10 @@ struct SavePlan {
     canonical_path: PathBuf,
     relative_path: PathBuf,
     document: Arc<Mutex<DocumentState>>,
+    /// Stable target identity observed at prepare time; revalidated
+    /// immediately before the atomic replace so an external change during the
+    /// write fails the save instead of being clobbered.
+    expected_identity: TargetIdentity,
 }
 
 struct SaveIoOutcome {
@@ -538,19 +570,13 @@ impl WorkspaceState {
         })
     }
 
-    /// List directory entries under a known workspace root.
-    ///
-    /// The listing is bounded by `request.max_depth` and `request.max_entries`.
-    /// It ignores a closed default set of generated directories and a single-
-    /// level `.gitignore` at the workspace root. Permission-denied directories
-    /// are reported as per-entry diagnostics without failing the whole request.
-    /// If `cancel` is supplied and becomes true, listing stops early and sets
-    /// `cancelled` on the result page.
-    pub(crate) fn list_directory(
+    /// Snapshot directory authority and request ceilings without traversing
+    /// the filesystem. Callers holding `Arc<Mutex<WorkspaceState>>` release
+    /// that lock before executing the returned plan.
+    pub(crate) fn prepare_directory_listing(
         &self,
         request: FileListRequest,
-        cancel: Option<&ListingCancelToken>,
-    ) -> Result<FileListPage, WorkspaceError> {
+    ) -> Result<DirectoryListingPlan, WorkspaceError> {
         let root = self
             .roots
             .get(&request.root_id)
@@ -563,80 +589,186 @@ impl WorkspaceState {
         else {
             return Err(WorkspaceError::DirectoryOpen);
         };
-
-        let target = root_path.join(&request.relative_path);
-        let canonical_target =
-            fs::canonicalize(&target).map_err(|source| WorkspaceError::FileUnavailable {
-                path: request.relative_path.clone(),
-                source,
-            })?;
-        if !canonical_target.starts_with(root_path) {
-            return Err(WorkspaceError::OutsideRoot);
-        }
-        let metadata =
-            fs::metadata(&canonical_target).map_err(|source| WorkspaceError::FileUnavailable {
-                path: request.relative_path.clone(),
-                source,
-            })?;
-        if !metadata.is_dir() {
-            return Err(WorkspaceError::DirectoryOpen);
-        }
-
-        let max_depth = request.max_depth.min(MAX_LIST_DIRECTORY_DEPTH);
-        let max_entries = request.max_entries.min(MAX_LIST_DIRECTORY_ENTRIES);
-        let gitignore_patterns = read_root_gitignore_patterns(root_path);
-        let ignore_set = build_ignore_set(&gitignore_patterns);
-
-        let mut entries = Vec::new();
-        let mut diagnostics = Vec::new();
-        let mut truncated = false;
-        let mut cancelled = false;
-
-        self.list_directory_recursive(
-            &canonical_target,
-            &request.relative_path,
-            0,
-            max_depth,
-            max_entries,
-            &ignore_set,
-            cancel,
-            &mut entries,
-            &mut diagnostics,
-            &mut truncated,
-            &mut cancelled,
-        );
-
-        entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-        diagnostics.sort_by(|left, right| left.message.cmp(&right.message));
-
-        Ok(FileListPage {
+        Ok(DirectoryListingPlan {
             root_id: request.root_id,
-            entries,
-            truncated,
-            cancelled,
-            diagnostics,
+            root_path: root_path.clone(),
+            relative_path: request.relative_path,
+            max_depth: request.max_depth.min(MAX_LIST_DIRECTORY_DEPTH),
+            max_entries: request.max_entries.min(MAX_LIST_DIRECTORY_ENTRIES),
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn list_directory_recursive(
+    /// Synchronous compatibility path for direct callers/tests. Async runtime
+    /// ops execute the same plan on Tokio's bounded blocking pool.
+    pub(crate) fn list_directory(
         &self,
-        dir_path: &Path,
-        dir_relative: &Path,
-        depth: usize,
-        max_depth: usize,
-        max_entries: usize,
-        ignore_set: &IgnoreSet,
+        request: FileListRequest,
         cancel: Option<&ListingCancelToken>,
-        entries: &mut Vec<FileListEntry>,
-        diagnostics: &mut Vec<WorkspaceDiagnostic>,
-        truncated: &mut bool,
-        cancelled: &mut bool,
-    ) {
-        // `depth` is the depth of the directory being processed relative to the
-        // requested directory (target = 0). Entries emitted are at depth+1.
-        // Recursion stops when the next directory would be at max_depth.
-        if depth >= max_depth {
+    ) -> Result<FileListPage, WorkspaceError> {
+        traverse_directory(self.prepare_directory_listing(request)?, cancel)
+    }
+}
+
+/// Traverse a previously authorized directory-listing plan. This performs all
+/// blocking filesystem work and reads no mutable workspace state.
+pub(crate) fn traverse_directory(
+    plan: DirectoryListingPlan,
+    cancel: Option<&ListingCancelToken>,
+) -> Result<FileListPage, WorkspaceError> {
+    if cancel.is_some_and(|token| token.load(Ordering::Relaxed)) {
+        return Ok(cancelled_listing_page(plan.root_id));
+    }
+    let target = plan.root_path.join(&plan.relative_path);
+    let canonical_target =
+        fs::canonicalize(&target).map_err(|source| WorkspaceError::FileUnavailable {
+            path: plan.relative_path.clone(),
+            source,
+        })?;
+    if !canonical_target.starts_with(&plan.root_path) {
+        return Err(WorkspaceError::OutsideRoot);
+    }
+    let metadata =
+        fs::metadata(&canonical_target).map_err(|source| WorkspaceError::FileUnavailable {
+            path: plan.relative_path.clone(),
+            source,
+        })?;
+    if !metadata.is_dir() {
+        return Err(WorkspaceError::DirectoryOpen);
+    }
+    if cancel.is_some_and(|token| token.load(Ordering::Relaxed)) {
+        return Ok(cancelled_listing_page(plan.root_id));
+    }
+
+    let ignore_set = load_ignore_set(&plan.root_path);
+    if cancel.is_some_and(|token| token.load(Ordering::Relaxed)) {
+        return Ok(cancelled_listing_page(plan.root_id));
+    }
+    let ignore_set = match ignore_set {
+        Ok(ignore_set) => ignore_set,
+        Err(message) => {
+            return Ok(FileListPage {
+                root_id: plan.root_id,
+                entries: Vec::new(),
+                truncated: true,
+                cancelled: false,
+                diagnostics: vec![WorkspaceDiagnostic::new(
+                    FileErrorCode::AccessDenied,
+                    format!("cannot apply root .gitignore: {message}"),
+                    Some(
+                        "Supported rules are component names with '*' and '?', plus an optional trailing '/' for directories."
+                            .to_string(),
+                    ),
+                )],
+            });
+        }
+    };
+    let mut entries = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut truncated = false;
+    let mut cancelled = false;
+    list_directory_recursive(
+        &canonical_target,
+        &plan.relative_path,
+        0,
+        plan.max_depth,
+        plan.max_entries,
+        &ignore_set,
+        cancel,
+        &mut entries,
+        &mut diagnostics,
+        &mut truncated,
+        &mut cancelled,
+    );
+    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    diagnostics.sort_by(|left, right| left.message.cmp(&right.message));
+    Ok(FileListPage {
+        root_id: plan.root_id,
+        entries,
+        truncated,
+        cancelled,
+        diagnostics,
+    })
+}
+
+fn cancelled_listing_page(root_id: WorkspaceRootId) -> FileListPage {
+    FileListPage {
+        root_id,
+        entries: Vec::new(),
+        truncated: false,
+        cancelled: true,
+        diagnostics: Vec::new(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn list_directory_recursive(
+    dir_path: &Path,
+    dir_relative: &Path,
+    depth: usize,
+    max_depth: usize,
+    max_entries: usize,
+    ignore_set: &IgnoreSet,
+    cancel: Option<&ListingCancelToken>,
+    entries: &mut Vec<FileListEntry>,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    truncated: &mut bool,
+    cancelled: &mut bool,
+) {
+    // `depth` is the depth of the directory being processed relative to the
+    // requested directory (target = 0). Entries emitted are at depth+1.
+    // Recursion stops when the next directory would be at max_depth.
+    if depth >= max_depth {
+        return;
+    }
+    if let Some(token) = cancel
+        && token.load(Ordering::Relaxed)
+    {
+        *cancelled = true;
+        return;
+    }
+
+    let read_dir = match fs::read_dir(dir_path) {
+        Ok(read_dir) => read_dir,
+        Err(source) => {
+            let code = io_error_code(&source);
+            diagnostics.push(WorkspaceDiagnostic::new(
+                code.clone(),
+                format!(
+                    "cannot read directory {}: {source}",
+                    display_authorized_path(dir_relative)
+                ),
+                Some(container_permission_hint()),
+            ));
+            let diagnostic = Some(FileListEntryDiagnostic {
+                code,
+                message: format!("cannot read directory: {source}"),
+            });
+            if let Some(entry) = entries
+                .iter_mut()
+                .find(|entry| entry.relative_path == dir_relative)
+            {
+                entry.diagnostic = diagnostic;
+            } else {
+                entries.push(FileListEntry {
+                    name: dir_relative
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| ".".to_string()),
+                    kind: FileListEntryKind::Directory,
+                    relative_path: dir_relative.to_path_buf(),
+                    size_hint: None,
+                    child_count: None,
+                    diagnostic,
+                });
+            }
+            return;
+        }
+    };
+
+    let mut child_dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for dir_entry in read_dir {
+        if entries.len() >= max_entries {
+            *truncated = true;
             return;
         }
         if let Some(token) = cancel
@@ -646,167 +778,114 @@ impl WorkspaceState {
             return;
         }
 
-        let read_dir = match fs::read_dir(dir_path) {
-            Ok(read_dir) => read_dir,
+        let dir_entry = match dir_entry {
+            Ok(entry) => entry,
+            Err(source) => {
+                diagnostics.push(WorkspaceDiagnostic::new(
+                    io_error_code(&source),
+                    format!(
+                        "cannot read an entry in directory {}: {source}",
+                        display_authorized_path(dir_relative)
+                    ),
+                    Some(container_permission_hint()),
+                ));
+                continue;
+            }
+        };
+
+        let name = dir_entry.file_name();
+        let name_str = name.to_string_lossy();
+        let entry_path = dir_entry.path();
+        let relative_path = if dir_relative.as_os_str().is_empty() {
+            PathBuf::from(&name)
+        } else {
+            dir_relative.join(&name)
+        };
+
+        let metadata = match dir_entry.metadata() {
+            Ok(metadata) => metadata,
             Err(source) => {
                 let code = io_error_code(&source);
                 diagnostics.push(WorkspaceDiagnostic::new(
                     code.clone(),
                     format!(
-                        "cannot read directory {}: {source}",
-                        display_authorized_path(dir_relative)
+                        "cannot read metadata for {}: {source}",
+                        display_authorized_path(&relative_path)
                     ),
                     Some(container_permission_hint()),
                 ));
-                let diagnostic = Some(FileListEntryDiagnostic {
-                    code,
-                    message: format!("cannot read directory: {source}"),
+                entries.push(FileListEntry {
+                    name: name_str.into_owned(),
+                    kind: FileListEntryKind::Other,
+                    relative_path,
+                    size_hint: None,
+                    child_count: None,
+                    diagnostic: Some(FileListEntryDiagnostic {
+                        code,
+                        message: format!("cannot read metadata: {source}"),
+                    }),
                 });
-                if let Some(entry) = entries
-                    .iter_mut()
-                    .find(|entry| entry.relative_path == dir_relative)
-                {
-                    entry.diagnostic = diagnostic;
-                } else {
-                    entries.push(FileListEntry {
-                        name: dir_relative
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| ".".to_string()),
-                        kind: FileListEntryKind::Directory,
-                        relative_path: dir_relative.to_path_buf(),
-                        size_hint: None,
-                        child_count: None,
-                        diagnostic,
-                    });
-                }
-                return;
+                continue;
             }
         };
 
-        let mut child_dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
-        for dir_entry in read_dir {
-            if entries.len() >= max_entries {
-                *truncated = true;
-                return;
-            }
-            if let Some(token) = cancel
-                && token.load(Ordering::Relaxed)
-            {
-                *cancelled = true;
-                return;
-            }
-
-            let dir_entry = match dir_entry {
-                Ok(entry) => entry,
-                Err(source) => {
-                    diagnostics.push(WorkspaceDiagnostic::new(
-                        io_error_code(&source),
-                        format!(
-                            "cannot read an entry in directory {}: {source}",
-                            display_authorized_path(dir_relative)
-                        ),
-                        Some(container_permission_hint()),
-                    ));
-                    continue;
-                }
-            };
-
-            let name = dir_entry.file_name();
-            let name_str = name.to_string_lossy();
-            if ignore_set.is_ignored(&name_str, None) {
-                continue;
-            }
-
-            let entry_path = dir_entry.path();
-            let relative_path = if dir_relative.as_os_str().is_empty() {
-                PathBuf::from(&name)
-            } else {
-                dir_relative.join(&name)
-            };
-
-            let metadata = match dir_entry.metadata() {
-                Ok(metadata) => metadata,
-                Err(source) => {
-                    let code = io_error_code(&source);
-                    diagnostics.push(WorkspaceDiagnostic::new(
-                        code.clone(),
-                        format!(
-                            "cannot read metadata for {}: {source}",
-                            display_authorized_path(&relative_path)
-                        ),
-                        Some(container_permission_hint()),
-                    ));
-                    entries.push(FileListEntry {
-                        name: name_str.into_owned(),
-                        kind: FileListEntryKind::Other,
-                        relative_path,
-                        size_hint: None,
-                        child_count: None,
-                        diagnostic: Some(FileListEntryDiagnostic {
-                            code,
-                            message: format!("cannot read metadata: {source}"),
-                        }),
-                    });
-                    continue;
-                }
-            };
-
-            let (kind, child_count) = if metadata.is_dir() {
-                (
-                    FileListEntryKind::Directory,
-                    Some(count_visible_children(&entry_path, ignore_set)),
-                )
-            } else if metadata.is_file() {
-                (FileListEntryKind::File, None)
-            } else if metadata.file_type().is_symlink() {
-                (FileListEntryKind::Symlink, None)
-            } else {
-                (FileListEntryKind::Other, None)
-            };
-
-            if metadata.is_dir()
-                && depth + 1 < max_depth
-                && !ignore_set.is_ignored(&name_str, Some(true))
-            {
-                child_dirs.push((entry_path.clone(), relative_path.clone()));
-            }
-
-            entries.push(FileListEntry {
-                name: name_str.into_owned(),
-                kind,
-                relative_path,
-                size_hint: if metadata.is_file() {
-                    Some(metadata.len())
-                } else {
-                    None
-                },
-                child_count,
-                diagnostic: None,
-            });
+        if ignore_set.is_ignored(&name_str, metadata.is_dir()) {
+            continue;
         }
 
-        for (child_path, child_relative) in child_dirs {
-            if entries.len() >= max_entries {
-                *truncated = true;
-                return;
-            }
-            self.list_directory_recursive(
-                &child_path,
-                &child_relative,
-                depth + 1,
-                max_depth,
-                max_entries,
-                ignore_set,
-                cancel,
-                entries,
-                diagnostics,
-                truncated,
-                cancelled,
-            );
+        let (kind, child_count) = if metadata.is_dir() {
+            (
+                FileListEntryKind::Directory,
+                Some(count_visible_children(&entry_path, ignore_set)),
+            )
+        } else if metadata.is_file() {
+            (FileListEntryKind::File, None)
+        } else if metadata.file_type().is_symlink() {
+            (FileListEntryKind::Symlink, None)
+        } else {
+            (FileListEntryKind::Other, None)
+        };
+
+        if metadata.is_dir() && depth + 1 < max_depth {
+            child_dirs.push((entry_path.clone(), relative_path.clone()));
         }
+
+        entries.push(FileListEntry {
+            name: name_str.into_owned(),
+            kind,
+            relative_path,
+            size_hint: if metadata.is_file() {
+                Some(metadata.len())
+            } else {
+                None
+            },
+            child_count,
+            diagnostic: None,
+        });
     }
 
+    for (child_path, child_relative) in child_dirs {
+        if entries.len() >= max_entries {
+            *truncated = true;
+            return;
+        }
+        list_directory_recursive(
+            &child_path,
+            &child_relative,
+            depth + 1,
+            max_depth,
+            max_entries,
+            ignore_set,
+            cancel,
+            entries,
+            diagnostics,
+            truncated,
+            cancelled,
+        );
+    }
+}
+
+impl WorkspaceState {
     pub(crate) async fn open_existing_file(
         &mut self,
         root_id: WorkspaceRootId,
@@ -819,12 +898,14 @@ impl WorkspaceState {
         {
             OpenPrepare::Existing(lease) => Ok(lease),
             OpenPrepare::New(plan) => {
-                let text = open_io(
+                let (text, observed_metadata) = open_io(
                     &plan.file_state.canonical_path,
                     plan.file_state.workspace_relative_path.clone(),
                 )
                 .await?;
-                self.register_canonical_file(plan.file_state, text, plan.client_id)
+                let mut file_state = plan.file_state;
+                file_state.last_known_metadata = observed_metadata;
+                self.register_canonical_file(file_state, text, plan.client_id)
                     .await
             }
         }
@@ -841,8 +922,10 @@ impl WorkspaceState {
         {
             SelectedOpenPrepare::Existing(lease) => Ok(lease),
             SelectedOpenPrepare::New(plan) => {
-                let text = open_io(&plan.canonical_path, plan.display_path.clone()).await?;
-                self.register_selected_file(plan, text).await
+                let (text, observed_metadata) =
+                    open_io(&plan.canonical_path, plan.display_path.clone()).await?;
+                self.register_selected_file(plan, text, observed_metadata)
+                    .await
             }
         }
     }
@@ -855,7 +938,7 @@ impl WorkspaceState {
     ) -> Result<OpenPrepare, WorkspaceError> {
         let file_state = self.canonical_file_state(root_id, file_path)?;
         if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
-            return Ok(OpenPrepare::Existing(existing));
+            return existing.map(OpenPrepare::Existing);
         }
         check_openable_size(&file_state.last_known_metadata, file_path)?;
         Ok(OpenPrepare::New(OpenPlan {
@@ -874,12 +957,11 @@ impl WorkspaceState {
             .existing_document_lease_by_canonical_path(&canonical_path, client_id)
             .await
         {
-            return Ok(SelectedOpenPrepare::Existing(existing));
+            return existing.map(SelectedOpenPrepare::Existing);
         }
         check_openable_size(&metadata, selected_path)?;
         Ok(SelectedOpenPrepare::New(SelectedOpenPlan {
             canonical_path,
-            metadata,
             display_path,
             client_id,
         }))
@@ -889,6 +971,7 @@ impl WorkspaceState {
         &mut self,
         plan: SelectedOpenPlan,
         text: String,
+        observed_metadata: FileMetadata,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
         // The selected file may have been opened by a concurrent selected/open
         // call while the workspace mutex was released during the disk read.
@@ -898,14 +981,15 @@ impl WorkspaceState {
             .existing_document_lease_by_canonical_path(&plan.canonical_path, plan.client_id)
             .await
         {
-            return Ok(existing);
+            return existing;
         }
+        self.enforce_document_ceilings(plan.client_id).await?;
         let root_id = self.add_single_file_grant(plan.canonical_path.clone())?;
         let file_state = FileDocumentState {
             workspace_root_id: root_id,
             canonical_path: plan.canonical_path,
             workspace_relative_path: plan.display_path,
-            last_known_metadata: plan.metadata,
+            last_known_metadata: observed_metadata,
         };
         self.register_canonical_file(file_state, text, plan.client_id)
             .await
@@ -920,7 +1004,7 @@ impl WorkspaceState {
     ) -> Result<OpenDocumentLease, WorkspaceError> {
         let file_state = self.canonical_file_state(root_id, file_path.as_ref())?;
         if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
-            return Ok(existing);
+            return existing;
         }
         self.register_canonical_file(file_state, text, client_id)
             .await
@@ -944,6 +1028,11 @@ impl WorkspaceState {
             .documents
             .get(&document_id)
             .ok_or(WorkspaceError::UnknownDocument { document_id })?;
+        // Fail closed like an unknown document: a connection that never
+        // opened this document must not learn that it exists (Plan 060 T4).
+        if !open_document.document.lock().await.has_access(client_id) {
+            return Err(WorkspaceError::UnknownDocument { document_id });
+        }
         metadata_for_open_document(document_id, open_document, client_id).await
     }
 
@@ -953,6 +1042,9 @@ impl WorkspaceState {
     ) -> Result<Vec<DocumentMetadata>, WorkspaceError> {
         let mut entries = Vec::with_capacity(self.documents.len());
         for (&document_id, open_document) in &self.documents {
+            if !open_document.document.lock().await.has_access(client_id) {
+                continue;
+            }
             entries.push(metadata_for_open_document(document_id, open_document, client_id).await?);
         }
         entries.sort_by_key(|metadata| metadata.document_id);
@@ -974,20 +1066,102 @@ impl WorkspaceState {
         Ok(entries)
     }
 
-    pub(crate) async fn release_client_access(&self, client_id: ClientId) {
-        for open_document in self.documents.values() {
-            open_document
-                .document
-                .lock()
-                .await
-                .release_access(client_id);
+    /// Release every access grant held by `client_id` (disconnect). Returns
+    /// the IDs and final versions of documents whose last holder left, so the
+    /// caller can tear down document-scoped coordinator state.
+    pub(crate) async fn release_client_access(
+        &mut self,
+        client_id: ClientId,
+    ) -> Vec<(DocumentId, DocumentVersion)> {
+        let mut finalized = Vec::new();
+        for (&document_id, open_document) in &self.documents {
+            let mut document = open_document.document.lock().await;
+            document.release_access(client_id);
+            if document.access_holder_count() == 0 {
+                finalized.push((document_id, document.version()));
+            }
         }
+        for &(document_id, _) in &finalized {
+            if let Some(open_document) = self.documents.remove(&document_id) {
+                self.path_to_document
+                    .remove(&open_document.file_state.canonical_path);
+            }
+        }
+        finalized
+    }
+
+    /// Explicit close: release `client_id`'s access after the access, and
+    /// dirty policy checks pass. A dirty document requires `force` so close
+    /// intent is explicit about discarding unsaved editor state. When the
+    /// last holder leaves, the registry entry is removed and the outcome
+    /// reports `closed: true` so the caller can tear down document-scoped
+    /// coordinator state (Plan 060 T6, P1-4).
+    pub(crate) async fn close_document(
+        &mut self,
+        document_id: DocumentId,
+        client_id: ClientId,
+        force: bool,
+    ) -> Result<CloseDocumentOutcome, WorkspaceError> {
+        let open_document = self
+            .documents
+            .get(&document_id)
+            .ok_or(WorkspaceError::UnknownDocument { document_id })?;
+        let mut document = open_document.document.lock().await;
+        if !document.has_access(client_id) {
+            return Err(WorkspaceError::UnknownDocument { document_id });
+        }
+        if document.is_dirty() && !force {
+            return Err(WorkspaceError::DirtyDocument { document_id });
+        }
+        document.release_access(client_id);
+        let version = document.version();
+        let closed = document.access_holder_count() == 0;
+        drop(document);
+        if closed {
+            let open_document = self
+                .documents
+                .remove(&document_id)
+                .expect("document checked above");
+            self.path_to_document
+                .remove(&open_document.file_state.canonical_path);
+        }
+        Ok(CloseDocumentOutcome {
+            document_id,
+            version,
+            closed,
+        })
+    }
+
+    /// Per-client and server-wide open-document ceilings, checked before a
+    /// new access grant or registry entry is created (Plan 060 T6, P1-4).
+    async fn enforce_document_ceilings(&self, client_id: ClientId) -> Result<(), WorkspaceError> {
+        if self.documents.len() >= MAX_SERVER_DOCUMENTS {
+            return Err(WorkspaceError::DocumentLimitExceeded {
+                limit: MAX_SERVER_DOCUMENTS,
+            });
+        }
+        let mut held = 0;
+        for open_document in self.documents.values() {
+            if open_document.document.lock().await.has_access(client_id) {
+                held += 1;
+            }
+        }
+        if held >= MAX_DOCUMENTS_PER_CLIENT {
+            return Err(WorkspaceError::DocumentLimitExceeded {
+                limit: MAX_DOCUMENTS_PER_CLIENT,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) async fn save_document(
         &mut self,
         document_id: DocumentId,
+        client_id: ClientId,
+        known_version: DocumentVersion,
     ) -> Result<SaveDocumentOutcome, WorkspaceError> {
+        self.authorize_save(document_id, client_id, known_version)
+            .await?;
         let plan = self.prepare_save(document_id)?;
         let io = save_io(&plan).await?;
         self.commit_save(plan, io).await
@@ -996,11 +1170,73 @@ impl WorkspaceState {
     pub(crate) async fn reload_document(
         &mut self,
         document_id: DocumentId,
+        client_id: ClientId,
         force: bool,
     ) -> Result<ReloadDocumentOutcome, WorkspaceError> {
+        self.authorize_document_access(document_id, client_id)
+            .await?;
         let plan = self.prepare_reload(document_id, force).await?;
         let io = reload_io(&plan).await?;
         self.commit_reload(plan, io).await
+    }
+
+    /// Fail closed when `client_id` never acquired access to `document_id`
+    /// through an authorized open path. Returns the same `UnknownDocument`
+    /// error as a missing document so unauthorized probes cannot distinguish
+    /// existence from denial (Plan 060 T4, P0-2).
+    async fn authorize_document_access(
+        &self,
+        document_id: DocumentId,
+        client_id: ClientId,
+    ) -> Result<(), WorkspaceError> {
+        let open_document = self
+            .documents
+            .get(&document_id)
+            .ok_or(WorkspaceError::UnknownDocument { document_id })?;
+        if !open_document.document.lock().await.has_access(client_id) {
+            return Err(WorkspaceError::UnknownDocument { document_id });
+        }
+        Ok(())
+    }
+
+    /// Save authorization: the caller must hold the editable lease (read-only
+    /// saves fail closed) and must not claim a version newer than the server
+    /// has confirmed. `known_version <= current` is accepted because only the
+    /// lease holder can edit, so any gap is the caller's own in-flight edits
+    /// ordered before the save on the same connection.
+    async fn authorize_save(
+        &self,
+        document_id: DocumentId,
+        client_id: ClientId,
+        known_version: DocumentVersion,
+    ) -> Result<(), WorkspaceError> {
+        let open_document = self
+            .documents
+            .get(&document_id)
+            .ok_or(WorkspaceError::UnknownDocument { document_id })?;
+        let document = open_document.document.lock().await;
+        if !document.has_access(client_id) {
+            return Err(WorkspaceError::UnknownDocument { document_id });
+        }
+        // The server-internal runtime identity (0) saves with full authority;
+        // remote connections must hold the editable lease.
+        if client_id != 0
+            && !matches!(
+                document.access_for_client(client_id),
+                crate::protocol::DocumentAccess::Editable { .. }
+            )
+        {
+            return Err(WorkspaceError::ReadOnlySave { document_id });
+        }
+        let current_version = document.version();
+        if known_version > current_version {
+            return Err(WorkspaceError::StaleSaveVersion {
+                document_id,
+                known_version,
+                current_version,
+            });
+        }
+        Ok(())
     }
 
     /// Gather the owned state needed to write `document_id` to disk: canonical
@@ -1018,8 +1254,8 @@ impl WorkspaceState {
         let expected_metadata = open_document.file_state.last_known_metadata.clone();
         let document = Arc::clone(&open_document.document);
 
-        let current_metadata = self.reauthorize_open_file(document_id)?;
-        if current_metadata != expected_metadata {
+        let current_identity = self.reauthorize_open_file(document_id)?;
+        if current_identity.metadata() != expected_metadata {
             return Err(WorkspaceError::StaleFileMetadata {
                 path: relative_path,
             });
@@ -1029,6 +1265,7 @@ impl WorkspaceState {
             canonical_path,
             relative_path,
             document,
+            expected_identity: current_identity,
         })
     }
 
@@ -1074,8 +1311,8 @@ impl WorkspaceState {
         if document.lock().await.is_dirty() && !force {
             return Err(WorkspaceError::DirtyDocument { document_id });
         }
-        let pre_read_metadata = self.reauthorize_open_file(document_id)?;
-        check_openable_size(&pre_read_metadata, &relative_path)?;
+        let pre_read_identity = self.reauthorize_open_file(document_id)?;
+        check_openable_size(&pre_read_identity.metadata(), &relative_path)?;
         Ok(ReloadPlan {
             document_id,
             canonical_path,
@@ -1118,7 +1355,7 @@ impl WorkspaceState {
         &self,
         file_state: &FileDocumentState,
         client_id: ClientId,
-    ) -> Option<OpenDocumentLease> {
+    ) -> Option<Result<OpenDocumentLease, WorkspaceError>> {
         self.existing_document_lease_by_canonical_path(&file_state.canonical_path, client_id)
             .await
     }
@@ -1127,23 +1364,28 @@ impl WorkspaceState {
         &self,
         canonical_path: &Path,
         client_id: ClientId,
-    ) -> Option<OpenDocumentLease> {
+    ) -> Option<Result<OpenDocumentLease, WorkspaceError>> {
         let document_id = self.path_to_document.get(canonical_path).copied()?;
         let open_document = self
             .documents
             .get(&document_id)
             .expect("path index and document registry must stay in sync");
+        if !open_document.document.lock().await.has_access(client_id)
+            && let Err(error) = self.enforce_document_ceilings(client_id).await
+        {
+            return Some(Err(error));
+        }
         let access = open_document
             .document
             .lock()
             .await
             .acquire_access(client_id);
-        Some(OpenDocumentLease {
+        Some(Ok(OpenDocumentLease {
             document_id,
             access,
             file_state: open_document.file_state.clone(),
             document: Arc::clone(&open_document.document),
-        })
+        }))
     }
 
     fn add_single_file_grant(
@@ -1179,8 +1421,9 @@ impl WorkspaceState {
             .existing_document_lease_by_canonical_path(&file_state.canonical_path, client_id)
             .await
         {
-            return Ok(existing);
+            return existing;
         }
+        self.enforce_document_ceilings(client_id).await?;
         let document_id = self.next_document_id;
         self.next_document_id = self.next_document_id.saturating_add(1);
         let document = Arc::new(Mutex::new(DocumentState::new(
@@ -1288,7 +1531,7 @@ impl WorkspaceState {
     fn reauthorize_open_file(
         &self,
         document_id: DocumentId,
-    ) -> Result<FileMetadata, WorkspaceError> {
+    ) -> Result<TargetIdentity, WorkspaceError> {
         let open_document = self
             .documents
             .get(&document_id)
@@ -1328,7 +1571,7 @@ impl WorkspaceState {
                 source,
             })?;
         validate_regular_file_metadata(&metadata)?;
-        Ok(FileMetadata::from_fs_metadata(&metadata))
+        Ok(TargetIdentity::from_metadata(&metadata))
     }
 }
 
@@ -1415,7 +1658,7 @@ fn validate_regular_file_metadata(metadata: &fs::Metadata) -> Result<(), Workspa
 }
 
 /// Reject a file whose observed size exceeds the openable-file budget *before*
-/// `tokio_fs::read` allocates the full contents. Returns a typed
+/// the bounded read allocates. Returns a typed
 /// [`WorkspaceError::FileTooLarge`] so oversized files cannot be used as a
 /// memory-exhaustion vector or silently fail later at frame encode.
 fn check_openable_size(metadata: &FileMetadata, path: &Path) -> Result<(), WorkspaceError> {
@@ -1430,22 +1673,127 @@ fn check_openable_size(metadata: &FileMetadata, path: &Path) -> Result<(), Works
     Ok(())
 }
 
-/// Heavy disk read for file open, performed with the workspace mutex released.
-/// `error_path` is the registry-relative path used in `FileUnavailable` /
-/// `InvalidUtf8` diagnostics so callers can pass either the workspace-relative
-/// path (root-scoped open) or the selected-file display path.
-async fn open_io(canonical_path: &Path, error_path: PathBuf) -> Result<String, WorkspaceError> {
-    let bytes =
-        tokio_fs::read(canonical_path)
-            .await
-            .map_err(|source| WorkspaceError::FileUnavailable {
-                path: error_path.clone(),
-                source,
-            })?;
-    String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
-        path: error_path,
+/// Bounded read of one file through a single opened handle, performed with the
+/// workspace mutex released. Handle-based metadata closes the
+/// swap-between-validation-and-read window (the type/size checks describe the
+/// exact file being read, not a path that could be replaced in between), and
+/// the `take` ceiling caps allocation at `max_bytes + 1` even if the file
+/// grows after the metadata check. `error_path` is the registry-relative path
+/// used in diagnostics so callers can pass either the workspace-relative path
+/// (root-scoped open) or the selected-file display path.
+async fn read_file_bounded(
+    canonical_path: &Path,
+    error_path: &Path,
+    max_bytes: usize,
+) -> Result<(String, FileMetadata), WorkspaceError> {
+    let unavailable = |source: io::Error| WorkspaceError::FileUnavailable {
+        path: error_path.to_path_buf(),
         source,
-    })
+    };
+    let file = tokio_fs::File::open(canonical_path)
+        .await
+        .map_err(unavailable)?;
+    let metadata = file.metadata().await.map_err(unavailable)?;
+    validate_regular_file_metadata(&metadata)?;
+    let observed = FileMetadata::from_fs_metadata(&metadata);
+    check_openable_size(&observed, error_path)?;
+    #[cfg(test)]
+    {
+        let mut hooks = BETWEEN_METADATA_AND_READ_HOOKS
+            .lock()
+            .expect("between-metadata-and-read hooks poisoned");
+        if let Some(position) = hooks.iter().rposition(|(path, _)| path == canonical_path) {
+            let (_, hook) = hooks.remove(position);
+            drop(hooks);
+            hook();
+        }
+    }
+    let mut bytes = Vec::new();
+    file.take((max_bytes as u64) + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(unavailable)?;
+    if bytes.len() > max_bytes {
+        return Err(WorkspaceError::FileTooLarge {
+            path: error_path.to_path_buf(),
+            len: bytes.len() as u64,
+            max: max_bytes,
+        });
+    }
+    let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
+        path: error_path.to_path_buf(),
+        source,
+    })?;
+    Ok((text, observed))
+}
+
+/// Heavy disk read for file open, performed with the workspace mutex released.
+async fn open_io(
+    canonical_path: &Path,
+    error_path: PathBuf,
+) -> Result<(String, FileMetadata), WorkspaceError> {
+    read_file_bounded(canonical_path, &error_path, MAX_OPENABLE_FILE_BYTES).await
+}
+
+/// Stable on-disk identity of the save target captured when the save was
+/// authorized. Revalidating this immediately before the atomic replace closes
+/// the TOCTOU window in which an external process (or another editor doing an
+/// atomic rename-write) could replace the target between the staleness check
+/// and the rename: the save then fails closed instead of silently clobbering
+/// someone else's bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TargetIdentity {
+    /// Platform stable file identity: `(dev, ino)` on Unix, `(volume serial,
+    /// file index)` on Windows. `None` when the platform cannot report one;
+    /// matching then falls back to content metadata only.
+    stable_id: Option<(u64, u64)>,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl TargetIdentity {
+    fn from_metadata(metadata: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        let stable_id = {
+            use std::os::unix::fs::MetadataExt;
+            Some((metadata.dev(), metadata.ino()))
+        };
+        #[cfg(windows)]
+        let stable_id = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.volume_serial_number().zip(metadata.file_index())
+        };
+        #[cfg(not(any(unix, windows)))]
+        let stable_id = None;
+        Self {
+            stable_id,
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        }
+    }
+
+    fn capture(path: &Path) -> io::Result<Self> {
+        fs::metadata(path).map(|metadata| Self::from_metadata(&metadata))
+    }
+
+    fn metadata(&self) -> FileMetadata {
+        FileMetadata {
+            len: self.len,
+            modified: self.modified,
+        }
+    }
+
+    /// True when the current on-disk target is the same file with the same
+    /// content metadata as when this identity was captured. A missing target
+    /// is an error (fail closed), a replaced file or any content change —
+    /// including a same-length edit that bumps `modified` — is a mismatch.
+    fn matches_current(&self, path: &Path) -> io::Result<bool> {
+        let metadata = fs::metadata(path)?;
+        let current = Self::from_metadata(&metadata);
+        Ok(current.stable_id == self.stable_id
+            && current.len == self.len
+            && current.modified == self.modified)
+    }
 }
 
 /// Process-wide counter for unique atomic-save temp file names so concurrent
@@ -1453,55 +1801,144 @@ async fn open_io(canonical_path: &Path, error_path: PathBuf) -> Result<String, W
 static ATOMIC_SAVE_TEMP_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// Build a unique temp-file path next to `target` for atomic save. The temp
-/// lives in the same directory so the `rename` is a same-filesystem atomic
+/// Test-only queue of forced temp file names scoped by target directory (one
+/// entry popped per atomic save in that directory) so tests can stage
+/// pre-created temp collisions and symlink attacks without cross-test races.
+#[cfg(test)]
+static TEST_TEMP_NAMES: std::sync::Mutex<Vec<(PathBuf, String)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Path-scoped test hook fired once at a staged filesystem hazard window.
+#[cfg(test)]
+type TestHook = (PathBuf, Box<dyn FnOnce() + Send>);
+
+/// Test-only hook invoked inside the atomic save for a specific target path
+/// after the temp is written and fsynced but before the target identity is
+/// revalidated and replaced, so tests can stage external target
+/// modification/replacement in that exact window.
+#[cfg(test)]
+static BEFORE_REVALIDATE_HOOKS: std::sync::Mutex<Vec<TestHook>> = std::sync::Mutex::new(Vec::new());
+
+/// Test-only hooks invoked inside the bounded read of a specific path after
+/// the handle metadata is validated but before the contents are read, so
+/// tests can stage external growth/replacement in that exact window.
+#[cfg(test)]
+static BETWEEN_METADATA_AND_READ_HOOKS: std::sync::Mutex<Vec<TestHook>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Build an unpredictable temp-file path next to `target` for atomic save. The
+/// temp lives in the same directory so the `rename` is a same-filesystem atomic
 /// replace (POSIX rename overwrites atomically; on Windows Rust's
-/// `std::fs::rename` uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`).
+/// `std::fs::rename` uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`). The random
+/// component comes from a process-random `RandomState` seed (std's OS-entropy
+/// hash keys) mixed with a unique counter, so an attacker who can pre-create
+/// files in the directory cannot predict the name and pre-place a symlink.
 fn atomic_temp_path(target: &Path) -> PathBuf {
-    let nonce = ATOMIC_SAVE_TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    #[cfg(test)]
+    {
+        let mut queue = TEST_TEMP_NAMES
+            .lock()
+            .expect("test temp-name queue poisoned");
+        if let Some(position) = queue.iter().rposition(|(dir, _)| dir == parent) {
+            let (_, name) = queue.remove(position);
+            return parent.join(name);
+        }
+    }
+    let nonce = ATOMIC_SAVE_TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let random = {
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u64(nonce);
+        hasher.finish()
+    };
     let stem = target
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "clay-save".to_string());
-    parent.join(format!(".{stem}.clay-save-{}-{nonce}", std::process::id()))
+    parent.join(format!(".{stem}.clay-save-{random:016x}"))
+}
+
+/// Failure modes of the atomic save that callers must distinguish: ordinary IO
+/// failures map to `WriteFailed`, while a target that changed identity or
+/// content during the save maps to the typed staleness error.
+#[derive(Debug)]
+enum AtomicSaveError {
+    Io(io::Error),
+    TargetChanged,
+}
+
+impl From<io::Error> for AtomicSaveError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+/// Create the exclusive temp file next to `target`, retrying with a fresh
+/// unpredictable name on collision. `create_new` refuses to follow or truncate
+/// a pre-created file/symlink at the temp path, closing the predictable-temp
+/// precreation attack. On Unix the temp starts `0o600` regardless of umask.
+async fn create_exclusive_temp(target: &Path) -> io::Result<(PathBuf, tokio_fs::File)> {
+    const MAX_TEMP_CREATE_ATTEMPTS: usize = 8;
+    let mut attempt = 0;
+    loop {
+        let temp_path = atomic_temp_path(target);
+        let mut options = tokio_fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        match options.open(&temp_path).await {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                attempt += 1;
+                if attempt >= MAX_TEMP_CREATE_ATTEMPTS {
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Atomically write `bytes` to `target` via a temp file + rename, returning the
-/// metadata of the saved file. Steps: create a temp file in `target`'s
-/// directory, write all bytes, `fsync` (durability), restore the original file's
-/// permissions where feasible (Unix mode), then `rename` over the target. If the
-/// rename fails the temp file is removed so failed saves do not litter the
-/// directory. A crash mid-write leaves the original file intact because only the
-/// temp is partial and the rename is atomic.
-async fn atomic_write_file(target: &Path, bytes: &[u8]) -> io::Result<FileMetadata> {
-    let temp_path = atomic_temp_path(target);
-
+/// metadata of the saved file. Steps: create an exclusive unpredictable temp
+/// file in `target`'s directory, write all bytes, `fsync` (durability),
+/// restore the original file's permissions (fail closed on Unix when that
+/// fails), revalidate the target's stable identity against `expected`
+/// immediately before the replace, then `rename` over the target. Every
+/// failure path removes the temp file and leaves the target untouched.
+async fn atomic_write_file(
+    target: &Path,
+    bytes: &[u8],
+    expected: Option<&TargetIdentity>,
+) -> Result<FileMetadata, AtomicSaveError> {
     #[cfg(unix)]
     if fs::metadata(target)
         .map(|metadata| metadata.permissions().mode() & 0o222 == 0)
         .unwrap_or(false)
     {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "target file is read-only",
-        ));
+        return Err(
+            io::Error::new(io::ErrorKind::PermissionDenied, "target file is read-only").into(),
+        );
     }
 
-    // Preserve the original file's permissions where feasible (Unix mode).
-    // Metadata of a missing target is ignored; the temp then keeps its default
-    // mode, which is the best we can do for a brand-new file.
+    // Preserve the original file's permissions (Unix mode). Metadata of a
+    // missing target is ignored; the temp then keeps its `0o600` start mode,
+    // which is a safe default for a brand-new file.
     let original_permissions = fs::metadata(target)
         .ok()
         .map(|metadata| metadata.permissions());
 
-    {
-        let mut file = tokio_fs::File::create(&temp_path).await?;
+    let (temp_path, mut file) = create_exclusive_temp(target).await?;
+    let write_result = async {
         file.write_all(bytes).await?;
-        // Flush the kernel buffer and fsync so the new content is on disk before
-        // the atomic rename; this is what makes the post-rename file durable.
-        file.sync_all().await?;
+        // Flush the kernel buffer and fsync so the new content is on disk
+        // before the atomic rename; this is what makes the post-rename file
+        // durable.
+        file.sync_all().await
     }
+    .await;
+    drop(file);
 
     // ponytail: directory fsync of the parent would make the rename itself
     // durable across power loss; skipped here because the atomic rename already
@@ -1509,27 +1946,55 @@ async fn atomic_write_file(target: &Path, bytes: &[u8]) -> io::Result<FileMetada
     // platform-specific code. Add if durability-of-the-rename becomes a
     // requirement.
 
-    #[cfg(unix)]
-    if let Some(perms) = original_permissions {
-        // Best-effort permission restore; a failure here does not corrupt data.
-        let _ = fs::set_permissions(&temp_path, perms);
-    }
-    #[cfg(not(unix))]
-    {
-        // Windows: file permissions are coarser and the temp already inherits
-        // the directory ACL; nothing practical to copy here.
-        let _ = original_permissions;
-    }
+    // From here on every failure must remove the orphaned temp file.
+    let result = async {
+        write_result?;
 
-    if let Err(error) = tokio_fs::rename(&temp_path, target).await {
-        // Remove the orphaned temp file; ignore its error since we are already
-        // failing.
+        #[cfg(unix)]
+        if let Some(perms) = original_permissions {
+            // Fail closed: a save that cannot preserve the target's required
+            // permissions must not silently loosen them.
+            fs::set_permissions(&temp_path, perms)?;
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows: file permissions are coarser and the temp already
+            // inherits the directory ACL; nothing practical to copy here.
+            let _ = original_permissions;
+        }
+
+        #[cfg(test)]
+        {
+            let mut hooks = BEFORE_REVALIDATE_HOOKS
+                .lock()
+                .expect("before-revalidate hooks poisoned");
+            if let Some(position) = hooks.iter().rposition(|(path, _)| path == target) {
+                let (_, hook) = hooks.remove(position);
+                drop(hooks);
+                hook();
+            }
+        }
+
+        // Revalidate the target's stable identity immediately before the
+        // replace: an external edit, atomic-replace, or symlink swap during
+        // the temp write fails the save instead of being silently clobbered.
+        if let Some(expected) = expected {
+            match expected.matches_current(target) {
+                Ok(true) => {}
+                Ok(false) => return Err(AtomicSaveError::TargetChanged),
+                Err(error) => return Err(AtomicSaveError::Io(error)),
+            }
+        }
+
+        tokio_fs::rename(&temp_path, target).await?;
+        let metadata = tokio_fs::metadata(target).await?;
+        Ok(FileMetadata::from_fs_metadata(&metadata))
+    }
+    .await;
+    if result.is_err() {
         let _ = tokio_fs::remove_file(&temp_path).await;
-        return Err(error);
     }
-
-    let metadata = tokio_fs::metadata(target).await?;
-    Ok(FileMetadata::from_fs_metadata(&metadata))
+    result
 }
 
 /// Heavy disk write + post-write metadata read for `save_document`, performed
@@ -1541,45 +2006,47 @@ async fn save_io(plan: &SavePlan) -> Result<SaveIoOutcome, WorkspaceError> {
         let document = plan.document.lock().await;
         (document.version(), document.text())
     };
-    // Atomic save: write a temp file in the target's directory, fsync it,
-    // restore the original file's permissions, then `rename` over the target.
-    // A crash or power loss during the write leaves the original file intact
-    // (only the temp is partial); the rename is atomic so the target is either
-    // the old or the new content, never a torn write.
-    let saved_metadata = atomic_write_file(&plan.canonical_path, text.as_bytes())
-        .await
-        .map_err(|source| WorkspaceError::WriteFailed {
+    // Atomic save: write an exclusive unpredictable temp file in the target's
+    // directory, fsync it, restore the original file's permissions, revalidate
+    // the target's stable identity, then `rename` over the target. A crash or
+    // power loss during the write leaves the original file intact (only the
+    // temp is partial); the rename is atomic so the target is either the old
+    // or the new content, never a torn write.
+    let saved_metadata = atomic_write_file(
+        &plan.canonical_path,
+        text.as_bytes(),
+        Some(&plan.expected_identity),
+    )
+    .await
+    .map_err(|error| match error {
+        AtomicSaveError::TargetChanged => WorkspaceError::StaleFileMetadata {
+            path: plan.relative_path.clone(),
+        },
+        AtomicSaveError::Io(source) => WorkspaceError::WriteFailed {
             path: plan.relative_path.clone(),
             source,
-        })?;
+        },
+    })?;
     Ok(SaveIoOutcome {
         prepared_version,
         saved_metadata,
     })
 }
 
-/// Heavy disk read + post-read metadata read for `reload_document`, performed
-/// with the workspace mutex released.
+/// Bounded disk read for `reload_document` through one opened handle,
+/// performed with the workspace mutex released. The returned metadata comes
+/// from the same handle that produced the text, so the registry records
+/// exactly what was read.
 async fn reload_io(plan: &ReloadPlan) -> Result<ReloadIoOutcome, WorkspaceError> {
-    let bytes = tokio_fs::read(&plan.canonical_path)
-        .await
-        .map_err(|source| WorkspaceError::FileUnavailable {
-            path: plan.relative_path.clone(),
-            source,
-        })?;
-    let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
-        path: plan.relative_path.clone(),
-        source,
-    })?;
-    let reloaded_metadata = tokio_fs::metadata(&plan.canonical_path)
-        .await
-        .map_err(|source| WorkspaceError::FileUnavailable {
-            path: plan.relative_path.clone(),
-            source,
-        })?;
+    let (text, reloaded_metadata) = read_file_bounded(
+        &plan.canonical_path,
+        &plan.relative_path,
+        MAX_OPENABLE_FILE_BYTES,
+    )
+    .await?;
     Ok(ReloadIoOutcome {
         text,
-        reloaded_metadata: FileMetadata::from_fs_metadata(&reloaded_metadata),
+        reloaded_metadata,
     })
 }
 
@@ -1606,14 +2073,19 @@ pub(crate) async fn open_existing_file_unlocked(
     match plan {
         OpenPrepare::Existing(lease) => Ok(lease),
         OpenPrepare::New(plan) => {
-            let text = open_io(
+            let (text, observed_metadata) = open_io(
                 &plan.file_state.canonical_path,
                 plan.file_state.workspace_relative_path.clone(),
             )
             .await?;
+            let mut file_state = plan.file_state;
+            // Record the metadata of the handle actually read, not the
+            // prepare-time stat, so the first save's staleness baseline
+            // matches the bytes in the document.
+            file_state.last_known_metadata = observed_metadata;
             let mut workspace = workspace.lock().await;
             workspace
-                .register_canonical_file(plan.file_state, text, plan.client_id)
+                .register_canonical_file(file_state, text, plan.client_id)
                 .await
         }
     }
@@ -1633,9 +2105,12 @@ pub(crate) async fn open_selected_file_unlocked(
     match plan {
         SelectedOpenPrepare::Existing(lease) => Ok(lease),
         SelectedOpenPrepare::New(plan) => {
-            let text = open_io(&plan.canonical_path, plan.display_path.clone()).await?;
+            let (text, observed_metadata) =
+                open_io(&plan.canonical_path, plan.display_path.clone()).await?;
             let mut workspace = workspace.lock().await;
-            workspace.register_selected_file(plan, text).await
+            workspace
+                .register_selected_file(plan, text, observed_metadata)
+                .await
         }
     }
 }
@@ -1643,7 +2118,15 @@ pub(crate) async fn open_selected_file_unlocked(
 pub(crate) async fn save_document_unlocked(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
+    client_id: ClientId,
+    known_version: DocumentVersion,
 ) -> Result<SaveDocumentOutcome, WorkspaceError> {
+    {
+        let workspace = workspace.lock().await;
+        workspace
+            .authorize_save(document_id, client_id, known_version)
+            .await?;
+    }
     let plan = {
         let workspace = workspace.lock().await;
         workspace.prepare_save(document_id)?
@@ -1656,8 +2139,15 @@ pub(crate) async fn save_document_unlocked(
 pub(crate) async fn reload_document_unlocked(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
+    client_id: ClientId,
     force: bool,
 ) -> Result<ReloadDocumentOutcome, WorkspaceError> {
+    {
+        let workspace = workspace.lock().await;
+        workspace
+            .authorize_document_access(document_id, client_id)
+            .await?;
+    }
     let plan = {
         let workspace = workspace.lock().await;
         workspace.prepare_reload(document_id, force).await?
@@ -1705,6 +2195,17 @@ pub(crate) enum WorkspaceError {
     UnsupportedFileType,
     DirtyDocument {
         document_id: DocumentId,
+    },
+    ReadOnlySave {
+        document_id: DocumentId,
+    },
+    DocumentLimitExceeded {
+        limit: usize,
+    },
+    StaleSaveVersion {
+        document_id: DocumentId,
+        known_version: DocumentVersion,
+        current_version: DocumentVersion,
     },
     StaleFileMetadata {
         path: PathBuf,
@@ -1824,6 +2325,25 @@ impl WorkspaceError {
                 format!("workspace document {document_id} has unsaved edits"),
                 Some("Save the document or explicitly request a forced reload before replacing in-memory edits.".to_string()),
             ),
+            Self::DocumentLimitExceeded { limit } => WorkspaceDiagnostic::new(
+                FileErrorCode::WorkspaceLimitExceeded,
+                format!("open-document limit of {limit} reached"),
+                Some("Close documents you no longer need before opening more.".to_string()),
+            ),
+            Self::ReadOnlySave { document_id } => WorkspaceDiagnostic::new(
+                FileErrorCode::AccessDenied,
+                format!("workspace document {document_id} is read-only for this connection"),
+                Some("Only the connection holding the editable lease can save a document.".to_string()),
+            ),
+            Self::StaleSaveVersion {
+                document_id,
+                known_version,
+                current_version,
+            } => WorkspaceDiagnostic::new(
+                FileErrorCode::StaleFileMetadata,
+                format!("save for workspace document {document_id} claims version {known_version} newer than the confirmed server version {current_version}"),
+                Some("Resync the document before saving so no confirmed edits are overwritten.".to_string()),
+            ),
             Self::StaleFileMetadata { path } => WorkspaceDiagnostic::new(
                 FileErrorCode::StaleFileMetadata,
                 format!("workspace file {} changed on disk since it was loaded", display_workspace_path(path)),
@@ -1857,20 +2377,27 @@ impl WorkspaceError {
 static LISTING_CANCELLATIONS: LazyLock<std::sync::Mutex<HashMap<String, ListingCancelToken>>> =
     LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
-/// Register a caller-supplied cancellation token id, returning the token.
+/// Register a caller-supplied cancellation token id, returning the existing
+/// token when the caller created it first. Reusing the token prevents a cancel
+/// racing list startup from being lost through replacement.
 pub(crate) fn register_listing_cancel_token(id: String) -> ListingCancelToken {
-    let token = Arc::new(AtomicBool::new(false));
-    {
-        let mut map = LISTING_CANCELLATIONS.lock().unwrap();
-        map.insert(id, token.clone());
-    }
-    token
+    let mut map = LISTING_CANCELLATIONS.lock().unwrap();
+    map.entry(id)
+        .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone()
 }
 
-/// Return a new unique cancellation token id, registering the token.
-pub(crate) fn create_listing_cancel_token() -> (String, ListingCancelToken) {
+/// Return a new unique cancellation token id without registering active
+/// state. The create-token API can therefore be called speculatively without
+/// leaking process-lifetime entries; registration starts with the listing.
+pub(crate) fn create_listing_cancel_token_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string();
+    NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string()
+}
+
+/// Allocate and register a token for a listing that starts immediately.
+pub(crate) fn create_listing_cancel_token() -> (String, ListingCancelToken) {
+    let id = create_listing_cancel_token_id();
     (id.clone(), register_listing_cancel_token(id))
 }
 
@@ -1891,112 +2418,185 @@ pub(crate) fn remove_listing_cancel_token(token_id: &str) {
     map.remove(token_id);
 }
 
-/// Closed set of names and patterns ignored by the bounded listing service.
+/// Drop guard for every listing exit path, including op cancellation and a
+/// panicking `spawn_blocking` task. Dropping requests cooperative cancellation
+/// before withdrawing the public token from the registry.
+pub(crate) struct ListingCancellationGuard {
+    token_id: String,
+    token: ListingCancelToken,
+}
+
+impl ListingCancellationGuard {
+    pub(crate) fn new(token_id: String, token: ListingCancelToken) -> Self {
+        Self { token_id, token }
+    }
+}
+
+impl Drop for ListingCancellationGuard {
+    fn drop(&mut self) {
+        self.token.store(true, Ordering::Relaxed);
+        remove_listing_cancel_token(&self.token_id);
+    }
+}
+
+/// Closed set of names and the intentionally small root-ignore grammar.
 struct IgnoreSet {
     names: HashSet<String>,
-    patterns: Vec<String>,
+    patterns: Vec<IgnorePattern>,
+}
+
+struct IgnorePattern {
+    chars: Vec<char>,
+    directory_only: bool,
 }
 
 impl IgnoreSet {
-    fn is_ignored(&self, name: &str, force_directory: Option<bool>) -> bool {
+    fn defaults() -> Self {
+        Self {
+            names: DEFAULT_IGNORED_NAMES
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
+            patterns: Vec::new(),
+        }
+    }
+
+    fn is_ignored(&self, name: &str, is_directory: bool) -> bool {
         if self.names.contains(name) {
             return true;
         }
-        for pattern in &self.patterns {
-            if gitignore_pattern_matches(name, pattern, force_directory) {
-                return true;
-            }
-        }
-        false
-    }
-}
-
-fn build_ignore_set(gitignore_patterns: &[String]) -> IgnoreSet {
-    let mut names: HashSet<String> = DEFAULT_IGNORED_NAMES
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
-    let mut patterns = Vec::new();
-    for pattern in gitignore_patterns {
-        let trimmed = pattern.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let without_dir_marker = trimmed.trim_end_matches('/');
-        if without_dir_marker.contains('/') {
-            // Single-level root .gitignore parse: path-specific patterns are
-            // not supported; only simple name patterns and globs.
-            continue;
-        }
-        if glob_pattern_is_name_only(trimmed) {
-            names.insert(without_dir_marker.to_string());
-        } else {
-            patterns.push(trimmed.to_string());
-        }
-    }
-    IgnoreSet { names, patterns }
-}
-
-fn glob_pattern_is_name_only(pattern: &str) -> bool {
-    let base = pattern.trim_end_matches('/');
-    !base.contains('*') && !base.contains('?') && !base.contains('[')
-}
-
-fn gitignore_pattern_matches(name: &str, pattern: &str, force_directory: Option<bool>) -> bool {
-    let directory_only = pattern.ends_with('/');
-    if directory_only {
-        if force_directory == Some(false) {
+        if self.patterns.is_empty() {
             return false;
         }
-        if force_directory.is_none() {
-            // Without metadata we cannot know; conservative: match anyway.
-        }
+        let text: Vec<_> = name.chars().collect();
+        self.patterns.iter().any(|pattern| {
+            (!pattern.directory_only || is_directory) && glob_matches(&text, &pattern.chars)
+        })
     }
-    let pattern = pattern.trim_end_matches('/');
-    glob_matches(name, pattern)
 }
 
-fn glob_matches(text: &str, pattern: &str) -> bool {
-    let mut pattern_chars = pattern.chars().peekable();
-    let mut text_chars = text.chars().peekable();
-    while let Some(p) = pattern_chars.next() {
-        match p {
-            '*' => {
-                let Some(next) = pattern_chars.peek().copied() else {
-                    return true;
-                };
-                loop {
-                    match text_chars.peek().copied() {
-                        Some(t) if t == next => break,
-                        Some(_) => {
-                            text_chars.next();
-                        }
-                        None => return false,
-                    }
-                }
-            }
-            '?' => {
-                if text_chars.next().is_none() {
-                    return false;
-                }
-            }
-            c => {
-                if text_chars.next() != Some(c) {
-                    return false;
-                }
-            }
-        }
-    }
-    text_chars.next().is_none()
-}
-
-fn read_root_gitignore_patterns(root_path: &Path) -> Vec<String> {
-    let path = root_path.join(".gitignore");
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(_) => return Vec::new(),
+fn load_ignore_set(root_path: &Path) -> Result<IgnoreSet, String> {
+    let Some(contents) =
+        read_auxiliary_file_bounded(&root_path.join(".gitignore"), MAX_AUXILIARY_READ_BYTES)?
+    else {
+        return Ok(IgnoreSet::defaults());
     };
-    contents.lines().map(|line| line.to_string()).collect()
+    build_ignore_set(&contents)
+}
+
+fn build_ignore_set(contents: &str) -> Result<IgnoreSet, String> {
+    let mut ignore_set = IgnoreSet::defaults();
+    for (index, line) in contents.lines().enumerate() {
+        let line_number = index + 1;
+        if line_number > MAX_GITIGNORE_LINES {
+            return Err(format!(
+                ".gitignore exceeds the {MAX_GITIGNORE_LINES}-line limit"
+            ));
+        }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.chars().count() > MAX_GITIGNORE_PATTERN_CHARS {
+            return Err(format!(
+                ".gitignore line {line_number} exceeds the {MAX_GITIGNORE_PATTERN_CHARS}-character rule limit"
+            ));
+        }
+        if ignore_set.patterns.len() >= MAX_GITIGNORE_PATTERNS {
+            return Err(format!(
+                ".gitignore exceeds the {MAX_GITIGNORE_PATTERNS}-rule limit"
+            ));
+        }
+        let directory_only = line.ends_with('/');
+        let pattern = line.strip_suffix('/').unwrap_or(line);
+        let unsupported = if line.starts_with('!') {
+            Some("negation")
+        } else if line.contains('\\') {
+            Some("escaping")
+        } else if line.contains('[') || line.contains(']') {
+            Some("character classes")
+        } else if pattern.contains('/') {
+            Some("path patterns")
+        } else if pattern.contains("**") {
+            Some("double-star patterns")
+        } else if pattern.chars().any(char::is_control) {
+            Some("control characters")
+        } else if pattern.is_empty() {
+            Some("an empty directory rule")
+        } else {
+            None
+        };
+        if let Some(feature) = unsupported {
+            return Err(format!(
+                ".gitignore line {line_number} uses unsupported {feature}"
+            ));
+        }
+        ignore_set.patterns.push(IgnorePattern {
+            chars: pattern.chars().collect(),
+            directory_only,
+        });
+    }
+    Ok(ignore_set)
+}
+
+/// Match the documented `*`/`?` component grammar with greedy-star
+/// backtracking. Both inputs are Unicode scalar sequences; separators never
+/// enter this function because path rules are rejected while parsing.
+fn glob_matches(text: &[char], pattern: &[char]) -> bool {
+    let (mut text_index, mut pattern_index) = (0, 0);
+    let (mut star_index, mut star_text_index) = (None, 0);
+    while text_index < text.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == '?' || pattern[pattern_index] == text[text_index])
+        {
+            text_index += 1;
+            pattern_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == '*' {
+            star_index = Some(pattern_index);
+            pattern_index += 1;
+            star_text_index = text_index;
+        } else if let Some(star) = star_index {
+            star_text_index += 1;
+            text_index = star_text_index;
+            pattern_index = star + 1;
+        } else {
+            return false;
+        }
+    }
+    while pattern_index < pattern.len() && pattern[pattern_index] == '*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
+}
+
+/// Read the optional root ignore file through one handle and retain at most
+/// `max_bytes + 1`. Missing means no user rules; every other failure aborts
+/// listing visibly so invalid rules never broaden traversal.
+fn read_auxiliary_file_bounded(path: &Path, max_bytes: usize) -> Result<Option<String>, String> {
+    use std::io::Read;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(".gitignore cannot be opened".to_string()),
+    };
+    let metadata = file
+        .metadata()
+        .map_err(|_| ".gitignore metadata cannot be read".to_string())?;
+    if !metadata.is_file() {
+        return Err(".gitignore is not a regular file".to_string());
+    }
+    if metadata.len() > max_bytes as u64 {
+        return Err(format!(".gitignore exceeds the {max_bytes}-byte limit"));
+    }
+    let mut bytes = Vec::new();
+    file.take((max_bytes as u64) + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ".gitignore cannot be read".to_string())?;
+    if bytes.len() > max_bytes {
+        return Err(format!(".gitignore exceeds the {max_bytes}-byte limit"));
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| ".gitignore is not valid UTF-8".to_string())
 }
 
 fn count_visible_children(dir_path: &Path, ignore_set: &IgnoreSet) -> usize {
@@ -2012,7 +2612,8 @@ fn count_visible_children(dir_path: &Path, ignore_set: &IgnoreSet) -> usize {
         };
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if ignore_set.is_ignored(&name_str, None) {
+        let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if ignore_set.is_ignored(&name_str, is_directory) {
             continue;
         }
         count += 1;
@@ -2065,6 +2666,9 @@ impl Error for WorkspaceError {
             | Self::DirectoryOpen
             | Self::UnsupportedFileType
             | Self::DirtyDocument { .. }
+            | Self::ReadOnlySave { .. }
+            | Self::DocumentLimitExceeded { .. }
+            | Self::StaleSaveVersion { .. }
             | Self::StaleFileMetadata { .. }
             | Self::FileTooLarge { .. }
             | Self::RootLimitExceeded => None,
@@ -2085,9 +2689,12 @@ mod tests {
 
     use crate::protocol::{DocumentAccess, EditOperation, FileErrorCode, ServerMessage};
 
+    use super::super::super::perf::budgets::MAX_DOCUMENTS_PER_CLIENT;
     use super::{
-        FileListEntryKind, FileListRequest, FileMetadata, SaveIoOutcome, WorkspaceError,
-        WorkspaceState, atomic_write_file, open_existing_file_unlocked, save_document_unlocked,
+        AtomicSaveError, BEFORE_REVALIDATE_HOOKS, BETWEEN_METADATA_AND_READ_HOOKS,
+        FileListEntryKind, FileListRequest, FileMetadata, SaveIoOutcome, TEST_TEMP_NAMES,
+        TargetIdentity, WorkspaceError, WorkspaceState, atomic_write_file, build_ignore_set,
+        open_existing_file_unlocked, save_document_unlocked,
     };
     use tokio::sync::Mutex;
 
@@ -2483,7 +3090,10 @@ mod tests {
             assert!(document.is_dirty());
         }
 
-        let saved = workspace.save_document(opened.document_id).await.unwrap();
+        let saved = workspace
+            .save_document(opened.document_id, 7, 2)
+            .await
+            .unwrap();
 
         assert_eq!(saved.document_id, opened.document_id);
         assert_eq!(saved.version, 2);
@@ -2524,7 +3134,10 @@ mod tests {
             assert!(matches!(response, ServerMessage::EditAck { .. }));
         }
 
-        workspace.save_document(opened.document_id).await.unwrap();
+        workspace
+            .save_document(opened.document_id, 9, 2)
+            .await
+            .unwrap();
 
         assert_eq!(fs::read_to_string(&file).unwrap(), "aéc");
 
@@ -2561,14 +3174,14 @@ mod tests {
         fs::write(&file, "changed on disk").unwrap();
 
         let rejected = workspace
-            .reload_document(opened.document_id, false)
+            .reload_document(opened.document_id, 3, false)
             .await
             .unwrap_err();
         assert!(matches!(rejected, WorkspaceError::DirtyDocument { .. }));
         assert_eq!(opened.document.lock().await.text(), "disk dirty");
 
         let reloaded = workspace
-            .reload_document(opened.document_id, true)
+            .reload_document(opened.document_id, 3, true)
             .await
             .unwrap();
 
@@ -2593,7 +3206,7 @@ mod tests {
         fs::write(&file, "new text").unwrap();
 
         let reloaded = workspace
-            .reload_document(opened.document_id, false)
+            .reload_document(opened.document_id, 4, false)
             .await
             .unwrap();
 
@@ -2635,7 +3248,7 @@ mod tests {
         fs::remove_file(&file).unwrap();
 
         let error = workspace
-            .save_document(opened.document_id)
+            .save_document(opened.document_id, 5, 2)
             .await
             .unwrap_err();
 
@@ -2674,7 +3287,7 @@ mod tests {
         fs::write(&file, "external change with different length").unwrap();
 
         let error = workspace
-            .save_document(opened.document_id)
+            .save_document(opened.document_id, 6, 2)
             .await
             .unwrap_err();
 
@@ -2772,7 +3385,7 @@ mod tests {
         fs::set_permissions(&file, permissions).unwrap();
 
         let error = workspace
-            .save_document(opened.document_id)
+            .save_document(opened.document_id, 8, 2)
             .await
             .unwrap_err();
         let diagnostic = error.diagnostic();
@@ -2789,7 +3402,7 @@ mod tests {
     }
 
     /// A file larger than `MAX_OPENABLE_FILE_BYTES` is rejected with a typed
-    /// `FileTooLarge` error before `tokio_fs::read` allocates the full contents.
+    /// `FileTooLarge` error before the bounded read allocates.
     #[tokio::test]
     async fn open_existing_file_rejects_oversized_file() {
         let root = temp_workspace("oversized-open");
@@ -2856,7 +3469,7 @@ mod tests {
         fs::write(&file, &oversized).unwrap();
 
         let error = workspace
-            .reload_document(opened.document_id, true)
+            .reload_document(opened.document_id, 1, true)
             .await
             .unwrap_err();
         let diagnostic = error.diagnostic();
@@ -2924,9 +3537,13 @@ mod tests {
         let ws_a = Arc::clone(&workspace);
         let ws_b = Arc::clone(&workspace);
         let save_a =
-            tokio::spawn(async move { save_document_unlocked(&ws_a, opened_a.document_id).await });
+            tokio::spawn(
+                async move { save_document_unlocked(&ws_a, opened_a.document_id, 1, 1).await },
+            );
         let save_b =
-            tokio::spawn(async move { save_document_unlocked(&ws_b, opened_b.document_id).await });
+            tokio::spawn(
+                async move { save_document_unlocked(&ws_b, opened_b.document_id, 2, 1).await },
+            );
         let (outcome_a, outcome_b) = tokio::join!(save_a, save_b);
         let outcome_a = outcome_a.unwrap().unwrap();
         let outcome_b = outcome_b.unwrap().unwrap();
@@ -3052,7 +3669,10 @@ mod tests {
             .lock()
             .await
             .replace_text_from_storage("replaced atomically".to_string());
-        workspace.save_document(opened.document_id).await.unwrap();
+        workspace
+            .save_document(opened.document_id, 9, 1)
+            .await
+            .unwrap();
 
         assert_eq!(
             fs::read_to_string(&file).unwrap(),
@@ -3104,7 +3724,7 @@ mod tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
 
         let error = workspace
-            .save_document(opened.document_id)
+            .save_document(opened.document_id, 9, 1)
             .await
             .unwrap_err();
         assert!(
@@ -3141,7 +3761,7 @@ mod tests {
         let blocker = root.join("blocker");
         fs::create_dir(&blocker).unwrap();
 
-        let error = atomic_write_file(&blocker, b"new content").await;
+        let error = atomic_write_file(&blocker, b"new content", None).await;
         assert!(
             error.is_err(),
             "renaming a temp file over a directory must fail, not silently succeed"
@@ -3159,6 +3779,439 @@ mod tests {
 
         let _ = fs::remove_dir(&blocker);
         let _ = fs::remove_dir(root);
+    }
+
+    /// A file that passes the prepare-time and handle-metadata size checks but
+    /// grows before the contents are read must still be bounded: the read
+    /// allocates at most the ceiling plus one byte and rejects with
+    /// `FileTooLarge` instead of opening the oversized file (Plan 060 T5).
+    #[tokio::test]
+    async fn bounded_read_rejects_file_that_grows_between_validation_and_read() {
+        let root = temp_workspace("grow-during-read");
+        let file = root.join("grow.txt");
+        let at_limit = "a".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES);
+        fs::write(&file, &at_limit).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let grow_path = file.clone();
+        BETWEEN_METADATA_AND_READ_HOOKS
+            .lock()
+            .expect("hook lock")
+            .push((
+                grow_path.clone(),
+                Box::new(move || {
+                    fs::write(&grow_path, format!("{at_limit}b")).unwrap();
+                }),
+            ));
+
+        let error = workspace
+            .open_existing_file(root_id, "grow.txt", 1)
+            .await
+            .unwrap_err();
+        assert_eq!(error.diagnostic().code, FileErrorCode::FileTooLarge);
+        assert!(workspace.document_handle(1).is_none());
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// A pre-created file at a predicted temp name must not be truncated or
+    /// followed: the exclusive create collides, the save retries with a fresh
+    /// unpredictable name, and the staged file is left untouched (Plan 060 T5).
+    #[tokio::test]
+    async fn atomic_save_ignores_precreated_temp_file() {
+        let root = temp_workspace("precreated-temp");
+        let target = root.join("target.txt");
+        fs::write(&target, "original").unwrap();
+        let staged = root.join("staged-collision");
+        fs::write(&staged, "sentinel").unwrap();
+        TEST_TEMP_NAMES
+            .lock()
+            .expect("temp-name queue lock")
+            .push((root.clone(), "staged-collision".to_string()));
+
+        let saved = atomic_write_file(&target, b"new content", None)
+            .await
+            .expect("collision with a pre-created temp must retry with a fresh name");
+        assert_eq!(saved.len(), 11);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new content");
+        assert_eq!(
+            fs::read_to_string(&staged).unwrap(),
+            "sentinel",
+            "pre-created temp file must never be truncated or overwritten"
+        );
+
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_file(staged);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// A pre-created symlink at a predicted temp name must not be followed:
+    /// the exclusive create refuses it and the symlink's victim keeps its
+    /// contents (Plan 060 T5).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn atomic_save_does_not_follow_precreated_temp_symlink() {
+        let root = temp_workspace("symlink-temp");
+        let target = root.join("target.txt");
+        fs::write(&target, "original").unwrap();
+        let victim = root.join("victim.txt");
+        fs::write(&victim, "victim-sentinel").unwrap();
+        std::os::unix::fs::symlink(&victim, root.join("staged-symlink")).unwrap();
+        TEST_TEMP_NAMES
+            .lock()
+            .expect("temp-name queue lock")
+            .push((root.clone(), "staged-symlink".to_string()));
+
+        atomic_write_file(&target, b"new content", None)
+            .await
+            .expect("symlink collision must retry with a fresh name");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new content");
+        assert_eq!(
+            fs::read_to_string(&victim).unwrap(),
+            "victim-sentinel",
+            "the temp symlink's target must never be written through"
+        );
+
+        let _ = fs::remove_file(root.join("staged-symlink"));
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_file(victim);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Collision retries are bounded: when every forced temp name is
+    /// pre-created the save fails closed, leaves the target untouched, and
+    /// removes nothing it did not create (Plan 060 T5).
+    #[tokio::test]
+    async fn atomic_save_fails_closed_on_bounded_collision_exhaustion() {
+        let root = temp_workspace("collision-exhaustion");
+        let target = root.join("target.txt");
+        fs::write(&target, "original").unwrap();
+        {
+            let mut queue = TEST_TEMP_NAMES.lock().expect("temp-name queue lock");
+            // Queue is popped one per attempt; push all 8 collision names.
+            for index in 0..8 {
+                let name = format!("collision-{index}");
+                fs::write(root.join(&name), "staged").unwrap();
+                queue.push((root.clone(), name));
+            }
+        }
+
+        let error = atomic_write_file(&target, b"new content", None)
+            .await
+            .expect_err("every temp name colliding must exhaust the bounded retry");
+        assert!(matches!(error, AtomicSaveError::Io(_)));
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "original",
+            "target must be unchanged when temp creation never succeeds"
+        );
+
+        let _ = fs::remove_file(target);
+        for index in 0..8 {
+            let _ = fs::remove_file(root.join(format!("collision-{index}")));
+        }
+        let _ = fs::remove_dir(root);
+    }
+
+    /// An external atomic replacement of the target (new inode, as other
+    /// editors do) during the temp write must fail the save closed instead of
+    /// silently clobbering the replacement (Plan 060 T5).
+    #[tokio::test]
+    async fn atomic_save_fails_closed_when_target_is_replaced_before_rename() {
+        let root = temp_workspace("target-replaced");
+        let target = root.join("target.txt");
+        fs::write(&target, "original").unwrap();
+        let replacement = root.join("replacement.txt");
+        fs::write(&replacement, "external replacement").unwrap();
+        let identity = TargetIdentity::capture(&target).unwrap();
+
+        let hook_root = root.clone();
+        BEFORE_REVALIDATE_HOOKS.lock().expect("hook lock").push((
+            target.clone(),
+            Box::new(move || {
+                fs::rename(
+                    hook_root.join("replacement.txt"),
+                    hook_root.join("target.txt"),
+                )
+                .unwrap();
+            }),
+        ));
+
+        let error = atomic_write_file(&target, b"editor content", Some(&identity))
+            .await
+            .expect_err("target replacement during save must fail closed");
+        assert!(matches!(error, AtomicSaveError::TargetChanged));
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "external replacement",
+            "the external replacement must be preserved, not clobbered"
+        );
+        let leaked_temps = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".clay-save-"))
+            .count();
+        assert_eq!(leaked_temps, 0, "failed save must clean up its temp file");
+
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// A same-length external edit during the temp write changes `modified`
+    /// and must fail the save closed, preserving the external bytes (Plan 060
+    /// T5). This is the case pure size checks cannot catch.
+    #[tokio::test]
+    async fn atomic_save_fails_closed_on_same_length_external_edit() {
+        let root = temp_workspace("same-length-edit");
+        let target = root.join("target.txt");
+        fs::write(&target, "aaaa").unwrap();
+        let identity = TargetIdentity::capture(&target).unwrap();
+
+        let edit_path = target.clone();
+        BEFORE_REVALIDATE_HOOKS.lock().expect("hook lock").push((
+            target.clone(),
+            Box::new(move || {
+                fs::write(&edit_path, "bbbb").unwrap();
+            }),
+        ));
+
+        let error = atomic_write_file(&target, b"cccc", Some(&identity))
+            .await
+            .expect_err("same-length external edit must fail closed");
+        assert!(matches!(error, AtomicSaveError::TargetChanged));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "bbbb");
+
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// End-to-end: a target modified between `prepare_save`'s staleness check
+    /// and the atomic replace surfaces the typed staleness error (not a
+    /// generic write failure) and preserves the external bytes (Plan 060 T5).
+    #[tokio::test]
+    async fn save_document_reports_stale_when_target_changes_during_write() {
+        let root = temp_workspace("stale-during-write");
+        let file = root.join("doc.txt");
+        fs::write(&file, "original").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+        let opened = open_existing_file_unlocked(&workspace, root_id, "doc.txt", 1)
+            .await
+            .unwrap();
+        opened
+            .document
+            .lock()
+            .await
+            .replace_text_from_storage("editor content".to_string());
+
+        let edit_path = file.clone();
+        BEFORE_REVALIDATE_HOOKS.lock().expect("hook lock").push((
+            file.clone(),
+            Box::new(move || {
+                fs::write(&edit_path, "external edit").unwrap();
+            }),
+        ));
+
+        let error = save_document_unlocked(&workspace, opened.document_id, 1, 1)
+            .await
+            .unwrap_err();
+        assert_eq!(error.diagnostic().code, FileErrorCode::StaleFileMetadata);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "external edit");
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Unix: a brand-new saved file starts owner-only (`0o600`) because the
+    /// exclusive temp does, and a save of an existing file preserves its
+    /// original mode across the atomic replace (Plan 060 T5).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn atomic_save_starts_owner_only_and_preserves_existing_mode() {
+        let root = temp_workspace("save-modes");
+        let new_file = root.join("new.txt");
+        atomic_write_file(&new_file, b"fresh", None).await.unwrap();
+        let new_mode = fs::metadata(&new_file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(new_mode, 0o600, "new file must start owner-only");
+
+        let existing = root.join("existing.txt");
+        fs::write(&existing, "old").unwrap();
+        fs::set_permissions(&existing, fs::Permissions::from_mode(0o640)).unwrap();
+        let identity = TargetIdentity::capture(&existing).unwrap();
+        atomic_write_file(&existing, b"updated", Some(&identity))
+            .await
+            .unwrap();
+        let kept_mode = fs::metadata(&existing).unwrap().permissions().mode() & 0o777;
+        assert_eq!(kept_mode, 0o640, "existing mode must survive the replace");
+
+        let _ = fs::remove_file(new_file);
+        let _ = fs::remove_file(existing);
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Per-client open-document ceiling: the 65th open by one client fails
+    /// closed with `WorkspaceLimitExceeded` while another client is
+    /// unaffected (Plan 060 T6, P1-4).
+    #[tokio::test]
+    async fn open_documents_enforce_per_client_ceiling() {
+        let root = temp_workspace("client-ceiling");
+        let total = MAX_DOCUMENTS_PER_CLIENT + 1;
+        for index in 0..total {
+            fs::write(root.join(format!("doc-{index}.txt")), "x").unwrap();
+        }
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        for index in 0..MAX_DOCUMENTS_PER_CLIENT {
+            workspace
+                .open_existing_file(root_id, format!("doc-{index}.txt"), 1)
+                .await
+                .unwrap_or_else(|error| panic!("open {index} must succeed: {error}"));
+        }
+        let error = workspace
+            .open_existing_file(root_id, format!("doc-{}.txt", MAX_DOCUMENTS_PER_CLIENT), 1)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.diagnostic().code,
+            FileErrorCode::WorkspaceLimitExceeded
+        );
+        // A different client has its own budget.
+        workspace
+            .open_existing_file(root_id, format!("doc-{}.txt", MAX_DOCUMENTS_PER_CLIENT), 2)
+            .await
+            .expect("other client must have its own budget");
+        for index in 0..total {
+            let _ = fs::remove_file(root.join(format!("doc-{index}.txt")));
+        }
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Explicit close: dirty close requires `force`, a non-holder fails closed
+    /// as `UnknownDocument`, the last holder's close removes the registry
+    /// entry, and a shared document survives until its final holder closes
+    /// (Plan 060 T6, P1-4).
+    #[tokio::test]
+    async fn close_document_lifecycle() {
+        let root = temp_workspace("close-lifecycle");
+        fs::write(root.join("a.txt"), "alpha").unwrap();
+        fs::write(root.join("shared.txt"), "shared").unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        // Dirty close requires force.
+        let opened = workspace
+            .open_existing_file(root_id, "a.txt", 1)
+            .await
+            .unwrap();
+        {
+            let mut document = opened.document.lock().await;
+            let access = document.access_for_client(1);
+            let crate::protocol::DocumentAccess::Editable { lease_id } = access else {
+                panic!("opener must hold the editable lease");
+            };
+            let (response, _) = document.apply_edit_with_parse_input(
+                opened.document_id,
+                1,
+                Some(lease_id),
+                1,
+                1,
+                crate::protocol::EditOperation::Insert {
+                    byte_offset: 0,
+                    text: "dirty ".to_string(),
+                },
+            );
+            assert!(matches!(response, ServerMessage::EditAck { .. }));
+        }
+        let error = workspace
+            .close_document(opened.document_id, 1, false)
+            .await
+            .unwrap_err();
+        assert_eq!(error.diagnostic().code, FileErrorCode::DirtyDocument);
+        assert!(workspace.document_handle(opened.document_id).is_some());
+
+        // Non-holder close fails closed like an unknown document.
+        let error = workspace
+            .close_document(opened.document_id, 2, true)
+            .await
+            .unwrap_err();
+        assert_eq!(error.diagnostic().code, FileErrorCode::UnknownDocument);
+
+        // Forced close by the only holder removes the registry entry.
+        let outcome = workspace
+            .close_document(opened.document_id, 1, true)
+            .await
+            .unwrap();
+        assert!(outcome.closed);
+        assert!(workspace.document_handle(opened.document_id).is_none());
+
+        // Shared document: first close releases only that holder.
+        let shared = workspace
+            .open_existing_file(root_id, "shared.txt", 1)
+            .await
+            .unwrap();
+        workspace
+            .open_existing_file(root_id, "shared.txt", 2)
+            .await
+            .unwrap();
+        let first = workspace
+            .close_document(shared.document_id, 1, false)
+            .await
+            .unwrap();
+        assert!(!first.closed);
+        assert!(workspace.document_handle(shared.document_id).is_some());
+        let second = workspace
+            .close_document(shared.document_id, 2, false)
+            .await
+            .unwrap();
+        assert!(second.closed);
+        assert!(workspace.document_handle(shared.document_id).is_none());
+
+        // Disconnect release finalizes documents with no remaining holders.
+        let reopened = workspace
+            .open_existing_file(root_id, "a.txt", 7)
+            .await
+            .unwrap();
+        let finalized = workspace.release_client_access(7).await;
+        assert_eq!(finalized.len(), 1);
+        assert_eq!(finalized[0].0, reopened.document_id);
+        assert!(workspace.document_handle(reopened.document_id).is_none());
+
+        let _ = fs::remove_file(root.join("a.txt"));
+        let _ = fs::remove_file(root.join("shared.txt"));
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn minimal_ignore_grammar_backtracks_and_rejects_unsupported_rules() {
+        let rules = build_ignore_set("*ab\n?.rs\nbuild/\n").unwrap();
+        assert!(rules.is_ignored("aab", false));
+        assert!(rules.is_ignored("é.rs", false));
+        assert!(!rules.is_ignored("ab.rs", false));
+        assert!(rules.is_ignored("build", true));
+        assert!(!rules.is_ignored("build", false));
+
+        for unsupported in [
+            "!secret", "foo\\*", "[xy]", "foo/bar", "foo//", "**.log", "/", "foo\0bar",
+        ] {
+            assert!(
+                build_ignore_set(unsupported).is_err(),
+                "unsupported rule was accepted: {unsupported}"
+            );
+        }
+    }
+
+    #[test]
+    fn ignore_rule_line_pattern_and_character_counts_are_bounded() {
+        let too_many_lines = "#\n".repeat(crate::perf::budgets::MAX_GITIGNORE_LINES + 1);
+        assert!(build_ignore_set(&too_many_lines).is_err());
+
+        let too_many_patterns = "x\n".repeat(crate::perf::budgets::MAX_GITIGNORE_PATTERNS + 1);
+        assert!(build_ignore_set(&too_many_patterns).is_err());
+
+        let too_long = "x".repeat(crate::perf::budgets::MAX_GITIGNORE_PATTERN_CHARS + 1);
+        assert!(build_ignore_set(&too_long).is_err());
     }
 
     #[test]
@@ -3491,6 +4544,41 @@ mod tests {
         assert!(!names.contains(&"out.txt"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_or_oversized_gitignore_aborts_listing_with_bounded_diagnostic() {
+        for (name, contents) in [
+            ("unsupported", "!secret\n".to_string()),
+            (
+                "oversized",
+                "#".repeat(crate::perf::budgets::MAX_AUXILIARY_READ_BYTES + 1),
+            ),
+        ] {
+            let root = temp_workspace(&format!("list-gitignore-{name}"));
+            fs::write(root.join("secret"), "x").unwrap();
+            fs::write(root.join(".gitignore"), contents).unwrap();
+            let mut workspace = WorkspaceState::new();
+            let root_id = workspace.add_root(&root).unwrap();
+
+            let page = workspace
+                .list_directory(
+                    FileListRequest {
+                        root_id,
+                        relative_path: PathBuf::new(),
+                        max_depth: 1,
+                        max_entries: 100,
+                    },
+                    None,
+                )
+                .unwrap();
+
+            assert!(page.entries.is_empty());
+            assert!(page.truncated);
+            assert_eq!(page.diagnostics.len(), 1);
+            assert!(page.diagnostics[0].message.contains(".gitignore"));
+            let _ = fs::remove_dir_all(root);
+        }
     }
 
     #[test]

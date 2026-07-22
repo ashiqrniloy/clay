@@ -1,0 +1,17 @@
+# cargo-audit configuration for Clay.
+#
+# Entries in `ignore` are temporary, expiring exceptions ONLY. Every ignored
+# advisory must have a matching documented record in
+# `docs/development/security.md` (dependency path, runtime reachability,
+# upstream remediation reference, owner, expiry). `tests/primitives_docs.rs`
+# fails once any documented expiry passes, forcing renewal with fresh evidence
+# or removal. Never add a blanket ignore.
+
+[advisories]
+ignore = [
+    # quick-xml 0.39.4 via wayland-scanner (build-time proc-macro) and
+    # zbus_xml 5.1.1 (runtime, D-Bus/AT-SPI accessibility chain). Both fixes
+    # are merged upstream but unreleased; see docs/development/security.md.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

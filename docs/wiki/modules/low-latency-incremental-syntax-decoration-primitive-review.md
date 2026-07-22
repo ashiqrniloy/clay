@@ -232,7 +232,7 @@ Tests:
 
 ## Tests
 
-- `tests/primitives_docs.rs::low_latency_incremental_syntax_decoration_primitive_review`: keeps amplification evidence, one-parse architecture, provisional interpolation, package neutrality, hot-path boundaries, and security authority exclusions recorded.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - `src/server/syntax.rs::tests::{native_parse_records_source_safe_work_classification_and_query_counts,incremental_parse_queries_less_than_unchanged_window,query_ranges_merge_and_expand_utf8_safe_empty_invalidations}`: verifies exact incremental/full classification, reduced query bytes, and deterministic UTF-8-safe normalization.
 - `tests/syntax_grammar.rs::{incremental_keyword_completion_requeries_whole_capture_not_distant_syntax,incremental_comment_opener_requeries_containing_capture,incremental_string_opener_requeries_complete_string_capture,incremental_string_closer_requeries_complete_string_capture,incremental_newline_shortens_line_comment_capture,cached_tree_version_gap_uses_one_bounded_full_parse}`: covers capture boundaries, distant unchanged syntax, and fallback.
 - `tests/syntax_grammar.rs::{dense_4k_capture_pass_fans_out_complete_bounded_decoration_sets,changed_decoration_chunk_is_ordered_before_adjacent_chunks}`: verifies complete dense fan-out, per-member budgets, atomic coordinator validation, and visible/changed-first order.
@@ -253,7 +253,7 @@ Tests:
 Run current documentation gate:
 
 ```bash
-cargo test --test primitives_docs
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

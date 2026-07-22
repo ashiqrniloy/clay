@@ -22,8 +22,8 @@
 - `src/server/decorations.rs`
 - `src/protocol/parse.rs`
 - `src/protocol/decorations.rs`
-- `runtime/js/parse.ts`
-- `runtime/js/decorations.ts`
+- `runtime/js/parse.js`
+- `runtime/js/decorations.js`
 - `tests/primitives_docs.rs`
 
 ## Overview
@@ -52,14 +52,14 @@ The target primitive is `SyntaxGrammarContribution`: package metadata that names
 
 - `src/server/parse_coordinator.rs` owns cancellable background parse scheduling, handler registration, generation replacement, stale-version rejection, parse-window validation, and syntax memory budgets.
 - `src/protocol/parse.rs` defines `ParseWindowSnapshot`, `ParsePolicy`, `ParseWindowRequest`, `ParseEditNotification`, and `IncrementalParseUpdate`.
-- `runtime/js/parse.ts` exposes `clay.parse.serverRegisterParseHandler` for server-side package parse handlers and rejects callback-shaped executable options.
+- `runtime/js/parse.js` exposes `clay.parse.serverRegisterParseHandler` for server-side package parse handlers and rejects callback-shaped executable options.
 - Phase 18.10 should reuse this lifecycle for Tree-sitter parse/highlight work as `Background` work. It should not add a second scheduler.
 
 ### Decoration transport and style-token validation
 
 - `src/protocol/decorations.rs` defines `DecorationSpan`, `DecorationKind::Syntax`, `DecorationSet`, and package provenance.
 - `src/server/decorations.rs` validates document versions, byte ranges, style tokens, permissions, provenance, and `DECORATION_PAYLOAD_BUDGET_BYTES`, then stores chunks under `SYNTAX_CACHE_BUDGET_BYTES`.
-- `runtime/js/decorations.ts` exposes `clay.decorations.serverPublishDecorations` for bounded server-side publication.
+- `runtime/js/decorations.js` exposes `clay.decorations.serverPublishDecorations` for bounded server-side publication.
 - Known generic code tokens already include `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, and `text`.
 - Tree-sitter captures must be mapped to Clay-known style tokens before publication; capture names and query files must not become raw CSS or renderer callbacks.
 
@@ -135,7 +135,7 @@ Phase 18.10 implemented the primitive as generic infrastructure rather than lang
 
 - `src/packages/record.rs` parses and validates `SyntaxGrammarContributionDescriptor` metadata under `clay.contributions.syntaxGrammars`, including first-party-only `@clay/*` scope, `tree-sitter-wasm` grammar paths, package-root-confined `.wasm`/`.scm` assets, known style tokens, duplicate-language checks, and `parse-document` + `render-decorations` permissions.
 - `src/server/syntax.rs` owns `SyntaxGrammarRegistry`, active syntax grammar selection, `TreeSitterSyntaxHandler`, query/capture diagnostics, incremental cached-tree reuse, viewport-bounded capture extraction, `DecorationSet` validation, payload checks before cache insertion, and `SyntaxChunkCache` retention.
-- `runtime/js/syntax.ts` and `src/server/ops/syntax.rs` expose the public `clay:syntax.serverRegisterSyntaxGrammar` facade/op for package load entries, while ordinary end-user config remains one-line `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, or `loadPackage("@clay/javascript")`.
+- `runtime/js/syntax.js` and `src/server/ops/syntax.rs` expose the public `clay:syntax.serverRegisterSyntaxGrammar` facade/op for package load entries, while ordinary end-user config remains one-line `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, or `loadPackage("@clay/javascript")`.
 - `packages/rust`, `packages/typescript`, and `packages/javascript` are grammar-only first-party packages: no major modes, commands, completions, SDUI, package UI, behavior manifests, configuration keys, or language-specific text transforms.
 - `docs/development/launch-and-gui-smoke.md` and `tests/fixtures/configuration/syntax-grammars/init.js` document the manual smoke path; `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow` provides deterministic load/select/decorate/edit/fallback coverage for non-interactive verification.
 
@@ -144,7 +144,7 @@ Phase 18.10 implemented the primitive as generic infrastructure rather than lang
 - `tests/primitives_docs.rs`: static coverage that this review is linked from the wiki index and primitive architecture page; registry/backlog mention `SyntaxGrammarContribution`; the review records first-party grammar-only packages, active syntax grammar vs active major mode separation, hot-path split, and first-party-only artifact security.
 - `tests/syntax_grammar.rs`: grammar contribution validation, query/capture mapping, package-root path rejection, disabled/invalid package fallback, no language-specific branch guards, Rust/TypeScript/JavaScript fixture `DecorationSet` generation, capture overflow rejection, and deterministic manual-smoke coverage.
 - `tests/package_loading_docs.rs`: documentation-as-code coverage for grammar package authoring, loadPackage-only configuration, final wiki coverage, and package-loading authority boundaries.
-- Commands: `CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs --test syntax_grammar --test package_loading_docs --quiet`.
+- Commands: `cargo test --test protocol --test runtime --quiet`.
 
 ## Related
 

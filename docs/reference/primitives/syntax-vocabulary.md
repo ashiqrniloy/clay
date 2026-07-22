@@ -161,5 +161,5 @@ Theme resolution happens at configuration/package-load time. `setTheme("@clay/th
 - `src/protocol/decorations.rs` — `TokenType`, `Modifiers`, `DecorationSpan`, compatibility mapping.
 - `src/editor/theme.rs` — `StyleSpec`, `StyleRegistry`, theme override resolution.
 - `src/packages/record.rs` — `TextStyleOverrideDescriptor` validation for `clay.contributions.textStyles`.
-- `runtime/js/theme.ts` and `docs/reference/clay-js-api/theme/set-theme.md` — `setTheme()`.
+- `runtime/js/theme.js` and `docs/reference/clay-js-api/theme/set-theme.md` — `setTheme()`.
 - `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md`.

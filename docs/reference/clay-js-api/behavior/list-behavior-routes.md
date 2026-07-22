@@ -3,7 +3,7 @@ id: clay.behavior.listBehaviorRoutes
 kind: clay-js-api
 js_module: "clay:behavior"
 js_export: listBehaviorRoutes
-js_facade: runtime/js/behavior.ts::listBehaviorRoutes
+js_facade: runtime/js/behavior.js::listBehaviorRoutes
 backing_rust: src/client/behavior.rs::ClientBehaviorState::route_key
 deno_op: op_clay_behavior_list_routes
 deno_op_path: src/server/ops/behavior.rs::op_clay_behavior_list_routes
@@ -91,7 +91,7 @@ Use `clay.behavior.listBehaviorRoutes` when the user asks for list behavior rout
 
 ## Backing implementation
 
-- JS facade: `runtime/js/behavior.ts::listBehaviorRoutes`
+- JS facade: `runtime/js/behavior.js::listBehaviorRoutes`
 - Deno op: `src/server/ops/behavior.rs::op_clay_behavior_list_routes` (`op_clay_behavior_list_routes`)
 - Backing Rust/current owner: `src/client/behavior.rs::ClientBehaviorState::route_key`
 - Current implementation audit path: `src/protocol/mod.rs::RoutingPolicy; src/client/behavior.rs::ClientBehaviorState::route_key`

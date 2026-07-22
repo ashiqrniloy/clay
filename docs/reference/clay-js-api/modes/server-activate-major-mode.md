@@ -3,7 +3,7 @@ id: clay.modes.serverActivateMajorMode
 kind: clay-js-api
 js_module: "clay:modes"
 js_export: serverActivateMajorMode
-js_facade: runtime/js/modes.ts::serverActivateMajorMode
+js_facade: runtime/js/modes.js::serverActivateMajorMode
 backing_rust: src/packages/modes.rs::ModeRegistry::activate_major_mode
 deno_op: op_clay_modes_activate_major_mode
 deno_op_path: src/server/ops/modes.rs::op_clay_modes_activate_major_mode
@@ -113,7 +113,7 @@ Use `clay.modes.serverActivateMajorMode` when the user asks for Activate Major M
 
 ## Backing implementation
 
-- JS facade: `runtime/js/modes.ts::serverActivateMajorMode`
+- JS facade: `runtime/js/modes.js::serverActivateMajorMode`
 - Deno op: `src/server/ops/modes.rs::op_clay_modes_activate_major_mode` (`op_clay_modes_activate_major_mode`)
 - Backing Rust/current owner: `src/packages/modes.rs::ModeRegistry::activate_major_mode`
 - Current implementation audit path: `src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::MajorModeActivation`

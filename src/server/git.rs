@@ -10,10 +10,12 @@ use std::{
 use tokio::{
     io::AsyncReadExt,
     process::Command,
-    sync::{Mutex, Notify},
+    sync::{Mutex, Notify, Semaphore},
     task::JoinSet,
     time::timeout,
 };
+
+use crate::perf::budgets::GIT_ROOT_CONCURRENCY;
 
 use super::workspace::{WorkspaceRootId, WorkspaceState};
 
@@ -90,6 +92,7 @@ pub(crate) struct GitDiscoveryService {
     git_binary: PathBuf,
     timeout: Duration,
     max_output_bytes: usize,
+    root_permits: Arc<Semaphore>,
 }
 
 impl Default for GitDiscoveryService {
@@ -104,6 +107,7 @@ impl GitDiscoveryService {
             git_binary: PathBuf::from("git"),
             timeout: GIT_DISCOVERY_TIMEOUT,
             max_output_bytes: GIT_OUTPUT_MAX_BYTES,
+            root_permits: Arc::new(Semaphore::new(GIT_ROOT_CONCURRENCY)),
         }
     }
 
@@ -113,6 +117,7 @@ impl GitDiscoveryService {
             git_binary: git_binary.into(),
             timeout: GIT_DISCOVERY_TIMEOUT,
             max_output_bytes: GIT_OUTPUT_MAX_BYTES,
+            root_permits: Arc::new(Semaphore::new(GIT_ROOT_CONCURRENCY)),
         }
     }
 
@@ -122,17 +127,32 @@ impl GitDiscoveryService {
         self
     }
 
+    #[cfg(test)]
+    fn with_root_concurrency(mut self, concurrency: usize) -> Self {
+        self.root_permits = Arc::new(Semaphore::new(concurrency));
+        self
+    }
+
     pub(crate) async fn discover_workspace_statuses(
         &self,
         workspace: &WorkspaceState,
     ) -> Vec<GitStatusSnapshot> {
-        let mut snapshots = Vec::new();
+        let mut tasks = JoinSet::new();
         for root in workspace.directory_roots() {
-            snapshots.push(
-                self.discover_root_status(root.workspace_root_id, &root.canonical_path)
-                    .await,
-            );
+            let service = self.clone();
+            tasks.spawn(async move {
+                service
+                    .discover_root_status(root.workspace_root_id, root.canonical_path)
+                    .await
+            });
         }
+        let mut snapshots = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            if let Ok(snapshot) = result {
+                snapshots.push(snapshot);
+            }
+        }
+        snapshots.sort_by_key(|snapshot| snapshot.workspace_root_id);
         snapshots
     }
 
@@ -141,6 +161,21 @@ impl GitDiscoveryService {
         workspace_root_id: WorkspaceRootId,
         workspace_root: impl AsRef<Path>,
     ) -> GitStatusSnapshot {
+        // One permit covers the complete per-root command sequence. Different
+        // roots run concurrently, while commands for one root remain ordered.
+        let _permit = match self.root_permits.acquire().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                return GitStatusSnapshot::error(
+                    workspace_root_id,
+                    workspace_root.as_ref().to_path_buf(),
+                    GitRefreshStatus::CommandError {
+                        command: "concurrency",
+                        message: "git discovery service stopped".to_string(),
+                    },
+                );
+            }
+        };
         let Ok(canonical_root) = canonical_directory(workspace_root.as_ref()) else {
             return GitStatusSnapshot::error(
                 workspace_root_id,
@@ -841,6 +876,80 @@ mod tests {
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].workspace_root_id, root_id);
         assert_eq!(snapshots[0].last_refresh, GitRefreshStatus::Success);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_discovery_bounds_root_concurrency_and_preserves_association() {
+        let parent = temp_dir("git-discovery-bounded-roots");
+        let release = parent.join("release");
+        let log = parent.join("commands.log");
+        let mut workspace = WorkspaceState::new();
+        let mut expected = Vec::new();
+        for index in 0..3 {
+            let root = parent.join(format!("root-{index}"));
+            fs::create_dir_all(&root).unwrap();
+            let id = workspace.add_root(&root).unwrap();
+            expected.push((id, fs::canonicalize(root).unwrap()));
+        }
+        let fake_git = fake_git(
+            &parent,
+            &format!(
+                r#"echo "$(pwd)|$*" >> "{}"
+touch "{}/started-$(basename "$(pwd)")"
+while [ ! -f "{}" ]; do sleep 0.02; done
+case "$*" in
+  *"rev-parse --show-toplevel"*) pwd ;;
+  *"symbolic-ref"*) echo main ;;
+  *"status --porcelain"*) ;;
+  *) echo "fatal fake" >&2; exit 2 ;;
+esac
+"#,
+                log.display(),
+                parent.display(),
+                release.display()
+            ),
+        );
+        let service = GitDiscoveryService::with_git_binary(fake_git)
+            .with_timeout(Duration::from_secs(30))
+            .with_root_concurrency(2);
+        let discovery =
+            tokio::spawn(async move { service.discover_workspace_statuses(&workspace).await });
+
+        let started_count = || {
+            fs::read_dir(&parent)
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("started-"))
+                .count()
+        };
+        while started_count() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(started_count(), 2, "only two roots may run concurrently");
+
+        fs::write(&release, "").unwrap();
+        let snapshots = discovery.await.unwrap();
+        assert_eq!(snapshots.len(), expected.len());
+        for (snapshot, (expected_id, expected_root)) in snapshots.iter().zip(&expected) {
+            assert_eq!(snapshot.workspace_root_id, *expected_id);
+            assert_eq!(&snapshot.workspace_root, expected_root);
+            assert_eq!(snapshot.last_refresh, GitRefreshStatus::Success);
+        }
+
+        let command_log = fs::read_to_string(log).unwrap();
+        for (_, root) in expected {
+            let commands: Vec<_> = command_log
+                .lines()
+                .filter(|line| line.starts_with(&format!("{}|", root.display())))
+                .collect();
+            assert_eq!(commands.len(), 3);
+            assert!(commands[0].contains("rev-parse --show-toplevel"));
+            assert!(commands[1].contains("symbolic-ref"));
+            assert!(commands[2].contains("status --porcelain"));
+        }
+        let _ = fs::remove_dir_all(parent);
     }
 
     #[cfg(unix)]

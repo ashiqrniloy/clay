@@ -17,7 +17,7 @@
 - `src/editor/layout.rs` — `paint_squiggle`, `diagnostic_mark_rects_in_layout`.
 - `src/editor/theme.rs` — `StyleRegistry::diagnostic_style`, severity colors.
 - `src/perf/budgets.rs` — `DIAGNOSTIC_*` budgets.
-- `runtime/js/diagnostics.ts`, `runtime/js/web-tree-sitter-host.ts::collectWebTreeSitterDiagnostics`.
+- `runtime/js/diagnostics.js`, `runtime/js/web-tree-sitter-host.ts::collectWebTreeSitterDiagnostics`.
 - Tests: `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, `tests/performance_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/primitives_docs.rs`, `tests/clay_js_doc_registry.rs`, `tests/rust_visibility_api_mapping.rs`, `tests/manual_smoke_docs.rs`.
 - Authoritative public API: [`clay.diagnostics.serverPublishDiagnostics`](../../reference/clay-js-api/diagnostics/server-publish-diagnostics.md).
 - Authoritative primitive contract: [Diagnostics](../../reference/primitives/diagnostics.md).
@@ -89,14 +89,14 @@ serverPublishDiagnostics({
 ```
 
 ```bash
-cargo test --test range_diagnostics
-cargo test --test syntax_grammar
-cargo test --test primitives_docs range_diagnostics
+cargo test --test editor range_diagnostics::
+cargo test --test runtime syntax_grammar::
+cargo test --test protocol primitives_docs::
 ```
 
 ## Primitive Coverage
 
-- **Range diagnostic publication** — `DiagnosticSet` in `src/protocol/diagnostics.rs`; facade `runtime/js/diagnostics.ts::serverPublishDiagnostics`.
+- **Range diagnostic publication** — `DiagnosticSet` in `src/protocol/diagnostics.rs`; facade `runtime/js/diagnostics.js::serverPublishDiagnostics`.
 - **Analyzer-neutral transport** — explicit package analyzers and future LSP bridges publish the same inert `DiagnosticSet` records.
 - **Permissions / budgets** — reuses `render-decorations`; `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 - **Hot-path policy** — parse/validate/serialize on background server path; paint uses cached spans + Parley rects + theme colors only.

@@ -54,6 +54,11 @@ pub(crate) struct DocumentState {
     region_locks: Vec<RegionLock>,
     next_region_lock_id: RegionLockId,
     retained_parse_windows: HashMap<(String, String), RetainedParseWindow>,
+    /// Connections that acquired document access through an authorized open
+    /// path (welcome snapshot, OpenDocument, OpenSelectedFile). Server-side
+    /// status/save/reload/list gates on this set so a connection cannot probe
+    /// or act on documents it never opened (Plan 060 T4, P0-2).
+    access_holders: std::collections::HashSet<ClientId>,
 }
 
 impl DocumentState {
@@ -69,6 +74,7 @@ impl DocumentState {
             region_locks: Vec::new(),
             next_region_lock_id: 1,
             retained_parse_windows: HashMap::new(),
+            access_holders: std::collections::HashSet::new(),
         }
     }
 
@@ -99,6 +105,7 @@ impl DocumentState {
     }
 
     pub(crate) fn acquire_access(&mut self, client_id: ClientId) -> DocumentAccess {
+        self.access_holders.insert(client_id);
         match self.active_lease {
             Some(lease) if lease.client_id == client_id => DocumentAccess::Editable {
                 lease_id: lease.lease_id,
@@ -117,12 +124,26 @@ impl DocumentState {
     }
 
     pub(crate) fn release_access(&mut self, client_id: ClientId) {
+        self.access_holders.remove(&client_id);
         if self
             .active_lease
             .is_some_and(|lease| lease.client_id == client_id)
         {
             self.active_lease = None;
         }
+    }
+
+    /// True when `client_id` acquired access through an authorized open path.
+    /// The server-internal runtime identity (`0`) always has access because it
+    /// acts on behalf of trusted configuration, not a remote connection.
+    /// Number of connections currently holding access. The server-internal
+    /// runtime identity is an implicit full-access holder and is not counted.
+    pub(crate) fn access_holder_count(&self) -> usize {
+        self.access_holders.len()
+    }
+
+    pub(crate) fn has_access(&self, client_id: ClientId) -> bool {
+        client_id == 0 || self.access_holders.contains(&client_id)
     }
 
     pub(crate) fn initial_document_message(&self, access: DocumentAccess) -> ServerMessage {

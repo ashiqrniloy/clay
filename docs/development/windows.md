@@ -60,7 +60,7 @@ cargo check --target x86_64-pc-windows-msvc --all-targets
 cargo test --lib client --quiet
 cargo test --lib windows_named_pipe --quiet
 cargo test --lib windows_second_client_is_read_only --quiet
-cargo test --test rust_visibility_api_mapping --quiet
+cargo test --test security rust_visibility_api_mapping:: --quiet
 ```
 
 For a broader native-target pass on Windows, run:
@@ -92,6 +92,8 @@ cargo run -- smoke-gui --config-fixture windows-markdown-open
 ```
 
 The fixture loads `@clay/markdown` and binds `Ctrl+O` to `clay.documents.clientOpenFileDialog` through `init.js`. The route opens the Windows native file browser with Markdown filters (`.md`, `.markdown`, `.mdown`) plus an all-files fallback; cancellation is a non-error no-op. Selecting a regular UTF-8 file sends an explicit selected-file open request to the server, which validates and grants only that file before replacing the GUI buffer. When `@clay/markdown` is loaded, selected `.md`, `.markdown`, and `.mdown` files also activate Markdown mode and receive viewport-bounded Markdown decorations/status for manual smoke validation. Type in the opened file to confirm local editing remains responsive, then skip save for this phase.
+
+Windows clipboard checks for Plan 060 T13 remain host-manual (Linux CI does not claim Windows execution): copy/cut/paste both through native chords and configured client commands. Linux-only portal generation gating does not change the Windows modal COM path. Clay retains text-only `arboard` because Masonry's private copypasta context exposes no `DriverCtx` read fallback; the image feature/dependency subtree is disabled. A future deletion requires this Windows smoke plus Linux pure-Wayland/X11 and macOS parity.
 
 Windows-specific expected behavior:
 

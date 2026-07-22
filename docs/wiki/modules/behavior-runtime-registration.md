@@ -7,8 +7,8 @@
 - `src/server/ops/keybindings.rs`
 - `src/server/ops/behavior.rs`
 - `src/server/behavior.rs`
-- `runtime/js/keybindings.ts`
-- `runtime/js/behavior.ts`
+- `runtime/js/keybindings.js`
+- `runtime/js/behavior.js`
 
 ## Overview
 

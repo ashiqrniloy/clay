@@ -3,7 +3,7 @@ id: clay.sdui.defineFlex
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineFlex
-js_facade: runtime/js/sdui.ts::defineFlex
+js_facade: runtime/js/sdui.js::defineFlex
 backing_rust: src/protocol/sdui.rs::SduiNodeKind::Flex
 deno_op: op_clay_sdui_define_node
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_define_node
@@ -106,7 +106,7 @@ Use `clay.sdui.defineFlex` when the user asks for runtime-backed Clay SDUI schem
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::defineFlex`
+- JS facade: `runtime/js/sdui.js::defineFlex`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::Flex`
 - Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`

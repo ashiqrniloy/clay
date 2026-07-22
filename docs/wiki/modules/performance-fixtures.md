@@ -90,11 +90,11 @@ Phase 14 adds `src/perf/budgets.rs` which centralises all typed budget constants
 
 | Constant | Value | Checked by |
 |---|---|---|
-| `CLIENT_EDIT_PAYLOAD_BUDGET_BYTES` | 512 B | `cargo test --test performance_protocol` |
-| `EDIT_ACK_PAYLOAD_BUDGET_BYTES` | 128 B | `cargo test --test performance_protocol` |
-| `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | 2 048 B | `cargo test --test performance_protocol` |
-| `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` | 4 096 B | `cargo test --test performance_protocol` |
-| `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | 1 024 B | `cargo test --test performance_protocol` |
+| `CLIENT_EDIT_PAYLOAD_BUDGET_BYTES` | 512 B | `cargo test --test protocol performance_protocol::` |
+| `EDIT_ACK_PAYLOAD_BUDGET_BYTES` | 128 B | `cargo test --test protocol performance_protocol::` |
+| `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | 2 048 B | `cargo test --test protocol performance_protocol::` |
+| `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` | 4 096 B | `cargo test --test protocol performance_protocol::` |
+| `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | 1 024 B | `cargo test --test protocol performance_protocol::` |
 
 ### Advisory latency/memory budgets
 
@@ -112,9 +112,9 @@ Security guardrails: profiling/benchmark workflows must not expose document cont
 
 ## Tests
 
-- `cargo test --test performance_budgets`: verifies benchmark command discoverability, budget constant/doc alignment, constant values (compile-time guard), developer-only profiling policy, active Markdown benchmark documentation, Phase 18 markdown-it rewrite decision/performance evidence in the plan/docs, and structural UI observability documentation.
-- `cargo test --test performance_protocol`: deterministic payload-size budgets, client-first typing invariants, queue depth/responsiveness, and oversized-frame rejection.
-- `cargo test --test editor_performance_invariants`: viewport-bounded extraction, scroll layout stability, layout cache invalidation, and Unicode safety.
+- `cargo test --test protocol performance_budgets::`: verifies benchmark command discoverability, budget constant/doc alignment, constant values (compile-time guard), developer-only profiling policy, active Markdown benchmark documentation, Phase 18 markdown-it rewrite decision/performance evidence in the plan/docs, and structural UI observability documentation.
+- `cargo test --test protocol performance_protocol::`: deterministic payload-size budgets, client-first typing invariants, queue depth/responsiveness, and oversized-frame rejection.
+- `cargo test --test editor editor_performance_invariants::`: viewport-bounded extraction, scroll layout stability, layout cache invalidation, and Unicode safety.
 - `cargo bench --no-run`: compiles all Criterion targets, including `markdown_baselines`, without machine-variant timing.
 
 ## Related

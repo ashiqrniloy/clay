@@ -3,7 +3,7 @@ id: clay.packages.serverValidatePackagePermissions
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: serverValidatePackagePermissions
-js_facade: runtime/js/packages.ts::serverValidatePackagePermissions
+js_facade: runtime/js/packages.js::serverValidatePackagePermissions
 backing_rust: src/packages/permissions.rs::parse_permission
 deno_op: op_clay_packages_validate_permissions
 deno_op_path: src/server/ops/packages.rs::op_clay_packages_validate_permissions
@@ -95,7 +95,7 @@ Use `clay.packages.serverValidatePackagePermissions` when the user asks for Vali
 
 ## Backing implementation
 
-- JS facade: `runtime/js/packages.ts::serverValidatePackagePermissions`
+- JS facade: `runtime/js/packages.js::serverValidatePackagePermissions`
 - Deno op: `src/server/ops/packages.rs::op_clay_packages_validate_permissions` (`op_clay_packages_validate_permissions`)
 - Backing Rust/current owner: `src/packages/permissions.rs::parse_permission`
 - Current implementation audit path: `src/packages/permissions.rs::PackagePermission; src/packages/permissions.rs::parse_permission`

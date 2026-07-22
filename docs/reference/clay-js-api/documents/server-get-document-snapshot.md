@@ -3,7 +3,7 @@ id: clay.documents.serverGetDocumentSnapshot
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverGetDocumentSnapshot
-js_facade: runtime/js/documents.ts::serverGetDocumentSnapshot
+js_facade: runtime/js/documents.js::serverGetDocumentSnapshot
 backing_rust: src/server/document.rs::DocumentState::resync_snapshot_message_for_client
 deno_op: op_clay_documents_get_document_snapshot
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_get_document_snapshot
@@ -91,7 +91,7 @@ Use `clay.documents.serverGetDocumentSnapshot` when the user asks for get docume
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::serverGetDocumentSnapshot`
+- JS facade: `runtime/js/documents.js::serverGetDocumentSnapshot`
 - Future Deno op: `src/server/ops/documents.rs::op_clay_documents_get_document_snapshot` (`op_clay_documents_get_document_snapshot`)
 - Backing Rust/current owner: `src/server/document.rs::DocumentState::resync_snapshot_message_for_client`
 - Current implementation audit path: `src/server/document.rs::DocumentState::initial_document_message; src/server/document.rs::DocumentState::resync_snapshot_message_for_client`

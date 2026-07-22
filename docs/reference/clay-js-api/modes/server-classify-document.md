@@ -3,7 +3,7 @@ id: clay.modes.serverClassifyDocument
 kind: clay-js-api
 js_module: "clay:modes"
 js_export: serverClassifyDocument
-js_facade: runtime/js/modes.ts::serverClassifyDocument
+js_facade: runtime/js/modes.js::serverClassifyDocument
 backing_rust: src/packages/modes.rs::ModeRegistry::classify
 deno_op: op_clay_modes_classify_document
 deno_op_path: src/server/ops/modes.rs::op_clay_modes_classify_document
@@ -107,7 +107,7 @@ Use `clay.modes.serverClassifyDocument` when the user asks for Classify Document
 
 ## Backing implementation
 
-- JS facade: `runtime/js/modes.ts::serverClassifyDocument`
+- JS facade: `runtime/js/modes.js::serverClassifyDocument`
 - Deno op: `src/server/ops/modes.rs::op_clay_modes_classify_document` (`op_clay_modes_classify_document`)
 - Backing Rust/current owner: `src/packages/modes.rs::ModeRegistry::classify`
 - Current implementation audit path: `src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::DocumentClassificationInput`

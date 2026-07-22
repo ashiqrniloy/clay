@@ -5,7 +5,7 @@
 - `src/protocol/decorations.rs`
 - `src/server/decorations.rs`
 - `src/server/ops/decorations.rs`
-- `runtime/js/decorations.ts`
+- `runtime/js/decorations.js`
 - `src/client/mod.rs`
 - `src/editor/surface.rs`
 - `src/editor/layout.rs`
@@ -87,7 +87,7 @@ let message = ServerMessage::DecorationSet(set);
 - `tests/performance_protocol.rs::decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport`: verifies chunk IPC payloads remain under the decoration transport budget.
 - `tests/editor_performance_invariants.rs::paint_uses_cached_inert_spans_without_package_javascript`: guards paint/layout source against package JavaScript, parser, server, or op calls.
 - `src/server/js_runtime.rs::phase18_parse_and_decoration_facades_are_runtime_backed`: controlled-runtime facade/op smoke for the public API.
-- Relevant commands: `cargo test large_file_decoration_cache_respects_30_mib_budget --lib`, `cargo test --test decoration_transport`, `cargo test --test performance_protocol`, `cargo test --test editor_performance_invariants`, and `cargo test phase18_parse_and_decoration_facades_are_runtime_backed --lib`.
+- Relevant commands: `cargo test large_file_decoration_cache_respects_30_mib_budget --lib`, `cargo test --test editor decoration_transport::`, `cargo test --test protocol performance_protocol::`, `cargo test --test editor editor_performance_invariants::`, and `cargo test phase18_parse_and_decoration_facades_are_runtime_backed --lib`.
 
 ## Related
 

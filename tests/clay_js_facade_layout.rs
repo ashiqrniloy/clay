@@ -3,7 +3,7 @@ use std::path::Path;
 
 const FACADE_MODULES: &[(&str, &[&str])] = &[
     (
-        "runtime/js/editor.ts",
+        "runtime/js/editor.js",
         &[
             "serverInsertText",
             "serverDeleteRange",
@@ -24,11 +24,11 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/keybindings.ts",
+        "runtime/js/keybindings.js",
         &["bindKey", "unbindKey", "listKeyBindings"],
     ),
     (
-        "runtime/js/configuration.ts",
+        "runtime/js/configuration.js",
         &[
             "loadConfigurationModule",
             "getConfigurationState",
@@ -39,7 +39,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/documents.ts",
+        "runtime/js/documents.js",
         &[
             "serverGetDocumentSnapshot",
             "serverGetDocumentLease",
@@ -52,7 +52,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/workspace.ts",
+        "runtime/js/workspace.js",
         &[
             "serverListWorkspaceRoots",
             "serverAddWorkspaceRoot",
@@ -64,11 +64,15 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/behavior.ts",
+        "runtime/js/behavior.js",
         &["getActiveBehaviorManifest", "listBehaviorRoutes"],
     ),
     (
-        "runtime/js/sdui.ts",
+        "runtime/js/git.js",
+        &["serverListGitStatuses", "serverRefreshGitStatus"],
+    ),
+    (
+        "runtime/js/sdui.js",
         &[
             "definePanel",
             "defineLabel",
@@ -81,7 +85,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/ui.ts",
+        "runtime/js/ui.js",
         &[
             "serverRegisterPanelContribution",
             "serverRegisterComponentContribution",
@@ -91,9 +95,9 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverRegisterThemeToken",
         ],
     ),
-    ("runtime/js/application.ts", &["quit"]),
+    ("runtime/js/application.js", &["quit"]),
     (
-        "runtime/js/packages.ts",
+        "runtime/js/packages.js",
         &[
             "serverValidatePackageManifest",
             "serverValidatePackagePermissions",
@@ -102,7 +106,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/modes.ts",
+        "runtime/js/modes.js",
         &[
             "serverRegisterModePattern",
             "serverClassifyDocument",
@@ -114,7 +118,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "runtime/js/commands.ts",
+        "runtime/js/commands.js",
         &[
             "serverRegisterCommand",
             "serverListCommands",
@@ -124,16 +128,29 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverRevealInTree",
         ],
     ),
-    ("runtime/js/decorations.ts", &["serverPublishDecorations"]),
-    ("runtime/js/parse.ts", &["serverRegisterParseHandler"]),
-    ("runtime/js/syntax.ts", &["serverRegisterSyntaxGrammar"]),
+    ("runtime/js/decorations.js", &["serverPublishDecorations"]),
+    ("runtime/js/diagnostics.js", &["serverPublishDiagnostics"]),
     (
-        "runtime/js/completion.ts",
+        "runtime/js/language-server.js",
+        &["authorizeLanguageServer", "startLanguageServerSession"],
+    ),
+    (
+        "runtime/js/language.js",
+        &[
+            "serverRegisterDocumentAnalyzer",
+            "serverRegisterLanguageIntelligenceProvider",
+        ],
+    ),
+    ("runtime/js/parse.js", &["serverRegisterParseHandler"]),
+    ("runtime/js/syntax.js", &["serverRegisterSyntaxGrammar"]),
+    (
+        "runtime/js/completion.js",
         &[
             "serverRegisterCompletionProvider",
             "serverDisableCompletion",
         ],
     ),
+    ("runtime/js/theme.js", &["setTheme", "setTypography"]),
 ];
 
 #[test]
@@ -142,12 +159,19 @@ fn clay_js_facade_modules_exist_with_expected_exports() {
         let source =
             fs::read_to_string(path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
 
+        let declaration_path = path.replace(".js", ".d.ts");
+        let declarations = fs::read_to_string(&declaration_path)
+            .unwrap_or_else(|err| panic!("failed to read {declaration_path}: {err}"));
         for export_name in *exports {
             let function_export = format!("export function {export_name}");
             let async_function_export = format!("export async function {export_name}");
             assert!(
                 source.contains(&function_export) || source.contains(&async_function_export),
                 "{path} must export planned facade function {export_name}"
+            );
+            assert!(
+                declarations.contains(&format!("function {export_name}")),
+                "{declaration_path} must declare facade function {export_name}"
             );
         }
     }
@@ -190,30 +214,31 @@ fn clay_js_facade_exports_follow_naming_and_boundary_rules() {
 }
 
 #[test]
-fn load_package_facade_stays_in_sync_between_ts_and_embedded_constant() {
-    // Phase 18.6 task 5: `loadPackage` ships on BOTH `runtime/js/packages.ts`
-    // (the TypeScript facade) and the embedded `CLAY_FACADE_PACKAGES` constant
-    // in `src/server/js_runtime.rs`. The runtime embeds facades as constants, so
-    // both must export `loadPackage` with the same shape or the runtime will not
-    // resolve it from a configuration module.
-    let ts_facade = fs::read_to_string("runtime/js/packages.ts").unwrap();
-    let embedded = fs::read_to_string("src/server/js_runtime.rs").unwrap();
+fn runtime_facades_are_included_from_authoritative_js_files() {
+    let table = fs::read_to_string("src/server/facades.rs").unwrap();
+    let runtime = fs::read_to_string("src/server/js_runtime.rs").unwrap();
+    let mut expected: Vec<_> = FACADE_MODULES.iter().map(|(path, _)| *path).collect();
+    let mut executable: Vec<_> = fs::read_dir("runtime/js")
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "js"))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    expected.sort_unstable();
+    executable.sort_unstable();
+    assert_eq!(executable, expected);
 
-    for needle in [
-        "export async function loadPackage",
-        "clay.packages.invalid_specifier: loadPackage requires a string specifier",
-        "op_clay_packages_load_package_by_specifier",
-        "loadEntrySpecifier",
-    ] {
-        assert!(
-            ts_facade.contains(needle),
-            "runtime/js/packages.ts must include the loadPackage facade piece: `{needle}`"
-        );
-        assert!(
-            embedded.contains(needle),
-            "the embedded CLAY_FACADE_PACKAGES constant must mirror the same loadPackage piece: `{needle}`"
+    for (path, _) in FACADE_MODULES {
+        assert_eq!(
+            table
+                .matches(&format!("include_str!(\"../../{path}\")"))
+                .count(),
+            1,
+            "{path} must be included exactly once by the runtime facade table"
         );
     }
+    assert!(!runtime.contains("const CLAY_FACADE_"));
 }
 
 #[test]
@@ -221,14 +246,14 @@ fn load_package_does_not_expose_raw_op_names() {
     // `loadPackage` is the only public symbol added; the packages facade must
     // not expose raw `op_`-shaped exports. (The general boundary rule is enforced
     // for all facades above; this pins it explicitly for the new loader.)
-    let ts_facade = fs::read_to_string("runtime/js/packages.ts").unwrap();
+    let ts_facade = fs::read_to_string("runtime/js/packages.js").unwrap();
     for line in ts_facade
         .lines()
         .filter(|line| line.trim_start().starts_with("export "))
     {
         assert!(
             !line.contains(" op_") && !line.contains("Deno"),
-            "runtime/js/packages.ts must not expose an implementation-shaped export: {line}"
+            "runtime/js/packages.js must not expose an implementation-shaped export: {line}"
         );
     }
 }

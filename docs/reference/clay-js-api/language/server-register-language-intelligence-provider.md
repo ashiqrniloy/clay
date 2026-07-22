@@ -3,7 +3,7 @@ id: clay.language.serverRegisterLanguageIntelligenceProvider
 kind: clay-js-api
 js_module: "clay:language"
 js_export: serverRegisterLanguageIntelligenceProvider
-js_facade: runtime/js/language.ts::serverRegisterLanguageIntelligenceProvider
+js_facade: runtime/js/language.js::serverRegisterLanguageIntelligenceProvider
 backing_rust: src/server/language_intelligence.rs::LanguageIntelligenceProviderMeta; src/server/ops/language_intelligence.rs
 deno_op: op_clay_language_register_intelligence_provider
 deno_op_path: src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider
@@ -190,7 +190,7 @@ Use only from package load entries. Never pass executable callbacks, modules fro
 
 ## Backing implementation
 
-- Facade: `runtime/js/language.ts::serverRegisterLanguageIntelligenceProvider`
+- Facade: `runtime/js/language.js::serverRegisterLanguageIntelligenceProvider`
 - Op: `src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider`
 - Rust: `src/server/language_intelligence.rs::LanguageIntelligenceProviderMeta; src/server/ops/language_intelligence.rs`
 

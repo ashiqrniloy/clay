@@ -20,8 +20,8 @@ use crate::{
         },
     },
     protocol::{
-        BehaviorVersion, DocumentId, DocumentVersion, IncrementalParseUpdate, ParseByteRange,
-        ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseUnit,
+        BehaviorVersion, ClientId, DocumentId, DocumentVersion, IncrementalParseUpdate,
+        ParseByteRange, ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseUnit,
         ParseWindowSnapshot, RuntimeDiagnostic, SyntaxMemoryBudget,
     },
     server::{decorations::validate_decoration_set, diagnostics::validate_diagnostic_set},
@@ -177,10 +177,10 @@ pub struct ParseCoordinatorStats {
 pub struct ParseCoordinator {
     inner: Arc<Mutex<ParseCoordinatorInner>>,
     perf: PerfRecorder,
-    updates_tx: mpsc::UnboundedSender<IncrementalParseUpdate>,
-    updates_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<IncrementalParseUpdate>>>,
-    diagnostics_tx: mpsc::UnboundedSender<RuntimeDiagnostic>,
-    diagnostics_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<RuntimeDiagnostic>>>,
+    updates_tx: mpsc::Sender<IncrementalParseUpdate>,
+    updates_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<IncrementalParseUpdate>>>,
+    diagnostics_tx: mpsc::Sender<RuntimeDiagnostic>,
+    diagnostics_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<RuntimeDiagnostic>>>,
 }
 
 struct ParseCoordinatorInner {
@@ -189,6 +189,11 @@ struct ParseCoordinatorInner {
     current_versions: HashMap<DocumentId, DocumentVersion>,
     accepted_native_edits: HashMap<DocumentId, (DocumentVersion, Instant, bool)>,
     stats: ParseCoordinatorStats,
+    /// Plan 060 T4 (P0-3): per-connection authorized subscriptions. Document
+    /// updates route only to connections that opened the document; sanitized
+    /// diagnostics broadcast to every subscribed connection.
+    updates_router: crate::server::output_router::OutputRouter<IncrementalParseUpdate>,
+    diagnostics_router: crate::server::output_router::OutputRouter<RuntimeDiagnostic>,
 }
 
 struct ActiveParseTask {
@@ -221,8 +226,11 @@ struct HandlerKeyWithDocument {
 
 impl ParseCoordinator {
     pub fn new() -> Self {
-        let (updates_tx, updates_rx) = mpsc::unbounded_channel();
-        let (diagnostics_tx, diagnostics_rx) = mpsc::unbounded_channel();
+        // ponytail: bounded global drains retained for tests/internal tooling;
+        // production delivery uses authorized per-connection subscriptions and
+        // drops instead of growing when nobody drains the legacy channel.
+        let (updates_tx, updates_rx) = mpsc::channel(4096);
+        let (diagnostics_tx, diagnostics_rx) = mpsc::channel(4096);
         Self {
             inner: Arc::new(Mutex::new(ParseCoordinatorInner {
                 handlers: HashMap::new(),
@@ -230,6 +238,8 @@ impl ParseCoordinator {
                 current_versions: HashMap::new(),
                 accepted_native_edits: HashMap::new(),
                 stats: ParseCoordinatorStats::default(),
+                updates_router: crate::server::output_router::OutputRouter::default(),
+                diagnostics_router: crate::server::output_router::OutputRouter::default(),
             })),
             perf: global_recorder(),
             updates_tx,
@@ -237,6 +247,44 @@ impl ParseCoordinator {
             diagnostics_tx,
             diagnostics_rx: Arc::new(tokio::sync::Mutex::new(diagnostics_rx)),
         }
+    }
+
+    /// Register one connection's authorized update/diagnostic channels
+    /// (Plan 060 T4). Called once per accepted connection.
+    pub(crate) fn subscribe_client(
+        &self,
+        client_id: ClientId,
+    ) -> (
+        mpsc::Receiver<IncrementalParseUpdate>,
+        mpsc::Receiver<RuntimeDiagnostic>,
+    ) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let updates = inner.updates_router.subscribe_client(client_id);
+        let diagnostics = inner.diagnostics_router.subscribe_client(client_id);
+        (updates, diagnostics)
+    }
+
+    /// Authorize `client_id` to receive parse updates for `document_id`.
+    pub(crate) fn subscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner
+            .updates_router
+            .subscribe_document(document_id, client_id);
+    }
+
+    /// Withdraw `client_id`'s parse subscription for one document.
+    pub(crate) fn unsubscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner
+            .updates_router
+            .unsubscribe_document(document_id, client_id);
+    }
+
+    /// Remove every subscription held by one connection (disconnect).
+    pub(crate) fn unsubscribe_client(&self, client_id: ClientId) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner.updates_router.unsubscribe_client(client_id);
+        inner.diagnostics_router.unsubscribe_client(client_id);
     }
 
     pub fn register_handler(
@@ -373,6 +421,22 @@ impl ParseCoordinator {
         abort_tasks(&mut inner, task_keys, &self.perf);
         drop(inner);
         self.drain_pending_outputs();
+    }
+
+    /// Tear down every document-scoped registration when the final access
+    /// holder closes a document: version tracking, native-edit acceptance
+    /// state, and active parse work for the document (Plan 060 T6, P1-4).
+    pub(crate) fn remove_document(&self, document_id: DocumentId) {
+        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner.current_versions.remove(&document_id);
+        inner.accepted_native_edits.remove(&document_id);
+        let task_keys: Vec<_> = inner
+            .active_tasks
+            .keys()
+            .filter(|task_key| task_key.document_id == document_id)
+            .cloned()
+            .collect();
+        abort_tasks(&mut inner, task_keys, &self.perf);
     }
 
     /// Cancel parse handlers and active work owned by one package prefix. This
@@ -632,13 +696,13 @@ impl ParseCoordinator {
         }
         let Ok(update) = result else {
             let error = result.expect_err("parse result error present");
+            let diagnostic = parse_failure_diagnostic(&task_key, &error);
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
             inner.active_tasks.remove(&task_key);
             inner.stats.failed_tasks += 1;
+            inner.diagnostics_router.broadcast(&diagnostic);
             drop(inner);
-            let _ = self
-                .diagnostics_tx
-                .send(parse_failure_diagnostic(&task_key, &error));
+            let _ = self.diagnostics_tx.try_send(diagnostic);
             return;
         };
 
@@ -654,9 +718,12 @@ impl ParseCoordinator {
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
                 inner.active_tasks.remove(&task_key);
                 inner.stats.published_updates += 1;
+                inner
+                    .updates_router
+                    .route_document(update.document_id, &update);
                 drop(inner);
                 self.record_native_publication(&update);
-                let _ = self.updates_tx.send(update);
+                let _ = self.updates_tx.try_send(update);
             }
             Err(ParseCoordinatorError::StaleDocumentVersion { .. }) => {
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
@@ -664,13 +731,13 @@ impl ParseCoordinator {
                 inner.stats.stale_results_rejected += 1;
             }
             Err(error) => {
+                let diagnostic = parse_failure_diagnostic(&task_key, &error);
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
                 inner.active_tasks.remove(&task_key);
                 inner.stats.failed_tasks += 1;
+                inner.diagnostics_router.broadcast(&diagnostic);
                 drop(inner);
-                let _ = self
-                    .diagnostics_tx
-                    .send(parse_failure_diagnostic(&task_key, &error));
+                let _ = self.diagnostics_tx.try_send(diagnostic);
             }
         }
     }

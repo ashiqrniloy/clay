@@ -11,13 +11,13 @@
 - `src/server/ops/packages.rs`
 - `src/server/ops/language_server.rs`
 - `src/server/js_runtime.rs`
-- `runtime/js/packages.ts`
-- `runtime/js/language-server.ts`
-- `runtime/js/modes.ts`
-- `runtime/js/decorations.ts`
-- `runtime/js/parse.ts`
-- `runtime/js/syntax.ts`
-- `runtime/js/completion.ts`
+- `runtime/js/packages.js`
+- `runtime/js/language-server.js`
+- `runtime/js/modes.js`
+- `runtime/js/decorations.js`
+- `runtime/js/parse.js`
+- `runtime/js/syntax.js`
+- `runtime/js/completion.js`
 - `docs/reference/primitives/package-loading.md`
 - `tests/package_loading.rs`
 - `tests/package_loading_docs.rs`
@@ -94,7 +94,7 @@ Customization after a future one-line load is now defined through documented Cla
 Run focused coverage with:
 
 ```text
-cargo test --test package_loading
+cargo test --test security package_loading::
 ```
 
 Relevant tests:
@@ -121,10 +121,10 @@ Relevant tests:
 - `load_package_loads_authorized_npm_style_fixture`, `load_package_loads_authorized_github_requested_spec_fixture`, `load_package_loads_authorized_local_requested_spec_fixture`, and `load_package_rejects_escaping_relative_import_from_package_root` verify source-aware `loadPackage` routing through `PackageService`, the shared module-loader allowlist, and package-root confinement.
 - `src/server/mod.rs::reload_reruns_one_line_loads_and_rebuilds_representative_contributions` verifies Phase 19 reload reruns ordinary one-line loads and rebuilds parse/behavior/syntax/completion/UI contributions in G2.
 - `src/server/js_runtime.rs::load_package_remains_idempotent_inside_one_generation` verifies repeated `loadPackage` calls reuse the generation-local cache without duplicate registrations.
-- `tests/package_loading_docs.rs::package_author_docs_cover_generation_local_state_and_rollback` guards generation-local vs persistent state, unsupported migration hooks, and package rollback docs.
+- `tests/package_loading_docs.rs::package_reference_docs_match_structured_manifest_contracts` binds every documented first-party language package to its manifest identity, load entry, API prefix, and typography role.
 - Existing package record, manager/service/CLI, conflict, SDUI provenance, and per-document manifest selection tests in `tests/package_loading.rs`
 - `runtime_imports_modes_commands_and_packages_facades` and `phase18_primitive_facades_remain_explicitly_planned` in `src/server/js_runtime.rs`
-- `package_loading_doc_linked_from_indexes_and_marks_phase17_ready`, `package_loading_keeps_validation_and_parsing_out_of_typing_hot_path`, `phase18_only_apis_remain_planned_or_documented_without_raw_op_exposure`, and `phase18_10_code_wiki_documents_final_syntax_implementation` in `tests/package_loading_docs.rs`
+- Generic non-mutating package-doc validators in `tests/package_loading_docs.rs` enforce manifest bindings, public facade/API ownership, security boundaries, and absence of package-specific hidden configuration APIs; ordinary prose is intentionally not pinned.
 
 ## Related
 

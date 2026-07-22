@@ -1,4 +1,6 @@
-# Unified Package Authority Primitive Review
+# Unified Package Authority Primitive Review (Historical)
+
+> **Superseded:** this page records the pre-Plan-061 single-runtime/`RuntimeProfile` review and Plan 035 outcome. Current execution authority is documented in [Package Extension and Adoption Authority](third-party-runtime-authority.md) and [Embedded JavaScript Runtime](embedded-js-runtime.md): exact bundled inventory selects the trusted domain, all other adopted packages execute in the shared third-party domain, and normal approval cannot promote them. Statements below about `@clay/*` auto-trust or future profile routing are historical and must not be used as current security guidance.
 
 ## Source
 
@@ -119,15 +121,15 @@ Plan 035 implemented the unified package authority model by extending the existi
 Run focused coverage with:
 
 ```text
-cargo test --test package_loading_docs unified_package_authority_primitive_review_is_documented
-cargo test --test package_loading_docs unified_package_authority_model_is_documented
-cargo test --test package_loading
- cargo test --test package_graph
- cargo test --test package_conflicts
- cargo test --test parse_coordinator
- cargo test --test clay_js_api_inventory
- cargo test --test rust_visibility_api_mapping
- cargo test --test primitives_docs
+cargo test --test protocol package_loading_docs::
+cargo test --test protocol package_loading_docs::
+cargo test --test security package_loading::
+ cargo test --test security package_graph::
+ cargo test --test security package_conflicts::
+ cargo test --test runtime parse_coordinator::
+ cargo test --test protocol clay_js_api_inventory::
+ cargo test --test security rust_visibility_api_mapping::
+ cargo test --test protocol primitives_docs::
 ```
 
 ## Related

@@ -14,9 +14,9 @@ One standards-shaped LSP 3.17 fixture used by Phase 18.21 bridge tests.
 
 ```bash
 node --test tests/fixtures/lsp/fake-server/fake-server.test.mjs tests/fixtures/lsp/fake-server/matrix.test.mjs
-cargo test --test lsp_bridge
-cargo test --test language_server_authority
-CLAY_LSP_REAL_SMOKE=1 cargo test --test lsp_real_servers -- --nocapture
+cargo test --test runtime lsp_bridge::
+cargo test --test security language_server_authority::
+CLAY_LSP_REAL_SMOKE=1 cargo test --test runtime lsp_real_servers:: -- --nocapture
 ```
 
 Ordinary `cargo test` must stay green without host language servers. Real

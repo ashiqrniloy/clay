@@ -7,7 +7,7 @@
 - `packages/git/dist/load.js`
 - `packages/git/dist/status.js`
 - `packages/git/docs/index.md`
-- `runtime/js/git.ts`
+- `runtime/js/git.js`
 - `src/server/ops/git.rs`
 - `src/server/ops/sdui.rs`
 - `src/server/command_execution.rs`
@@ -108,8 +108,8 @@ not silently become a mutation package.
 Run:
 
 ```bash
-CARGO_TARGET_DIR=target/pi-verify cargo test --test clay_js_api_inventory --test clay_js_doc_registry --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib server::js_runtime git_package --quiet
+cargo test --test protocol --quiet
+cargo test --lib server::js_runtime git_package --quiet
 ```
 
 Key coverage:

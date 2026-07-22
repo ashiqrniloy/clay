@@ -3,7 +3,7 @@ id: clay.decorations.serverPublishDecorations
 kind: clay-js-api
 js_module: "clay:decorations"
 js_export: serverPublishDecorations
-js_facade: runtime/js/decorations.ts::serverPublishDecorations
+js_facade: runtime/js/decorations.js::serverPublishDecorations
 backing_rust: src/server/decorations.rs::validate_decoration_publication
 deno_op: op_clay_decorations_publish_decorations
 deno_op_path: src/server/ops/decorations.rs::op_clay_decorations_publish_decorations
@@ -163,8 +163,8 @@ Prefer this facade over raw ops or Rust internals. Keep publications viewport-bo
 
 ## Backing implementation
 
-- JS facade: `runtime/js/decorations.ts::serverPublishDecorations`
-- Runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_DECORATIONS`
+- JS facade: `runtime/js/decorations.js::serverPublishDecorations`
+- Runtime facade: `src/server/facades.rs`
 - Op wrapper: `src/server/ops/decorations.rs::op_clay_decorations_publish_decorations`
 - Validator: `src/server/decorations.rs::validate_decoration_publication`
 - Protocol type: `src/protocol/decorations.rs::DecorationSet`

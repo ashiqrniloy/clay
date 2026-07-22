@@ -3,7 +3,7 @@ id: clay.configuration.setPackageOption
 kind: clay-js-api
 js_module: "clay:configuration"
 js_export: setPackageOption
-js_facade: runtime/js/configuration.ts::setPackageOption
+js_facade: runtime/js/configuration.js::setPackageOption
 backing_rust: src/server/configuration.rs::ConfigurationRuntime::set_package_option
 deno_op: op_clay_configuration_set_package_option
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_set_package_option
@@ -104,7 +104,7 @@ Use only documented package-prefixed option names. Do not invent hidden JSON/TOM
 
 ## Backing implementation
 
-- Facade: `runtime/js/configuration.ts::setPackageOption`
+- Facade: `runtime/js/configuration.js::setPackageOption`
 - Op: `src/server/ops/configuration.rs::op_clay_configuration_set_package_option`
 - Rust: `src/server/configuration.rs::ConfigurationRuntime::set_package_option`
 

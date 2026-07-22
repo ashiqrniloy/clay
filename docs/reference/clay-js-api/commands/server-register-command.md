@@ -3,7 +3,7 @@ id: clay.commands.serverRegisterCommand
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverRegisterCommand
-js_facade: runtime/js/commands.ts::serverRegisterCommand
+js_facade: runtime/js/commands.js::serverRegisterCommand
 backing_rust: src/packages/commands.rs::CommandRegistry::register_command
 deno_op: op_clay_commands_register_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_register_command
@@ -119,7 +119,7 @@ Use `clay.commands.serverRegisterCommand` when the user asks for Register Comman
 
 ## Backing implementation
 
-- JS facade: `runtime/js/commands.ts::serverRegisterCommand`
+- JS facade: `runtime/js/commands.js::serverRegisterCommand`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_register_command` (`op_clay_commands_register_command`)
 - Backing Rust/current owner: `src/packages/commands.rs::CommandRegistry::register_command`
 - Current implementation audit path: `src/packages/commands.rs::CommandRegistry; src/packages/commands.rs::PackageCommandDeclaration`

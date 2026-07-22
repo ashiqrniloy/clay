@@ -8,29 +8,14 @@ fn repository_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Parse the `THIRD_PARTY_FACADES` compile-time array from the JS runtime
-/// source. The constant is an `&[&str]` of `"clay:*"` specifiers.
+/// Parse public third-party facade rows from the single runtime facade table.
 fn parse_third_party_facades() -> BTreeSet<String> {
-    let source = fs::read_to_string(repository_root().join("src/server/js_runtime.rs"))
-        .expect("read js_runtime.rs");
-    // The constant declaration:
-    //   const THIRD_PARTY_FACADES: &[&str] = &[
-    //        "clay:sdui",
-    //        ...
-    //   ];
-    let body = source
-        .split_once("const THIRD_PARTY_FACADES: &[&str] = &[")
-        .and_then(|(_, remaining)| remaining.split_once("];"))
-        .map(|(body, _)| body)
-        .expect("find THIRD_PARTY_FACADES in js_runtime.rs");
-    body.lines()
-        .map(str::trim)
-        .filter_map(|line| {
-            line.trim_start_matches('"')
-                .split_once('"')
-                .map(|(specifier, _)| specifier.to_string())
-        })
-        .filter(|specifier| specifier.starts_with("clay:"))
+    let source = fs::read_to_string(repository_root().join("src/server/facades.rs"))
+        .expect("read facades.rs");
+    source
+        .split("Facade::public(")
+        .skip(1)
+        .filter_map(|row| row.split('\"').nth(1).map(str::to_string))
         .collect()
 }
 
@@ -82,53 +67,146 @@ fn third_party_facade_allowlist_exactly_matches_plan_public_inventory() {
     );
 }
 
-/// Regression: internal types that handle approval storage, cross-domain
-/// routing, package context, and domain classification must remain
-/// `pub(crate)` or private — never `pub`.
+/// Regression: trust-domain, routing, lifecycle, queue, filesystem, and
+/// scheduler mechanics are host implementation details, never bare-public Rust
+/// API. `pub(crate)` remains acceptable for cross-module orchestration.
 #[test]
-fn internal_trust_domain_types_are_not_public() {
+fn internal_runtime_mechanics_are_not_public() {
     let root = repository_root();
-    // For each internal type, scan the defining file for a `pub struct` or
-    // `pub enum` line that would expose it publicly.  `pub(crate)` is
-    // acceptable; bare `pub ` is a violation.
-    let checks: &[(&str, &str)] = &[
-        ("src/packages/approvals.rs", "PackageApprovalStore"),
-        ("src/packages/approvals.rs", "ApprovalMismatch"),
-        ("src/packages/approvals.rs", "ApprovalStoreError"),
-        ("src/packages/bundled.rs", "BundledTrustError"),
-        ("src/server/cross_domain.rs", "CrossDomainRequestEnvelope"),
-        ("src/server/ops/mod.rs", "PackageContext"),
+    let declarations: &[(&str, &str)] = &[
+        (
+            "src/packages/approvals.rs",
+            "pub struct PackageApprovalStore",
+        ),
+        ("src/packages/approvals.rs", "pub enum ApprovalMismatch"),
+        ("src/packages/approvals.rs", "pub enum ApprovalStoreError"),
+        ("src/packages/bundled.rs", "pub enum RuntimeDomain"),
+        ("src/packages/bundled.rs", "pub enum BundledTrustError"),
+        (
+            "src/server/cross_domain.rs",
+            "pub struct CrossDomainRequestEnvelope",
+        ),
+        ("src/server/ops/mod.rs", "pub struct PackageContext"),
+        ("src/server/output_router.rs", "pub struct OutputRouter"),
+        ("src/server/workspace.rs", "pub struct TargetIdentity"),
+        ("src/server/workspace.rs", "pub struct DirectoryListingPlan"),
+        (
+            "src/server/workspace.rs",
+            "pub struct ListingCancellationGuard",
+        ),
+        ("src/server/workspace.rs", "pub struct CloseDocumentOutcome"),
+        (
+            "src/server/connection.rs",
+            "pub struct RuntimeDiagnosticStore",
+        ),
+        (
+            "src/server/connection.rs",
+            "pub struct ConnectionOutputSubscriptions",
+        ),
+        (
+            "src/server/document_analysis.rs",
+            "pub struct AnalysisOutputSink",
+        ),
         (
             "src/packages/extension_points.rs",
-            "RelationVerificationError",
+            "pub enum RelationVerificationError",
         ),
     ];
-    for (path, type_name) in checks {
+    for (path, declaration) in declarations {
         let source =
             fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
-        let public_pattern = format!("pub struct {type_name}");
-        let public_enum_pat = format!("pub enum {type_name}");
-        if source.contains(&public_pattern) || source.contains(&public_enum_pat) {
-            // Allow pub struct if the doc states it is part of the public
-            // package-authoring manifest (ExtensionContributionKind,
-            // ExtensionPointDeclaration, StructuredRelationRequest,
-            // RelationOperation) or the adoption record model
-            // (PackageApprovalRecord, ApprovedRelation, ApprovedReplacement).
-            let allowed_public = [
-                "ExtensionPointDeclaration",
-                "StructuredRelationRequest",
-                "ExtensionContributionKind",
-                "RelationOperation",
-                "PackageApprovalRecord",
-                "ApprovedRelation",
-                "ApprovedReplacement",
-            ];
-            if !allowed_public.contains(type_name) {
-                panic!(
-                    "{type_name} in {path} must be pub(crate) or private, \
-                     found bare `pub`"
-                );
-            }
+        assert!(
+            !source.contains(declaration),
+            "{declaration} in {path} must be pub(crate) or private"
+        );
+    }
+
+    let internal_functions: &[(&str, &str)] = &[
+        ("src/client/mod.rs", "pub fn enqueue_close_document"),
+        ("src/server/completion.rs", "pub fn remove_document"),
+        (
+            "src/server/language_intelligence.rs",
+            "pub fn remove_document",
+        ),
+        ("src/server/parse_coordinator.rs", "pub fn subscribe_client"),
+        (
+            "src/server/parse_coordinator.rs",
+            "pub fn subscribe_document",
+        ),
+        (
+            "src/server/parse_coordinator.rs",
+            "pub fn unsubscribe_document",
+        ),
+        (
+            "src/server/parse_coordinator.rs",
+            "pub fn unsubscribe_client",
+        ),
+        ("src/server/parse_coordinator.rs", "pub fn remove_document"),
+    ];
+    for (path, declaration) in internal_functions {
+        let source =
+            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        assert!(
+            !source.contains(declaration),
+            "{declaration} in {path} must be pub(crate) or private"
+        );
+    }
+
+    let budgets = fs::read_to_string(root.join("src/perf/budgets.rs")).expect("read budgets.rs");
+    for name in [
+        "LANGUAGE_SERVER_SESSION_COMMAND_CAPACITY",
+        "DIRECTORY_LISTING_MAX_CONCURRENCY",
+        "GIT_ROOT_CONCURRENCY",
+        "MAX_DOCUMENTS_PER_CLIENT",
+        "MAX_ACTIVE_CONNECTIONS",
+        "MAX_SERVER_DOCUMENTS",
+        "CONNECTION_RESULT_LANE_CAPACITY",
+        "RUNTIME_DIAGNOSTIC_CAPACITY",
+        "MAX_AUXILIARY_READ_BYTES",
+        "MAX_GITIGNORE_LINES",
+        "MAX_GITIGNORE_PATTERNS",
+        "MAX_GITIGNORE_PATTERN_CHARS",
+    ] {
+        assert!(
+            !budgets.contains(&format!("pub const {name}")),
+            "internal compiled budget {name} must not be bare-public"
+        );
+    }
+}
+
+#[test]
+fn internal_runtime_names_are_absent_from_public_facades() {
+    let root = repository_root();
+    let internal_names = [
+        "RuntimeDomain",
+        "PackageContext",
+        "OutputRouter",
+        "TargetIdentity",
+        "DirectoryListingPlan",
+        "ListingCancellationGuard",
+        "CloseDocumentOutcome",
+        "RuntimeDiagnosticStore",
+        "ConnectionOutputSubscriptions",
+        "AnalysisOutputSink",
+        "LANGUAGE_SERVER_SESSION_COMMAND_CAPACITY",
+        "MAX_ACTIVE_CONNECTIONS",
+        "serverCloseDocument",
+    ];
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for name in internal_names {
+            assert!(
+                !source.contains(name),
+                "{} must not expose internal runtime name {name}",
+                path.display()
+            );
         }
     }
 }

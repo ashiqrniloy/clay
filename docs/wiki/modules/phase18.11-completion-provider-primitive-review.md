@@ -49,7 +49,7 @@
 - `src/masonry_editor.rs`
 - `src/editor/surface.rs`
 - `src/editor.rs`
-- `runtime/js/completion.ts`
+- `runtime/js/completion.js`
 - `runtime/js/mod.ts`
 - `tests/primitives_docs.rs`
 
@@ -173,7 +173,7 @@ It reads only the bounded provider window supplied by the coordinator. Oversized
 
 ### Clay JS completion provider registration API
 
-The public Clay JS API is `clay:completion.serverRegisterCompletionProvider` (`clay.completion.serverRegisterCompletionProvider`), permission `completion-provider`, following Clay JS API naming/boundary rules. The source-tree facade lives in `runtime/js/completion.ts`; the embedded runtime facade is `CLAY_FACADE_COMPLETION` in `src/server/js_runtime.rs`; the op wrapper is `src/server/ops/completion.rs::op_clay_completion_register_completion_provider`; the registry/docs entry is `docs/reference/clay-js-api/completion/server-register-completion-provider.md`.
+The public Clay JS API is `clay:completion.serverRegisterCompletionProvider` (`clay.completion.serverRegisterCompletionProvider`), permission `completion-provider`, following Clay JS API naming/boundary rules. The source-tree facade lives in `runtime/js/completion.js`; the runtime includes that same file through `src/server/facades.rs`; the op wrapper is `src/server/ops/completion.rs::op_clay_completion_register_completion_provider`; the registry/docs entry is `docs/reference/clay-js-api/completion/server-register-completion-provider.md`.
 
 Phase 18.11 implements metadata-only package registration. The op reuses `assemble_package_record`, validates `clay.contributions.completionProviders`, requires `completion-provider`, enforces package-owned provider IDs and duplicate rejection, stores `CompletionProviderMeta` snapshots in `ClayOpState`, and exposes them on `ClayRuntimeEvaluation` for tests. It rejects arbitrary executable handler values (`handler`, `callback`, `complete`, `function`, `module`), raw ops, client JavaScript, native handles, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager authority, and does not grant a package execution token. The built-in `core.bufferWords` provider is Phase 18.11's only computed provider; a future constrained handler bridge is still required for package-supplied computation.
 
@@ -219,12 +219,12 @@ All Phase 18.11 plan tasks are now complete. The protocol shapes (`CompletionReq
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, and `tests/clay_js_facade_layout.rs`: cover the public `clay:completion` facade, registry/docs entry, generated registry freshness, and source-tree facade layout.
 - `tests/rust_visibility_api_mapping.rs`: allowlists `src/server/completion.rs` public items as non-JS server infrastructure (only `op_clay_completion_register_completion_provider` is the public JS API backing) and verifies `TransientMenuSession` stays `pub(crate)`.
 - `tests/manual_smoke_docs.rs`: `phase18_11_manual_completion_smoke_has_runnable_contract` verifies `docs/development/launch-and-gui-smoke.md` defines the Phase 18.11 completion smoke contract (manual trigger binding, menu display/navigation/commit/dismiss, trigger-character local-first edit, stale-result drop, disabled-provider fallback, performance/security contract, and automated coverage list).
-- `tests/package_loading_docs.rs`: `phase18_11_completion_provider_authoring_contract_documented_in_package_guide` covers the package-guide completion provider authoring contract (registration API, trigger/word-boundary/commit-character metadata, transient menu reuse, explicit `loadPackage`, no auto-load, UI-reactive/cancellable hot-path boundary, `completion-provider` permission, no raw callbacks/raw ops/client JS/filesystem/network/shell/AI authority, and metadata-only scope).
-- `tests/clay_js_api_inventory.rs`: `phase18_11_completion_provider_configuration_uses_existing_apis` verifies no new `clay:configuration` completion API is introduced; manual completion trigger is documented through existing `bindKey`; provider enable/disable stays tied to package load/disable; hidden completion config keys are listed as rejected; and the metadata-only/no-authority-grant boundary is documented.
+- Package reference documentation uses generic manifest/API/security validators in `tests/package_loading_docs.rs`; executable package/runtime tests remain authoritative for behavior.
+- Clay JS API documentation uses generic inventory/index/generated-registry/facade/security validators in `tests/clay_js_api_inventory.rs`.
 - `tests/package_primitive_gate.rs`: covers completion provider contribution permission requirements, duplicate IDs, package-owned ID validation, oversize metadata, and rejection of raw ops, command/snippet, shell, URL, and client-JavaScript authority fields.
 - `tests/editor_performance_invariants.rs`: `completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only` statically guards the editor key/text/paint path against provider/coordinator/package/runtime work while requiring bounded `try_send` request enqueue.
 - `tests/performance_protocol.rs`: covers representative completion result codec/payload budget alongside the shared protocol payload guardrails.
-- Commands: `CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs --quiet`.
+- Commands: `cargo test --test protocol primitives_docs:: --quiet`.
 
 ## Related
 

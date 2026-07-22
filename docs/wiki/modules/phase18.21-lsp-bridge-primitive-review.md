@@ -1,4 +1,6 @@
-# Phase 18.21 LSP Bridge Primitive Review
+# Phase 18.21 LSP Bridge Primitive Review (Historical Baseline)
+
+> This page records the pre-implementation primitive inventory used by Plan 053. Current process/session behavior is documented in [Language Server Process Service](language-server-process-service.md), current analysis/provider behavior in [Language Intelligence](language-intelligence.md), and current two-domain runtime behavior in [Embedded JavaScript Runtime](embedded-js-runtime.md). References below to one runtime, missing close lifecycle, central-router head-of-line blocking, or unbounded parse channels describe the historical gap, not current behavior.
 
 ## Source
 
@@ -7,12 +9,12 @@
 - Process authority: `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 - Patterns: `.agents/skills/project-patterns/references/mode-primitive-first.md`, `language-capability-sequencing.md`, `protocol-and-performance.md`, `extensions-and-ai.md`, and `authority-boundaries.md`.
 - Primitive references: `docs/reference/primitives/language-intelligence.md`, `diagnostics.md`, `parse-update-strategy.md`, `package-security.md`, `registry.md`, and `backlog.md`.
-- Process/session: `src/server/language_server.rs`, `src/server/ops/language_server.rs`, and `runtime/js/language-server.ts`.
+- Process/session: `src/server/language_server.rs`, `src/server/ops/language_server.rs`, and `runtime/js/language-server.js`.
 - Runtime/module boundary: `src/server/js_runtime.rs`, `src/server/ops/mod.rs`, and `src/server/ops/packages.rs`.
 - Analysis/provider paths: `src/server/parse_coordinator.rs`, `language_intelligence.rs`, `completion.rs`, `decorations.rs`, and `diagnostics.rs`.
 - Protocol shapes: `src/protocol/parse.rs`, `language_intelligence.rs`, `completion.rs`, `decorations.rs`, and `diagnostics.rs`.
 - Document/workspace/command flow: `src/server/connection.rs`, `document.rs`, `workspace.rs`, and `command_execution.rs`.
-- JavaScript facades: `runtime/js/language.ts`, `completion.ts`, `parse.ts`, `decorations.ts`, `diagnostics.ts`, and `language-server.ts`.
+- JavaScript facades: `runtime/js/{language,completion,parse,decorations,diagnostics,language-server}.js` with adjacent `.d.ts` declarations.
 - Base packages: `packages/{rust,typescript,javascript,markdown}/{package.json,dist/load.js}`.
 - Tests: `tests/language_server_authority.rs`, `language_intelligence.rs`, `completion_provider.rs`, `parse_coordinator.rs`, `decoration_transport.rs`, `range_diagnostics.rs`, `editor_performance_invariants.rs`, and `primitives_docs.rs`.
 
@@ -247,7 +249,7 @@ Task 4 should add byte-exact split-UTF-8, fragmented/multiple frame transport, c
 
 After task 3 approval, the worker task should add one generic fake adapter test path covering initial snapshot, ordered accepted deltas, reload/close/revoke/root-removal/runtime-replacement/shutdown, bounded queues, oversize fallback, dynamic completion, live semantic/diagnostic publication, stale/generation rejection, and no hot-path wait. Existing focused suites remain the regression owners for output shape and UI behavior.
 
-This review itself is locked by `tests/primitives_docs.rs::phase18_21_lsp_bridge_primitive_review_is_linked_and_complete`.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 
 ## Related
 

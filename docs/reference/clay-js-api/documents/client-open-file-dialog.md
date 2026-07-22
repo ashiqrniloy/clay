@@ -3,7 +3,7 @@ id: clay.documents.clientOpenFileDialog
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: clientOpenFileDialog
-js_facade: runtime/js/documents.ts::clientOpenFileDialog
+js_facade: runtime/js/documents.js::clientOpenFileDialog
 backing_rust: src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
@@ -108,7 +108,7 @@ Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKe
 
 ## Backing implementation
 
-- JS facade: `runtime/js/documents.ts::clientOpenFileDialog`
+- JS facade: `runtime/js/documents.js::clientOpenFileDialog`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - Backing Rust/current owner: `src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command`
 - Current implementation audit path: `src/client/file_dialog.rs`, `src/main.rs`, `src/client/behavior.rs`, `src/server/workspace.rs::WorkspaceState::open_selected_file`, and `src/protocol/mod.rs::ClientMessage::OpenSelectedFile`

@@ -3,7 +3,7 @@ id: clay.workspace.serverAddWorkspaceRoot
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverAddWorkspaceRoot
-js_facade: runtime/js/workspace.ts::serverAddWorkspaceRoot
+js_facade: runtime/js/workspace.js::serverAddWorkspaceRoot
 backing_rust: src/server/workspace.rs::WorkspaceState::add_explicit_user_grant
 deno_op: op_clay_workspace_add_root
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_add_root
@@ -89,7 +89,7 @@ Use `clay.workspace.serverAddWorkspaceRoot` only through the documented Clay JS 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/workspace.ts::serverAddWorkspaceRoot`
+- JS facade: `runtime/js/workspace.js::serverAddWorkspaceRoot`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_add_root` (`op_clay_workspace_add_root`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::add_explicit_user_grant`
 

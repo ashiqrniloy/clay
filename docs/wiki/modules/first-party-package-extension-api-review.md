@@ -249,7 +249,7 @@ replacement
 - Plan 061 will add executable two-domain, op/module denial, adoption, extension, replacement, revocation, and resource tests.
 
 ```bash
-cargo test --test primitives_docs first_party_package_extension_api_review
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

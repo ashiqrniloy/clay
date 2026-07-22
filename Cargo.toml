@@ -3,9 +3,20 @@ name = "clay"
 version = "0.1.0"
 edition = "2024"
 default-run = "clay"
+autotests = false
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.debugging]
+inherits = "test"
+debug = 2
 
 [dependencies]
-arboard = "3.6.1"
+arboard = { version = "3.6.1", default-features = false }
 crop = "0.4.3"
 deno_core = "0.400.0"
 deno_error = "=0.7.1"
@@ -50,6 +61,22 @@ features = [
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
+
+[[test]]
+name = "security"
+path = "tests/suites/security.rs"
+
+[[test]]
+name = "runtime"
+path = "tests/suites/runtime.rs"
+
+[[test]]
+name = "editor"
+path = "tests/suites/editor.rs"
+
+[[test]]
+name = "protocol"
+path = "tests/suites/protocol.rs"
 
 [[bench]]
 name = "editor_baselines"

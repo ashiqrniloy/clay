@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
@@ -49,6 +49,82 @@ use super::{
 };
 use crate::shell::file_browser::FileBrowserState;
 
+/// Bounded, deduplicating runtime-diagnostic retention (Plan 060 T6, P1-8).
+/// Consecutive duplicates collapse to one entry; past the capacity the oldest
+/// entry drops and the drop count is retained for observability. Retention is
+/// aligned with the snapshot publication cap so welcome/runtime snapshots
+/// never grow past the frame budget.
+#[derive(Debug, Default)]
+pub(crate) struct RuntimeDiagnosticStore {
+    entries: std::collections::VecDeque<RuntimeDiagnostic>,
+    dropped: u64,
+}
+
+impl RuntimeDiagnosticStore {
+    pub(crate) fn push(&mut self, diagnostic: RuntimeDiagnostic) {
+        if self.entries.back() == Some(&diagnostic) {
+            return;
+        }
+        if self.entries.len() >= crate::perf::budgets::RUNTIME_DIAGNOSTIC_CAPACITY {
+            self.entries.pop_front();
+            self.dropped = self.dropped.saturating_add(1);
+        }
+        self.entries.push_back(diagnostic);
+    }
+
+    pub(crate) fn snapshot(&self) -> Vec<RuntimeDiagnostic> {
+        self.entries.iter().cloned().collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dropped_count(&self) -> u64 {
+        self.dropped
+    }
+}
+
+/// Withdraws a connection's parse/analysis output subscriptions on drop so
+/// every exit path (clean close, IO error, disconnect) fails closed without
+/// leaking routed payloads to a recycled client identity (Plan 060 T4).
+struct ConnectionOutputSubscriptions {
+    parse_coordinator: ParseCoordinator,
+    document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+    client_id: ClientId,
+}
+
+impl Drop for ConnectionOutputSubscriptions {
+    fn drop(&mut self) {
+        self.parse_coordinator.unsubscribe_client(self.client_id);
+        self.document_analysis.unsubscribe_client(self.client_id);
+    }
+}
+
+/// Extract the legacy caller-supplied identity from any post-`Hello` message.
+/// The dispatch loop compares this against the connection's handshake-assigned
+/// `client_id` exactly once; downstream arms only ever see the canonical
+/// connection identity (Plan 060 T4, P0-2).
+fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
+    match message {
+        ClientMessage::Hello { .. } => None,
+        ClientMessage::Edit { client_id, .. }
+        | ClientMessage::EditorIntent { client_id, .. }
+        | ClientMessage::RequestResync { client_id, .. }
+        | ClientMessage::DecorationViewportRequest { client_id, .. }
+        | ClientMessage::OpenDocument { client_id, .. }
+        | ClientMessage::OpenSelectedFile { client_id, .. }
+        | ClientMessage::AddSelectedWorkspaceRoot { client_id, .. }
+        | ClientMessage::SaveDocument { client_id, .. }
+        | ClientMessage::ReloadDocument { client_id, .. }
+        | ClientMessage::GetDocumentStatus { client_id, .. }
+        | ClientMessage::ListDocuments { client_id }
+        | ClientMessage::SduiAction { client_id, .. }
+        | ClientMessage::CommandIntent { client_id, .. }
+        | ClientMessage::RuntimeGenerationInstalled { client_id, .. }
+        | ClientMessage::CloseDocument { client_id, .. } => Some(*client_id),
+        ClientMessage::CompletionRequest { request } => Some(request.client_id),
+        ClientMessage::LanguageIntelligenceRequest { request } => Some(request.client_id),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 async fn handle_connection<S>(
@@ -59,7 +135,7 @@ async fn handle_connection<S>(
     workspace: Arc<Mutex<WorkspaceState>>,
     sdui: Arc<Mutex<StaticSduiState>>,
     active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
-    runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_diagnostics: Arc<Mutex<RuntimeDiagnosticStore>>,
     runtime_generation: RuntimeGenerationStore,
     parse_coordinator: ParseCoordinator,
     language_intelligence: LanguageIntelligenceCoordinator,
@@ -93,6 +169,86 @@ where
     reason = "connection handler receives server-owned state explicitly instead of hiding authority in a context bag"
 )]
 pub(crate) async fn handle_connection_with_analysis<S>(
+    stream: S,
+    client_id: u64,
+    document: Arc<Mutex<DocumentState>>,
+    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+    workspace: Arc<Mutex<WorkspaceState>>,
+    sdui: Arc<Mutex<StaticSduiState>>,
+    active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
+    runtime_diagnostics: Arc<Mutex<RuntimeDiagnosticStore>>,
+    runtime_generation: RuntimeGenerationStore,
+    parse_coordinator: ParseCoordinator,
+    completion: crate::server::completion::CompletionCoordinator,
+    document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+    language_intelligence: LanguageIntelligenceCoordinator,
+    reload_server: Option<super::IpcServer>,
+    codec: Codec,
+) -> Result<(), CodecError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let cleanup_document = Arc::clone(&document);
+    let cleanup_workspace = Arc::clone(&workspace);
+    let cleanup_parse = parse_coordinator.clone();
+    let cleanup_completion = completion.clone();
+    let cleanup_language_intelligence = language_intelligence.clone();
+    let cleanup_document_analysis = document_analysis.clone();
+    let result = handle_connection_loop(
+        stream,
+        client_id,
+        document,
+        behavior,
+        workspace,
+        sdui,
+        active_theme,
+        runtime_diagnostics,
+        runtime_generation,
+        parse_coordinator,
+        completion,
+        document_analysis,
+        language_intelligence,
+        reload_server,
+        codec,
+    )
+    .await;
+
+    // A peer closing while asynchronous output is pending is a normal
+    // disconnect, matching read-pump EOF/reset handling.
+    let result = match result {
+        Err(CodecError::Io(error))
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+            ) =>
+        {
+            Ok(())
+        }
+        result => result,
+    };
+
+    // Every exit path, including failed asynchronous server writes, releases
+    // document authority and document-scoped coordinator state.
+    cleanup_connection_documents(
+        client_id,
+        &cleanup_document,
+        &cleanup_workspace,
+        &cleanup_parse,
+        &cleanup_completion,
+        &cleanup_language_intelligence,
+        &cleanup_document_analysis,
+    )
+    .await;
+    result
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "connection loop receives server-owned state explicitly instead of hiding authority in a context bag"
+)]
+async fn handle_connection_loop<S>(
     mut stream: S,
     client_id: u64,
     document: Arc<Mutex<DocumentState>>,
@@ -100,7 +256,7 @@ pub(crate) async fn handle_connection_with_analysis<S>(
     workspace: Arc<Mutex<WorkspaceState>>,
     sdui: Arc<Mutex<StaticSduiState>>,
     active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
-    runtime_diagnostics: Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_diagnostics: Arc<Mutex<RuntimeDiagnosticStore>>,
     runtime_generation: RuntimeGenerationStore,
     parse_coordinator: ParseCoordinator,
     completion: crate::server::completion::CompletionCoordinator,
@@ -114,11 +270,31 @@ where
 {
     let mut typography_updates = runtime_generation.subscribe_typography();
     let mut runtime_state_updates = runtime_generation.subscribe_runtime_state();
-    let (completion_tx, mut completion_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+    // Plan 060 T6 (P1-8): bounded per-connection result lanes. A saturated
+    // lane means the client is not reading; results drop with a counter and
+    // log line instead of growing memory without bound.
+    let (completion_tx, mut completion_rx) = tokio::sync::mpsc::channel::<ServerMessage>(
+        crate::perf::budgets::CONNECTION_RESULT_LANE_CAPACITY,
+    );
     let (language_intelligence_tx, mut language_intelligence_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
-    let mut analysis_documents = HashMap::new();
+        tokio::sync::mpsc::channel::<ServerMessage>(
+            crate::perf::budgets::CONNECTION_RESULT_LANE_CAPACITY,
+        );
+    let dropped_results = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // Plan 060 T4 (P0-3): authorized per-connection subscriptions. Parse and
+    // analysis payloads route only to documents this connection opened; the
+    // guard withdraws every subscription on any exit path.
+    let (mut parse_updates_rx, mut parse_diagnostics_rx) =
+        parse_coordinator.subscribe_client(client_id);
+    let mut analysis_rx = document_analysis.subscribe_client(client_id);
+    let _subscriptions = ConnectionOutputSubscriptions {
+        parse_coordinator: parse_coordinator.clone(),
+        document_analysis: document_analysis.clone(),
+        client_id,
+    };
+    let default_document_id = document.lock().await.document_id();
+    parse_coordinator.subscribe_document(default_document_id, client_id);
+    document_analysis.subscribe_document(default_document_id, client_id);
     let first_message = codec.read_client_message(&mut stream).await?;
     let mut file_open_capabilities = match first_message {
         ClientMessage::Hello {
@@ -241,10 +417,9 @@ where
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
             },
-            // ponytail: one connection drains shared parse channel. Desktop is
-            // single-client; broadcast fan-out if multi-client parse delivery
-            // becomes required.
-            update = parse_coordinator.next_update() => {
+            // Plan 060 T4 (P0-3): parse updates arrive only for documents this
+            // connection opened, over this connection's bounded subscription.
+            update = parse_updates_rx.recv() => {
                 if let Some(update) = update {
                     // One parse update's chunks ship in a single frame;
                     // single-chunk updates keep the plain DecorationSet wire.
@@ -271,7 +446,7 @@ where
                 }
                 continue;
             }
-            diagnostic = parse_coordinator.next_diagnostic() => {
+            diagnostic = parse_diagnostics_rx.recv() => {
                 if let Some(diagnostic) = diagnostic {
                     codec
                         .write_server_message(
@@ -282,7 +457,7 @@ where
                 }
                 continue;
             }
-            output = document_analysis.next_output() => {
+            output = analysis_rx.recv() => {
                 if let Some(output) = output {
                     let message = match output {
                         crate::server::document_analysis::DocumentAnalysisOutput::Decorations(set) => ServerMessage::DecorationSet(set),
@@ -308,11 +483,7 @@ where
             message = incoming_rx.recv() => message,
         } {
             Some(Ok(message)) => message,
-            None => {
-                close_analysis_documents(&document_analysis, &analysis_documents);
-                release_client_access(client_id, &document, &workspace).await;
-                return Ok(());
-            }
+            None => return Ok(()),
             Some(Err(CodecError::Io(error)))
                 if matches!(
                     error.kind(),
@@ -321,16 +492,29 @@ where
                         | std::io::ErrorKind::BrokenPipe
                 ) =>
             {
-                close_analysis_documents(&document_analysis, &analysis_documents);
-                release_client_access(client_id, &document, &workspace).await;
                 return Ok(());
             }
-            Some(Err(error)) => {
-                close_analysis_documents(&document_analysis, &analysis_documents);
-                release_client_access(client_id, &document, &workspace).await;
-                return Err(error);
-            }
+            Some(Err(error)) => return Err(error),
         };
+
+        // Plan 060 T4 (P0-2): one pre-dispatch identity boundary. Every legacy
+        // message that still carries a `client_id` must present the connection's
+        // handshake-assigned identity; forged or confused IDs fail closed before
+        // any dispatch arm runs.
+        if let Some(message_client_id) = client_message_identity(&message)
+            && message_client_id != client_id
+        {
+            codec
+                .write_server_message(
+                    &mut stream,
+                    &ServerMessage::Error {
+                        code: ProtocolErrorCode::InvalidMessage,
+                        message: "client identity mismatch".to_string(),
+                    },
+                )
+                .await?;
+            continue;
+        }
 
         match message {
             ClientMessage::Edit {
@@ -342,95 +526,26 @@ where
                 transaction_id,
                 operation,
             } => {
-                let behavior_decision = match validate_edit_behavior_version(
+                dispatch_edit_operation(
+                    codec,
+                    &mut stream,
                     &behavior,
                     &runtime_generation,
+                    &document,
+                    &workspace,
+                    &completion,
+                    &language_intelligence,
+                    &document_analysis,
+                    &parse_coordinator,
                     client_id,
                     document_id,
-                    transaction_id,
+                    lease_id,
+                    base_version,
                     behavior_version,
+                    transaction_id,
+                    operation,
                 )
-                .await
-                {
-                    Ok(decision) => decision,
-                    Err(response) => {
-                        reject_invalid_behavior_version(
-                            &codec,
-                            &mut stream,
-                            &runtime_generation,
-                            client_id,
-                            response,
-                        )
-                        .await?;
-                        continue;
-                    }
-                };
-
-                let target_document =
-                    document_for_message(document_id, &document, &workspace).await;
-                let analysis_delta = document_analysis_delta(&operation);
-                let (response, parse_input) = {
-                    let mut document = target_document.lock().await;
-                    document.apply_edit_with_parse_input(
-                        document_id,
-                        client_id,
-                        lease_id,
-                        base_version,
-                        transaction_id,
-                        operation,
-                    )
-                };
-                codec.write_server_message(&mut stream, &response).await?;
-                if let (
-                    ServerMessage::EditAck {
-                        confirmed_version, ..
-                    },
-                    Some(parse_input),
-                ) = (response, parse_input)
-                {
-                    if matches!(
-                        behavior_decision,
-                        BehaviorVersionDecision::PreviousWithinGrace
-                    ) {
-                        let _ = runtime_generation
-                            .behavior_grace()
-                            .record_previous_accepted(std::time::Instant::now())
-                            .await;
-                    }
-                    completion.document_changed(document_id, confirmed_version);
-                    language_intelligence.document_changed(document_id, confirmed_version);
-                    analysis_documents.insert(document_id, confirmed_version);
-                    let (byte_start, byte_end, inserted_text) = analysis_delta;
-                    if document_analysis.change_document(
-                        document_id,
-                        base_version,
-                        confirmed_version,
-                        byte_start,
-                        byte_end,
-                        inserted_text,
-                    ) {
-                        let text = target_document.lock().await.text();
-                        document_analysis.reset_document(document_id, confirmed_version, text);
-                    }
-                    if let Err(diagnostic) = refresh_native_syntax_after_edit(
-                        &workspace,
-                        &behavior,
-                        &runtime_generation,
-                        &parse_coordinator,
-                        client_id,
-                        document_id,
-                        parse_input,
-                    )
-                    .await
-                    {
-                        codec
-                            .write_server_message(
-                                &mut stream,
-                                &ServerMessage::RuntimeDiagnostic(diagnostic),
-                            )
-                            .await?;
-                    }
-                }
+                .await?;
             }
             ClientMessage::EditorIntent {
                 document_id,
@@ -441,30 +556,6 @@ where
                 transaction_id,
                 intent,
             } => {
-                let behavior_decision = match validate_edit_behavior_version(
-                    &behavior,
-                    &runtime_generation,
-                    client_id,
-                    document_id,
-                    transaction_id,
-                    behavior_version,
-                )
-                .await
-                {
-                    Ok(decision) => decision,
-                    Err(response) => {
-                        reject_invalid_behavior_version(
-                            &codec,
-                            &mut stream,
-                            &runtime_generation,
-                            client_id,
-                            response,
-                        )
-                        .await?;
-                        continue;
-                    }
-                };
-
                 let operation = match intent {
                     crate::protocol::EditorIntent::InsertText { byte_offset, text } => {
                         crate::protocol::EditOperation::Insert { byte_offset, text }
@@ -473,79 +564,59 @@ where
                         crate::protocol::EditOperation::Delete { start, end }
                     }
                 };
-                let target_document =
-                    document_for_message(document_id, &document, &workspace).await;
-                let analysis_delta = document_analysis_delta(&operation);
-                let (response, parse_input) = {
-                    let mut document = target_document.lock().await;
-                    document.apply_edit_with_parse_input(
-                        document_id,
-                        client_id,
-                        lease_id,
-                        base_version,
-                        transaction_id,
-                        operation,
-                    )
-                };
-                codec.write_server_message(&mut stream, &response).await?;
-                if let (
-                    ServerMessage::EditAck {
-                        confirmed_version, ..
-                    },
-                    Some(parse_input),
-                ) = (response, parse_input)
-                {
-                    if matches!(
-                        behavior_decision,
-                        BehaviorVersionDecision::PreviousWithinGrace
-                    ) {
-                        let _ = runtime_generation
-                            .behavior_grace()
-                            .record_previous_accepted(std::time::Instant::now())
-                            .await;
-                    }
-                    completion.document_changed(document_id, confirmed_version);
-                    language_intelligence.document_changed(document_id, confirmed_version);
-                    analysis_documents.insert(document_id, confirmed_version);
-                    let (byte_start, byte_end, inserted_text) = analysis_delta;
-                    if document_analysis.change_document(
-                        document_id,
-                        base_version,
-                        confirmed_version,
-                        byte_start,
-                        byte_end,
-                        inserted_text,
-                    ) {
-                        let text = target_document.lock().await.text();
-                        document_analysis.reset_document(document_id, confirmed_version, text);
-                    }
-                    if let Err(diagnostic) = refresh_native_syntax_after_edit(
-                        &workspace,
-                        &behavior,
-                        &runtime_generation,
-                        &parse_coordinator,
-                        client_id,
-                        document_id,
-                        parse_input,
-                    )
-                    .await
-                    {
-                        codec
-                            .write_server_message(
-                                &mut stream,
-                                &ServerMessage::RuntimeDiagnostic(diagnostic),
-                            )
-                            .await?;
-                    }
-                }
+                dispatch_edit_operation(
+                    codec,
+                    &mut stream,
+                    &behavior,
+                    &runtime_generation,
+                    &document,
+                    &workspace,
+                    &completion,
+                    &language_intelligence,
+                    &document_analysis,
+                    &parse_coordinator,
+                    client_id,
+                    document_id,
+                    lease_id,
+                    base_version,
+                    behavior_version,
+                    transaction_id,
+                    operation,
+                )
+                .await?;
             }
             ClientMessage::RequestResync {
                 document_id,
                 client_id,
                 known_version: _,
             } => {
-                let target_document =
-                    document_for_message(document_id, &document, &workspace).await;
+                // Plan 060 T4 (P0-2): resync returns full document text, so a
+                // guessed workspace document id must fail closed instead of
+                // leaking another connection's payload. The default document
+                // is authorized at welcome.
+                let authorized = {
+                    let default_id = document.lock().await.document_id();
+                    if document_id == default_id {
+                        Some(Arc::clone(&document))
+                    } else {
+                        let workspace = workspace.lock().await;
+                        match workspace.document_handle(document_id) {
+                            Some(handle) if handle.lock().await.has_access(client_id) => {
+                                Some(handle)
+                            }
+                            _ => None,
+                        }
+                    }
+                };
+                let Some(target_document) = authorized else {
+                    let response = file_operation_failed(
+                        crate::server::workspace::WorkspaceError::UnknownDocument { document_id },
+                        None,
+                        Some(document_id),
+                    );
+                    codec.write_server_message(&mut stream, &response).await?;
+                    continue;
+                };
                 let response = {
                     let document = target_document.lock().await;
                     document.resync_snapshot_message_for_client(document_id, client_id)
@@ -553,13 +624,13 @@ where
                 codec.write_server_message(&mut stream, &response).await?;
             }
             ClientMessage::DecorationViewportRequest {
-                client_id: request_client_id,
+                client_id: _,
                 document_id,
                 document_version,
                 byte_start,
                 byte_end,
             } => {
-                if request_client_id != client_id || byte_start > byte_end {
+                if byte_start > byte_end {
                     continue;
                 }
                 let (metadata, target_document) = {
@@ -609,36 +680,19 @@ where
             } => {
                 let response =
                     open_document_response(&workspace, workspace_root_id, path, client_id).await;
-                codec.write_server_message(&mut stream, &response).await?;
-                if let ServerMessage::DocumentOpened { metadata, text } = &response {
-                    let runtime = runtime_generation.current().await;
-                    for message in open_document_followup_messages(
-                        metadata,
-                        text,
-                        &behavior,
-                        &sdui,
-                        runtime.id,
-                        &runtime.service,
-                        &parse_coordinator,
-                    )
-                    .await
-                    {
-                        codec.write_server_message(&mut stream, &message).await?;
-                    }
-                    for message in start_document_analysis(
-                        &document_analysis,
-                        &workspace,
-                        &behavior,
-                        runtime.id,
-                        metadata,
-                        text,
-                    )
-                    .await
-                    {
-                        codec.write_server_message(&mut stream, &message).await?;
-                    }
-                    analysis_documents.insert(metadata.document_id, metadata.version);
-                }
+                write_document_open_response(
+                    &codec,
+                    &mut stream,
+                    response,
+                    &behavior,
+                    &runtime_generation,
+                    &workspace,
+                    &sdui,
+                    &parse_coordinator,
+                    &document_analysis,
+                    client_id,
+                )
+                .await?;
             }
             ClientMessage::OpenSelectedFile {
                 client_id,
@@ -668,36 +722,19 @@ where
                 }
                 let response =
                     open_selected_file_response(&workspace, selected_path, client_id).await;
-                codec.write_server_message(&mut stream, &response).await?;
-                if let ServerMessage::DocumentOpened { metadata, text } = &response {
-                    let runtime = runtime_generation.current().await;
-                    let messages = open_document_followup_messages(
-                        metadata,
-                        text,
-                        &behavior,
-                        &sdui,
-                        runtime.id,
-                        &runtime.service,
-                        &parse_coordinator,
-                    )
-                    .await;
-                    for message in messages {
-                        codec.write_server_message(&mut stream, &message).await?;
-                    }
-                    for message in start_document_analysis(
-                        &document_analysis,
-                        &workspace,
-                        &behavior,
-                        runtime.id,
-                        metadata,
-                        text,
-                    )
-                    .await
-                    {
-                        codec.write_server_message(&mut stream, &message).await?;
-                    }
-                    analysis_documents.insert(metadata.document_id, metadata.version);
-                }
+                write_document_open_response(
+                    &codec,
+                    &mut stream,
+                    response,
+                    &behavior,
+                    &runtime_generation,
+                    &workspace,
+                    &sdui,
+                    &parse_coordinator,
+                    &document_analysis,
+                    client_id,
+                )
+                .await?;
                 codec.write_server_message(&mut stream, &replenish).await?;
             }
             ClientMessage::AddSelectedWorkspaceRoot {
@@ -738,13 +775,14 @@ where
             ClientMessage::SaveDocument {
                 client_id: _,
                 document_id,
-                known_version: _,
+                known_version,
             } => {
-                let response = save_document_response(&workspace, document_id).await;
+                let response =
+                    save_document_response(&workspace, document_id, client_id, known_version).await;
                 codec.write_server_message(&mut stream, &response).await?;
             }
             ClientMessage::ReloadDocument {
-                client_id,
+                client_id: _,
                 document_id,
                 known_version: _,
                 force,
@@ -756,7 +794,49 @@ where
                     completion.document_changed(document_id, metadata.version);
                     language_intelligence.document_changed(document_id, metadata.version);
                     document_analysis.reset_document(document_id, metadata.version, text);
-                    analysis_documents.insert(document_id, metadata.version);
+                }
+            }
+            ClientMessage::CloseDocument {
+                client_id,
+                document_id,
+                force,
+            } => {
+                let outcome = {
+                    let mut workspace = workspace.lock().await;
+                    workspace
+                        .close_document(document_id, client_id, force)
+                        .await
+                };
+                match outcome {
+                    Ok(outcome) => {
+                        // This connection's subscriptions end immediately; the
+                        // document may stay alive for other connections.
+                        parse_coordinator.unsubscribe_document(document_id, client_id);
+                        document_analysis.unsubscribe_document(document_id, client_id);
+                        if outcome.closed {
+                            teardown_closed_document(
+                                document_id,
+                                outcome.version,
+                                &parse_coordinator,
+                                &completion,
+                                &language_intelligence,
+                                &document_analysis,
+                            );
+                        }
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::DocumentClosed {
+                                    document_id,
+                                    closed: outcome.closed,
+                                },
+                            )
+                            .await?;
+                    }
+                    Err(error) => {
+                        let response = file_operation_failed(error, None, Some(document_id));
+                        codec.write_server_message(&mut stream, &response).await?;
+                    }
                 }
             }
             ClientMessage::GetDocumentStatus {
@@ -771,13 +851,10 @@ where
                 codec.write_server_message(&mut stream, &response).await?;
             }
             ClientMessage::SduiAction {
-                client_id: request_client_id,
+                client_id: _,
                 ui_version: _,
                 intent,
             } => {
-                if request_client_id != client_id {
-                    continue;
-                }
                 let validation_response = {
                     let state = sdui.lock().await;
                     sdui_action_response(&state, &intent)
@@ -796,47 +873,27 @@ where
                 )
                 .await;
                 if let Some(response) = response {
-                    codec.write_server_message(&mut stream, &response).await?;
-                    if let ServerMessage::DocumentOpened { metadata, text } = &response {
-                        let runtime = runtime_generation.current().await;
-                        for message in open_document_followup_messages(
-                            metadata,
-                            text,
-                            &behavior,
-                            &sdui,
-                            runtime.id,
-                            &runtime.service,
-                            &parse_coordinator,
-                        )
-                        .await
-                        {
-                            codec.write_server_message(&mut stream, &message).await?;
-                        }
-                        for message in start_document_analysis(
-                            &document_analysis,
-                            &workspace,
-                            &behavior,
-                            runtime.id,
-                            metadata,
-                            text,
-                        )
-                        .await
-                        {
-                            codec.write_server_message(&mut stream, &message).await?;
-                        }
-                        analysis_documents.insert(metadata.document_id, metadata.version);
-                    }
+                    write_document_open_response(
+                        &codec,
+                        &mut stream,
+                        response,
+                        &behavior,
+                        &runtime_generation,
+                        &workspace,
+                        &sdui,
+                        &parse_coordinator,
+                        &document_analysis,
+                        client_id,
+                    )
+                    .await?;
                 }
             }
             ClientMessage::CommandIntent {
-                client_id: request_client_id,
+                client_id: _,
                 document_id,
                 behavior_version,
                 command_id,
             } => {
-                if request_client_id != client_id {
-                    continue;
-                }
                 // Commands never receive previous-generation grace.
                 if behavior.lock().await.version() != behavior_version {
                     codec
@@ -932,25 +989,34 @@ where
                         &document_text,
                         &provider.provenance.package_prefix,
                     );
-                    if completion
-                        .schedule_completion(&provider.id, request.clone(), window)
-                        .is_ok()
+                    if let Ok(reply_rx) =
+                        completion.schedule_completion(&provider.id, request.clone(), window)
                     {
-                        let coordinator = completion.clone();
                         let tx = completion_tx.clone();
+                        let dropped = std::sync::Arc::clone(&dropped_results);
                         tokio::spawn(async move {
                             let message = match tokio::time::timeout(
                                 std::time::Duration::from_millis(
                                     provider.timeout_ms.saturating_add(50),
                                 ),
-                                coordinator.next_result(),
+                                reply_rx,
                             )
                             .await
                             {
-                                Ok(Some(result)) => ServerMessage::CompletionResult { result },
+                                Ok(Ok(result)) => ServerMessage::CompletionResult { result },
+                                // Provider timeout/failure/supersede: fall back
+                                // to the static result so the client never waits
+                                // on a dropped request-scoped reply.
                                 _ => ServerMessage::CompletionResult { result: fallback },
                             };
-                            let _ = tx.send(message);
+                            if tx.try_send(message).is_err() {
+                                let count = dropped
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    .saturating_add(1);
+                                eprintln!(
+                                    "clay server: completion result lane full; dropped {count} result(s)"
+                                );
+                            }
                         });
                         continue;
                     }
@@ -993,11 +1059,23 @@ where
                 match language_intelligence.schedule(None, request.clone(), window) {
                     Ok(reply_rx) => {
                         let tx = language_intelligence_tx.clone();
+                        let dropped = std::sync::Arc::clone(&dropped_results);
                         tokio::spawn(async move {
                             match reply_rx.await {
                                 Ok(result) => {
-                                    let _ = tx
-                                        .send(ServerMessage::LanguageIntelligenceResult { result });
+                                    if tx
+                                        .try_send(ServerMessage::LanguageIntelligenceResult {
+                                            result,
+                                        })
+                                        .is_err()
+                                    {
+                                        let count = dropped
+                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                            .saturating_add(1);
+                                        eprintln!(
+                                            "clay server: language-intelligence result lane full; dropped {count} result(s)"
+                                        );
+                                    }
                                 }
                                 Err(_canceled) => {
                                     // Stale/canceled work drops silently so a newer
@@ -1090,6 +1168,173 @@ where
             }
         }
     }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared open orchestration keeps server-owned state explicit instead of hiding authority in a context bag"
+)]
+async fn write_document_open_response<S>(
+    codec: &Codec,
+    stream: &mut S,
+    response: ServerMessage,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    parse_coordinator: &ParseCoordinator,
+    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    client_id: ClientId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    codec.write_server_message(stream, &response).await?;
+    let ServerMessage::DocumentOpened { metadata, text } = &response else {
+        return Ok(());
+    };
+    parse_coordinator.subscribe_document(metadata.document_id, client_id);
+    document_analysis.subscribe_document(metadata.document_id, client_id);
+    let runtime = runtime_generation.current().await;
+    for message in open_document_followup_messages(
+        metadata,
+        text,
+        behavior,
+        sdui,
+        runtime.id,
+        &runtime.service,
+        parse_coordinator,
+    )
+    .await
+    {
+        codec.write_server_message(stream, &message).await?;
+    }
+    for message in start_document_analysis(
+        document_analysis,
+        workspace,
+        behavior,
+        runtime.id,
+        metadata,
+        text,
+    )
+    .await
+    {
+        codec.write_server_message(stream, &message).await?;
+    }
+    Ok(())
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared edit/intent dispatch keeps server-owned state explicit instead of hiding authority in a context bag"
+)]
+async fn dispatch_edit_operation<S>(
+    codec: Codec,
+    stream: &mut S,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    completion: &crate::server::completion::CompletionCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    parse_coordinator: &ParseCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    lease_id: Option<crate::protocol::LeaseId>,
+    base_version: crate::protocol::DocumentVersion,
+    behavior_version: crate::protocol::BehaviorVersion,
+    transaction_id: crate::protocol::TransactionId,
+    operation: crate::protocol::EditOperation,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let behavior_decision = match validate_edit_behavior_version(
+        behavior,
+        runtime_generation,
+        client_id,
+        document_id,
+        transaction_id,
+        behavior_version,
+    )
+    .await
+    {
+        Ok(decision) => decision,
+        Err(response) => {
+            reject_invalid_behavior_version(
+                &codec,
+                stream,
+                runtime_generation,
+                client_id,
+                response,
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let target_document = document_for_message(document_id, document, workspace).await;
+    let analysis_delta = document_analysis_delta(&operation);
+    let (response, parse_input) = {
+        let mut document = target_document.lock().await;
+        document.apply_edit_with_parse_input(
+            document_id,
+            client_id,
+            lease_id,
+            base_version,
+            transaction_id,
+            operation,
+        )
+    };
+    codec.write_server_message(stream, &response).await?;
+    if let (
+        ServerMessage::EditAck {
+            confirmed_version, ..
+        },
+        Some(parse_input),
+    ) = (response, parse_input)
+    {
+        if matches!(
+            behavior_decision,
+            BehaviorVersionDecision::PreviousWithinGrace
+        ) {
+            let _ = runtime_generation
+                .behavior_grace()
+                .record_previous_accepted(std::time::Instant::now())
+                .await;
+        }
+        completion.document_changed(document_id, confirmed_version);
+        language_intelligence.document_changed(document_id, confirmed_version);
+        let (byte_start, byte_end, inserted_text) = analysis_delta;
+        if document_analysis.change_document(
+            document_id,
+            base_version,
+            confirmed_version,
+            byte_start,
+            byte_end,
+            inserted_text,
+        ) {
+            let text = target_document.lock().await.text();
+            document_analysis.reset_document(document_id, confirmed_version, text);
+        }
+        if let Err(diagnostic) = refresh_native_syntax_after_edit(
+            workspace,
+            behavior,
+            runtime_generation,
+            parse_coordinator,
+            client_id,
+            document_id,
+            parse_input,
+        )
+        .await
+        {
+            codec
+                .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn execute_command_intent(
@@ -1242,7 +1487,7 @@ async fn send_welcome_snapshot_and_manifest<S>(
     workspace: &Arc<Mutex<WorkspaceState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
     active_theme: &Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
-    runtime_diagnostics: &Arc<Mutex<Vec<RuntimeDiagnostic>>>,
+    runtime_diagnostics: &Arc<Mutex<RuntimeDiagnosticStore>>,
     runtime_generation: &RuntimeGenerationStore,
     codec: Codec,
 ) -> Result<(), CodecError>
@@ -1323,7 +1568,7 @@ where
         }
     }
 
-    let diagnostics = runtime_diagnostics.lock().await.clone();
+    let diagnostics = runtime_diagnostics.lock().await.snapshot();
     for diagnostic in diagnostics {
         codec
             .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
@@ -1443,26 +1688,55 @@ async fn start_document_analysis(
         .collect()
 }
 
-fn close_analysis_documents(
-    coordinator: &crate::server::document_analysis::DocumentAnalysisCoordinator,
-    documents: &HashMap<DocumentId, crate::protocol::DocumentVersion>,
-) {
-    for (&document_id, &version) in documents {
-        coordinator.close_document(document_id, version);
-    }
-}
-
-async fn release_client_access(
+/// Release every access grant the connection holds (disconnect) and tear down
+/// document-scoped coordinator state for documents whose final holder left
+/// (Plan 060 T6, P1-4). Documents still held by other connections keep their
+/// analysis routes, versions, and provider state.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "disconnect teardown needs every document-scoped coordinator explicitly"
+)]
+async fn cleanup_connection_documents(
     client_id: ClientId,
     default_document: &Arc<Mutex<DocumentState>>,
     workspace: &Arc<Mutex<WorkspaceState>>,
+    parse_coordinator: &ParseCoordinator,
+    completion: &crate::server::completion::CompletionCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
 ) {
     default_document.lock().await.release_access(client_id);
-    workspace
+    let finalized = workspace
         .lock()
         .await
         .release_client_access(client_id)
         .await;
+    for (document_id, version) in finalized {
+        teardown_closed_document(
+            document_id,
+            version,
+            parse_coordinator,
+            completion,
+            language_intelligence,
+            document_analysis,
+        );
+    }
+}
+
+/// Final-close teardown for one document: cancel active work and drop every
+/// document-keyed coordinator entry (versions, generations, analysis routes).
+fn teardown_closed_document(
+    document_id: DocumentId,
+    version: crate::protocol::DocumentVersion,
+    parse_coordinator: &ParseCoordinator,
+    completion: &crate::server::completion::CompletionCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+) {
+    parse_coordinator.remove_document(document_id);
+    completion.remove_document(document_id);
+    language_intelligence.remove_document(document_id);
+    document_analysis.close_document(document_id, version);
 }
 
 /// Per-connection pool of single-use file-open capability tokens.
@@ -1633,8 +1907,10 @@ async fn open_selected_file_response(
 async fn save_document_response(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
+    client_id: ClientId,
+    known_version: crate::protocol::DocumentVersion,
 ) -> ServerMessage {
-    match save_document_unlocked(workspace, document_id).await {
+    match save_document_unlocked(workspace, document_id, client_id, known_version).await {
         Ok(outcome) => ServerMessage::DocumentSaved {
             document_id: outcome.document_id,
             version: outcome.version,
@@ -1650,7 +1926,7 @@ async fn reload_document_response(
     client_id: ClientId,
     force: bool,
 ) -> ServerMessage {
-    let outcome = match reload_document_unlocked(workspace, document_id, force).await {
+    let outcome = match reload_document_unlocked(workspace, document_id, client_id, force).await {
         Ok(outcome) => outcome,
         Err(error) => return file_operation_failed(error, None, Some(document_id)),
     };
@@ -2254,7 +2530,7 @@ mod tests {
     };
 
     use super::{
-        execute_command_intent, handle_connection,
+        RuntimeDiagnosticStore, execute_command_intent, handle_connection,
         language_intelligence_document_window_for_behavior, sdui_command_request,
         static_package_completion_result,
     };
@@ -2280,8 +2556,8 @@ mod tests {
         Arc::new(Mutex::new(StaticSduiState::empty_for_document(1)))
     }
 
-    fn runtime_diagnostics() -> Arc<Mutex<Vec<RuntimeDiagnostic>>> {
-        Arc::new(Mutex::new(Vec::new()))
+    fn runtime_diagnostics() -> Arc<Mutex<RuntimeDiagnosticStore>> {
+        Arc::new(Mutex::new(RuntimeDiagnosticStore::default()))
     }
 
     fn active_theme_state() -> Arc<Mutex<Option<crate::protocol::ActiveTheme>>> {
@@ -2775,6 +3051,659 @@ await loadPackage("@clay/markdown");"#,
         server_task.await.unwrap().unwrap();
     }
 
+    /// Plan 060 T4 test helpers: drain the bootstrap sequence through the
+    /// always-terminal capability issue so tests start from a clean cursor.
+    async fn drain_bootstrap(client: &mut tokio::io::DuplexStream, codec: Codec) {
+        loop {
+            if matches!(
+                codec.read_server_message(client).await.unwrap(),
+                ServerMessage::FileOpenCapabilityIssued { .. }
+            ) {
+                break;
+            }
+        }
+    }
+
+    struct TestConnection {
+        client: tokio::io::DuplexStream,
+        server_task: tokio::task::JoinHandle<Result<(), crate::protocol::codec::CodecError>>,
+        codec: Codec,
+    }
+
+    impl TestConnection {
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "test connection harness mirrors the server's explicit authority parameters"
+        )]
+        async fn connect(
+            client_id: u64,
+            document: Arc<Mutex<DocumentState>>,
+            behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+            workspace: Arc<Mutex<WorkspaceState>>,
+            runtime_generation: super::RuntimeGenerationStore,
+            parse_coordinator: ParseCoordinator,
+            document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+            language_intelligence: LanguageIntelligenceCoordinator,
+        ) -> Self {
+            let (client, server) = duplex(4096);
+            let codec = Codec::default();
+            let server_task = tokio::spawn(super::handle_connection_with_analysis(
+                server,
+                client_id,
+                document,
+                behavior,
+                workspace,
+                sdui_state(),
+                active_theme_state(),
+                runtime_diagnostics(),
+                runtime_generation,
+                parse_coordinator,
+                crate::server::completion::CompletionCoordinator::new(),
+                document_analysis,
+                language_intelligence,
+                None,
+                codec,
+            ));
+            let mut client = client;
+            codec
+                .write_client_message(
+                    &mut client,
+                    &ClientMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        client_name: "test-client".to_string(),
+                    },
+                )
+                .await
+                .unwrap();
+            drain_bootstrap(&mut client, codec).await;
+            Self {
+                client,
+                server_task,
+                codec,
+            }
+        }
+
+        async fn send(&mut self, message: &ClientMessage) {
+            self.codec
+                .write_client_message(&mut self.client, message)
+                .await
+                .unwrap();
+        }
+
+        async fn receive(&mut self) -> ServerMessage {
+            self.codec
+                .read_server_message(&mut self.client)
+                .await
+                .unwrap()
+        }
+
+        async fn close(self) {
+            drop(self.client);
+            self.server_task.await.unwrap().unwrap();
+        }
+
+        /// Drain open/activation follow-ups until the stream goes quiet so the
+        /// next read observes the response to the next request, not a queued
+        /// BehaviorManifest/decoration frame.
+        async fn drain_until_quiet(&mut self) {
+            while timeout(
+                Duration::from_millis(50),
+                self.codec.read_server_message(&mut self.client),
+            )
+            .await
+            .is_ok()
+            {}
+        }
+
+        /// Read until the response frame arrives, skipping asynchronous parse
+        /// and activation output that can race a request/response exchange.
+        async fn receive_response(&mut self) -> ServerMessage {
+            loop {
+                let frame = self.receive().await;
+                if matches!(
+                    frame,
+                    ServerMessage::Error { .. }
+                        | ServerMessage::FileOperationFailed { .. }
+                        | ServerMessage::DocumentSaved { .. }
+                        | ServerMessage::DocumentReloaded { .. }
+                        | ServerMessage::DocumentClosed { .. }
+                        | ServerMessage::DocumentStatus { .. }
+                        | ServerMessage::DocumentList { .. }
+                        | ServerMessage::ResyncSnapshot { .. }
+                ) {
+                    return frame;
+                }
+            }
+        }
+    }
+
+    /// Plan 060 T4 (P0-2): one pre-dispatch boundary rejects every legacy
+    /// message whose `client_id` does not match the handshake-assigned
+    /// connection identity. Table covers every post-Hello family.
+    #[tokio::test]
+    async fn forged_client_identity_is_rejected_for_every_message_family() {
+        let root = temp_workspace("forged-identity");
+        fs::write(root.join("note.md"), "# secret\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+        let mut connection = TestConnection::connect(
+            99,
+            document,
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+        )
+        .await;
+
+        let forged: Vec<(&str, ClientMessage)> = vec![
+            (
+                "Edit",
+                ClientMessage::Edit {
+                    document_id: 7,
+                    client_id: 1,
+                    lease_id: Some(1),
+                    base_version: 1,
+                    behavior_version: 1,
+                    transaction_id: 1,
+                    operation: EditOperation::Insert {
+                        byte_offset: 0,
+                        text: "x".to_string(),
+                    },
+                },
+            ),
+            (
+                "EditorIntent",
+                ClientMessage::EditorIntent {
+                    document_id: 7,
+                    client_id: 1,
+                    lease_id: Some(1),
+                    base_version: 1,
+                    behavior_version: 1,
+                    transaction_id: 2,
+                    intent: crate::protocol::EditorIntent::InsertText {
+                        byte_offset: 0,
+                        text: "x".to_string(),
+                    },
+                },
+            ),
+            (
+                "RequestResync",
+                ClientMessage::RequestResync {
+                    document_id: 7,
+                    client_id: 1,
+                    known_version: 0,
+                },
+            ),
+            (
+                "DecorationViewportRequest",
+                ClientMessage::DecorationViewportRequest {
+                    client_id: 1,
+                    document_id: 7,
+                    document_version: 1,
+                    byte_start: 0,
+                    byte_end: 1,
+                },
+            ),
+            (
+                "OpenDocument",
+                ClientMessage::OpenDocument {
+                    client_id: 1,
+                    workspace_root_id: root_id,
+                    path: "note.md".to_string(),
+                },
+            ),
+            (
+                "OpenSelectedFile",
+                ClientMessage::OpenSelectedFile {
+                    client_id: 1,
+                    capability: "forged".to_string(),
+                    selected_path: root.join("note.md").to_string_lossy().into_owned(),
+                },
+            ),
+            (
+                "AddSelectedWorkspaceRoot",
+                ClientMessage::AddSelectedWorkspaceRoot {
+                    client_id: 1,
+                    capability: "forged".to_string(),
+                    selected_path: root.to_string_lossy().into_owned(),
+                },
+            ),
+            (
+                "SaveDocument",
+                ClientMessage::SaveDocument {
+                    client_id: 1,
+                    document_id: 7,
+                    known_version: 1,
+                },
+            ),
+            (
+                "ReloadDocument",
+                ClientMessage::ReloadDocument {
+                    client_id: 1,
+                    document_id: 7,
+                    known_version: 1,
+                    force: true,
+                },
+            ),
+            (
+                "GetDocumentStatus",
+                ClientMessage::GetDocumentStatus {
+                    client_id: 1,
+                    document_id: 7,
+                },
+            ),
+            (
+                "ListDocuments",
+                ClientMessage::ListDocuments { client_id: 1 },
+            ),
+            (
+                "SduiAction",
+                ClientMessage::SduiAction {
+                    client_id: 1,
+                    ui_version: 1,
+                    intent: SduiActionIntent::command(
+                        "clay.controlCenter.open",
+                        SduiActionSource::Button {
+                            node_id: SduiNodeId(1),
+                        },
+                    ),
+                },
+            ),
+            (
+                "CommandIntent",
+                ClientMessage::CommandIntent {
+                    client_id: 1,
+                    document_id: 7,
+                    behavior_version: 1,
+                    command_id: "clay.controlCenter.open".to_string(),
+                },
+            ),
+            (
+                "CompletionRequest",
+                ClientMessage::CompletionRequest {
+                    request: crate::protocol::CompletionRequest {
+                        request_id: 1,
+                        client_id: 1,
+                        document_id: 7,
+                        document_version: 1,
+                        behavior_version: 1,
+                        cursor_byte_offset: 0,
+                        replacement_range: crate::protocol::CompletionReplacementRange::new(0, 0),
+                        trigger: crate::protocol::CompletionTrigger::Manual,
+                        provider_generation: 1,
+                    },
+                },
+            ),
+            (
+                "LanguageIntelligenceRequest",
+                ClientMessage::LanguageIntelligenceRequest {
+                    request: crate::protocol::LanguageIntelligenceRequest {
+                        request_id: 1,
+                        client_id: 1,
+                        document_id: 7,
+                        document_version: 1,
+                        behavior_version: 1,
+                        cursor_byte_offset: 0,
+                        feature: crate::protocol::LanguageIntelligenceFeature::Hover,
+                        provider_generation: 1,
+                    },
+                },
+            ),
+            (
+                "RuntimeGenerationInstalled",
+                ClientMessage::RuntimeGenerationInstalled {
+                    client_id: 1,
+                    runtime_generation_id: 1,
+                },
+            ),
+        ];
+
+        for (family, message) in forged {
+            connection.send(&message).await;
+            let response = connection.receive().await;
+            assert!(
+                matches!(
+                    response,
+                    ServerMessage::Error {
+                        code: ProtocolErrorCode::InvalidMessage,
+                        ..
+                    }
+                ),
+                "forged {family} must be rejected at the identity boundary, got {response:?}"
+            );
+        }
+
+        // The forged OpenDocument must have had no effect: the connection's own
+        // document list stays empty, and the connection survives rejections.
+        connection
+            .send(&ClientMessage::ListDocuments { client_id: 99 })
+            .await;
+        let response = connection.receive().await;
+        assert!(
+            matches!(response, ServerMessage::DocumentList { ref documents } if documents.is_empty()),
+            "forged open must not register documents, got {response:?}"
+        );
+
+        connection.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Plan 060 T4 (P0-3): two connections share the server coordinators; a
+    /// parse update for a document opened by one connection never reaches the
+    /// other connection's stream.
+    #[tokio::test]
+    async fn two_client_parse_updates_are_isolated_to_the_subscribed_connection() {
+        let root = temp_workspace("parse-isolation");
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+
+        let mut connection_a = TestConnection::connect(
+            99,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation.clone(),
+            parse_coordinator.clone(),
+            document_analysis.clone(),
+            language_intelligence_coordinator(),
+        )
+        .await;
+        let mut connection_b = TestConnection::connect(
+            100,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+        )
+        .await;
+
+        // A opens and edits the document; only A may see its parse output.
+        connection_a
+            .send(&ClientMessage::OpenDocument {
+                client_id: 99,
+                workspace_root_id: root_id,
+                path: "main.rs".to_string(),
+            })
+            .await;
+        let behavior_version = loop {
+            match connection_a.receive().await {
+                ServerMessage::BehaviorManifest(manifest) => break manifest.behavior_version,
+                ServerMessage::DocumentOpened { .. }
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. } => {}
+                other => panic!("unexpected message during open: {other:?}"),
+            }
+        };
+        connection_a.drain_until_quiet().await;
+        connection_a
+            .send(&ClientMessage::Edit {
+                document_id: 1,
+                client_id: 99,
+                lease_id: Some(1),
+                base_version: 1,
+                behavior_version,
+                transaction_id: 900,
+                operation: EditOperation::Insert {
+                    byte_offset: 13,
+                    text: "// owned by A\n".to_string(),
+                },
+            })
+            .await;
+        loop {
+            match connection_a.receive().await {
+                ServerMessage::DecorationSet(set)
+                    if set.document_id == 1 && set.document_version == 2 =>
+                {
+                    break;
+                }
+                ServerMessage::EditAck { .. }
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                other => panic!("unexpected message awaiting decorations: {other:?}"),
+            }
+        }
+
+        // B never subscribed to document 1: its stream stays silent.
+        let leaked = timeout(
+            Duration::from_millis(150),
+            connection_b
+                .codec
+                .read_server_message(&mut connection_b.client),
+        )
+        .await;
+        assert!(
+            leaked.is_err(),
+            "unsubscribed connection must receive no parse output, got {leaked:?}"
+        );
+
+        connection_a.close().await;
+        connection_b.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Plan 060 T4 (P0-2): save requires the editable lease and validates
+    /// `known_version`; status and list fail closed for documents the
+    /// connection never opened.
+    #[tokio::test]
+    async fn save_reload_status_list_enforce_connection_owned_access() {
+        let root = temp_workspace("save-access");
+        fs::write(root.join("note.md"), "hello\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+
+        let mut connection_a = TestConnection::connect(
+            99,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation.clone(),
+            parse_coordinator.clone(),
+            document_analysis.clone(),
+            language_intelligence_coordinator(),
+        )
+        .await;
+        let mut connection_b = TestConnection::connect(
+            100,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+        )
+        .await;
+
+        // A opens the document (editable lease).
+        connection_a
+            .send(&ClientMessage::OpenDocument {
+                client_id: 99,
+                workspace_root_id: root_id,
+                path: "note.md".to_string(),
+            })
+            .await;
+        loop {
+            match connection_a.receive().await {
+                ServerMessage::DocumentOpened { .. } => break,
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. } => {}
+                other => panic!("unexpected message during A open: {other:?}"),
+            }
+        }
+        connection_a.drain_until_quiet().await;
+
+        // B has never opened document 1: resync, status, and list fail closed.
+        connection_b
+            .send(&ClientMessage::RequestResync {
+                document_id: 1,
+                client_id: 100,
+                known_version: 0,
+            })
+            .await;
+        let resync = connection_b.receive_response().await;
+        assert!(
+            matches!(
+                resync,
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::UnknownDocument,
+                    ..
+                }
+            ),
+            "resync for an unopened document must not leak text, got {resync:?}"
+        );
+        connection_b
+            .send(&ClientMessage::GetDocumentStatus {
+                client_id: 100,
+                document_id: 1,
+            })
+            .await;
+        let status = connection_b.receive_response().await;
+        assert!(
+            matches!(
+                status,
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::UnknownDocument,
+                    ..
+                }
+            ),
+            "status for an unopened document must fail closed, got {status:?}"
+        );
+        connection_b
+            .send(&ClientMessage::ListDocuments { client_id: 100 })
+            .await;
+        let list = connection_b.receive_response().await;
+        assert!(
+            matches!(list, ServerMessage::DocumentList { ref documents } if documents.is_empty()),
+            "list must not leak another connection's documents, got {list:?}"
+        );
+
+        // B opens the same document: read-only access. Save fails closed.
+        connection_b
+            .send(&ClientMessage::OpenDocument {
+                client_id: 100,
+                workspace_root_id: root_id,
+                path: "note.md".to_string(),
+            })
+            .await;
+        loop {
+            match connection_b.receive().await {
+                ServerMessage::DocumentOpened { metadata, .. } => {
+                    assert_eq!(metadata.access, DocumentAccess::ReadOnly);
+                    break;
+                }
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. } => {}
+                other => panic!("unexpected message during B open: {other:?}"),
+            }
+        }
+        connection_b.drain_until_quiet().await;
+        connection_b
+            .send(&ClientMessage::SaveDocument {
+                client_id: 100,
+                document_id: 1,
+                known_version: 1,
+            })
+            .await;
+        let read_only_save = connection_b.receive_response().await;
+        assert!(
+            matches!(
+                read_only_save,
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::AccessDenied,
+                    ..
+                }
+            ),
+            "read-only save must fail closed, got {read_only_save:?}"
+        );
+
+        // A saves with a future version claim: stale check fails closed.
+        connection_a
+            .send(&ClientMessage::SaveDocument {
+                client_id: 99,
+                document_id: 1,
+                known_version: 99,
+            })
+            .await;
+        let stale_save = connection_a.receive_response().await;
+        assert!(
+            matches!(
+                stale_save,
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::StaleFileMetadata,
+                    ..
+                }
+            ),
+            "future-version save must fail closed, got {stale_save:?}"
+        );
+
+        // A saves at the current version: succeeds and clears dirty state.
+        connection_a
+            .send(&ClientMessage::SaveDocument {
+                client_id: 99,
+                document_id: 1,
+                known_version: 1,
+            })
+            .await;
+        let saved = connection_a.receive_response().await;
+        assert!(
+            matches!(
+                saved,
+                ServerMessage::DocumentSaved {
+                    document_id: 1,
+                    version: 1,
+                    dirty: false,
+                }
+            ),
+            "lease-holder save at the current version must succeed, got {saved:?}"
+        );
+
+        connection_a.close().await;
+        connection_b.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn stale_client_is_rejected_after_native_decoration_semantics_change() {
         let (client, server) = duplex(4096);
@@ -3084,10 +4013,11 @@ await loadPackage("@clay/markdown");"#,
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
-        let diagnostics = Arc::new(Mutex::new(vec![RuntimeDiagnostic::error(
+        let diagnostics = Arc::new(Mutex::new(RuntimeDiagnosticStore::default()));
+        diagnostics.lock().await.push(RuntimeDiagnostic::error(
             "clay.runtime.invalid_import",
             "Only clay:* facades and relative local configuration modules are allowed.",
-        )]));
+        ));
         let server_task = tokio::spawn(handle_connection(
             server,
             99,
@@ -4932,5 +5862,229 @@ await loadPackage("@clay/markdown");"#,
         server_task.await.unwrap().unwrap();
         let _ = fs::remove_file(target);
         let _ = fs::remove_dir(root);
+    }
+
+    /// CloseDocument: final-holder close acknowledges and tears down the
+    /// document; a shared document survives until the last holder closes
+    /// (Plan 060 T6, P1-4).
+    #[tokio::test]
+    async fn close_document_acknowledges_and_tears_down_final_document() {
+        let root = temp_workspace("close-document");
+        fs::write(root.join("note.md"), "hello\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+
+        let mut connection_a = TestConnection::connect(
+            99,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation.clone(),
+            parse_coordinator.clone(),
+            document_analysis.clone(),
+            language_intelligence_coordinator(),
+        )
+        .await;
+        let mut connection_b = TestConnection::connect(
+            100,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+        )
+        .await;
+
+        // A opens the shared document, then B opens it too.
+        connection_a
+            .send(&ClientMessage::OpenDocument {
+                client_id: 99,
+                workspace_root_id: root_id,
+                path: "note.md".to_string(),
+            })
+            .await;
+        connection_a.drain_until_quiet().await;
+        connection_b
+            .send(&ClientMessage::OpenDocument {
+                client_id: 100,
+                workspace_root_id: root_id,
+                path: "note.md".to_string(),
+            })
+            .await;
+        connection_b.drain_until_quiet().await;
+
+        // A closes: not the final holder, document survives for B.
+        connection_a
+            .send(&ClientMessage::CloseDocument {
+                client_id: 99,
+                document_id: 1,
+                force: false,
+            })
+            .await;
+        let closed_a = connection_a.receive_response().await;
+        assert!(
+            matches!(
+                closed_a,
+                ServerMessage::DocumentClosed {
+                    document_id: 1,
+                    closed: false
+                }
+            ),
+            "non-final close must report closed=false, got {closed_a:?}"
+        );
+        connection_b
+            .send(&ClientMessage::GetDocumentStatus {
+                client_id: 100,
+                document_id: 1,
+            })
+            .await;
+        let status_b = connection_b.receive_response().await;
+        assert!(
+            matches!(status_b, ServerMessage::DocumentStatus { .. }),
+            "remaining holder must still see the document, got {status_b:?}"
+        );
+        // A no longer has access.
+        connection_a
+            .send(&ClientMessage::GetDocumentStatus {
+                client_id: 99,
+                document_id: 1,
+            })
+            .await;
+        let status_a = connection_a.receive_response().await;
+        assert!(
+            matches!(
+                status_a,
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::UnknownDocument,
+                    ..
+                }
+            ),
+            "closed connection must lose access, got {status_a:?}"
+        );
+
+        // B closes: final holder, document is torn down.
+        connection_b
+            .send(&ClientMessage::CloseDocument {
+                client_id: 100,
+                document_id: 1,
+                force: false,
+            })
+            .await;
+        let closed_b = connection_b.receive_response().await;
+        assert!(
+            matches!(
+                closed_b,
+                ServerMessage::DocumentClosed {
+                    document_id: 1,
+                    closed: true
+                }
+            ),
+            "final close must report closed=true, got {closed_b:?}"
+        );
+        assert!(workspace.lock().await.document_handle(1).is_none());
+
+        let _ = fs::remove_file(root.join("note.md"));
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Disconnect releases every access grant; documents with no remaining
+    /// holders are removed from the workspace registry (Plan 060 T6, P1-4).
+    #[tokio::test]
+    async fn disconnect_finalizes_documents_with_no_remaining_holders() {
+        let root = temp_workspace("disconnect-finalize");
+        fs::write(root.join("note.md"), "hello\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+
+        let connection = TestConnection::connect(
+            99,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation(),
+            parse_coordinator(),
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
+            language_intelligence_coordinator(),
+        )
+        .await;
+        let mut connection = connection;
+        connection
+            .send(&ClientMessage::OpenDocument {
+                client_id: 99,
+                workspace_root_id: root_id,
+                path: "note.md".to_string(),
+            })
+            .await;
+        connection.drain_until_quiet().await;
+        assert!(workspace.lock().await.document_handle(1).is_some());
+
+        // Disconnect: the server task exits and finalizes the document.
+        drop(connection.client);
+        connection.server_task.await.unwrap().unwrap();
+        assert!(
+            workspace.lock().await.document_handle(1).is_none(),
+            "disconnect must finalize documents with no remaining holders"
+        );
+
+        let _ = fs::remove_file(root.join("note.md"));
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Runtime-diagnostic retention: consecutive duplicates collapse, the
+    /// deque never exceeds its capacity, and drops are counted (Plan 060 T6,
+    /// P1-8).
+    #[test]
+    fn runtime_diagnostic_store_deduplicates_and_bounds() {
+        let mut store = RuntimeDiagnosticStore::default();
+        let duplicate = RuntimeDiagnostic::warning("clay.test.dup", "same");
+        store.push(duplicate.clone());
+        store.push(duplicate);
+        assert_eq!(
+            store.snapshot().len(),
+            1,
+            "consecutive duplicate must collapse"
+        );
+        assert_eq!(store.dropped_count(), 0);
+
+        for index in 0..crate::perf::budgets::RUNTIME_DIAGNOSTIC_CAPACITY + 8 {
+            store.push(RuntimeDiagnostic::warning(
+                "clay.test.flood",
+                format!("diagnostic {index}"),
+            ));
+        }
+        let snapshot = store.snapshot();
+        assert_eq!(
+            snapshot.len(),
+            crate::perf::budgets::RUNTIME_DIAGNOSTIC_CAPACITY,
+            "retention must stay within the snapshot cap"
+        );
+        // 41 total entries (1 duplicate survivor + 40 flood) minus the 32
+        // retained = 9 dropped; "diagnostic 8" is the oldest survivor.
+        assert_eq!(store.dropped_count(), 9);
+        assert_eq!(
+            snapshot.first().map(|d| d.message.as_str()),
+            Some("diagnostic 8"),
+            "oldest entries drop first"
+        );
     }
 }

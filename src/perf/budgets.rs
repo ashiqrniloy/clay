@@ -15,6 +15,16 @@ pub const LANGUAGE_SERVER_STDERR_BUDGET_BYTES: usize = 64 * 1024;
 pub const LANGUAGE_SERVER_MAX_SESSIONS: usize = 16;
 /// Default wall-clock timeout for a single language-server stdout read.
 pub const LANGUAGE_SERVER_READ_TIMEOUT_MS: u64 = 30_000;
+/// Bounded ingress per language-server session actor. A full queue rejects
+/// new work rather than blocking the central identity/session router.
+pub(crate) const LANGUAGE_SERVER_SESSION_COMMAND_CAPACITY: usize = 8;
+
+// Background filesystem/process concurrency ceilings (Plan 060 T8). These
+// are compiled server budgets, not user configuration.
+/// Concurrent blocking workspace directory traversals.
+pub(crate) const DIRECTORY_LISTING_MAX_CONCURRENCY: usize = 4;
+/// Concurrent Git roots; commands within one root remain sequential.
+pub(crate) const GIT_ROOT_CONCURRENCY: usize = 4;
 
 // Approved Phase 18.21 analyzer-neutral package-worker limits.
 pub const DOCUMENT_ANALYSIS_MAX_WORKERS: usize = 4;
@@ -42,6 +52,29 @@ pub const EDIT_HISTORY_MAX_ENTRY_BYTES: usize = 64 * 1024;
 // Max retained client document sessions including the active document (Phase 20).
 // Aligned with `RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS`.
 pub const CLIENT_DOCUMENT_SESSION_MAX: usize = 64;
+
+// Per-connection ceiling on simultaneously open server documents, aligned with
+// the client retained-session budget: a client that retains at most 64
+// sessions never legitimately holds more server documents open.
+pub(crate) const MAX_DOCUMENTS_PER_CLIENT: usize = CLIENT_DOCUMENT_SESSION_MAX;
+// Active IPC connection ceiling enforced at the accept loop via a semaphore
+// permit owned by each connection task; excess connections are refused at
+// accept time instead of spawning unbounded tasks (Plan 060 T6, P1-10).
+pub(crate) const MAX_ACTIVE_CONNECTIONS: usize = 64;
+// Server-wide open-document ceiling: every connection could hold the
+// per-client maximum. Beyond this, opens fail closed with
+// `WorkspaceLimitExceeded` rather than growing workspace registries without
+// bound.
+pub(crate) const MAX_SERVER_DOCUMENTS: usize = MAX_ACTIVE_CONNECTIONS * MAX_DOCUMENTS_PER_CLIENT;
+// Per-connection completion / language-intelligence result lane capacity.
+// These lanes carry only request-scoped results; a saturated lane means the
+// client is not reading, so the server drops with a diagnostic instead of
+// growing memory.
+pub(crate) const CONNECTION_RESULT_LANE_CAPACITY: usize = 64;
+// Server-side runtime-diagnostic retention: bounded deduplicating deque,
+// aligned with the snapshot publication cap so welcome/runtime snapshots
+// never grow past the frame budget.
+pub(crate) const RUNTIME_DIAGNOSTIC_CAPACITY: usize = RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS;
 // Edit acknowledgement payload budget.  Advisory: rkyv union-layout sizing means
 // the serialized size of `ServerMessage::EditAck` grows with the largest enum
 // variant.  128 bytes reflects the current union floor after adding completion
@@ -208,9 +241,11 @@ pub const LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB: u64 = 256;
 // single rkyv frame, and the IPC codec caps a frame at
 // `DEFAULT_MAX_FRAME_SIZE` (1 MiB). A file at or near that limit would open
 // successfully only to fail at frame encode, and reading it into memory first
-// is a memory-exhaustion vector. This gate is checked against already-fetched
-// file metadata *before* `tokio_fs::read` allocates, so oversized files are
-// rejected with a typed `FileTooLarge` error without ever being read.
+// is a memory-exhaustion vector. Open/reload read through one opened handle
+// (`read_file_bounded` in the workspace): handle metadata is checked against
+// this gate before allocation and the read itself is capped at this value
+// plus one byte, so oversized files are rejected with a typed `FileTooLarge`
+// error even if the file grows between validation and read.
 //
 // The value sits below the 1 MiB frame limit to leave headroom for the message
 // envelope (variant tag + `DocumentMetadata` + rkyv overhead) so any file that
@@ -219,3 +254,16 @@ pub const LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB: u64 = 256;
 // (see plan 030). `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` is the future
 // resident-memory budget for that chunked path and is intentionally much larger.
 pub const MAX_OPENABLE_FILE_BYTES: usize = 768 * 1024;
+
+/// Hard size gate for small trusted-local auxiliary reads (e.g. a workspace
+/// root `.gitignore`). These files are read in full into memory, so a
+/// symlinked or absurdly large helper file would otherwise be a
+/// memory-exhaustion vector. Reads use one opened handle and allocate at most
+/// this plus one byte; overflow aborts listing with a bounded diagnostic.
+pub(crate) const MAX_AUXILIARY_READ_BYTES: usize = 1024 * 1024;
+/// Maximum lines inspected in the root `.gitignore` used by directory listing.
+pub(crate) const MAX_GITIGNORE_LINES: usize = 4096;
+/// Maximum accepted root `.gitignore` rules retained by one listing.
+pub(crate) const MAX_GITIGNORE_PATTERNS: usize = 1024;
+/// Maximum Unicode scalar count in one supported root `.gitignore` rule.
+pub(crate) const MAX_GITIGNORE_PATTERN_CHARS: usize = 256;

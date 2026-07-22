@@ -3,7 +3,7 @@ id: clay.completion.serverListCompletionProvidersForTrigger
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: serverListCompletionProvidersForTrigger
-js_facade: runtime/js/completion.ts::serverListCompletionProvidersForTrigger
+js_facade: runtime/js/completion.js::serverListCompletionProvidersForTrigger
 backing_rust: src/server/completion.rs::CompletionProviderRegistry::providers_for_trigger_character
 deno_op: op_clay_completion_providers_for_trigger
 deno_op_path: src/server/ops/completion.rs::op_clay_completion_providers_for_trigger
@@ -110,8 +110,8 @@ Use `clay.completion.serverListCompletionProvidersForTrigger` only for trigger-p
 
 ## Backing implementation
 
-- Facade: `runtime/js/completion.ts::serverListCompletionProvidersForTrigger`
-- Embedded runtime facade: `src/server/js_runtime.rs::CLAY_FACADE_COMPLETION`
+- Facade: `runtime/js/completion.js::serverListCompletionProvidersForTrigger`
+- Runtime include table: `src/server/facades.rs`
 - Deno op: `src/server/ops/completion.rs::op_clay_completion_providers_for_trigger`
 - Backing registry: `src/server/completion.rs::CompletionProviderRegistry`
 

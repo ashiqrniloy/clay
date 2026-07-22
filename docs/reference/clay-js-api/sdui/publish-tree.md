@@ -3,7 +3,7 @@ id: clay.sdui.publishTree
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: publishTree
-js_facade: runtime/js/sdui.ts::publishTree
+js_facade: runtime/js/sdui.js::publishTree
 backing_rust: src/server/sdui.rs::validate_runtime_tree
 deno_op: op_clay_sdui_publish_tree
 deno_op_path: src/server/ops/sdui.rs::op_clay_sdui_publish_tree
@@ -106,7 +106,7 @@ Use `clay.sdui.publishTree` only with documented SDUI node helpers and only in s
 
 ## Backing implementation
 
-- JS facade: `runtime/js/sdui.ts::publishTree`
+- JS facade: `runtime/js/sdui.js::publishTree`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_publish_tree` (`op_clay_sdui_publish_tree`)
 - Rust function: `src/server/sdui.rs::validate_runtime_tree`
 - Runtime conversion path: `src/server/ops/sdui.rs::runtime_tree_from_json`

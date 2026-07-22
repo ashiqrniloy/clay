@@ -37,615 +37,6 @@ use super::{
 const CONTROLLED_MAIN_SPECIFIER: &str = "clay://runtime/main.js";
 const MARKDOWN_IT_MODULE_SPECIFIER: &str = "clay://vendor/markdown-it.js";
 
-fn clay_facade_source(specifier: &str) -> Option<&'static str> {
-    match specifier {
-        "clay:configuration" => Some(CLAY_FACADE_CONFIGURATION),
-        "clay:sdui" => Some(CLAY_FACADE_SDUI),
-        "clay:ui" => Some(CLAY_FACADE_UI),
-        "clay:documents" => Some(CLAY_FACADE_DOCUMENTS),
-        "clay:workspace" => Some(CLAY_FACADE_WORKSPACE),
-        "clay:git" => Some(CLAY_FACADE_GIT),
-        "clay:keybindings" => Some(CLAY_FACADE_KEYBINDINGS),
-        "clay:behavior" => Some(CLAY_FACADE_BEHAVIOR),
-        "clay:packages" => Some(CLAY_FACADE_PACKAGES),
-        "clay:language-server" => Some(CLAY_FACADE_LANGUAGE_SERVER),
-        "clay:modes" => Some(CLAY_FACADE_MODES),
-        "clay:commands" => Some(CLAY_FACADE_COMMANDS),
-        "clay:decorations" => Some(CLAY_FACADE_DECORATIONS),
-        "clay:diagnostics" => Some(CLAY_FACADE_DIAGNOSTICS),
-        "clay:parse" => Some(CLAY_FACADE_PARSE),
-        "clay:syntax" => Some(CLAY_FACADE_SYNTAX),
-        "clay:completion" => Some(CLAY_FACADE_COMPLETION),
-        "clay:language" => Some(CLAY_FACADE_LANGUAGE),
-        "clay:application" => Some(CLAY_FACADE_APPLICATION),
-        "clay:editor" => Some(CLAY_FACADE_EDITOR),
-        "clay:theme" => Some(CLAY_FACADE_THEME),
-        _ => None,
-    }
-}
-
-const CLAY_FACADE_CONFIGURATION: &str = r#"
-const ops = Deno.core.ops;
-const unavailable = (api) => { ops.op_clay_runtime_unavailable(api); };
-
-export async function loadConfigurationModule(options) {
-  if (options === null || typeof options !== "object" || typeof options.path !== "string") {
-    throw new Error("clay.configuration.invalid_module: loadConfigurationModule requires { path: string }");
-  }
-  const path = ops.op_clay_configuration_load_module(options.path);
-  await import(path);
-}
-
-export function getConfigurationState() {
-  return JSON.parse(ops.op_clay_configuration_get_state());
-}
-
-export function setPackageOption(options) {
-  return JSON.parse(ops.op_clay_configuration_set_package_option(JSON.stringify(options ?? null)));
-}
-export function setModePreference(options) { void options; unavailable("clay.configuration.setModePreference"); }
-export function setDecorationTheme(options) { void options; unavailable("clay.configuration.setDecorationTheme"); }
-export function setParsePolicy(options) { void options; unavailable("clay.configuration.setParsePolicy"); }
-"#;
-
-const CLAY_FACADE_SDUI: &str = r#"
-const ops = Deno.core.ops;
-
-function defineNode(kind, options) {
-  return JSON.parse(ops.op_clay_sdui_define_node(kind, JSON.stringify(options ?? {})));
-}
-
-export function definePanel(options) { return defineNode("panel", options); }
-export function defineLabel(options) { return defineNode("label", options); }
-export function defineButton(options) { return defineNode("button", options); }
-export function defineList(options) { return defineNode("list", options); }
-export function defineEditorView(options) { return defineNode("editorView", options); }
-export function defineFlex(options) { return defineNode("flex", options); }
-export function defineStack(options) { return defineNode("stack", options); }
-export async function publishTree(tree) {
-  ops.op_clay_sdui_publish_tree(JSON.stringify(tree ?? null));
-}
-"#;
-
-const CLAY_FACADE_UI: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-const encode = (value) => JSON.stringify(value ?? null);
-// Package provenance is stamped host-side from the executing-package
-// context; facades never accept caller manifests.
-export function serverRegisterPanelContribution(declaration) {
-  return parse(ops.op_clay_ui_register_panel_contribution(encode(declaration)));
-}
-export function serverRegisterComponentContribution(declaration) {
-  return parse(ops.op_clay_ui_register_component_contribution(encode(declaration)));
-}
-export function serverRegisterTransientOverlayContribution(declaration) {
-  return parse(ops.op_clay_ui_register_transient_overlay_contribution(encode(declaration)));
-}
-export function serverRegisterInputContribution(declaration) {
-  return parse(ops.op_clay_ui_register_input_contribution(encode(declaration)));
-}
-export function serverRegisterUiStateScope(declaration) {
-  return parse(ops.op_clay_ui_register_ui_state_scope(encode(declaration)));
-}
-export function serverSetLayoutOverride(declaration) {
-  return parse(ops.op_clay_ui_set_layout_override(encode(declaration)));
-}
-export function serverRegisterThemeToken(declaration) {
-  return parse(ops.op_clay_ui_register_theme_token(encode(declaration)));
-}
-"#;
-
-const CLAY_FACADE_DOCUMENTS: &str = r#"
-const ops = Deno.core.ops;
-const unavailable = (api) => { ops.op_clay_runtime_unavailable(api); };
-const parse = (json) => JSON.parse(json);
-export async function serverGetDocumentSnapshot(documentId) { void documentId; unavailable("clay.documents.serverGetDocumentSnapshot"); }
-export async function serverGetDocumentLease(documentId) { void documentId; unavailable("clay.documents.serverGetDocumentLease"); }
-export function clientOpenFileDialog() { return "clay.documents.clientOpenFileDialog"; }
-export async function serverOpenDocument(options) { return parse(await ops.op_clay_documents_open_document(JSON.stringify(options ?? null))); }
-export async function serverSaveDocument(options) { return parse(await ops.op_clay_documents_save_document(JSON.stringify(options ?? null))); }
-export async function serverReloadDocument(options) { return parse(await ops.op_clay_documents_reload_document(JSON.stringify(options ?? null))); }
-export async function serverGetDocumentStatus(documentId) { return parse(await ops.op_clay_documents_get_document_status(JSON.stringify(documentId))); }
-export async function serverListDocuments() { return parse(await ops.op_clay_documents_list_documents()); }
-"#;
-
-const CLAY_FACADE_WORKSPACE: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export async function serverListWorkspaceRoots() { return parse(await ops.op_clay_workspace_list_roots()); }
-export async function serverAddWorkspaceRoot(path) {
-  return parse(await ops.op_clay_workspace_add_root(path)).workspaceRootId;
-}
-export async function serverDiscoverWorkspaceRootForPath(path) {
-  return parse(await ops.op_clay_workspace_discover_root_for_path(path));
-}
-export async function serverListDirectory(options) {
-  const request = {
-    rootId: options?.rootId,
-    relativePath: options?.relativePath ?? "",
-    maxDepth: options?.maxDepth,
-    maxEntries: options?.maxEntries,
-  };
-  return parse(await ops.op_clay_workspace_list_directory(JSON.stringify(request), options?.cancelTokenId));
-}
-export async function serverCreateListingCancelToken() {
-  return await ops.op_clay_workspace_create_listing_cancel_token();
-}
-export async function serverCancelListing(tokenId) {
-  return await ops.op_clay_workspace_cancel_listing(tokenId);
-}
-export function clientOpenFolderDialog() {
-  return "clay.workspace.clientOpenFolderDialog";
-}
-"#;
-
-const CLAY_FACADE_GIT: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export async function serverListGitStatuses() {
-  return parse(await ops.op_clay_git_list_statuses());
-}
-export async function serverRefreshGitStatus(options) {
-  return parse(await ops.op_clay_git_refresh_status(JSON.stringify(options ?? null)));
-}
-"#;
-
-const CLAY_FACADE_KEYBINDINGS: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function bindKey(key, command, options = {}) {
-  if (typeof key !== "string" || typeof command !== "string") {
-    throw new Error("clay.keybindings.invalid_bind: bindKey requires (key: string, command: string)");
-  }
-  return parse(ops.op_clay_keybindings_bind_key(key, command, JSON.stringify(options ?? {})));
-}
-export function unbindKey(key, options = {}) {
-  if (typeof key !== "string") {
-    throw new Error("clay.keybindings.invalid_unbind: unbindKey requires (key: string)");
-  }
-  ops.op_clay_keybindings_unbind_key(key, JSON.stringify(options ?? {}));
-}
-export function listKeyBindings(scope = "all") {
-  return parse(ops.op_clay_keybindings_list_key_bindings(scope ?? "all"));
-}
-"#;
-
-const CLAY_FACADE_BEHAVIOR: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function getActiveBehaviorManifest(documentId) {
-  return parse(ops.op_clay_behavior_get_active_manifest(JSON.stringify(documentId ?? null)));
-}
-export function listBehaviorRoutes(documentId) {
-  return parse(ops.op_clay_behavior_list_routes(JSON.stringify(documentId ?? null)));
-}
-export function buildCodeEditingManifest(options) {
-  const pairs = (options.pairs ?? [
-    { open: "(", close: ")" },
-    { open: "[", close: "]" },
-    { open: "{", close: "}" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" }
-  ]).filter((pair) => pair.open.length > 0 && pair.close.length > 0);
-  const comments = [];
-  if (options.lineComment && options.lineComment.length > 0) {
-    comments.push({ linePrefix: options.lineComment, continuePrefix: `${options.lineComment} ` });
-  }
-  const electricCharacters = [];
-  const seenElectric = new Set();
-  for (const character of options.electricOutdentCharacters ?? []) {
-    if ([...character].length === 1 && !seenElectric.has(character)) {
-      seenElectric.add(character);
-      electricCharacters.push({ trigger: character, effect: "outdent-one-level" });
-    }
-  }
-  const autocompleteTriggers = [];
-  const seenAutocomplete = new Set();
-  for (const trigger of options.autocompleteTriggers ?? []) {
-    if ([...trigger].length === 1 && !seenAutocomplete.has(trigger) && seenAutocomplete.size < 32) {
-      seenAutocomplete.add(trigger);
-      autocompleteTriggers.push({ trigger });
-    }
-  }
-  return {
-    enter: options.enter ?? { kind: "preserveLeadingWhitespace" },
-    pairs,
-    comments,
-    tabSpaces: options.indentSize,
-    electricCharacters,
-    autocompleteTriggers
-  };
-}
-"#;
-
-const CLAY_FACADE_PACKAGES: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-// Per-runtime-generation cache. Hot reload invalidates it by swapping to a
-// fresh ClayJsRuntimeService, not by mutating globals/module cache in place,
-// adding a force flag, or invoking package-authored reload/migration hooks.
-// Generation-local only: this object is empty in every candidate generation.
-const loadedPackages = globalThis.__clayLoadedPackages ??= Object.create(null);
-export function serverValidatePackageManifest(manifest) {
-  return parse(ops.op_clay_packages_validate_manifest(JSON.stringify(manifest ?? null)));
-}
-export function serverValidatePackagePermissions(permissions) {
-  return parse(ops.op_clay_packages_validate_permissions(JSON.stringify(permissions ?? null)));
-}
-export function serverLoadPackage(packageJson) {
-  return parse(ops.op_clay_packages_load_package(JSON.stringify(packageJson ?? null)));
-}
-export function serverListFirstPartyPackageSpecifiers() {
-  return parse(ops.op_clay_packages_list_first_party_specifiers()).specifiers;
-}
-/** Load and activate an installed, user-authorized package by specifier.
- *
- * One-line default end-user loader from ~/.config/clay/init.js for both
- * bundled and user-installed packages:
- * await loadPackage("@clay/markdown"), await loadPackage("@vendor/foo"),
- * or await loadPackage("github:user/repo"). init.js grants no capabilities
- * on its own; every powerful capability is a separate user-approved grant. */
-export async function loadPackage(specifier) {
-  if (typeof specifier !== "string") {
-    throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
-  }
-  if (loadedPackages[specifier]) {
-    return loadedPackages[specifier];
-  }
-  const result = parse(ops.op_clay_packages_load_package_by_specifier(JSON.stringify({ specifier })));
-  if (result.domain === "third-party") {
-    // Approved third-party packages never execute in this (trusted) runtime:
-    // the host bridge evaluates their load entry in the third-party runtime
-    // and absorbs the registration payload (Plan 061 task 12).
-    parse(await ops.op_clay_packages_load_in_package_domain(JSON.stringify(result)));
-    loadedPackages[specifier] = result;
-    return result;
-  }
-  const loadEntry = await import(result.loadEntrySpecifier);
-  if (typeof loadEntry.default === "function") {
-    await loadEntry.default();
-  }
-  loadedPackages[specifier] = result;
-  return result;
-}
-"#;
-
-const CLAY_FACADE_LANGUAGE_SERVER: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-/** Approve one fixed contribution/root set from init.js before loadPackage. */
-export async function authorizeLanguageServer(options) {
-  return parse(await ops.op_clay_language_server_authorize(JSON.stringify(options ?? null)));
-}
-/** Start an authorized language-server child session for one contribution+root.
- * Returns an opaque session id used by the bounded session wrapper below. */
-export async function serverStartSession(options) {
-  // The session owner is the host-stamped executing package; the op response
-  // carries the host-resolved package/contribution identity.
-  return parse(await ops.op_clay_language_server_start_session(JSON.stringify(options ?? null)));
-}
-/** Open a bounded language-server session. Exact byte methods preserve
- * arbitrary child chunk boundaries; no process or stdio handle is exposed. */
-export class LanguageServerSession {
-  #sessionId;
-  #pkg;
-  #contribution;
-  constructor(sessionId, pkg, contribution) {
-    this.#sessionId = sessionId;
-    this.#pkg = pkg;
-    this.#contribution = contribution;
-  }
-  async sendBytes(bytes) {
-    if (!(bytes instanceof Uint8Array)) {
-      throw new Error("clay.language_server.invalid_bytes: bytes must be a Uint8Array");
-    }
-    return await ops.op_clay_language_server_send_bytes(JSON.stringify({
-      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
-    }), bytes);
-  }
-  async readBytes(maxBytes, timeoutMs) {
-    return await ops.op_clay_language_server_read_bytes(JSON.stringify({
-      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
-      maxBytes, timeoutMs,
-    }));
-  }
-  /** Compatibility text path. Byte-framed adapters use sendBytes/readBytes. */
-  async send(message) {
-    if (typeof message !== "string") {
-      throw new Error("clay.language_server.invalid_message: message must be a string");
-    }
-    return parse(await ops.op_clay_language_server_send_message(JSON.stringify({
-      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution, message,
-    })));
-  }
-  async read(maxBytes, timeoutMs) {
-    return parse(await ops.op_clay_language_server_read_message(JSON.stringify({
-      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
-      maxBytes, timeoutMs,
-    }))).message;
-  }
-  async stop() {
-    return parse(await ops.op_clay_language_server_stop_session(JSON.stringify({
-      sessionId: this.#sessionId, package: this.#pkg, contribution: this.#contribution,
-    })));
-  }
-}
-/** Start a session and return its opaque wrapper. */
-export async function startLanguageServerSession(options) {
-  const started = await serverStartSession(options);
-  return new LanguageServerSession(started.sessionId, started.package, started.contribution);
-}
-"#;
-
-const CLAY_FACADE_MODES: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-const activationRegistry = globalThis.__clayModeActivations ??= Object.create(null);
-const activationKey = (apiPrefix, modeId) => `${apiPrefix}:${modeId}`;
-// Package provenance is stamped host-side; the op response carries the
-// host-registered packagePrefix/modeId used to key inert activation payloads.
-export function serverRegisterModePattern(declaration) {
-  const result = parse(ops.op_clay_modes_register_pattern(JSON.stringify(declaration ?? null)));
-  if (result?.packagePrefix && result?.modeId) {
-    activationRegistry[activationKey(result.packagePrefix, result.modeId)] = {
-      editorRules: declaration?.editorRules,
-      commands: declaration?.commands,
-      keymaps: declaration?.keymaps,
-    };
-  }
-  return result;
-}
-export function serverClassifyDocument(input) {
-  return parse(ops.op_clay_modes_classify_document(JSON.stringify(input ?? null)));
-}
-export function serverActivateMajorMode(input) {
-  return parse(ops.op_clay_modes_activate_major_mode(JSON.stringify(input ?? null)));
-}
-export function serverActivateClassifiedMode(classification, input = {}) {
-  const activation = activationRegistry[activationKey(classification?.apiPrefix, classification?.modeId)];
-  if (!activation) {
-    throw new Error("clay.modes.activation_failed: classified mode has no registered activation metadata");
-  }
-  return serverActivateMajorMode({
-    ...input,
-    documentId: classification.documentId,
-    modeId: classification.modeId,
-    editorRules: activation.editorRules,
-    commands: activation.commands,
-    keymaps: activation.keymaps,
-  });
-}
-export function serverSelectDocumentManifest(options) { void options; ops.op_clay_runtime_unavailable("clay.modes.serverSelectDocumentManifest"); }
-export function serverRegisterDecorationProvider(options) { void options; ops.op_clay_runtime_unavailable("clay.modes.serverRegisterDecorationProvider"); }
-export function serverRegisterParseProvider(options) { void options; ops.op_clay_runtime_unavailable("clay.modes.serverRegisterParseProvider"); }
-export function serverRegisterFoldingProvider(options) { void options; ops.op_clay_runtime_unavailable("clay.modes.serverRegisterFoldingProvider"); }
-"#;
-
-const CLAY_FACADE_COMMANDS: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-// Package provenance is stamped host-side from the executing-package context.
-export function serverRegisterCommand(declaration) {
-  return parse(ops.op_clay_commands_register_command(JSON.stringify(declaration ?? null)));
-}
-export function serverListCommands() {
-  return parse(ops.op_clay_commands_list_commands());
-}
-export async function serverExecuteCommand(commandId, args = {}, target = { global: {} }) {
-  return parse(await ops.op_clay_commands_execute_command(JSON.stringify({
-    commandId,
-    arguments: args ?? {},
-    target: target ?? { global: {} },
-    expectedPermissions: [],
-  })));
-}
-export async function serverOpenFile(args) {
-  const result = await serverExecuteCommand("clay.workspace.openFile", args ?? {});
-  if (result.status?.kind !== "workspace" || result.status?.action !== "opened") {
-    throw new Error(`clay.commands.open_failed: expected opened status, got ${JSON.stringify(result.status)}`);
-  }
-  return { documentId: String(result.status.documentId), version: Number(result.status.version), path: String(result.status.path ?? "") };
-}
-export async function serverOpenDirectory(args) {
-  const result = await serverExecuteCommand("clay.workspace.openDirectory", args ?? {});
-  if (result.status?.kind !== "workspace" || result.status?.action !== "navigated") {
-    throw new Error(`clay.commands.open_directory_failed: expected navigated status, got ${JSON.stringify(result.status)}`);
-  }
-  return { workspaceRootId: String(result.status.workspaceRootId), relativePath: String(result.status.relativePath ?? "") };
-}
-export async function serverRevealInTree(args) {
-  const result = await serverExecuteCommand("clay.workspace.revealInTree", args ?? {});
-  if (result.status?.kind !== "workspace" || result.status?.action !== "revealed") {
-    throw new Error(`clay.commands.reveal_failed: expected revealed status, got ${JSON.stringify(result.status)}`);
-  }
-}
-"#;
-
-const CLAY_FACADE_DECORATIONS: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function serverPublishDecorations(options) {
-  return parse(ops.op_clay_decorations_publish_decorations(JSON.stringify(options ?? null)));
-}
-"#;
-
-const CLAY_FACADE_DIAGNOSTICS: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-const FORBIDDEN = ["handler", "callback", "onDiagnostic", "function", "clientJavaScript", "nativeHandle", "rawOps", "draw", "css", "render"];
-export function serverPublishDiagnostics(options) {
-  for (const key of FORBIDDEN) {
-    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-      throw new Error(`clay.diagnostics.invalid_publication: executable or raw authority field ${key} is not accepted`);
-    }
-  }
-  return parse(ops.op_clay_diagnostics_publish_diagnostics(JSON.stringify(options ?? null)));
-}
-"#;
-
-const CLAY_FACADE_PARSE: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function serverRegisterParseHandler(options) {
-  for (const key of ["handler", "callback", "onParse", "function"]) {
-    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-      throw new Error(`clay.parse.invalid_handler: executable ${key} callbacks are not accepted by the public registration contract`);
-    }
-  }
-  const { module, exportName = "default", ...opOptions } = options ?? {};
-  const registration = parse(ops.op_clay_parse_register_parse_handler(JSON.stringify({ ...(opOptions ?? {}), runtimeBridge: module !== undefined })));
-  if (module !== undefined) {
-    const handler = module?.[exportName];
-    if (typeof handler !== "function") {
-      throw new Error(`clay.parse.invalid_handler: module export ${exportName} must be a function`);
-    }
-    globalThis.__clayParseHandlers ??= Object.create(null);
-    globalThis.__clayParseHandlers[registration.token] = handler;
-  }
-  return registration;
-}
-"#;
-
-const CLAY_FACADE_SYNTAX: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function setSyntaxEnginePreference(target, tier) {
-  return parse(ops.op_clay_syntax_set_engine_preference(String(target ?? ""), String(tier ?? "")));
-}
-export function serverRegisterSyntaxGrammar(options) {
-  for (const key of ["handler", "callback", "onParse", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
-    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-      throw new Error(`clay.syntax.invalid_grammar: executable or raw authority field ${key} is not accepted by the public registration contract`);
-    }
-  }
-  return parse(ops.op_clay_syntax_register_syntax_grammar(JSON.stringify(options ?? null)));
-}
-"#;
-
-const CLAY_FACADE_COMPLETION: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function serverRegisterCompletionProvider(options) {
-  for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
-    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-      throw new Error(`clay.completion.invalid_provider: executable or raw authority field ${key} is not accepted by the public registration contract`);
-    }
-  }
-  const { module, exportName = "provideCompletion", ...opOptions } = options ?? {};
-  const registration = parse(ops.op_clay_completion_register_completion_provider(JSON.stringify({ ...opOptions, exportName, runtimeBridge: module !== undefined })));
-  if (module !== undefined) {
-    const handler = module?.[exportName];
-    if (typeof handler !== "function") {
-      throw new Error(`clay.completion.invalid_provider: module export ${exportName} must be a function`);
-    }
-    globalThis.__clayCompletionHandlers ??= Object.create(null);
-    for (const token of registration.tokens ?? []) {
-      globalThis.__clayCompletionHandlers[token] = handler;
-    }
-  }
-  return registration;
-}
-export function serverDisableCompletion(options) {
-  for (const key of Object.keys(options ?? {})) {
-    if (key !== "provider" && key !== "packagePrefix") {
-      throw new Error("clay.completion.invalid_disable: only provider or packagePrefix is accepted");
-    }
-  }
-  const provider = (options ?? {}).provider;
-  const packagePrefix = (options ?? {}).packagePrefix;
-  const targets = [provider, packagePrefix].filter((value) => typeof value === "string" && value.trim().length > 0);
-  if (targets.length !== 1) {
-    throw new Error("clay.completion.invalid_disable: provide exactly one non-empty provider or packagePrefix");
-  }
-  return parse(ops.op_clay_completion_disable(JSON.stringify(options)));
-}
-export function serverListCompletionProvidersForTrigger(options) {
-  const trigger = (options ?? {}).trigger;
-  if (typeof trigger !== "string" || trigger.length === 0) {
-    throw new Error("clay.completion.invalid_trigger: trigger must be a non-empty string");
-  }
-  return parse(ops.op_clay_completion_providers_for_trigger(trigger));
-}
-export function completionTriggerCharactersFromEditorRules(editorRules) {
-  const triggers = editorRules?.autocompleteTriggers ?? [];
-  const characters = [];
-  for (const trigger of triggers) {
-    const value = trigger?.trigger;
-    if (typeof value === "string" && value.length > 0) {
-      characters.push(value);
-    }
-  }
-  return characters;
-}
-"#;
-
-const CLAY_FACADE_LANGUAGE: &str = r#"
-const ops = Deno.core.ops;
-const parse = (json) => JSON.parse(json);
-export function serverRegisterDocumentAnalyzer(options) {
-  return parse(ops.op_clay_language_register_document_analyzer(JSON.stringify(options ?? null)));
-}
-export function serverRegisterLanguageIntelligenceProvider(options) {
-  for (const key of ["handler", "callback", "function", "clientJavaScript", "nativeHandle", "rawOps", "executable", "process", "languageServer"]) {
-    if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-      throw new Error(`clay.language.invalid_provider: executable or process authority field ${key} is not accepted by the public registration contract`);
-    }
-  }
-  const { module, exportName = "provideLanguageIntelligence", ...opOptions } = options ?? {};
-  const registration = parse(ops.op_clay_language_register_intelligence_provider(JSON.stringify({ ...(opOptions ?? {}), exportName, runtimeBridge: module !== undefined })));
-  if (module !== undefined) {
-    const handler = module?.[exportName];
-    if (typeof handler !== "function") {
-      throw new Error(`clay.language.invalid_provider: module export ${exportName} must be a function`);
-    }
-    globalThis.__clayLanguageIntelligenceHandlers ??= Object.create(null);
-    globalThis.__clayLanguageIntelligenceHandlers[registration.token] = handler;
-  }
-  return registration;
-}
-"#;
-
-const CLAY_FACADE_APPLICATION: &str = r#"
-export function quit() { Deno.core.ops.op_clay_runtime_unavailable("clay.application.quit"); }
-"#;
-
-const CLAY_FACADE_EDITOR: &str = r#"
-const unavailable = (api) => { Deno.core.ops.op_clay_runtime_unavailable(api); };
-export async function serverInsertText(options) { void options; unavailable("clay.editor.serverInsertText"); }
-export async function serverDeleteRange(options) { void options; unavailable("clay.editor.serverDeleteRange"); }
-export async function serverInsertNewline(options) { void options; unavailable("clay.editor.serverInsertNewline"); }
-export function clientMoveCursor(options) { void options; unavailable("clay.editor.clientMoveCursor"); }
-export function clientSetSelection(options) { void options; unavailable("clay.editor.clientSetSelection"); }
-export function clientScrollTo(options) { void options; unavailable("clay.editor.clientScrollTo"); }
-export function clientSetCursorStyle(options) { void options; unavailable("clay.editor.clientSetCursorStyle"); }
-export function clientSetViewport(options) { void options; unavailable("clay.editor.clientSetViewport"); }
-export function clientCopySelection() { return "clay.editor.clientCopySelection"; }
-export function clientCutSelection() { return "clay.editor.clientCutSelection"; }
-export function clientPasteClipboard() { return "clay.editor.clientPasteClipboard"; }
-export function clientUndo() { return "clay.editor.clientUndo"; }
-export function clientRedo() { return "clay.editor.clientRedo"; }
-export function clientShowOpenDocuments() { return "clay.editor.clientShowOpenDocuments"; }
-export function clientRequestResync() { return "clay.editor.clientRequestResync"; }
-export function clientDismissRecovery() { return "clay.editor.clientDismissRecovery"; }
-"#;
-
-const CLAY_FACADE_THEME: &str = r#"
-export function setTheme(options) {
-  const specifier = typeof options === "string" ? options : options?.specifier;
-  if (typeof specifier !== "string" || specifier.length === 0) {
-    throw new Error("clay.theme.invalid_request: setTheme requires a theme specifier");
-  }
-  return JSON.parse(Deno.core.ops.op_clay_theme_set_theme(JSON.stringify({ specifier })));
-}
-export function setTypography(options) {
-  if (options === null || typeof options !== "object") {
-    throw new Error("clay.theme.invalid_typography: setTypography requires complete typography profiles");
-  }
-  return JSON.parse(Deno.core.ops.op_clay_theme_set_typography(JSON.stringify(options)));
-}
-"#;
-
 /// One persistent domain worker plus its per-domain generation state
 /// (poison flag, evaluation metric, replaceable worker handle).
 #[derive(Debug, Clone)]
@@ -3706,34 +3097,6 @@ struct LoadedRuntimeEntry {
     configuration: Option<Arc<ConfigurationRuntime>>,
 }
 
-/// `clay:*` facade specifiers the third-party domain may import (Plan 061
-/// task 1 classification). Configuration, documents, workspace, keybindings,
-/// packages, theme, application, and editor facades stay trusted-only.
-const THIRD_PARTY_FACADES: &[&str] = &[
-    "clay:sdui",
-    "clay:ui",
-    "clay:git",
-    "clay:behavior",
-    "clay:language-server",
-    "clay:modes",
-    "clay:commands",
-    "clay:decorations",
-    "clay:diagnostics",
-    "clay:parse",
-    "clay:syntax",
-    "clay:completion",
-    "clay:language",
-];
-
-fn facade_allowed(domain: crate::packages::bundled::RuntimeDomain, specifier: &str) -> bool {
-    match domain {
-        crate::packages::bundled::RuntimeDomain::Trusted => clay_facade_source(specifier).is_some(),
-        crate::packages::bundled::RuntimeDomain::ThirdParty => {
-            THIRD_PARTY_FACADES.contains(&specifier)
-        }
-    }
-}
-
 #[derive(Debug)]
 struct ClayModuleLoader {
     state: std::sync::Mutex<ClayModuleLoaderState>,
@@ -3809,8 +3172,8 @@ impl ModuleLoader for ClayModuleLoader {
         if specifier == state.main_specifier.as_str() {
             return Ok(state.main_specifier.clone());
         }
-        if clay_facade_source(specifier).is_some() {
-            if !facade_allowed(self.domain, specifier) {
+        if super::facades::source(specifier).is_some() {
+            if !super::facades::allowed(self.domain, specifier) {
                 return Err(Self::denied(specifier));
             }
             return ModuleSpecifier::parse(specifier)
@@ -3882,8 +3245,8 @@ impl ModuleLoader for ClayModuleLoader {
             )));
         }
 
-        if let Some(source) = clay_facade_source(module_specifier.as_str()) {
-            if !facade_allowed(self.domain, module_specifier.as_str()) {
+        if let Some(source) = super::facades::source(module_specifier.as_str()) {
+            if !super::facades::allowed(self.domain, module_specifier.as_str()) {
                 return ModuleLoadResponse::Sync(Err(Self::denied(module_specifier.as_str())));
             }
             return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
@@ -4468,7 +3831,7 @@ mod tests {
             service.domain_evaluations(crate::packages::bundled::RuntimeDomain::Trusted);
         let third_party_before =
             service.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty);
-        coordinator
+        let reply_rx = coordinator
             .schedule_completion(
                 "domaindyn.provider",
                 crate::protocol::CompletionRequest {
@@ -4496,7 +3859,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let result = tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+        let result = tokio::time::timeout(Duration::from_secs(2), reply_rx)
             .await
             .unwrap()
             .unwrap();
@@ -4547,7 +3910,7 @@ mod tests {
         service
             .register_completion_providers(&coordinator, 4, &evaluation)
             .unwrap();
-        coordinator
+        let reply_rx = coordinator
             .schedule_completion(
                 "slowdyn.provider",
                 crate::protocol::CompletionRequest {
@@ -4577,7 +3940,11 @@ mod tests {
             .unwrap();
         // The busy-loop provider times out; only the third-party domain is
         // poisoned. The trusted runtime keeps answering immediately.
-        let _ = tokio::time::timeout(Duration::from_secs(1), coordinator.next_result()).await;
+        // The busy-loop provider times out inside the coordinator; the
+        // request-scoped reply is dropped and the receiver observes
+        // cancellation instead of a result.
+        let outcome = tokio::time::timeout(Duration::from_secs(1), reply_rx).await;
+        assert!(matches!(outcome, Ok(Err(_))));
         let trusted = service
             .evaluate_controlled_module(
                 r#"Deno.core.ops.op_clay_runtime_record(Deno.core.ops.op_clay_runtime_ping());"#,
@@ -4648,7 +4015,7 @@ mod tests {
             .unwrap();
         let third_party_evals_before =
             reloaded.domain_evaluations(crate::packages::bundled::RuntimeDomain::ThirdParty);
-        coordinator
+        let reply_rx = coordinator
             .schedule_completion(
                 "survivor.provider",
                 crate::protocol::CompletionRequest {
@@ -4676,7 +4043,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let result = tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+        let result = tokio::time::timeout(Duration::from_secs(2), reply_rx)
             .await
             .unwrap()
             .unwrap();
@@ -4755,7 +4122,7 @@ mod tests {
 
         // The next third-party dispatch replaces the worker and replays the
         // approved graph: the provider answers again under the same token.
-        coordinator
+        let reply_rx = coordinator
             .schedule_completion(
                 "replayd.provider",
                 crate::protocol::CompletionRequest {
@@ -4783,7 +4150,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let result = tokio::time::timeout(Duration::from_secs(3), coordinator.next_result())
+        let result = tokio::time::timeout(Duration::from_secs(3), reply_rx)
             .await
             .unwrap()
             .unwrap();
@@ -4898,7 +4265,7 @@ mod tests {
             .unwrap()
             .disable("@vendor/skipd")
             .unwrap();
-        coordinator
+        let reply_rx = coordinator
             .schedule_completion(
                 "skipd.provider",
                 crate::protocol::CompletionRequest {
@@ -4926,10 +4293,10 @@ mod tests {
                 },
             )
             .unwrap();
-        let outcome = tokio::time::timeout(Duration::from_secs(1), coordinator.next_result()).await;
-        // A dropped channel or silent drop are both fail-closed: no
-        // completion is ever produced from the disabled package.
-        if let Ok(Some(result)) = outcome {
+        let outcome = tokio::time::timeout(Duration::from_secs(1), reply_rx).await;
+        // A dropped request-scoped reply or silent drop are both fail-closed:
+        // no completion is ever produced from the disabled package.
+        if let Ok(Ok(result)) = outcome {
             assert_ne!(
                 result.status,
                 crate::protocol::CompletionStatus::Ok,
@@ -5270,7 +4637,7 @@ mod tests {
         let saturation_started = Instant::now();
         for index in 0..20u32 {
             let started = Instant::now();
-            coordinator
+            let reply_rx = coordinator
                 .schedule_completion(
                     "probeprov.provider",
                     crate::protocol::CompletionRequest {
@@ -5290,7 +4657,7 @@ mod tests {
                     completion_window.clone(),
                 )
                 .unwrap();
-            tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+            tokio::time::timeout(Duration::from_secs(2), reply_rx)
                 .await
                 .unwrap()
                 .unwrap();
@@ -5368,7 +4735,7 @@ mod tests {
         )
         .await;
         let recovery_started = Instant::now();
-        recovery_coordinator
+        let reply_rx = recovery_coordinator
             .schedule_completion(
                 "recoverd.provider",
                 crate::protocol::CompletionRequest {
@@ -5396,11 +4763,10 @@ mod tests {
                 },
             )
             .unwrap();
-        let recovered =
-            tokio::time::timeout(Duration::from_secs(3), recovery_coordinator.next_result())
-                .await
-                .unwrap()
-                .unwrap();
+        let recovered = tokio::time::timeout(Duration::from_secs(3), reply_rx)
+            .await
+            .unwrap()
+            .unwrap();
         let third_party_recovery_us = recovery_started.elapsed().as_micros();
         assert_eq!(recovered.items[0].label, "recovered");
         let _ = fs::remove_dir_all(recovery_root.parent().unwrap());
@@ -5889,7 +5255,7 @@ mod tests {
             trigger: crate::protocol::CompletionTrigger::Manual,
             provider_generation: 4,
         };
-        coordinator
+        let reply_rx = coordinator
             .schedule_completion(
                 "dynamic.provider",
                 request,
@@ -5905,7 +5271,7 @@ mod tests {
             )
             .unwrap();
 
-        let result = tokio::time::timeout(Duration::from_secs(2), coordinator.next_result())
+        let result = tokio::time::timeout(Duration::from_secs(2), reply_rx)
             .await
             .unwrap()
             .unwrap();
@@ -7857,6 +7223,43 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.op_records, vec!["hello:note.txt:false:hello:1"]);
+    }
+
+    #[tokio::test]
+    async fn document_facade_save_rejects_future_known_version() {
+        let config_root = config_fixture("document-save-version");
+        let workspace_root = config_root.join("workspace");
+        fs::create_dir(&workspace_root).unwrap();
+        fs::write(workspace_root.join("note.txt"), "hello").unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            r#"
+            import { serverOpenDocument, serverSaveDocument } from "clay:documents";
+            const opened = await serverOpenDocument({ workspaceRootId: "1", path: "note.txt" });
+            try {
+              await serverSaveDocument({
+                documentId: opened.metadata.documentId,
+                knownVersion: opened.metadata.version + 1,
+              });
+              Deno.core.ops.op_clay_runtime_record("accepted");
+            } catch (error) {
+              Deno.core.ops.op_clay_runtime_record(String(error).includes("claims version") ? "rejected" : String(error));
+            }
+            "#,
+        )
+        .unwrap();
+        let mut workspace = WorkspaceState::new();
+        workspace.add_root(&workspace_root).unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root_with_workspace(
+                config_root,
+                Arc::new(Mutex::new(workspace)),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.op_records, vec!["rejected"]);
     }
 
     #[tokio::test]

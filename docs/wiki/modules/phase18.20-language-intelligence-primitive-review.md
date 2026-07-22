@@ -201,13 +201,13 @@ Reject generic shell strings, arbitrary runtime argv, external URIs, raw absolut
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_20_language_intelligence_primitive_review_is_linked_and_complete`: locks inventory, existing reuse, generic gaps, byte-offset/LSP boundary, lifecycle, budgets, hot-path split, authority split, and rejected shapes.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Final implementation and verification are documented in [Language Intelligence](language-intelligence.md) and [Language Server Process Service](language-server-process-service.md), including protocol round trips, provider cancellation/staleness, UI projection, workspace navigation, deny-by-default process grants, fixed launch descriptors, bounded process I/O, cleanup, and semantic/diagnostic/completion reuse tests.
 
 Run this review gate with:
 
 ```bash
-cargo test --test primitives_docs phase18_20_language_intelligence_primitive_review_is_linked_and_complete
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

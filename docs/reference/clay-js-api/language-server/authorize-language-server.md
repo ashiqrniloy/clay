@@ -3,8 +3,8 @@ id: clay.language-server.authorizeLanguageServer
 kind: clay-js-api
 js_module: "clay:language-server"
 js_export: authorizeLanguageServer
-js_facade: runtime/js/language-server.ts::authorizeLanguageServer
-backing_rust: src/server/language_server.rs PackageService grant registry; src/server/ops/language_server.rs
+js_facade: runtime/js/language-server.js::authorizeLanguageServer
+backing_rust: src/packages/service.rs::PackageService::authorize_language_server; src/server/ops/language_server.rs::op_clay_language_server_authorize
 deno_op: op_clay_language_server_authorize
 deno_op_path: src/server/ops/language_server.rs::op_clay_language_server_authorize
 name: authorizeLanguageServer
@@ -118,7 +118,7 @@ Use only for documented package-prefixed language-server contributions with vali
 
 ## Backing implementation
 
-- Facade: `runtime/js/language-server.ts::authorizeLanguageServer`
+- Facade: `runtime/js/language-server.js::authorizeLanguageServer`
 - Op: `src/server/ops/language_server.rs::op_clay_language_server_authorize`
 - Rust: `src/server/language_server.rs PackageService grant registry; src/server/ops/language_server.rs`
 

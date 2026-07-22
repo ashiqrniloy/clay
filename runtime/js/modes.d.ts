@@ -1,0 +1,23 @@
+export type DocumentFontRole = "monospace" | "proportional";
+export type ModePatternDeclaration = {
+    modeId: string;
+    displayName?: string;
+    defaultFontRole?: DocumentFontRole;
+    extensions?: string[];
+    mimeTypes?: string[];
+    fileNames?: string[];
+    fileNamePatterns?: string[];
+    shebangPatterns?: string[];
+    contentProbes?: string[];
+    editorRules?: unknown;
+    commands?: unknown;
+    keymaps?: unknown;
+};
+export declare function serverRegisterModePattern(declaration: ModePatternDeclaration): unknown;
+export declare function serverClassifyDocument(input: unknown): unknown;
+export declare function serverActivateMajorMode(input: unknown): unknown;
+export declare function serverActivateClassifiedMode(classification: unknown, input?: unknown): unknown;
+export declare function serverSelectDocumentManifest(options: unknown): never;
+export declare function serverRegisterDecorationProvider(options: unknown): never;
+export declare function serverRegisterParseProvider(options: unknown): never;
+export declare function serverRegisterFoldingProvider(options: unknown): never;

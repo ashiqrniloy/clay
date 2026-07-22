@@ -370,13 +370,15 @@ fn document_analysis_capacity_constants_match_approved_phase18_21_contract() {
 #[test]
 fn document_analysis_runs_after_ack_and_outside_editor_hot_paths() {
     let connection = fs::read_to_string("src/server/connection.rs").expect("connection readable");
+    // The Edit/EditorIntent arms share one apply/ack/follow-up path (Plan 060
+    // T4): assert the invariant inside the shared dispatcher — the edit ack is
+    // written to the client before any analysis follow-up work runs.
     let edit_branch = connection
-        .split("ClientMessage::Edit {")
+        .split("async fn dispatch_edit_operation")
         .nth(1)
-        .and_then(|source| source.split("ClientMessage::EditorIntent {").next())
-        .expect("edit branch present");
+        .expect("shared edit dispatch present");
     assert!(
-        edit_branch.find("write_server_message(&mut stream, &response)")
+        edit_branch.find("write_server_message(stream, &response)")
             < edit_branch.find("document_analysis.change_document")
     );
 
@@ -660,8 +662,8 @@ fn semantic_intelligence_reuses_existing_decoration_paths_without_hot_path_work(
     let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
     let theme = fs::read_to_string("src/editor/theme.rs").expect("theme readable");
     let widget = fs::read_to_string("src/masonry_editor.rs").expect("widget readable");
-    let decorations_facade =
-        fs::read_to_string("runtime/js/decorations.ts").expect("decorations facade readable");
+    let decorations_declarations = fs::read_to_string("runtime/js/decorations.d.ts")
+        .expect("decorations declarations readable");
     let hot_paths = format!(
         "{}\n{}\n{}",
         non_test_body(&surface),
@@ -672,9 +674,9 @@ fn semantic_intelligence_reuses_existing_decoration_paths_without_hot_path_work(
     assert!(surface.contains("normalize_visible_text_style_runs"));
     assert!(surface.contains("DecorationKind::Semantic"));
     assert!(theme.contains("DecorationKind::Syntax | DecorationKind::Semantic"));
-    assert!(decorations_facade.contains("tokenType?"));
-    assert!(decorations_facade.contains("modifiers?"));
-    assert!(decorations_facade.contains("\"semantic\""));
+    assert!(decorations_declarations.contains("tokenType?"));
+    assert!(decorations_declarations.contains("modifiers?"));
+    assert!(decorations_declarations.contains("\"semantic\""));
 
     for forbidden in [
         "serverPublishDecorations",

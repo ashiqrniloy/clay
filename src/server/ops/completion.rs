@@ -156,7 +156,11 @@ pub(super) fn op_clay_completion_register_completion_provider(
             .map(|(index, meta)| JsCompletionProviderRegistration {
                 package: package.clone(),
                 meta: meta.clone(),
-                token: format!("{}:{}:{}", package.manifest.clay.api_prefix, meta.id, index),
+                token: super::registration_token(
+                    &package.manifest.clay.api_prefix,
+                    &meta.id,
+                    index,
+                ),
                 export_name: export_name.clone(),
             })
             .collect::<Vec<_>>()

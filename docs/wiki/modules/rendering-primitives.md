@@ -98,11 +98,9 @@ Payloads use the advisory and existing budget constants:
 
 ## Tests
 
-- `tests/primitives_docs.rs::rendering_strategy_doc_linked_from_index`: verifies the reference rendering strategy remains linked from `docs/index.md`.
-- `tests/primitives_docs.rs::rendering_strategy_covers_inert_client_rendering_contract`: checks for decoration shapes, layout hints, render intent versioning, server validation, client attachment points, Parley/Vello references, and security prohibitions.
-- `tests/primitives_docs.rs::rendering_strategy_references_payload_budgets`: checks decoration and SDUI budget references plus viewport-prioritized updates.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - `tests/decoration_transport.rs`: validates payload budget rejection, stale version rejection, codec round trip, and the client render hook.
-- `cargo test --test primitives_docs` and `cargo test --test decoration_transport`: run the documentation and implementation coverage.
+- `cargo test --test protocol primitives_docs::` and `cargo test --test editor decoration_transport::`: run the documentation and implementation coverage.
 
 ## Related
 

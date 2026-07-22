@@ -3,7 +3,7 @@ id: clay.language.serverRegisterDocumentAnalyzer
 kind: clay-js-api
 js_module: "clay:language"
 js_export: serverRegisterDocumentAnalyzer
-js_facade: runtime/js/language.ts::serverRegisterDocumentAnalyzer
+js_facade: runtime/js/language.js::serverRegisterDocumentAnalyzer
 backing_rust: src/server/document_analysis.rs::DocumentAnalysisCoordinator; src/server/ops/document_analysis.rs
 deno_op: op_clay_language_register_document_analyzer
 deno_op_path: src/server/ops/document_analysis.rs::op_clay_language_register_document_analyzer
@@ -161,7 +161,7 @@ Use only from package `dist/load.js`. The bridge contract owns all LSP framing â
 
 ## Backing implementation
 
-- Facade: `runtime/js/language.ts::serverRegisterDocumentAnalyzer`
+- Facade: `runtime/js/language.js::serverRegisterDocumentAnalyzer`
 - Op: `src/server/ops/document_analysis.rs::op_clay_language_register_document_analyzer`
 - Rust: `src/server/document_analysis.rs::DocumentAnalysisCoordinator`
 

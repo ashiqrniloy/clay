@@ -712,6 +712,16 @@ pub enum ClientMessage {
         client_id: ClientId,
         runtime_generation_id: RuntimeGenerationId,
     },
+    /// Plan 060 T6: explicit document close. The server releases the client's
+    /// access; when the last holder leaves, all document-scoped state (trees,
+    /// versions, analysis routes, leases) is torn down. A dirty document
+    /// requires `force` so close intent is explicit about discarding unsaved
+    /// editor state.
+    CloseDocument {
+        client_id: ClientId,
+        document_id: DocumentId,
+        force: bool,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1029,6 +1039,13 @@ pub enum ServerMessage {
     Error {
         code: ProtocolErrorCode,
         message: String,
+    },
+    /// Plan 060 T6 acknowledgement that `CloseDocument` released the client's
+    /// access; `closed` is true when this was the final holder and the server
+    /// tore down all document-scoped state.
+    DocumentClosed {
+        document_id: DocumentId,
+        closed: bool,
     },
 }
 

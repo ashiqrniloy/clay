@@ -51,7 +51,7 @@ Validation keeps provenance in every `PackageDiagnostic`:
 Run focused coverage with:
 
 ```text
-cargo test --test package_primitive_gate
+cargo test --test security package_primitive_gate::
 ```
 
 The tests cover the first-party Markdown fixture, invalid/reserved prefixes, unknown/prohibited permissions, duplicate package prefixes, raw op metadata, client hook metadata, and the split between default-denied `clay.permissions` and separately authorized powerful `clay.capabilities`.

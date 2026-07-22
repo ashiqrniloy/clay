@@ -53,7 +53,7 @@ The Control Center also surfaces two built-in mode-discovery commands for diagno
 Run with:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --lib control_center --quiet
+cargo test --lib control_center --quiet
 ```
 
 ## Related

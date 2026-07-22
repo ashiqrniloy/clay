@@ -11,8 +11,8 @@
 - `src/packages/record.rs` (`SyntaxStyleMapEntry`, `SyntaxGrammarContributionDescriptor`, `is_known_syntax_style_token`).
 - `src/protocol/decorations.rs` (`TokenType`, `Modifiers`, `DecorationSpan`, `classify_style_token`, `from_style_token`).
 - `src/editor/theme.rs` (`StyleRegistry`).
-- `src/protocol/completion.rs` (`CompletionItem`), `src/server/completion.rs`, `runtime/js/completion.ts` (`serverRegisterCompletionProvider`).
-- `runtime/js/behavior.ts` (`buildCodeEditingManifest`), `runtime/js/syntax.ts` (`serverRegisterSyntaxGrammar`), `runtime/js/modes.ts` (`serverRegisterModePattern`), `runtime/js/commands.ts` (`serverRegisterCommand`), `runtime/js/ui.ts` (`serverRegisterComponentContribution`), `runtime/js/packages.ts` (`loadPackage`).
+- `src/protocol/completion.rs` (`CompletionItem`), `src/server/completion.rs`, `runtime/js/completion.js` (`serverRegisterCompletionProvider`).
+- `runtime/js/behavior.js` (`buildCodeEditingManifest`), `runtime/js/syntax.js` (`serverRegisterSyntaxGrammar`), `runtime/js/modes.js` (`serverRegisterModePattern`), `runtime/js/commands.js` (`serverRegisterCommand`), `runtime/js/ui.js` (`serverRegisterComponentContribution`), `runtime/js/packages.js` (`loadPackage`).
 - `packages/{rust,typescript,javascript,markdown}/package.json`, `dist/index.js`, `dist/load.js`, `queries/highlights.scm`.
 - `tests/primitives_docs.rs`, `tests/syntax_grammar.rs`, `tests/completion_provider.rs`, `tests/package_loading.rs`, `tests/editor_performance_invariants.rs`, `tests/performance_protocol.rs`.
 
@@ -48,17 +48,17 @@ This rendering contract is the target the first-party styleMaps must emit into d
 
 ### Behavior manifests and text transforms
 
-`runtime/js/behavior.ts::buildCodeEditingManifest` already accepts generic `CodeEditingManifestOptions`: `indentSize`, `lineComment`, `pairs: Array<{ open, close }>`, `electricOutdentCharacters`, and `autocompleteTriggers`. The editor core deserializes the result into language-agnostic `EnterRule`, `PairRule`, `CommentContinuationRule`, `TabRule`, and `ElectricCharacterRule` types. No language-specific behavior logic lives in the Rust client or server.
+`runtime/js/behavior.js::buildCodeEditingManifest` already accepts generic `CodeEditingManifestOptions`: `indentSize`, `lineComment`, `pairs: Array<{ open, close }>`, `electricOutdentCharacters`, and `autocompleteTriggers`. The editor core deserializes the result into language-agnostic `EnterRule`, `PairRule`, `CommentContinuationRule`, `TabRule`, and `ElectricCharacterRule` types. No language-specific behavior logic lives in the Rust client or server.
 
 The Phase 18.14 packages already call `buildCodeEditingManifest` with placeholder values; Phase 18.18 tunes those values to language-appropriate parameters (rust indent 4; typescript/javascript indent 2; markdown prose-appropriate). This is package data, not a new primitive.
 
 ### Command declaration and execution
 
-`runtime/js/commands.ts::serverRegisterCommand` plus the Phase 18.8 server-owned `CommandExecution` boundary register package-prefixed command metadata with routing policy and authority. First-party comment-toggle/insert commands (`rust.toggleLineComment`, `typescript.toggleLineComment`, `javascript.toggleLineComment`, plus existing markdown commands) are server-first inert metadata; registration grants no execution authority, which is re-checked at activation.
+`runtime/js/commands.js::serverRegisterCommand` plus the Phase 18.8 server-owned `CommandExecution` boundary register package-prefixed command metadata with routing policy and authority. First-party comment-toggle/insert commands (`rust.toggleLineComment`, `typescript.toggleLineComment`, `javascript.toggleLineComment`, plus existing markdown commands) are server-first inert metadata; registration grants no execution authority, which is re-checked at activation.
 
 ### Completion trigger and result providers
 
-Phase 18.11's `CompletionTriggerAndResult` framework exposes `runtime/js/completion.ts::serverRegisterCompletionProvider` for package load-time provider registration. The framework reuses behavior-manifest autocomplete triggers, client local-edit-first routing, a cancellable server-side `UiReactivePriority` lane, and `TransientMenuSession` for display/acceptance.
+Phase 18.11's `CompletionTriggerAndResult` framework exposes `runtime/js/completion.js::serverRegisterCompletionProvider` for package load-time provider registration. The framework reuses behavior-manifest autocomplete triggers, client local-edit-first routing, a cancellable server-side `UiReactivePriority` lane, and `TransientMenuSession` for display/acceptance.
 
 `src/protocol/completion.rs::CompletionItem` is inert text-replacement data only: "No callbacks, snippets …". The snippet kind is **not yet present**; it is planned for Phase 18.19 (snippets, exclusive claim, disable-native). Phase 18.18 therefore ships **keyword-only** base providers (`rust.keywords`, `typescript.keywords`, `javascript.keywords`, `markdown.keywords`) and defers snippet content to Phase 18.19.
 
@@ -76,7 +76,7 @@ Phase 18.18 moves the Markdown decoration styleMap onto the vocabulary contract 
 
 ### Package UI, configuration, and loading
 
-`runtime/js/ui.ts::serverRegisterComponentContribution` registers inert `statusItem` and other component contributions. `runtime/js/configuration.ts` and `runtime/js/ui.ts` expose package options and layout overrides. `runtime/js/packages.ts::loadPackage` is the one-line default end-user loader; the Phase 18.6 generic resolver carries each first-party package's `loadEntry` end-to-end with no copied manifests or manual primitive registration. The four packages already load through `loadPackage("@clay/*")`.
+`runtime/js/ui.js::serverRegisterComponentContribution` registers inert `statusItem` and other component contributions. `runtime/js/configuration.js` and `runtime/js/ui.js` expose package options and layout overrides. `runtime/js/packages.js::loadPackage` is the one-line default end-user loader; the Phase 18.6 generic resolver carries each first-party package's `loadEntry` end-to-end with no copied manifests or manual primitive registration. The four packages already load through `loadPackage("@clay/*")`.
 
 ## Generic Phase 18.18 Gaps
 
@@ -167,13 +167,13 @@ First-party grammar/query/styleMap data and mode/completion/command contribution
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_18_language_package_primitive_review_is_linked_and_complete`: locks inventory, vocabulary styleMap gap, Markdown decoration/preview split, completion keyword deferral, hot-path split, authority boundary, and rejected shapes.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Implementation coverage (later tasks): `tests/syntax_grammar.rs` (vocabulary styleMap resolution, unmatched captures, multi-language-id parity, no-language-branch), `tests/completion_provider.rs` (base keyword provider registration/merge), `tests/package_loading.rs` (one-line load + no silent defaults), `tests/editor_performance_invariants.rs` (single-source-of-color, no-hot-path guards), `tests/performance_protocol.rs` (per-language payload/cache bounds).
 
 Run:
 
 ```bash
-cargo test --test primitives_docs phase18_18_language_package_primitive_review_is_linked_and_complete
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

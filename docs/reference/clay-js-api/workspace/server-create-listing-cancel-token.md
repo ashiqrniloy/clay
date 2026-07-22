@@ -3,7 +3,7 @@ id: clay.workspace.serverCreateListingCancelToken
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverCreateListingCancelToken
-js_facade: runtime/js/workspace.ts::serverCreateListingCancelToken
+js_facade: runtime/js/workspace.js::serverCreateListingCancelToken
 backing_rust: src/server/workspace.rs::create_listing_cancel_token
 deno_op: op_clay_workspace_create_listing_cancel_token
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_create_listing_cancel_token
@@ -89,7 +89,7 @@ Use `clay.workspace.serverCreateListingCancelToken` only through the documented 
 
 ## Backing implementation
 
-- JS facade: `runtime/js/workspace.ts::serverCreateListingCancelToken`
+- JS facade: `runtime/js/workspace.js::serverCreateListingCancelToken`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_create_listing_cancel_token` (`op_clay_workspace_create_listing_cancel_token`)
 - Backing Rust/current owner: `src/server/workspace.rs::create_listing_cancel_token`
 

@@ -3,7 +3,7 @@ id: clay.theme.setTypography
 kind: clay-js-api
 js_module: "clay:theme"
 js_export: setTypography
-js_facade: runtime/js/theme.ts::setTypography
+js_facade: runtime/js/theme.js::setTypography
 backing_rust: src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography
 deno_op: op_clay_theme_set_typography
 deno_op_path: src/server/ops/typography.rs::op_clay_theme_set_typography
@@ -153,7 +153,7 @@ Prefer one complete call and preserve a generic fallback at the end of every sta
 
 ## Backing implementation
 
-- Facade: `runtime/js/theme.ts::setTypography`
+- Facade: `runtime/js/theme.js::setTypography`
 - Deno op: `src/server/ops/typography.rs::op_clay_theme_set_typography`
 - Server state/publication: `src/server/mod.rs::RuntimeGenerationStore::replace_typography`
 - Client resolution: `src/editor/typography.rs::TypographyRegistry`

@@ -21,8 +21,8 @@
 - `src/server/control_center.rs`
 - `src/shell/transient_menu.rs`
 - `src/shell/file_browser.rs`
-- `runtime/js/workspace.ts`
-- `runtime/js/commands.ts`
+- `runtime/js/workspace.js`
+- `runtime/js/commands.js`
 - `tests/primitives_docs.rs`
 
 ## Overview
@@ -37,7 +37,7 @@ The key finding is boring: Git needs one new reusable server primitive, not a cu
 
 - `src/server/workspace.rs::WorkspaceState` is the server source of truth for workspace roots, open documents, canonical paths, selected-file grants, and bounded directory listing.
 - `WorkspaceRootDiscovery` and `BoundedFileListService` from Phase 18.12 already provide known workspace roots and server-owned root/listing authority. Git must consume those roots rather than rediscover workspaces independently.
-- `runtime/js/workspace.ts::serverListWorkspaceRoots`, `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, and `serverListDirectory` are documented Clay JS facades for workspace discovery/listing. `@clay/git` should read root identity/status through a Git API that is keyed by these workspace roots.
+- `runtime/js/workspace.js::serverListWorkspaceRoots`, `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, and `serverListDirectory` are documented Clay JS facades for workspace discovery/listing. `@clay/git` should read root identity/status through a Git API that is keyed by these workspace roots.
 - The package boundary stays unchanged: packages cannot add roots, marker files, ignore rules, raw path scans, or arbitrary filesystem listing providers.
 
 ### Command execution and Control Center
@@ -55,7 +55,7 @@ The key finding is boring: Git needs one new reusable server primitive, not a cu
 
 ### Package loading and first-party package defaults
 
-- `runtime/js/packages.ts::loadPackage` is the one-line explicit package loading path from `~/.config/clay/init.js`. Package behavior should not silently auto-load just because a workspace is a Git repository.
+- `runtime/js/packages.js::loadPackage` is the one-line explicit package loading path from `~/.config/clay/init.js`. Package behavior should not silently auto-load just because a workspace is a Git repository.
 - `PackageService`/package metadata validation already records package identity, source/provenance, `apiPrefix`, permissions/capabilities, entry/loadEntry confinement, and contribution conflicts.
 - `@clay/git` should be a bundled first-party package with `apiPrefix = "git"` and read-only Git/workspace status capability, loaded explicitly through `await loadPackage("@clay/git")`.
 - The package must consume documented Clay JS APIs. It must not call raw `Deno.core.ops`, spawn processes, read arbitrary files, or parse `.git` directly.
@@ -232,11 +232,11 @@ Implementation-time tests should cover repo/non-repo roots, branch and detached 
 
 ## Tests
 
-- `tests/primitives_docs.rs::phase18_13_git_discovery_primitive_review_records_inventory_and_gaps`: verifies wiki/index and primitive-architecture links plus required primitive-review contents.
+- Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Focused documentation coverage:
 
 ```text
-CARGO_TARGET_DIR=target/pi-verify cargo test --test primitives_docs phase18_13_git_discovery_primitive_review_records_inventory_and_gaps --quiet
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

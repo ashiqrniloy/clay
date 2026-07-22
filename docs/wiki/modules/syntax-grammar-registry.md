@@ -4,7 +4,7 @@
 
 - `src/packages/record.rs`
 - `src/server/syntax.rs`
-- `runtime/js/syntax.ts`
+- `runtime/js/syntax.js`
 - `runtime/js/web-tree-sitter-host.ts`
 - `src/server/ops/syntax.rs`
 - `tests/syntax_grammar.rs`
@@ -176,10 +176,10 @@ Native scheduling submits one bounded parse window per document/version/window r
 Run:
 
 ```bash
-CARGO_TARGET_DIR=target/pi-verify cargo test --test syntax_grammar --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test parse_coordinator --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test decoration_transport --quiet
-CARGO_TARGET_DIR=target/pi-verify cargo test --test editor_performance_invariants --quiet
+cargo test --test runtime syntax_grammar:: --quiet
+cargo test --test runtime parse_coordinator:: --quiet
+cargo test --test editor decoration_transport:: --quiet
+cargo test --test editor editor_performance_invariants:: --quiet
 ```
 
 Coverage:

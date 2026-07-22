@@ -30,7 +30,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: `KeyRoutingOverride` / behavior-manifest routing.
 - Owner: server/configuration compiles inert key rules; client executes installed manifest rules locally.
-- Code: `runtime/js/keybindings.ts`, `src/server/ops/keybindings.rs`, `src/client/behavior.rs`, `src/masonry_editor.rs`.
+- Code: `runtime/js/keybindings.js`, `src/server/ops/keybindings.rs`, `src/client/behavior.rs`, `src/masonry_editor.rs`.
 - Bug boundary: shifted `Ctrl+Shift+O` must be fixed in shared key matching for character key bindings, not as an `O`-specific shortcut.
 - Hot path: key lookup is client-local and must not run IPC, JavaScript, file IO, or desktop portal work before route recognition.
 
@@ -38,7 +38,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: `ClientUiCommandRoute` plus documented Clay JS API command IDs.
 - Owner: client app driver invokes native UI only after explicit user command; server validates selected paths afterward.
-- Code: `src/main.rs::handle_client_ui_command`, `src/client/file_dialog.rs`, `src/client/mod.rs`, `runtime/js/workspace.ts`, `docs/reference/clay-js-api/workspace/client-open-folder-dialog.md`.
+- Code: `src/main.rs::handle_client_ui_command`, `src/client/file_dialog.rs`, `src/client/mod.rs`, `runtime/js/workspace.js`, `docs/reference/clay-js-api/workspace/client-open-folder-dialog.md`.
 - Bug boundary: `clientOpenFolderDialog()` remains a bindable client UI command. The fix must not add hidden config keys or grant folder authority before `AddSelectedWorkspaceRoot` reaches server validation.
 
 ### FileBrowserState and bounded workspace APIs

@@ -13,7 +13,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(default_endpoint);
 
     eprintln!("clay server listening on {endpoint}");
-    IpcServer::new(ServerConfig::new(endpoint)).run().await?;
+    IpcServer::try_new(ServerConfig::new(endpoint))?
+        .run()
+        .await?;
     Ok(())
 }
 

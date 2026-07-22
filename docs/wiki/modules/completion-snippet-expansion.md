@@ -9,7 +9,7 @@
 - `src/server/completion.rs` — `CompletionProviderMeta::exclusive` and `apply_exclusive_suppression`
 - `src/server/ops/completion.rs` — `op_clay_completion_disable`
 - `src/server/ops/mod.rs` — `ClayOpState::disabled_completion_providers` and generation counter
-- `runtime/js/completion.ts` — `serverDisableCompletion` JS facade
+- `runtime/js/completion.js` — `serverDisableCompletion` JS facade
 - `tests/completion_provider.rs` — snippet provider integration tests
 - `tests/primitives_docs.rs` — deterministic primitive docs test
 
@@ -96,11 +96,11 @@ The helper is wired into all three selection paths: `ClayOpState::completion_pro
 
 The disabled set is consulted by `completion_provider_is_disabled` (`src/server/completion.rs`) and applied as a filter in every selection path. Disabled state persists across `begin_evaluation` runtime reloads; the reload path stamps new metadata with the current generation from the surviving counter. Re-enabling requires a package reload or runtime restart.
 
-The JS facade `serverDisableCompletion` (`runtime/js/completion.ts`) validates exactly one non-empty target before delegating to the op; the embedded `CLAY_FACADE_COMPLETION` constant in `src/server/js_runtime.rs` mirrors this facade for configuration-module loading.
+The JS facade `serverDisableCompletion` (`runtime/js/completion.js`) validates exactly one non-empty target before delegating to the op; `src/server/facades.rs` includes this same executable file for configuration-module loading.
 
 ### First-party snippet providers
 
-`@clay/rust` ships `rust.snippets` with three `fn`/`match`/`impl` templates at priority 0 alongside `rust.keywords`. `@clay/typescript` ships `typescript.snippets` with `interface`/`type` templates at priority 0. Both use `textFormat: "snippet"` in their structured `CompletionItemContributionDescriptor` items, share existing trigger characters and permission, and load through the same one `serverRegisterCompletionProvider({ packageManifest })` call that maps the full `completionProviders` array.
+`@clay/rust` ships `rust.snippets` with three `fn`/`match`/`impl` templates at priority 0 alongside `rust.keywords`. `@clay/typescript` ships `typescript.snippets` with `interface`/`type` templates at priority 0. Both use `textFormat: "snippet"` in their structured `CompletionItemContributionDescriptor` items, share existing trigger characters and permission, and load through host-context-stamped `serverRegisterCompletionProvider({})` calls that map each manifest-declared provider by ID; package JavaScript cannot select provenance with a `packageManifest` field.
 
 ## How It Works
 
@@ -189,9 +189,9 @@ Run with:
 ```text
 cargo test --lib snippet --quiet
 cargo test --lib surface --quiet
-cargo test --test completion_provider --quiet
-cargo test --test editor_performance_invariants --quiet
-cargo test --test primitives_docs phase18_19 --quiet
+cargo test --test runtime completion_provider:: --quiet
+cargo test --test editor editor_performance_invariants:: --quiet
+cargo test --test protocol primitives_docs::
 ```
 
 ## Related

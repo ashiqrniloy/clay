@@ -3,7 +3,7 @@ id: clay.commands.serverOpenFile
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenFile
-js_facade: runtime/js/commands.ts::serverOpenFile
+js_facade: runtime/js/commands.js::serverOpenFile
 backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
@@ -89,7 +89,7 @@ Use `clay.commands.serverOpenFile` only through the documented Clay JS facade. D
 
 ## Backing implementation
 
-- JS facade: `runtime/js/commands.ts::serverOpenFile`
+- JS facade: `runtime/js/commands.js::serverOpenFile`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
 - Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file`
 

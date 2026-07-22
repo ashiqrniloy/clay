@@ -1,28 +1,20 @@
-# Clay JavaScript Facade Skeleton
+# Clay JavaScript Facades
 
-`runtime/js/` contains the planned Clay JavaScript/TypeScript facade source tree. These files define the stable user-facing module layout that future server-side `deno_core` runtime work will bind to explicit Rust op wrappers.
+`runtime/js/` owns Clay's executable JavaScript facade modules and adjacent TypeScript declarations. Each `*.js` file is the only executable body for its `clay:*` module; matching `*.d.ts` files describe public options/results without duplicating implementation.
 
-## Module specifiers
+`src/server/facades.rs` includes these checked-in JavaScript files at compile time and classifies every module as trusted-only or public to the shared third-party runtime. `ClayModuleLoader` resolves only rows admitted by that table. There is no embedded raw-string copy in `src/server/js_runtime.rs` and no runtime filesystem read or transpilation.
 
-Future import-map/runtime wiring should expose these files with Clay-owned module specifiers:
+`runtime/js/mod.ts` is an aggregate declaration/source-tree entry point for tooling. User and package code imports domain specifiers, not this file:
 
-- `clay:editor` -> `runtime/js/editor.ts`
-- `clay:keybindings` -> `runtime/js/keybindings.ts`
-- `clay:configuration` -> `runtime/js/configuration.ts`
-- `clay:documents` -> `runtime/js/documents.ts`
-- `clay:workspace` -> `runtime/js/workspace.ts`
-- `clay:git` -> `runtime/js/git.ts`
-- `clay:behavior` -> `runtime/js/behavior.ts`
-- `clay:ui` -> `runtime/js/ui.ts`
+- trusted-only: `clay:configuration`, `clay:documents`, `clay:workspace`, `clay:keybindings`, `clay:packages`, `clay:application`, `clay:editor`, `clay:theme`;
+- public to both domains: `clay:sdui`, `clay:ui`, `clay:git`, `clay:behavior`, `clay:language-server`, `clay:modes`, `clay:commands`, `clay:decorations`, `clay:diagnostics`, `clay:parse`, `clay:syntax`, `clay:completion`, `clay:language`.
 
-`runtime/js/mod.ts` is an aggregate source-tree entry point for organization and deterministic checks. User code should import domain modules rather than raw Rust functions or raw op names.
+Facade implementations may call Clay-owned `Deno.core.ops` internally. Public exports must never expose raw op names, V8 values, native handles, or client-side JavaScript authority. Third-party security depends on privileged ops and trusted-only facades being absent from that runtime, not on hiding names in JavaScript.
 
-## Phase boundary
+Validation:
 
-Most editor-core facade exports are typed planned stubs. Runtime-backed modules such as `clay:ui` call explicit Clay-owned ops behind facade helpers; public exports still do not expose raw `Deno.core.ops`, execute arbitrary JavaScript in the Rust client, or add work to Masonry paint/input handlers.
-
-Phase 11 runtime work is expected to add explicit `#[deno_core::op2]` Rust wrappers registered through `deno_core::extension!`, then bind those wrappers behind these facades. Raw `op_*` names remain implementation details and must not become the public JavaScript API.
-
-## Authority and security
-
-This skeleton grants no filesystem, network, shell, extension loading, AI mutation, workspace, package, or client-side JavaScript execution authority. Authority-bearing behavior must be represented by documented Clay JS APIs, inventory records, and server-side validation before it becomes executable.
+```bash
+cargo test --test protocol clay_js_facade_layout::
+cargo test --test security rust_visibility_api_mapping::third_party_facade_allowlist_exactly_matches_plan_public_inventory
+cargo test js_runtime --lib
+```
