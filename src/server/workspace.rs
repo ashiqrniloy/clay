@@ -655,7 +655,7 @@ pub(crate) fn traverse_directory(
                     FileErrorCode::AccessDenied,
                     format!("cannot apply root .gitignore: {message}"),
                     Some(
-                        "Supported rules are component names with '*' and '?', plus an optional trailing '/' for directories."
+                        "Supported rules are names or root-relative paths with '*' and '?', plus an optional trailing '/' for directories."
                             .to_string(),
                     ),
                 )],
@@ -829,14 +829,18 @@ fn list_directory_recursive(
             }
         };
 
-        if ignore_set.is_ignored(&name_str, metadata.is_dir()) {
+        if ignore_set.is_ignored(&relative_path, metadata.is_dir()) {
             continue;
         }
 
         let (kind, child_count) = if metadata.is_dir() {
             (
                 FileListEntryKind::Directory,
-                Some(count_visible_children(&entry_path, ignore_set)),
+                Some(count_visible_children(
+                    &entry_path,
+                    &relative_path,
+                    ignore_set,
+                )),
             )
         } else if metadata.is_file() {
             (FileListEntryKind::File, None)
@@ -2446,7 +2450,8 @@ struct IgnoreSet {
 }
 
 struct IgnorePattern {
-    chars: Vec<char>,
+    segments: Vec<Vec<char>>,
+    matches_path: bool,
     directory_only: bool,
 }
 
@@ -2461,16 +2466,34 @@ impl IgnoreSet {
         }
     }
 
-    fn is_ignored(&self, name: &str, is_directory: bool) -> bool {
-        if self.names.contains(name) {
+    fn is_ignored(&self, relative_path: &Path, is_directory: bool) -> bool {
+        let name = relative_path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
+        if self.names.contains(name.as_ref()) {
             return true;
         }
         if self.patterns.is_empty() {
             return false;
         }
-        let text: Vec<_> = name.chars().collect();
+        let name: Vec<_> = name.chars().collect();
+        let path_segments: Vec<Vec<char>> = relative_path
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().chars().collect())
+            .collect();
         self.patterns.iter().any(|pattern| {
-            (!pattern.directory_only || is_directory) && glob_matches(&text, &pattern.chars)
+            if pattern.directory_only && !is_directory {
+                return false;
+            }
+            if !pattern.matches_path {
+                return glob_matches(&name, &pattern.segments[0]);
+            }
+            path_segments.len() == pattern.segments.len()
+                && path_segments
+                    .iter()
+                    .zip(&pattern.segments)
+                    .all(|(text, pattern)| glob_matches(text, pattern))
         })
     }
 }
@@ -2508,20 +2531,20 @@ fn build_ignore_set(contents: &str) -> Result<IgnoreSet, String> {
         }
         let directory_only = line.ends_with('/');
         let pattern = line.strip_suffix('/').unwrap_or(line);
+        let matches_path = pattern.starts_with('/') || pattern.contains('/');
+        let pattern = pattern.strip_prefix('/').unwrap_or(pattern);
         let unsupported = if line.starts_with('!') {
             Some("negation")
         } else if line.contains('\\') {
             Some("escaping")
         } else if line.contains('[') || line.contains(']') {
             Some("character classes")
-        } else if pattern.contains('/') {
-            Some("path patterns")
         } else if pattern.contains("**") {
             Some("double-star patterns")
+        } else if pattern.split('/').any(str::is_empty) {
+            Some("empty path components")
         } else if pattern.chars().any(char::is_control) {
             Some("control characters")
-        } else if pattern.is_empty() {
-            Some("an empty directory rule")
         } else {
             None
         };
@@ -2531,16 +2554,20 @@ fn build_ignore_set(contents: &str) -> Result<IgnoreSet, String> {
             ));
         }
         ignore_set.patterns.push(IgnorePattern {
-            chars: pattern.chars().collect(),
+            segments: pattern
+                .split('/')
+                .map(|segment| segment.chars().collect())
+                .collect(),
+            matches_path,
             directory_only,
         });
     }
     Ok(ignore_set)
 }
 
-/// Match the documented `*`/`?` component grammar with greedy-star
-/// backtracking. Both inputs are Unicode scalar sequences; separators never
-/// enter this function because path rules are rejected while parsing.
+/// Match one path segment in the documented `*`/`?` grammar with greedy-star
+/// backtracking. Callers split root-relative path patterns before matching, so
+/// wildcards never cross directory separators.
 fn glob_matches(text: &[char], pattern: &[char]) -> bool {
     let (mut text_index, mut pattern_index) = (0, 0);
     let (mut star_index, mut star_text_index) = (None, 0);
@@ -2599,7 +2626,7 @@ fn read_auxiliary_file_bounded(path: &Path, max_bytes: usize) -> Result<Option<S
         .map_err(|_| ".gitignore is not valid UTF-8".to_string())
 }
 
-fn count_visible_children(dir_path: &Path, ignore_set: &IgnoreSet) -> usize {
+fn count_visible_children(dir_path: &Path, relative_path: &Path, ignore_set: &IgnoreSet) -> usize {
     let read_dir = match fs::read_dir(dir_path) {
         Ok(read_dir) => read_dir,
         Err(_) => return 0,
@@ -2611,9 +2638,8 @@ fn count_visible_children(dir_path: &Path, ignore_set: &IgnoreSet) -> usize {
             Err(_) => continue,
         };
         let name = entry.file_name();
-        let name_str = name.to_string_lossy();
         let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
-        if ignore_set.is_ignored(&name_str, is_directory) {
+        if ignore_set.is_ignored(&relative_path.join(&name), is_directory) {
             continue;
         }
         count += 1;
@@ -4184,16 +4210,23 @@ mod tests {
     }
 
     #[test]
-    fn minimal_ignore_grammar_backtracks_and_rejects_unsupported_rules() {
+    fn bounded_ignore_grammar_supports_root_paths_and_rejects_unsupported_rules() {
         let rules = build_ignore_set("*ab\n?.rs\nbuild/\n").unwrap();
-        assert!(rules.is_ignored("aab", false));
-        assert!(rules.is_ignored("é.rs", false));
-        assert!(!rules.is_ignored("ab.rs", false));
-        assert!(rules.is_ignored("build", true));
-        assert!(!rules.is_ignored("build", false));
+        assert!(rules.is_ignored(std::path::Path::new("aab"), false));
+        assert!(rules.is_ignored(std::path::Path::new("é.rs"), false));
+        assert!(!rules.is_ignored(std::path::Path::new("ab.rs"), false));
+        assert!(rules.is_ignored(std::path::Path::new("build"), true));
+        assert!(!rules.is_ignored(std::path::Path::new("build"), false));
+
+        let path_rules = build_ignore_set("/cache\n/packages/markdown/node_modules/\n").unwrap();
+        assert!(path_rules.is_ignored(std::path::Path::new("cache"), true));
+        assert!(
+            path_rules.is_ignored(std::path::Path::new("packages/markdown/node_modules"), true)
+        );
+        assert!(!path_rules.is_ignored(std::path::Path::new("src/cache"), true));
 
         for unsupported in [
-            "!secret", "foo\\*", "[xy]", "foo/bar", "foo//", "**.log", "/", "foo\0bar",
+            "!secret", "foo\\*", "[xy]", "foo//", "**.log", "/", "foo\0bar",
         ] {
             assert!(
                 build_ignore_set(unsupported).is_err(),
@@ -4517,7 +4550,7 @@ mod tests {
     #[test]
     fn list_directory_reads_root_gitignore() {
         let root = temp_workspace("list-gitignore");
-        fs::write(root.join(".gitignore"), "*.log\nbuild/\n").unwrap();
+        fs::write(root.join(".gitignore"), "/debug.log\n/build/\n").unwrap();
         fs::write(root.join("app.txt"), "x").unwrap();
         fs::write(root.join("debug.log"), "x").unwrap();
         fs::create_dir(root.join("build")).unwrap();

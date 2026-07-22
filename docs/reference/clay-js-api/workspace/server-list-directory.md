@@ -71,7 +71,7 @@ const page = await serverListDirectory({ rootId, relativePath: "src", maxDepth: 
 
 `rootId` (`WorkspaceRootId`, required), `relativePath` (`string`, default `""`), `maxDepth` (`number`, clamped to `8`), `maxEntries` (`number`, clamped to `1000`), and `cancelTokenId` (`string`, optional).
 
-Root `.gitignore` supports a deliberately small filename-component grammar: blank lines, column-zero comments, literal Unicode scalars, `?` for one scalar, backtracking `*` for zero or more scalars, and an optional trailing `/` for directory-only matching. Negation, escaping, character classes, path separators/anchoring, `**`, control characters, invalid UTF-8, more than 4096 lines/1024 retained rules/256 scalars per rule, and files above the 1 MiB auxiliary-read ceiling are rejected visibly.
+Root `.gitignore` supports a deliberately bounded grammar: blank lines, column-zero comments, literal Unicode scalars, `?` for one scalar, per-segment backtracking `*` for zero or more scalars, slash-separated root-relative paths, optional leading `/` root anchoring, and an optional trailing `/` for directory-only matching. Negation, escaping, character classes, `**`, empty path components, control characters, invalid UTF-8, more than 4096 lines/1024 retained rules/256 scalars per rule, and files above the 1 MiB auxiliary-read ceiling are rejected visibly.
 
 ## Key bindings
 

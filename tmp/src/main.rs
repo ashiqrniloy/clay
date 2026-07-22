@@ -15,10 +15,13 @@ impl Point {
 }
 
 // some comment to check what is happening
+// Another comment to check what happens
 
 fn main() {
     let p = Point { x: 3.0, y: 4.0 };
     println!("{}", greet("world"));
     println!("distance: {}", p.distance_from_origin());
 }
+
+
 
