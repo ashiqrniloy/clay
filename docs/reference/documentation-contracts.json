@@ -15,7 +15,8 @@
     { "id": "rendering-strategy", "path": "docs/reference/primitives/rendering-strategy.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
     { "id": "shell-layout-strategy", "path": "docs/reference/primitives/shell-layout-strategy.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
     { "id": "syntax-vocabulary", "path": "docs/reference/primitives/syntax-vocabulary.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
-    { "id": "typography", "path": "docs/reference/primitives/typography.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] }
+    { "id": "typography", "path": "docs/reference/primitives/typography.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] },
+    { "id": "ui-chrome-primitives", "path": "docs/reference/primitives/ui-chrome-primitives.md", "indexes": ["docs/index.md", "docs/reference/primitives/index.md"] }
   ],
   "package_documents": [
     { "id": "creating-packages", "path": "docs/reference/packages/creating-packages.md", "indexes": ["docs/index.md"] },

@@ -74,7 +74,7 @@ fn read_theme_package(specifier: &str, dir: &str) -> serde_json::Value {
         .unwrap_or_else(|err| panic!("parse {specifier} package.json as JSON: {err}"))
 }
 
-fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
+fn assert_full_theme_mapping(specifier: &str, dir: &str, keyword_bold: bool) {
     let value = read_theme_package(specifier, dir);
     let record = assemble_package_record(&value).unwrap_or_else(|err| {
         panic!(
@@ -139,8 +139,9 @@ fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
     }
 
     // The overrides must layer over the Clay default and actually change it:
-    // panel background + keyword syntax color must depart from the default, and
-    // Keyword must render bold (Gruvbox Material makes keywords bold). Construct
+    // panel background + keyword syntax color must depart from the default.
+    // Keyword boldness is theme-specific (Gruvbox Material makes keywords bold;
+    // Modus keeps them unbolded per upstream font-lock faces). Construct
     // the editor-side overrides from the pub descriptor fields (the
     // `to_override` helper is pub(crate) and reserved for task 7's setTheme).
     let overrides_view: Vec<TextStyleOverride> = overrides
@@ -176,7 +177,7 @@ fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
         ),
         "{specifier} Keyword override must change the rendered StyleSpec"
     );
-    assert!(
+    assert_eq!(
         registry
             .style_for(
                 clay::protocol::DecorationKind::Syntax,
@@ -184,7 +185,8 @@ fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
                 clay::protocol::Modifiers::NONE,
             )
             .bold,
-        "{specifier} must make Keywords bold by default"
+        keyword_bold,
+        "{specifier} keyword boldness must match the theme's upstream intent"
     );
     assert_ne!(
         registry
@@ -225,34 +227,59 @@ fn assert_full_gruvbox_mapping(specifier: &str, dir: &str) {
 
 #[test]
 fn gruvbox_material_dark_theme_is_inert_full_mapping() {
-    assert_full_gruvbox_mapping(
+    assert_full_theme_mapping(
         "@clay/theme-gruvbox-material-dark",
         "theme-gruvbox-material-dark",
+        true,
     );
 }
 
 #[test]
 fn gruvbox_material_light_theme_is_inert_full_mapping() {
-    assert_full_gruvbox_mapping(
+    assert_full_theme_mapping(
         "@clay/theme-gruvbox-material-light",
         "theme-gruvbox-material-light",
+        true,
     );
 }
 
 #[test]
+fn modus_operandi_theme_is_inert_full_mapping() {
+    assert_full_theme_mapping("@clay/theme-modus-operandi", "theme-modus-operandi", false);
+}
+
+#[test]
+fn modus_vivendi_theme_is_inert_full_mapping() {
+    assert_full_theme_mapping("@clay/theme-modus-vivendi", "theme-modus-vivendi", false);
+}
+
+#[test]
 fn gruvbox_themes_distinct_palettes() {
-    // Dark and light are genuinely different (e.g. panel backgrounds differ, the
+    assert_distinct_theme_palettes(
+        (
+            "@clay/theme-gruvbox-material-dark",
+            "theme-gruvbox-material-dark",
+        ),
+        (
+            "@clay/theme-gruvbox-material-light",
+            "theme-gruvbox-material-light",
+        ),
+    );
+}
+
+#[test]
+fn modus_themes_distinct_palettes() {
+    assert_distinct_theme_palettes(
+        ("@clay/theme-modus-operandi", "theme-modus-operandi"),
+        ("@clay/theme-modus-vivendi", "theme-modus-vivendi"),
+    );
+}
+
+fn assert_distinct_theme_palettes(a: (&str, &str), b: (&str, &str)) {
+    // The pair is genuinely different (e.g. panel backgrounds differ, the
     // text colors are inverse), not duplicate declarations.
-    let dark = assemble_package_record(&read_theme_package(
-        "@clay/theme-gruvbox-material-dark",
-        "theme-gruvbox-material-dark",
-    ))
-    .expect("dark validates");
-    let light = assemble_package_record(&read_theme_package(
-        "@clay/theme-gruvbox-material-light",
-        "theme-gruvbox-material-light",
-    ))
-    .expect("light validates");
+    let dark = assemble_package_record(&read_theme_package(a.0, a.1)).expect("first validates");
+    let light = assemble_package_record(&read_theme_package(b.0, b.1)).expect("second validates");
 
     let panel = |r: &PackageRecord| {
         r.contributions
@@ -285,6 +312,8 @@ fn gruvbox_themes_status_chrome_meets_aa_contrast() {
             "@clay/theme-gruvbox-material-light",
             "theme-gruvbox-material-light",
         ),
+        ("@clay/theme-modus-operandi", "theme-modus-operandi"),
+        ("@clay/theme-modus-vivendi", "theme-modus-vivendi"),
     ] {
         let value = read_theme_package(specifier, dir);
         let record = assemble_package_record(&value).expect("theme validates");

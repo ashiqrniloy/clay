@@ -18,3 +18,10 @@ export function setTypography(options) {
     }
     return JSON.parse(requireOps().op_clay_theme_set_typography(JSON.stringify(options)));
 }
+export function setAppearance(options) {
+    const appearance = typeof options === "string" ? options : options?.appearance;
+    if (typeof appearance !== "string" || appearance.length === 0) {
+        throw new Error("clay.theme.invalid_request: setAppearance requires an appearance string");
+    }
+    return JSON.parse(requireOps().op_clay_theme_set_appearance(JSON.stringify({ appearance })));
+}

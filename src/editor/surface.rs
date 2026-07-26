@@ -1122,6 +1122,11 @@ pub struct EditorSurface {
     /// 4). Defaults to the Clay theme; task 5 swaps in the active theme at
     /// load/reload. Immutable during paint.
     theme: StyleRegistry,
+    /// Phase 20.2: cached resolved UI design-token registry for shell chrome
+    /// (scrollbar, status bar). Installed atomically with `theme` when the
+    /// active theme changes. Editor text/caret/selection/diagnostics stay on
+    /// `theme` (StyleRegistry); shell chrome routes through primitives.
+    ui_theme: crate::shell::theme::ResolvedUiTheme,
     /// Active theme package specifier last installed from an `ActiveTheme`
     /// snapshot (`@clay/default` until the first install). Used only for
     /// status/accessibility theme-label observability — never for paint.
@@ -1133,6 +1138,13 @@ pub struct EditorSurface {
     /// that can change shaping changes. Color-only rectangle paint stays out of
     /// the layout cache key.
     layout_style_revision: u64,
+    /// Phase 20.4 task 5: client-local pointer state for the editor scrollbar's
+    /// InteractionState (Hover when the pointer is over the track, Active when
+    /// pressed over the thumb). Stored in the same absolute widget coordinate
+    /// space as the `rect` passed to `paint_in_rect`. Client-side only; carries
+    /// no authority.
+    pointer_pos: Option<masonry::kurbo::Point>,
+    pointer_pressed: bool,
     perf: PerfRecorder,
 }
 
@@ -1347,6 +1359,69 @@ impl EditorSurface {
         }
     }
 
+    /// Install resolved UI design-token registry for shell chrome (Phase 20.2).
+    pub(crate) fn set_ui_theme(&mut self, ui_theme: crate::shell::theme::ResolvedUiTheme) {
+        self.ui_theme = ui_theme;
+    }
+
+    /// Read-only access to the resolved UI design-token registry for shell
+    /// chrome (spacing/dimension/color tokens). Phase 20.4 task 6: the status
+    /// bar reads spacing tokens here.
+    pub(crate) fn ui_theme(&self) -> &crate::shell::theme::ResolvedUiTheme {
+        &self.ui_theme
+    }
+
+    /// Phase 20.4 task 5: feed the editor chrome the pointer position (absolute
+    /// widget coords, same space as the `rect` passed to `paint_in_rect`) so the
+    /// scrollbar can derive Hover/Active state. `None` clears hover.
+    pub(crate) fn set_pointer_pos(&mut self, point: Option<masonry::kurbo::Point>) {
+        self.pointer_pos = point;
+    }
+
+    /// Phase 20.4 task 5: feed the editor chrome the primary-button press state
+    /// so the scrollbar can derive Active state when the press is over the thumb.
+    pub(crate) fn set_pointer_pressed(&mut self, pressed: bool) {
+        self.pointer_pressed = pressed;
+    }
+
+    /// Phase 20.4 task 5: clear pointer-driven chrome state (pointer leave /
+    /// cancel).
+    pub(crate) fn clear_pointer_chrome_state(&mut self) {
+        self.pointer_pos = None;
+        self.pointer_pressed = false;
+    }
+
+    /// Phase 20.4 task 5: derive the scrollbar InteractionState from the
+    /// pointer position and press state. Hover when the pointer is over the
+    /// track; Active when pressed over the thumb (hit-test on
+    /// `scrollbar_thumb_rect`); otherwise Rest. O(1).
+    pub(crate) fn scrollbar_interaction_state(
+        &self,
+        rect: Rect,
+        available_height: f64,
+    ) -> crate::shell::primitives::InteractionState {
+        use crate::shell::primitives::InteractionState;
+        let Some(point) = self.pointer_pos else {
+            return InteractionState::Rest;
+        };
+        let track_y0 = rect.y0 + TEXT_INSET;
+        let track_y1 = rect.y0 + TEXT_INSET + available_height;
+        let x1 = rect.x1 - SCROLLBAR_MARGIN;
+        let x0 = x1 - SCROLLBAR_WIDTH;
+        let track = Rect::new(x0, track_y0, x1, track_y1);
+        if !track.contains(point) {
+            return InteractionState::Rest;
+        }
+        if self.pointer_pressed
+            && self
+                .scrollbar_thumb_rect(rect)
+                .is_some_and(|thumb| thumb.contains(point))
+        {
+            return InteractionState::Active;
+        }
+        InteractionState::Hover
+    }
+
     /// Install an inert `ActiveTheme` snapshot: resolve colors into the
     /// registry and retain the package specifier for theme-label observability.
     pub(crate) fn set_active_theme(&mut self, theme: &crate::protocol::ActiveTheme) {
@@ -1354,6 +1429,12 @@ impl EditorSurface {
         self.set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
             theme,
         ));
+        // Phase 20.2: install resolved UI tokens for shell chrome.
+        if let Ok(ui_theme) =
+            crate::shell::theme::ResolvedUiTheme::from_active_theme(&theme.design_tokens)
+        {
+            self.set_ui_theme(ui_theme);
+        }
     }
 
     /// Active theme package specifier (`@clay/...`), or `@clay/default` before install.
@@ -2186,22 +2267,13 @@ impl EditorSurface {
         let x1 = rect.x1 - SCROLLBAR_MARGIN;
         let x0 = x1 - SCROLLBAR_WIDTH;
         let track = Rect::new(x0, track_y0, x1, track_y1);
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            self.theme.base.scrollbar_track,
-            None,
-            &track,
-        );
-        if let Some(thumb) = self.scrollbar_thumb_rect(rect) {
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                self.theme.base.scrollbar,
-                None,
-                &thumb,
-            );
-        }
+
+        // Route scrollbar chrome through primitive (Phase 20.2); thread the
+        // real InteractionState from pointer/press state (Phase 20.4 task 5)
+        // so the thumb is dim at rest and full on hover/active.
+        let thumb = self.scrollbar_thumb_rect(rect).unwrap_or(Rect::ZERO);
+        let state = self.scrollbar_interaction_state(rect, available_height);
+        crate::shell::primitives::paint_scroll_chrome(scene, track, thumb, state, &self.ui_theme);
     }
 
     fn paint_text(
@@ -3122,8 +3194,8 @@ mod tests {
     use std::fmt::Write as _;
 
     use super::{
-        CARET_WIDTH, Color, EditorCommand, EditorSurface, TEXT_INSET,
-        normalize_visible_text_style_runs, subtract_half_open_range,
+        CARET_WIDTH, Color, EditorCommand, EditorSurface, SCROLLBAR_MARGIN, SCROLLBAR_WIDTH,
+        TEXT_INSET, normalize_visible_text_style_runs, subtract_half_open_range,
     };
     use crate::editor::layout::LayoutCacheKey;
     use crate::perf::{budgets::SYNTAX_CACHE_BUDGET_BYTES, metrics::PerfRecorder};
@@ -3135,7 +3207,7 @@ mod tests {
         RoutingPolicy, TabMode, TokenType,
     };
     use crate::shell::CompletionMenuAcceptAction;
-    use masonry::kurbo::Rect;
+    use masonry::kurbo::{Point, Rect};
 
     fn span(
         byte_start: u64,
@@ -4046,6 +4118,90 @@ mod tests {
         assert!(
             thumb.y1 <= rect.y1,
             "scrollbar must stay above the editor bottom"
+        );
+    }
+
+    #[test]
+    fn editor_scrollbar_reflects_hover_and_active_state() {
+        // Plan 065 task 5: the editor scrollbar derives InteractionState from
+        // the pointer position + press state (Hover over the track, Active when
+        // pressed over the thumb, Rest elsewhere) instead of hardcoded Rest.
+        use crate::shell::primitives::InteractionState;
+        let rect = Rect::new(240.0, 0.0, 900.0, 600.0);
+        let available_height = (rect.height() - (TEXT_INSET * 2.0)).max(0.0);
+        let mut editor = editor_with_scroll_bounds(2000.0);
+
+        // No pointer -> Rest.
+        assert_eq!(
+            editor.scrollbar_interaction_state(rect, available_height),
+            InteractionState::Rest
+        );
+
+        // At scroll-top the thumb sits at the top of the track.
+        let thumb = editor.scrollbar_thumb_rect(rect).expect("scrollable thumb");
+        let track_x = rect.x1 - SCROLLBAR_MARGIN - SCROLLBAR_WIDTH / 2.0;
+
+        // Pointer over the thumb, not pressed -> Hover.
+        editor.set_pointer_pos(Some(Point::new(thumb.center().x, thumb.center().y)));
+        assert_eq!(
+            editor.scrollbar_interaction_state(rect, available_height),
+            InteractionState::Hover
+        );
+
+        // Pressed over the thumb -> Active.
+        editor.set_pointer_pressed(true);
+        assert_eq!(
+            editor.scrollbar_interaction_state(rect, available_height),
+            InteractionState::Active
+        );
+
+        // Pressed but pointer moved off the thumb (still over the track, near
+        // the track bottom) -> Hover.
+        let track_bottom = rect.y0 + TEXT_INSET + available_height - 1.0;
+        editor.set_pointer_pos(Some(Point::new(track_x, track_bottom)));
+        assert_eq!(
+            editor.scrollbar_interaction_state(rect, available_height),
+            InteractionState::Hover
+        );
+
+        // Pointer off the track -> Rest (even while pressed).
+        editor.set_pointer_pos(Some(Point::new(rect.x0, rect.y0)));
+        assert_eq!(
+            editor.scrollbar_interaction_state(rect, available_height),
+            InteractionState::Rest
+        );
+
+        // Clearing chrome state -> Rest.
+        editor.clear_pointer_chrome_state();
+        assert_eq!(
+            editor.scrollbar_interaction_state(rect, available_height),
+            InteractionState::Rest
+        );
+    }
+
+    #[test]
+    fn editor_caret_selection_diagnostics_use_base_ui_colors() {
+        // Plan 065 task 5: caret/selection/diagnostics stay on the editor
+        // StyleRegistry (base.caret / base.selection / diagnostic_style), the
+        // single source of color for editor paint — separate from SDUI typed
+        // tokens. Source guard complementing the conformance color-literal scan.
+        let source = include_str!("surface.rs");
+        let non_test = source.split("mod tests").next().expect("non-test source");
+        let paint_text = non_test
+            .split("fn paint_text")
+            .nth(1)
+            .expect("paint_text body");
+        assert!(
+            paint_text.contains("base.caret"),
+            "caret color must come from self.theme.base.caret"
+        );
+        assert!(
+            paint_text.contains("base.selection"),
+            "selection color must come from self.theme.base.selection"
+        );
+        assert!(
+            paint_text.contains("diagnostic_style"),
+            "diagnostic squiggle colors must come from diagnostic_style(severity)"
         );
     }
 

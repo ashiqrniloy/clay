@@ -210,3 +210,179 @@ fn internal_runtime_names_are_absent_from_public_facades() {
         }
     }
 }
+
+/// Plan 063 task 8: verify Phase 20.2 native chrome primitives are not exposed
+/// to JavaScript. Primitives are `pub(crate)` inert paint helpers, not
+/// programmatic behavior. They must not be wrapped by `deno_core` ops or
+/// exposed through Clay JS facades.
+#[test]
+fn phase20_2_primitives_are_not_exposed_to_javascript() {
+    let root = repository_root();
+    let primitives_source =
+        fs::read_to_string(root.join("src/shell/primitives.rs")).expect("read primitives.rs");
+
+    // Assert all primitive functions are `pub(crate)`, not bare `pub`.
+    let primitive_functions = [
+        "paint_divider",
+        "paint_focus_ring",
+        "paint_panel_chrome",
+        "paint_scroll_chrome",
+        "paint_badge",
+        "paint_kbd_hint",
+        "paint_icon_slot",
+        "paint_tooltip_shell",
+    ];
+    for func in primitive_functions {
+        let pub_crate_marker = format!("pub(crate) fn {func}");
+        let pub_marker = format!("pub fn {func}");
+        assert!(
+            primitives_source.contains(&pub_crate_marker),
+            "primitive {func} must be pub(crate), not bare pub or private"
+        );
+        assert!(
+            !primitives_source.contains(&pub_marker),
+            "primitive {func} must not be bare pub (exposed to JS)"
+        );
+    }
+
+    // Assert no primitive is wrapped by a deno_core op.
+    let ops_source =
+        fs::read_to_string(root.join("src/server/ops/ui.rs")).expect("read src/server/ops/ui.rs");
+    for func in primitive_functions {
+        assert!(
+            !ops_source.contains(func),
+            "primitive {func} must not be wrapped by a deno_core op in src/server/ops/ui.rs"
+        );
+    }
+
+    // Assert no primitive is exposed through Clay JS facades.
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for func in primitive_functions {
+            assert!(
+                !source.contains(func),
+                "{} must not expose primitive {func} to JavaScript",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn phase20_4_introduces_no_unexposed_public_rust_function() {
+    // Plan 065 task 10: Phase 20.4 is pub(crate) paint/interaction work. Every
+    // new helper must be pub(crate) or private — none may be a bare `pub fn`
+    // that becomes a public JS surface, and none may be wrapped by a deno_core
+    // op or exposed through a runtime/js facade.
+    let root = repository_root();
+
+    // (source_file, [function names that must be pub(crate) or private])
+    let new_helpers: &[(&str, &[&str])] = &[
+        (
+            "src/shell/primitives.rs",
+            &[
+                "component_state_color",
+                "list_row_fill_color",
+                "disabled_text_color",
+            ],
+        ),
+        ("src/shell/theme.rs", &["from_ui_theme", "typography"]),
+        (
+            "src/masonry_sdui.rs",
+            &[
+                "theme_style",
+                "set_pointer_pos",
+                "set_pointer_pressed",
+                "clear_pointer_state",
+                "set_focused_action",
+                "focused_action",
+                "is_focused",
+                "interaction_state",
+            ],
+        ),
+        (
+            "src/editor/surface.rs",
+            &[
+                "ui_theme",
+                "set_pointer_pos",
+                "set_pointer_pressed",
+                "clear_pointer_chrome_state",
+                "scrollbar_interaction_state",
+            ],
+        ),
+    ];
+
+    // Each new helper must appear as `pub(crate) fn` (or a private `fn`) and
+    // must NOT appear as a bare `pub fn`.
+    for (file, funcs) in new_helpers {
+        let source = fs::read_to_string(root.join(file))
+            .unwrap_or_else(|error| panic!("read {file}: {error}"));
+        for func in *funcs {
+            let pub_crate_marker = format!("pub(crate) fn {func}");
+            let private_marker = format!("    fn {func}");
+            let pub_marker = format!("pub fn {func}");
+            assert!(
+                source.contains(&pub_crate_marker) || source.contains(&private_marker),
+                "{file}::{func} must be pub(crate) or private, not bare pub"
+            );
+            assert!(
+                !source.contains(&pub_marker),
+                "{file}::{func} must not be bare pub (would expose to JS)"
+            );
+        }
+    }
+
+    // No new helper may be wrapped by a deno_core op. Only check the
+    // Rust-internal snake_case names; generic words like `typography`/`ui_theme`
+    // appear legitimately in facade prose and are not Rust helper exports.
+    let facade_ops_funcs = [
+        "component_state_color",
+        "list_row_fill_color",
+        "disabled_text_color",
+        "from_ui_theme",
+        "theme_style",
+        "set_pointer_pos",
+        "set_pointer_pressed",
+        "clear_pointer_state",
+        "set_focused_action",
+        "focused_action",
+        "is_focused",
+        "interaction_state",
+        "clear_pointer_chrome_state",
+        "scrollbar_interaction_state",
+    ];
+    let ops_text =
+        fs::read_to_string(root.join("src/server/ops/ui.rs")).expect("read src/server/ops/ui.rs");
+    for func in facade_ops_funcs {
+        assert!(
+            !ops_text.contains(func),
+            "{func} must not be wrapped by a deno_core op in src/server/ops/ui.rs"
+        );
+    }
+
+    // No new helper may be exposed through a Clay JS facade.
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for func in facade_ops_funcs {
+            assert!(
+                !source.contains(func),
+                "{} must not expose {func} to JavaScript",
+                path.display()
+            );
+        }
+    }
+}

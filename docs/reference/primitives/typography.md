@@ -9,7 +9,7 @@ Phase 18.16.5 defines one reusable typography contract for document modes, synta
 | Document/mode text | `defaultFontRole: "monospace" \| "proportional"` | `core.code`: monospace; `core.text`: proportional | User `monospace` or `proportional` profile |
 | Syntax/semantic range | `fontRole: "monospace" \| "proportional"` | Inherit document role | Same user profile selected by role |
 | Clay/package component text | `style.fontRole: "ui" \| "monospace" \| "proportional"` | UI | Selected user profile |
-| UI text scale | semantic `typography.body`, `typography.title`, or `typography.status` | Kind-specific semantic variant | Clay scales selected profile; package supplies no pixels |
+| UI text scale | semantic `typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, or `typography.caption` | Kind-specific semantic variant | Clay scales selected profile via the user-owned [`UiTypographyHierarchy`](#ui-typography-hierarchy); package supplies no pixels |
 
 One role selects both ordered family fallback stack and logical-pixel size. Packages cannot split family and size ownership.
 
@@ -82,7 +82,13 @@ Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` components may
 }
 ```
 
-`typography.body`, `typography.title`, and `typography.status` are semantic scale variants, not absolute sizes. Native paint, row height, hit testing, scrolling, status geometry, and accessibility bounds derive from the same resolved metrics.
+`typography.body`, `typography.title`, and `typography.status` are semantic scale variants, not absolute sizes. Phase 20.1 adds `typography.display`, `typography.section`, `typography.detail`, and `typography.caption` as additive semantic variants. Native paint, row height, hit testing, scrolling, status geometry, and accessibility bounds derive from the same resolved metrics.
+
+## UI Typography Hierarchy
+
+The seven semantic variants (`display`, `title`, `section`, `body`, `status`, `detail`, `caption`) are scale ratios over the selected role's base size. The complete hierarchy is user-owned and travels atomically with `ActiveTypography` via [`clay.theme.setTypography`](../clay-js-api/theme/set-typography.md). Defaults preserve the legacy scales (`title = 14/12`, `body/status = 1`, `detail = 10/12`) and add restrained defaults for `display` (1.5), `section` (13/12), and `caption` (0.75). Each scale must be finite, positive, and at most 4.
+
+Packages and components select a semantic variant name only; they cannot supply concrete scale ratios. A `clay.contributions.designTokens` entry targeting any `typography.*` token is rejected as a typography (variant) override, not a scale value. A changed hierarchy increments the typography revision and invalidates editor/UI layout once; an unchanged hierarchy does not churn layout.
 
 ## Fallback and Invalidation
 

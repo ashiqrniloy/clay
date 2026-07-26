@@ -387,6 +387,102 @@ pub(crate) fn is_git_command(command_id: &str) -> bool {
     builtin_definition(command_id).is_some_and(|command| command.kind == BuiltinCommandKind::Git)
 }
 
+/// Phase 20.6: settings command ids dispatched from the `@clay/settings`
+/// package's catalog-composed surface. Live application (persist → reload →
+/// runtime-state fanout) is owned by the configuration-precedence task; this
+/// executor validates the inert intent values only.
+pub(crate) fn is_settings_command(command_id: &str) -> bool {
+    command_id.starts_with("settings.")
+}
+
+/// Bounded appearance values accepted by `clay.settings.setAppearance`.
+const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
+
+impl CommandExecutor {
+    /// Validate a settings intent. `clay.settings.setTheme` requires a
+    /// first-party `@clay/theme-*` bundled specifier (carried as
+    /// `arguments.item_id` from the dropdown list source);
+    /// `clay.settings.setAppearance` requires a bounded light/dark/system
+    /// value; other `clay.settings.*` intents (open, close, reset,
+    /// setTypography) are accepted — typography bounds are enforced at apply
+    /// time by the existing `setTypography` op.
+    pub fn execute_settings(
+        &self,
+        request: CommandExecutionRequest,
+    ) -> Result<CommandExecutionResult, CommandExecutionDiagnostic> {
+        match request.command_id.as_str() {
+            "settings.setTheme" => {
+                let Some(specifier) = argument_string(&request.arguments, "item_id")
+                    .or_else(|| argument_string(&request.arguments, "specifier"))
+                else {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setTheme requires an item_id/specifier argument",
+                    ));
+                };
+                if !specifier.starts_with("@clay/theme-")
+                    || crate::packages::bundled::bundled_entry(&specifier).is_none()
+                {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        format!(
+                            "settings.setTheme requires a first-party @clay/theme-* specifier, got `{specifier}`"
+                        ),
+                    ));
+                }
+            }
+            "settings.setAppearance" => {
+                let Some(value) = argument_string(&request.arguments, "item_id")
+                    .or_else(|| argument_string(&request.arguments, "appearance"))
+                else {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setAppearance requires an item_id/appearance argument",
+                    ));
+                };
+                if !SETTINGS_APPEARANCE_VALUES.contains(&value.as_str()) {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        format!("settings.setAppearance requires light/dark/system, got `{value}`"),
+                    ));
+                }
+            }
+            "settings.setTypography" => {
+                // Value bounds (sizes 6–96, families ≤128 bytes, 7-field
+                // hierarchy) are enforced by the `setTypography` op at apply
+                // time; catalog textInput fields render a `validationState`
+                // style for out-of-bound feedback.
+            }
+            "settings.open" | "settings.close" | "settings.reset" => {}
+            _ => {
+                return Err(diagnostic(
+                    &request.command_id,
+                    CommandExecutionRule::UnknownCommand,
+                    "unknown settings.* command",
+                ));
+            }
+        }
+        Ok(CommandExecutionResult {
+            command_id: request.command_id.clone(),
+            routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
+            target: request.target,
+            status: CommandExecutionStatus::Accepted,
+        })
+    }
+}
+
+fn argument_string(arguments: &serde_json::Value, name: &str) -> Option<String> {
+    arguments
+        .as_object()
+        .and_then(|object| object.get(name))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
 /// Execute an open command: in-root files use [`WorkspaceState::open_existing_file`];
 /// out-of-root files use [`WorkspaceState::open_selected_file`] and therefore the
 /// selected-file single-file grant flow.
@@ -1216,5 +1312,105 @@ mod tests {
 
             assert_eq!(error.rule, CommandExecutionRule::UnknownCommand);
         }
+    }
+    fn settings_request(command_id: &str, args: serde_json::Value) -> CommandExecutionRequest {
+        CommandExecutionRequest {
+            command_id: command_id.to_string(),
+            arguments: args,
+            target: CommandExecutionTarget::Global,
+            provenance: None,
+            expected_permissions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn settings_set_theme_accepts_first_party_modus_specifier() {
+        let executor = CommandExecutor::new();
+        let result = executor
+            .execute_settings(settings_request(
+                "settings.setTheme",
+                json!({ "item_id": "@clay/theme-modus-vivendi" }),
+            ))
+            .expect("first-party @clay/theme-* specifier must validate");
+        assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        assert_eq!(result.command_id, "settings.setTheme");
+    }
+
+    #[test]
+    fn settings_set_theme_rejects_non_first_party_specifier() {
+        let executor = CommandExecutor::new();
+        let err = executor
+            .execute_settings(settings_request(
+                "settings.setTheme",
+                json!({ "item_id": "@vendor/evil" }),
+            ))
+            .expect_err("non-first-party specifier must be rejected");
+        assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
+    }
+
+    #[test]
+    fn settings_set_theme_rejects_non_theme_first_party_specifier() {
+        let executor = CommandExecutor::new();
+        let err = executor
+            .execute_settings(settings_request(
+                "settings.setTheme",
+                json!({ "item_id": "@clay/markdown" }),
+            ))
+            .expect_err("first-party non-theme specifier must be rejected");
+        assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
+    }
+
+    #[test]
+    fn settings_set_appearance_accepts_bounded_enum() {
+        let executor = CommandExecutor::new();
+        for value in ["light", "dark", "system"] {
+            let result = executor
+                .execute_settings(settings_request(
+                    "settings.setAppearance",
+                    json!({ "item_id": value }),
+                ))
+                .expect("bounded appearance value must validate");
+            assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        }
+    }
+
+    #[test]
+    fn settings_set_appearance_rejects_unknown_value() {
+        let executor = CommandExecutor::new();
+        let err = executor
+            .execute_settings(settings_request(
+                "settings.setAppearance",
+                json!({ "item_id": "auto" }),
+            ))
+            .expect_err("unknown appearance must be rejected");
+        assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
+    }
+
+    #[test]
+    fn settings_set_typography_and_lifecycle_commands_accept() {
+        let executor = CommandExecutor::new();
+        for command_id in [
+            "settings.setTypography",
+            "settings.open",
+            "settings.close",
+            "settings.reset",
+        ] {
+            let result = executor
+                .execute_settings(settings_request(command_id, json!({})))
+                .expect("lifecycle/typography settings commands accept");
+            assert_eq!(
+                result.status,
+                CommandExecutionStatus::Accepted,
+                "{command_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_settings_command_recognizes_prefix() {
+        assert!(is_settings_command("settings.setTheme"));
+        assert!(is_settings_command("settings.open"));
+        assert!(!is_settings_command("clay.controlCenter.open"));
+        assert!(!is_settings_command("markdown.togglePreview"));
     }
 }

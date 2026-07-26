@@ -23,6 +23,14 @@ pub(crate) enum ComponentKind {
     Scroll,
     Portal,
     StatusItem,
+    /// Phase 20.5: single-select drop-down. Trigger row + list-in-overlay.
+    Dropdown,
+    /// Phase 20.5: expand/collapse section with chevron and content toggle.
+    Collapse,
+    /// Phase 20.5: blocking dialog on `z.modal` with focus trap.
+    Modal,
+    /// Phase 20.5: single-line editable text field with focus, placeholder, and validation states.
+    TextInput,
 }
 
 impl ComponentKind {
@@ -39,6 +47,10 @@ impl ComponentKind {
             "scroll" => Some(Self::Scroll),
             "portal" => Some(Self::Portal),
             "statusItem" => Some(Self::StatusItem),
+            "dropdown" => Some(Self::Dropdown),
+            "collapse" => Some(Self::Collapse),
+            "modal" => Some(Self::Modal),
+            "textInput" => Some(Self::TextInput),
             _ => None,
         }
     }
@@ -46,26 +58,29 @@ impl ComponentKind {
     pub(crate) const fn supports_text_font_role(self) -> bool {
         matches!(
             self,
-            Self::Panel | Self::Label | Self::Button | Self::List | Self::StatusItem
+            Self::Panel
+                | Self::Label
+                | Self::Button
+                | Self::List
+                | Self::StatusItem
+                | Self::Dropdown
+                | Self::Collapse
+                | Self::Modal
+                | Self::TextInput
         )
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeferredComponentKind {
+    /// Reserved; no first-party package need identified as of Phase 20.5.
     Table,
-    Dropdown,
-    Collapse,
-    Modal,
 }
 
 impl DeferredComponentKind {
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "table" => Some(Self::Table),
-            "dropdown" => Some(Self::Dropdown),
-            "collapse" => Some(Self::Collapse),
-            "modal" => Some(Self::Modal),
             _ => None,
         }
     }
@@ -102,7 +117,7 @@ pub(crate) fn validate_component_kind(kind: &str) -> Result<ComponentKind, Compo
         return Err(ComponentCatalogError {
             field: "kind".to_string(),
             message: format!(
-                "component kind `{kind}` is reserved for a later Clay component catalog phase and is not available in Phase 18.3"
+                "component kind `{kind}` is reserved for a later Clay component catalog phase"
             ),
         });
     }
@@ -169,6 +184,7 @@ fn token_type_for_style_variable(name: &str) -> Option<ThemeTokenType> {
             Some(ThemeTokenType::ColorRole)
         }
         "padding" | "gap" | "rowHeight" | "inset" => Some(ThemeTokenType::Spacing),
+        "placeholderColor" => Some(ThemeTokenType::ColorRole),
         "radius" => Some(ThemeTokenType::Radius),
         "typography" => Some(ThemeTokenType::Typography),
         "opacity" => Some(ThemeTokenType::Opacity),
@@ -212,6 +228,28 @@ fn validate_enum_style_variable(
                 return Err(ComponentCatalogError {
                     field: "style.variant".to_string(),
                     message: "style.variant must be default, muted, primary, or danger".to_string(),
+                });
+            }
+            Ok(ComponentStyleVariable {
+                name: name.to_string(),
+                value: ComponentStyleValue::Enum {
+                    value: value.to_string(),
+                },
+            })
+        }
+        "validationState" => {
+            let value = value
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| ComponentCatalogError {
+                    field: "style.validationState".to_string(),
+                    message: "style.validationState must be a non-empty enum string".to_string(),
+                })?;
+            if !matches!(value, "none" | "error" | "warning" | "success") {
+                return Err(ComponentCatalogError {
+                    field: "style.validationState".to_string(),
+                    message: "style.validationState must be none, error, warning, or success"
+                        .to_string(),
                 });
             }
             Ok(ComponentStyleVariable {
@@ -276,6 +314,12 @@ mod tests {
             "scroll",
             "portal",
             "statusItem",
+            // Phase 20.5: promoted from deferred.
+            "dropdown",
+            "collapse",
+            "modal",
+            // Phase 20.5: new kind.
+            "textInput",
         ];
 
         for kind in supported {
@@ -285,10 +329,32 @@ mod tests {
             );
         }
 
-        for deferred in ["table", "dropdown", "collapse", "modal"] {
-            let error = validate_component_kind(deferred).unwrap_err();
-            assert!(error.message.contains("reserved for a later"));
+        // table remains reserved; no first-party package need as of Phase 20.5.
+        let error = validate_component_kind("table").unwrap_err();
+        assert!(error.message.contains("reserved for a later"));
+    }
+
+    #[test]
+    fn component_catalog_accepts_validation_state_enum() {
+        let resolver = ThemeTokenResolver::new();
+        for state in ["none", "error", "warning", "success"] {
+            let object = json!({ "style": { "validationState": state } });
+            assert!(
+                validate_style_variables(object.as_object().unwrap(), &resolver).is_ok(),
+                "validationState={state} should be accepted"
+            );
         }
+        let invalid = json!({ "style": { "validationState": "critical" } });
+        assert!(validate_style_variables(invalid.as_object().unwrap(), &resolver).is_err());
+    }
+
+    #[test]
+    fn component_catalog_accepts_placeholder_color_token() {
+        let resolver = ThemeTokenResolver::new();
+        let object = json!({ "style": { "placeholderColor": "text.muted" } });
+        assert!(validate_style_variables(object.as_object().unwrap(), &resolver).is_ok());
+        let mismatch = json!({ "style": { "placeholderColor": "spacing.md" } });
+        assert!(validate_style_variables(mismatch.as_object().unwrap(), &resolver).is_err());
     }
 
     #[test]

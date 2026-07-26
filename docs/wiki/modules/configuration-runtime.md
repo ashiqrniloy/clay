@@ -6,6 +6,7 @@
 - `src/server/js_runtime.rs`
 - `src/server/mod.rs`
 - `src/server/ops/configuration.rs`
+- `src/server/ops/theme.rs`
 - `src/server/ops/typography.rs`
 - `runtime/js/configuration.js`
 - `runtime/js/theme.js`
@@ -63,6 +64,12 @@ console.log(getConfigurationState().loadedModules);
 let service = ClayJsRuntimeService::default();
 let result = service.load_configuration_from_root(config_root).await?;
 ```
+
+## Phase 20.6 persisted preferences and precedence
+
+Phase 20.6 adds `PersistedPreferences` in `src/server/configuration.rs`: a closed `~/.config/clay/preferences.json` store with at most three keys (`theme`, `appearance`, `typography`), bounded to `PREFERENCES_PAYLOAD_BUDGET_BYTES` (8 KiB), validated at load and persist time, and authority-rejecting. `load_preferences` skips `null` fields and drops corrupted/oversized/manual-edit fields field-by-field with a diagnostic so startup never breaks. `persist_preference` writes atomically (tmp + rename); `clear_preferences` backs `settings.reset`. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values, but no new `clay:configuration` export is added — appearance is a `clay:theme` API (`clay.theme.setAppearance`), and the `clay:configuration` module stays closed.
+
+A single documented precedence applies on every startup/reload (highest wins): `ui-session` (`preferences.json`, written by `settings.setTheme`/`settings.setAppearance`) > `init-js` (`init.js` `setTheme`/`setAppearance`/`setTypography`) > canonical/package default (appearance-derived Modus default or Clay core default). `apply_persisted_preferences` runs in the `src/server/js_runtime.rs` harvest immediately after `init.js` evaluation, so a UI choice always overrides the equivalent `init.js` call. Canonical-default resolution (Modus Operandi/Vivendi) also runs in the harvest when no explicit theme was set. Full implementation, settings surface, and the `@clay/settings` package details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
 
 ## Invariants and Constraints
 

@@ -16,8 +16,8 @@ mod parse;
 mod planned;
 mod sdui;
 mod syntax;
-mod theme;
-mod typography;
+pub(crate) mod theme;
+pub(crate) mod typography;
 mod ui;
 mod workspace;
 
@@ -91,13 +91,13 @@ use self::{
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
     syntax::{op_clay_syntax_register_syntax_grammar, op_clay_syntax_set_engine_preference},
-    theme::op_clay_theme_set_theme,
+    theme::{op_clay_theme_set_appearance, op_clay_theme_set_theme},
     typography::op_clay_theme_set_typography,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
         op_clay_ui_register_panel_contribution, op_clay_ui_register_theme_token,
         op_clay_ui_register_transient_overlay_contribution, op_clay_ui_register_ui_state_scope,
-        op_clay_ui_set_layout_override,
+        op_clay_ui_request_layout_intent, op_clay_ui_set_layout_override,
     },
     workspace::{
         op_clay_workspace_add_root, op_clay_workspace_cancel_listing,
@@ -193,6 +193,12 @@ pub(crate) struct ClayOpState {
     /// handshake ships it to the client. `None` = Clay default theme.
     active_theme: Mutex<Option<crate::protocol::ActiveTheme>>,
     active_typography: Mutex<Option<crate::protocol::ActiveTypography>>,
+    /// Phase 20.6 bounded appearance preference (`light` | `dark` | `system`).
+    /// Selects the canonical default theme only when no explicit `setTheme` ran.
+    appearance: Mutex<crate::protocol::Appearance>,
+    /// Whether the user explicitly called `setTheme`. Once true, appearance
+    /// changes no longer re-resolve the canonical default over the user's pick.
+    explicit_theme_active: std::sync::atomic::AtomicBool,
     runtime_context: Mutex<ClayRuntimeContext>,
     // Shared PackageService for loadPackage resolution. Bundled packages are
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
@@ -284,6 +290,8 @@ impl ClayOpState {
             document_analyzers: Mutex::new(Vec::new()),
             active_theme: Mutex::new(None),
             active_typography: Mutex::new(None),
+            appearance: Mutex::new(crate::protocol::Appearance::default()),
+            explicit_theme_active: std::sync::atomic::AtomicBool::new(false),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
@@ -1094,6 +1102,33 @@ impl ClayOpState {
             .clone()
     }
 
+    /// Phase 20.6: store the bounded appearance preference.
+    pub(super) fn set_appearance(&self, appearance: crate::protocol::Appearance) {
+        *self
+            .appearance
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = appearance;
+    }
+
+    pub(crate) fn appearance(&self) -> crate::protocol::Appearance {
+        *self
+            .appearance
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+    }
+
+    /// Phase 20.6: mark that the user explicitly selected a theme via
+    /// `setTheme`, so later `setAppearance` calls do not re-resolve over it.
+    pub(super) fn set_explicit_theme_active(&self, value: bool) {
+        self.explicit_theme_active
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn explicit_theme_active(&self) -> bool {
+        self.explicit_theme_active
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub(crate) fn completion_providers(
         &self,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
@@ -1397,6 +1432,20 @@ impl ClayOpState {
             .set_layout_override(declaration)
     }
 
+    pub(super) fn request_layout_intent(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredLayoutIntent,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .request_layout_intent(package, declaration)
+    }
+
     pub(super) fn register_theme_token(
         &self,
         package: &crate::packages::manifest::ClayPackageManifest,
@@ -1411,7 +1460,7 @@ impl ClayOpState {
             .register_theme_token(package, declaration)
     }
 
-    fn record(&self, value: String) {
+    pub(crate) fn record(&self, value: String) {
         self.runtime_records
             .lock()
             .expect("Clay runtime op state mutex poisoned")
@@ -1449,6 +1498,7 @@ extension!(
         op_clay_configuration_set_package_option,
         op_clay_sdui_define_node,
         op_clay_sdui_publish_tree,
+        op_clay_theme_set_appearance,
         op_clay_theme_set_theme,
         op_clay_theme_set_typography,
         op_clay_ui_register_panel_contribution,
@@ -1457,6 +1507,7 @@ extension!(
         op_clay_ui_register_theme_token,
         op_clay_ui_register_input_contribution,
         op_clay_ui_register_ui_state_scope,
+        op_clay_ui_request_layout_intent,
         op_clay_ui_set_layout_override,
         op_clay_documents_open_document,
         op_clay_documents_save_document,
@@ -1530,6 +1581,7 @@ extension!(
         op_clay_ui_register_theme_token,
         op_clay_ui_register_input_contribution,
         op_clay_ui_register_ui_state_scope,
+        op_clay_ui_request_layout_intent,
         op_clay_ui_set_layout_override,
         op_clay_git_list_statuses,
         op_clay_git_refresh_status,
@@ -1617,8 +1669,8 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 67);
-        assert_eq!(package.len(), 35);
+        assert_eq!(trusted.len(), 69);
+        assert_eq!(package.len(), 36);
         assert!(
             package.is_subset(&trusted),
             "every third-party op must also exist in the trusted extension"
@@ -1628,6 +1680,7 @@ mod domain_extension_tests {
             "op_clay_configuration_load_module",
             "op_clay_configuration_get_state",
             "op_clay_configuration_set_package_option",
+            "op_clay_theme_set_appearance",
             "op_clay_theme_set_theme",
             "op_clay_theme_set_typography",
             "op_clay_documents_open_document",

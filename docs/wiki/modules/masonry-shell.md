@@ -139,6 +139,53 @@ Phase 18.2 is an internal runtime foundation, not a public package UI API releas
 - Command: `cargo test --lib masonry_shell --quiet`
 - Command: `cargo test --lib main --quiet`
 
+## Phase 20.3: Layout Primitives — Splits, Panel Resizing, and Screen Division
+
+Phase 20.3 (2026-07-25) adds user-facing layout interaction on top of the Phase 18.2 structural model.
+
+### Split Divider Drag
+
+`ClayShellWidget::on_pointer_event` hit-tests pointer-down events against split divider rects (`hit_test_split_divider`, 4px slop). During drag, `compute_drag_ratio` maps pointer position to a clamped `SplitRatio` (0.05–0.95) and `pane_tree_mut().update_split_ratio()` applies it live. On pointer-up, `commit_split_drag()` bumps the layout version. Escape cancels via `cancel_split_drag()`. Dividers paint through `paint_divider` (Phase 20.2 primitive).
+
+### Fixed Slot Resize and Collapse
+
+Slot resize handles are hit-tested via `hit_test_slot_handle` (4px slop). Drag computes a clamped size via `compute_slot_resize_size` and applies it live through `resize_slot_live()`. On pointer-up, `commit_slot_resize()` sets `resized_by_user = true` and bumps the version. Double-click (< 300ms) on a handle toggles collapse/restore via `toggle_slot_collapse()`. Handles paint through `paint_panel_chrome` with `InteractionState::Resize`/`Collapse`.
+
+### Layout Persistence
+
+`src/shell/layout_persist.rs` serializes user-modified state (split ratios ≠ 0.5, slots with `resized_by_user` or `collapsed`) to `~/.config/clay/layout.json` via `serde_json`. `save_layout`/`load_layout` handle I/O; `apply_persisted_state` restores with validation (skips invalid entries). Persistence is debounced ≥ 500ms in `ClayShellWidget::persist_debounced()`. Corrupt/missing files fall back to defaults.
+
+### Focus and Input Routing
+
+`PaneSplitTree::next_pane()`/`prev_pane()` traverse panes in reading order (in-order, wrapping). Tab/Shift+Tab in `on_text_event` moves focus; `set_focus_pane()` validates membership. A focus ring paints on the active pane when multiple panes exist (`paint_focus_ring`). `focused_pane_rect()` provides the transient surface anchor for overlays/menus.
+
+### Layout Intent API
+
+`serverRequestLayoutIntent` (`clay:ui` facade → `op_clay_ui_request_layout_intent` → `PackageUiRegistry::request_layout_intent`) accepts inert versioned layout intents from packages. Validation: package-prefixed ID, orientation (horizontal/vertical), ratio (0.05–0.95), position (first/second), payload size. Intents are composed into `WorkingAreaLayoutUpdate` via `PaneSplitTree::split_pane()` at Clay's discretion. Packages cannot mutate native layout directly.
+
+### Key Invariants
+
+- `compute_geometry()` is a pure `&self` read — no mutation during Masonry layout pass.
+- Drag/resize handlers call only layout methods — no package JS, no ops, no theme resolution.
+- All layout types are `pub(crate)`; only `serverRequestLayoutIntent` crosses the public op/facade boundary.
+- Persistence writes only non-default state; defaults are never persisted.
+
+### Source Paths
+
+- `src/shell/layout.rs`: Split divider hit-test, drag ratio, slot resize/collapse, focus traversal, `split_pane` composition.
+- `src/shell/layout_persist.rs`: Serialization, I/O, apply/restore.
+- `src/masonry_shell.rs`: Pointer/keyboard event handlers, paint, persistence debounce.
+- `src/server/ui.rs`: `RegisteredLayoutIntent`, `request_layout_intent` validation.
+- `src/server/ops/ui.rs`: `op_clay_ui_request_layout_intent`.
+- `runtime/js/ui.js`: `serverRequestLayoutIntent` facade.
+
+### Tests
+
+- `src/shell/layout.rs`: 52 tests (geometry invariants, clamping, collapse, focus traversal, split composition, drag interaction).
+- `src/shell/layout_persist.rs`: 6 tests (round-trip, corrupt fallback, selective persistence).
+- `src/server/ui.rs`: 6 tests (intent validation: ratio, orientation, provenance, duplicate, default position).
+- Command: `cargo test --lib shell --quiet`
+
 ## Related
 
 - [Primitive Architecture](primitive-architecture.md)
@@ -148,4 +195,6 @@ Phase 18.2 is an internal runtime foundation, not a public package UI API releas
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
+- [Shell Primitives](shell-primitives.md)
 - `plans/025-Phase18.2-Masonry-Clay-Shell-and-Pane-Runtime-Foundation.md`
+- `plans/064-Phase20.3-Layout-Primitives-Splits-Panel-Resizing-and-Screen-Division.md`

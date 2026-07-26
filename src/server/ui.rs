@@ -67,7 +67,7 @@ const VALID_LAYOUT_OVERRIDE_SOURCES: &[&str] = &[
     "package-default",
 ];
 const VALID_FALLBACK_BEHAVIORS: &[&str] = &["package-default", "hide", "ignore"];
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PackageUiRegistry {
     panels: BTreeMap<String, RegisteredPanelContribution>,
     components: BTreeMap<String, RegisteredComponentContribution>,
@@ -76,9 +76,10 @@ pub(crate) struct PackageUiRegistry {
     input_contributions: BTreeMap<String, RegisteredPackageInputContribution>,
     ui_state_scopes: BTreeMap<String, RegisteredPackageUiStateScope>,
     layout_overrides: BTreeMap<String, RegisteredPackageLayoutOverride>,
+    layout_intents: BTreeMap<String, RegisteredLayoutIntent>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PackageUiRegistrySnapshot {
     pub(crate) panels: Vec<RegisteredPanelContribution>,
     pub(crate) components: Vec<RegisteredComponentContribution>,
@@ -87,6 +88,7 @@ pub(crate) struct PackageUiRegistrySnapshot {
     pub(crate) input_contributions: Vec<RegisteredPackageInputContribution>,
     pub(crate) ui_state_scopes: Vec<RegisteredPackageUiStateScope>,
     pub(crate) layout_overrides: Vec<RegisteredPackageLayoutOverride>,
+    pub(crate) layout_intents: Vec<RegisteredLayoutIntent>,
 }
 
 impl PackageUiRegistrySnapshot {
@@ -126,6 +128,7 @@ impl PackageUiRegistrySnapshot {
                         overlay.dismissal_policy.clone(),
                         overlay.component_tree.clone(),
                         overlay.action_targets.clone(),
+                        "z.overlay",
                     )
                 })
                 .collect(),
@@ -247,6 +250,22 @@ pub(crate) struct RegisteredPackageLayoutOverride {
     pub(crate) estimated_payload_bytes: usize,
 }
 
+/// Phase 20.3: Inert versioned layout intent submitted by a package.
+///
+/// Packages request pane splits through this advisory struct. Clay validates
+/// and stores the intent; composition into `WorkingAreaLayoutUpdate` happens
+/// at Clay's discretion. Packages cannot mutate native layout directly.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RegisteredLayoutIntent {
+    pub(crate) id: String,
+    pub(crate) target_pane: String,
+    pub(crate) orientation: String,
+    pub(crate) ratio: f64,
+    pub(crate) position: String,
+    pub(crate) source: String,
+    pub(crate) estimated_payload_bytes: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UiContributionDiagnostic {
     pub(crate) package_name: Option<Box<str>>,
@@ -275,6 +294,7 @@ pub(crate) enum UiContributionRule {
     ProhibitedAuthority,
     InvalidThemeToken,
     InvalidLayoutOverride,
+    InvalidLayoutIntent,
 }
 
 impl PackageUiRegistry {
@@ -291,6 +311,7 @@ impl PackageUiRegistry {
             input_contributions: self.input_contributions.values().cloned().collect(),
             ui_state_scopes: self.ui_state_scopes.values().cloned().collect(),
             layout_overrides: self.layout_overrides.values().cloned().collect(),
+            layout_intents: self.layout_intents.values().cloned().collect(),
         }
     }
 
@@ -1011,6 +1032,97 @@ impl PackageUiRegistry {
         Ok(registered)
     }
 
+    /// Phase 20.3: Validate and store an inert layout intent from a package.
+    pub(crate) fn request_layout_intent(
+        &mut self,
+        package: &ClayPackageManifest,
+        declaration: &Value,
+    ) -> Result<RegisteredLayoutIntent, UiContributionDiagnostic> {
+        let context = UiDiagnosticContext::from_package(package, None);
+        validate_provenance(package, &context)?;
+        let size = payload_size(declaration);
+        if size > SDUI_UPDATE_PAYLOAD_BUDGET_BYTES {
+            return Err(context.error(
+                UiContributionRule::PayloadTooLarge,
+                None,
+                format!(
+                    "layout intent payload ({size} bytes) exceeds SDUI_UPDATE_PAYLOAD_BUDGET_BYTES ({SDUI_UPDATE_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_prohibited_authority(declaration, &context)?;
+        let object = declaration.as_object().ok_or_else(|| {
+            context.error(
+                UiContributionRule::InvalidLayoutIntent,
+                None,
+                "layout intent declaration must be an object",
+            )
+        })?;
+        let id = package_owned_string(object, "id", package, UiContributionRule::InvalidId)?;
+        if self.layout_intents.contains_key(&id) {
+            return Err(context.error(
+                UiContributionRule::DuplicateId,
+                Some(&id),
+                "layout intent id already registered",
+            ));
+        }
+        let target_pane = required_str(
+            object,
+            "targetPane",
+            UiContributionRule::InvalidLayoutIntent,
+            &context,
+        )?;
+        let orientation = required_str(
+            object,
+            "orientation",
+            UiContributionRule::InvalidLayoutIntent,
+            &context,
+        )?;
+        if !matches!(orientation, "horizontal" | "vertical") {
+            return Err(context.error(
+                UiContributionRule::InvalidLayoutIntent,
+                Some(orientation),
+                "layout intent orientation must be horizontal or vertical",
+            ));
+        }
+        let ratio = object
+            .get("ratio")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| {
+                context.error(
+                    UiContributionRule::InvalidLayoutIntent,
+                    Some(&id),
+                    "layout intent requires a numeric ratio",
+                )
+            })?;
+        if !ratio.is_finite() || !(0.05..=0.95).contains(&ratio) {
+            return Err(context.error(
+                UiContributionRule::InvalidLayoutIntent,
+                Some(&id),
+                format!("layout intent ratio {ratio} must be between 0.05 and 0.95"),
+            ));
+        }
+        let position = optional_str(object, "position").unwrap_or("second");
+        if !matches!(position, "first" | "second") {
+            return Err(context.error(
+                UiContributionRule::InvalidLayoutIntent,
+                Some(position),
+                "layout intent position must be first or second",
+            ));
+        }
+        let registered = RegisteredLayoutIntent {
+            id: id.clone(),
+            target_pane: target_pane.to_string(),
+            orientation: orientation.to_string(),
+            ratio,
+            position: position.to_string(),
+            source: package.clay.api_prefix.clone(),
+            estimated_payload_bytes: size,
+        };
+        self.layout_intents.insert(id, registered.clone());
+        Ok(registered)
+    }
+
     pub(crate) fn register_theme_token(
         &mut self,
         package: &ClayPackageManifest,
@@ -1068,7 +1180,10 @@ impl PackageUiRegistry {
             return Err(context.error(
                 UiContributionRule::InvalidThemeToken,
                 Some(&token),
-                "theme token type must be color-role, spacing, radius, typography, or opacity",
+                format!(
+                    "theme token type must be one of: {}",
+                    ThemeTokenType::all_as_str().join(", ")
+                ),
             ));
         };
         let fallback = required_str(
@@ -2436,5 +2551,124 @@ mod tests {
     fn ui_contribution_diagnostic_size_remains_under_large_err_threshold() {
         const _: () = assert!(std::mem::size_of::<UiContributionDiagnostic>() <= 128);
         assert!(std::mem::size_of::<UiContributionDiagnostic>() <= 128);
+    }
+
+    // -- Phase 20.3: layout intent validation tests --
+
+    #[test]
+    fn layout_intent_valid_request_accepted() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let registered = registry
+            .request_layout_intent(
+                &package,
+                &json!({
+                    "id": "markdown.splitPreview",
+                    "targetPane": "active",
+                    "orientation": "horizontal",
+                    "ratio": 0.5,
+                    "position": "second"
+                }),
+            )
+            .unwrap();
+        assert_eq!(registered.id, "markdown.splitPreview");
+        assert_eq!(registered.target_pane, "active");
+        assert_eq!(registered.orientation, "horizontal");
+        assert!((registered.ratio - 0.5).abs() < 1e-9);
+        assert_eq!(registered.position, "second");
+        assert_eq!(registered.source, "markdown");
+        assert_eq!(registry.snapshot().layout_intents.len(), 1);
+    }
+
+    #[test]
+    fn layout_intent_invalid_ratio_rejected() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let err = registry
+            .request_layout_intent(
+                &package,
+                &json!({
+                    "id": "markdown.badRatio",
+                    "targetPane": "active",
+                    "orientation": "horizontal",
+                    "ratio": 1.5
+                }),
+            )
+            .unwrap_err();
+        assert_eq!(err.rule, UiContributionRule::InvalidLayoutIntent);
+    }
+
+    #[test]
+    fn layout_intent_invalid_orientation_rejected() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let err = registry
+            .request_layout_intent(
+                &package,
+                &json!({
+                    "id": "markdown.badOrientation",
+                    "targetPane": "active",
+                    "orientation": "diagonal",
+                    "ratio": 0.5
+                }),
+            )
+            .unwrap_err();
+        assert_eq!(err.rule, UiContributionRule::InvalidLayoutIntent);
+    }
+
+    #[test]
+    fn layout_intent_invalid_provenance_rejected() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        // ID not owned by the package's apiPrefix.
+        let err = registry
+            .request_layout_intent(
+                &package,
+                &json!({
+                    "id": "other.splitPreview",
+                    "targetPane": "active",
+                    "orientation": "horizontal",
+                    "ratio": 0.5
+                }),
+            )
+            .unwrap_err();
+        assert_eq!(err.rule, UiContributionRule::InvalidId);
+    }
+
+    #[test]
+    fn layout_intent_duplicate_id_rejected() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let declaration = json!({
+            "id": "markdown.splitPreview",
+            "targetPane": "active",
+            "orientation": "horizontal",
+            "ratio": 0.5
+        });
+        registry
+            .request_layout_intent(&package, &declaration)
+            .unwrap();
+        let err = registry
+            .request_layout_intent(&package, &declaration)
+            .unwrap_err();
+        assert_eq!(err.rule, UiContributionRule::DuplicateId);
+    }
+
+    #[test]
+    fn layout_intent_default_position_is_second() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let registered = registry
+            .request_layout_intent(
+                &package,
+                &json!({
+                    "id": "markdown.noPosition",
+                    "targetPane": "active",
+                    "orientation": "vertical",
+                    "ratio": 0.4
+                }),
+            )
+            .unwrap();
+        assert_eq!(registered.position, "second");
     }
 }

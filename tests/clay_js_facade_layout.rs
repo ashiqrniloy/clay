@@ -93,6 +93,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverRegisterInputContribution",
             "serverRegisterUiStateScope",
             "serverRegisterThemeToken",
+            "serverRequestLayoutIntent",
         ],
     ),
     ("runtime/js/application.js", &["quit"]),

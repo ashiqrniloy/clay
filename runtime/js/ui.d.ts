@@ -14,7 +14,17 @@ export type UiStateLifetime = "session" | "workspace" | "document" | "transient"
 export type UiStatePersistence = "none" | "client-local" | "server-canonical" | "deferred";
 export type UiStateImplementationStatus = "implemented" | "deferred";
 export type UiStateSchemaKind = "boolean" | "number" | "string" | "enum" | "object";
-export type ThemeTokenType = "color-role" | "spacing" | "radius" | "typography" | "opacity";
+export type ThemeTokenType =
+    | "color-role"
+    | "spacing"
+    | "radius"
+    | "typography"
+    | "opacity"
+    | "dimension"
+    | "elevation"
+    | "motion-duration"
+    | "z-level"
+    | "density";
 export type ComponentFontRole = "ui" | "monospace" | "proportional";
 export type LayoutOverrideProperty = "slot" | "visibility" | "splitRatio" | "themeToken" | "inputDefault" | "actionDefault" | "fallback";
 export type LayoutOverrideSource = "user-config" | "active-major-mode" | "compatible-minor-mode" | "global-package" | "package-default";
@@ -108,10 +118,18 @@ export interface PackageLayoutOverrideDefinition {
     value: unknown;
     source?: LayoutOverrideSource;
 }
+export interface PackageLayoutIntentDefinition {
+    id: string;
+    targetPane: string;
+    orientation: "horizontal" | "vertical";
+    ratio: number;
+    position?: "first" | "second";
+}
 export declare function serverRegisterPanelContribution(declaration: PanelContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterComponentContribution(declaration: ComponentContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterTransientOverlayContribution(declaration: TransientOverlayContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterInputContribution(declaration: PackageInputContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterUiStateScope(declaration: PackageUiStateScopeDefinition): Record<string, unknown>;
 export declare function serverSetLayoutOverride(declaration: PackageLayoutOverrideDefinition): Record<string, unknown>;
+export declare function serverRequestLayoutIntent(declaration: PackageLayoutIntentDefinition): Record<string, unknown>;
 export declare function serverRegisterThemeToken(declaration: PackageThemeTokenDeclaration): Record<string, unknown>;

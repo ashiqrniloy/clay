@@ -56,8 +56,8 @@ The model is deliberately not a direct Masonry, CSS, HTML, or client-side JavaSc
 4. `PackageUiRegistry` validates the declaration against the package prefix/provenance and the already-registered package commands. It rejects unsupported slots/policies, unregistered command actions, duplicate IDs, duplicate fixed-slot claims, raw op/native/widget/CSS/client-JS authority fields, unsupported/deferred component kinds, invalid typed style variables, raw colors, type-incompatible theme token fallbacks, and payloads over SDUI/component budget expectations.
 5. Accepted records are stored as `RegisteredPanelContribution`, `RegisteredComponentContribution`, `RegisteredTransientOverlayContribution`, `RegisteredPackageInputContribution`, `RegisteredPackageUiStateScope`, and `RegisteredPackageThemeTokenDeclaration` values with `UiContributionProvenance`.
 6. `PackageUiRegistrySnapshot::runtime_update` maps registered panels, overlays, and input contributions into `PackageUiRuntimeUpdate`. `src/shell/package_ui.rs` applies that update only when the base version matches, enforces `MAX_FIXED_PANELS`, `MAX_TRANSIENT_OVERLAYS`, `MAX_INPUT_ROUTES`, duplicate contribution-ID rejection, and duplicate exclusive fixed-slot rejection, then increments the local runtime version.
-7. `PackageUiRuntimeState::slot_layout` folds visible fixed panels into `PaneSlotLayout`. Side panels use bounded side sizes, top/bottom panels use bounded vertical sizes, and transient overlays are kept separate so they do not consume fixed slot geometry.
-8. `src/masonry_sdui.rs` reads the installed inert package UI state during layout/paint. It paints fixed panels and transient overlays from validated state, while `src/masonry_editor.rs` uses the same slot-computed `main` rect to clip/offset `EditorSurface` painting and translate pointer hit-testing before caret/selection updates. `EditorSurface` remains responsible for text, caret, selection, viewport, edit queueing, and ordinary input.
+7. `PackageUiRuntimeState::slot_layout` folds visible fixed panels into `PaneSlotLayout`. Side panels use bounded side sizes from `PanelDefaults` (Phase 20.1: resolved from `dimension.panel.side.*` and `dimension.sidebar.default` tokens with core fallbacks), top/bottom panels use bounded vertical sizes, and transient overlays are kept separate so they do not consume fixed slot geometry.
+8. `src/masonry_sdui.rs` reads the installed inert package UI state and cached `ResolvedUiTheme` during layout/paint. `SduiNativeState.ui_theme.panel_defaults()` supplies sidebar width and per-slot default/min/max sizes to `slot_layout`, `fixed_panel_observations`, and the legacy SDUI left-slot bridge. It paints fixed panels and transient overlays from validated state, while `src/masonry_editor.rs` uses the same slot-computed `main` rect to clip/offset `EditorSurface` painting and translate pointer hit-testing before caret/selection updates. `EditorSurface` remains responsible for text, caret, selection, viewport, edit queueing, and ordinary input.
 9. Package UI action regions emit bounded `ClientMessage::SduiAction` command intents for registered command IDs. The pointer handler does not execute package JavaScript and does not wait synchronously for IPC acknowledgement. Phase 18.4 input routes are installed as inert `PackageInputRouting` values so native input code can read focus/action policy without package validation, configuration evaluation, or package JavaScript in pointer/key/text hot paths.
 
 ## Code Examples
@@ -105,7 +105,7 @@ serverRegisterPanelContribution(manifest, {
   - Owner/source: `runtime/js/ui.js`, `src/server/ui.rs`, `src/shell/components.rs`, `src/shell/package_ui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-component-contribution.md`.
   - Supported Phase 18.3 component kinds: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, and `statusItem`.
-  - Deferred component kinds: `table`, `dropdown`, `collapse`, and `modal` fail with planned/deferred diagnostics instead of partially working semantics.
+  - Deferred component kinds: as of Phase 20.5 only `table` fails with a planned/deferred diagnostic. `dropdown`, `collapse`, and `modal` were promoted to implemented in Phase 20.5; `textInput` was added as a new implemented kind.
   - Style variables must reference typed Clay tokens or allowed enum values such as `variant` and `fontRole`; raw CSS, raw colors, concrete font families/sizes, and unsupported style keys are rejected. `fontRole` defaults to user-owned `ui`; only text-bearing panel, label, button, list, and statusItem components may select semantic `monospace` or `proportional`.
 
 - `TransientOverlayContribution`
@@ -129,8 +129,12 @@ serverRegisterPanelContribution(manifest, {
 - `PackageThemeTokenDeclaration`
   - Owner/source: `runtime/js/ui.js`, `src/server/ui.rs`, `src/shell/theme.rs`, `src/masonry_sdui.rs`.
   - Public docs: `docs/reference/clay-js-api/ui/server-register-theme-token.md`.
-  - Validation: package-prefixed token name, token type (`color-role`, `spacing`, `radius`, `typography`, or `opacity`), non-empty description, and same-type Clay core fallback.
-  - Runtime: `ThemeTokenResolver` resolves package tokens to core fallback values before native paint/layout reads them.
+  - Validation: package-prefixed token name, token type in the ten Phase 20.1 domains (`color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, `density`), non-empty description, and same-type Clay core fallback.
+  - Runtime: `ThemeTokenResolver` resolves package semantic aliases to core fallback values. Theme package `designTokens` (separate contribution) supply resolved active-theme overrides validated into `ResolvedUiTheme`; ordinary package `themeTokens` remain alias-only.
+
+- `PanelDefaults` (Phase 20.1 internal layout-default view)
+  - Owner/source: `src/shell/theme.rs` (`ResolvedUiTheme::panel_defaults`), consumed by `src/shell/package_ui.rs` and `src/masonry_sdui.rs`.
+  - Runtime: `FixedPackagePanel::fixed_slot_state` and `slot_layout` read default/min/max sizes and sidebar width from one token-resolved view instead of hardcoded constants. Invalid or misordered dimension triples fall back to Clay core constants before layout.
 
 ## Invariants and Constraints
 
@@ -149,8 +153,8 @@ serverRegisterPanelContribution(manifest, {
 - `src/server/js_runtime.rs::runtime_clay_ui_rejects_invalid_prefix_unregistered_action_and_raw_css`: verifies invalid package prefixes, stale/unregistered actions, and raw CSS-style input fail.
 - `src/server/ui.rs` unit tests: validate accepted contribution records, input contribution records, UI state-scope lifecycle records, duplicate IDs/slots, prohibited authority fields, hidden state key rejection, key-routing rejection, action target validation, payload budgets, component tree bounds, and typed theme-token fallback rules.
 - `src/shell/components.rs` unit tests: validate supported/deferred component kinds and typed style variables.
-- `src/shell/theme.rs` unit tests: validate core token resolution, package-token fallback resolution, and type mismatch rejection.
-- `src/shell/package_ui.rs` unit tests: validate fixed panel slot composition, duplicate exclusive slot rejection, and transient overlay geometry.
+- `src/shell/theme.rs` unit tests: validate core token resolution, package-token fallback resolution, type mismatch rejection, design-token validation, panel-default resolution, density spacing scale, and Gruvbox core-fallback compatibility.
+- `src/shell/package_ui.rs` unit tests: validate fixed panel slot composition with `PanelDefaults`, duplicate exclusive slot rejection, and transient overlay geometry.
 - `src/masonry_sdui.rs` unit tests: validate package fixed-panel geometry, transient overlay geometry, action routing, observation privacy, resolved theme-token rendering, semantic package font-role selection, and shared row/hit/accessibility geometry.
 - `src/server/ui.rs::package_component_font_role_is_semantic_and_text_only`: accepts allowed enum roles and rejects unsupported roles, concrete family/size fields, and structural-component use.
 - `src/masonry_editor.rs::fixed_package_panel_shrinks_editor_hit_region`: validates editor hit-testing uses the fixed-panel-reduced `main` rect.
@@ -186,4 +190,5 @@ cargo test --test protocol primitives_docs:: --quiet
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
 - [Package Authoring Guide](../../reference/packages/creating-packages.md) — includes Phase 20 multi-document / dirty-save / recovery chrome non-goals for package UI
 - [Phase 20 Daily Editing Product Hardening Primitive Review](phase20-daily-editing-product-hardening-primitive-review.md)
+- [Phase 20.5 Overlay, Menu, and Input Components](phase20.5-overlay-menu-input-components.md) — new kinds, z-level stacking, keyboard nav, `TransientMenuOrigin`
 - [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md)

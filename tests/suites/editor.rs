@@ -12,3 +12,5 @@ mod range_diagnostics;
 mod theme_packages;
 #[path = "../typography_protocol.rs"]
 mod typography_protocol;
+#[path = "../ui_primitive_conformance.rs"]
+mod ui_primitive_conformance;

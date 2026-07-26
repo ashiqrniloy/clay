@@ -96,6 +96,12 @@ pub(crate) const BUNDLED_PACKAGES: &[BundledPackageEntry] = &[
         manifest_fingerprint: "1d99d782c25ce396",
     },
     BundledPackageEntry {
+        name: "@clay/settings",
+        version: "0.1.0",
+        root: "settings",
+        manifest_fingerprint: "efc9c42ede4ef6ef",
+    },
+    BundledPackageEntry {
         name: "@clay/theme-gruvbox-material-dark",
         version: "0.1.0",
         root: "theme-gruvbox-material-dark",
@@ -106,6 +112,18 @@ pub(crate) const BUNDLED_PACKAGES: &[BundledPackageEntry] = &[
         version: "0.1.0",
         root: "theme-gruvbox-material-light",
         manifest_fingerprint: "c65285885db23e1e",
+    },
+    BundledPackageEntry {
+        name: "@clay/theme-modus-operandi",
+        version: "0.1.0",
+        root: "theme-modus-operandi",
+        manifest_fingerprint: "7d079e0b979a7150",
+    },
+    BundledPackageEntry {
+        name: "@clay/theme-modus-vivendi",
+        version: "0.1.0",
+        root: "theme-modus-vivendi",
+        manifest_fingerprint: "b95dc45385d0170c",
     },
     BundledPackageEntry {
         name: "@clay/typescript",

@@ -40,6 +40,9 @@ export function serverRegisterUiStateScope(declaration) {
 export function serverSetLayoutOverride(declaration) {
     return JSON.parse(uiOps().op_clay_ui_set_layout_override(encode(declaration)));
 }
+export function serverRequestLayoutIntent(declaration) {
+    return JSON.parse(uiOps().op_clay_ui_request_layout_intent(encode(declaration)));
+}
 export function serverRegisterThemeToken(declaration) {
     return JSON.parse(uiOps().op_clay_ui_register_theme_token(encode(declaration)));
 }

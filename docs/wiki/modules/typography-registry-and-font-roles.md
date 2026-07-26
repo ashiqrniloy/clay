@@ -3,7 +3,7 @@
 ## Source
 
 - `src/editor/typography.rs` — `TypographyRegistry`, `ResolvedFontProfile`, `UiTextVariant`, `UiTextMetrics`.
-- `src/protocol/mod.rs` — `FontRole`, `DocumentFontRole`, `FontProfile`, `ActiveTypography`, validation constants and `validate()`.
+- `src/protocol/mod.rs` — `FontRole`, `DocumentFontRole`, `FontProfile`, `ActiveTypography`, `UiTypographyHierarchy`, validation constants and `validate()`.
 - `src/protocol/decorations.rs` — `DecorationSpan.font_role`, `SyntaxStyleMapEntry`.
 - `src/server/ops/typography.rs` — `op_clay_theme_set_typography`.
 - `src/server/mod.rs` — `ActiveTypographyState`, `RuntimeGenerationStore`, `install_active_typography`.
@@ -23,7 +23,7 @@
 
 ## Overview
 
-Phase 18.16.5 adds user-owned font configuration and semantic font roles across the editor, native shell, SDUI, and package components. Users atomically configure three profiles — `monospace`, `proportional`, `ui` — each an ordered family fallback stack plus a logical-pixel base size. Modes, syntax/semantic decoration spans, and text-bearing package components select one of a closed set of semantic roles; they never supply concrete family names or sizes. The client resolves roles through a cached `TypographyRegistry` and feeds Parley layout and native UI geometry from those cached profiles.
+Phase 18.16.5 adds user-owned font configuration and semantic font roles across the editor, native shell, SDUI, and package components. Phase 20.1 extends the same atomic typography snapshot with user-owned `UiTypographyHierarchy` scale ratios and three additional semantic UI variants (`Display`, `Section`, `Caption`). Users configure three profiles — `monospace`, `proportional`, `ui` — each an ordered family fallback stack plus a logical-pixel base size, and optionally seven bounded hierarchy ratios through `setTypography`. Modes, syntax/semantic decoration spans, and text-bearing package components select semantic roles and variants; they never supply concrete family names, sizes, or scale ratios. The client resolves roles through a cached `TypographyRegistry` and feeds Parley layout and native UI geometry from those cached profiles.
 
 Typography is architecturally separate from `ActiveTheme`/`StyleRegistry`: the theme registry owns colors and text attributes; the typography registry owns family stacks and sizes. A font change reshapes text and changes geometry, so it has its own snapshot (`ActiveTypography`), its own revision, its own bootstrap message, and its own live broadcast.
 
@@ -39,9 +39,9 @@ Typography is architecturally separate from `ActiveTheme`/`StyleRegistry`: the t
 
 ### Configuration and server state
 
-`runtime/js/theme.js::setTypography` validates its object input in JS, then calls `op_clay_theme_set_typography`. The op (`src/server/ops/typography.rs`) enforces a raw `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES` cap before parsing, requires exactly `monospace`/`proportional`/`ui` keys each with only `families` and `size`, then hands a parsed `ActiveTypography` to `ClayOpState::set_active_typography`.
+`runtime/js/theme.js::setTypography` validates its object input in JS, then calls `op_clay_theme_set_typography`. The op (`src/server/ops/typography.rs`) enforces a raw `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES` cap before parsing, requires exactly `monospace`/`proportional`/`ui` keys each with only `families` and `size`, optionally parses a complete `hierarchy` object with all seven named scale fields (`display`, `title`, `section`, `body`, `status`, `detail`, `caption`) — omission uses `UiTypographyHierarchy::DEFAULT` — then hands a parsed `ActiveTypography` to `ClayOpState::set_active_typography`. Partial hierarchies are rejected atomically.
 
-Server state lives in `ActiveTypographyState` (`src/server/mod.rs`): an `Arc<Mutex<ActiveTypography>>` plus a `broadcast::Sender` (capacity 16). `replace()` validates the whole candidate, and if all three profiles are byte-identical to the current snapshot it returns `None` and emits nothing — duplicate calls and reloads that reproduce the prior configuration do not churn clients. On a real change it bumps `revision` (`saturating_add(1)`), swaps the snapshot, and broadcasts. `RuntimeGenerationStore` exposes `active_typography()`, `subscribe_typography()`, and `replace_typography()` delegates.
+Server state lives in `ActiveTypographyState` (`src/server/mod.rs`): an `Arc<Mutex<ActiveTypography>>` plus a `broadcast::Sender` (capacity 16). `replace()` validates the whole candidate, and if all three profiles and the hierarchy are byte-identical to the current snapshot it returns `None` and emits nothing — duplicate calls and reloads that reproduce the prior configuration do not churn clients. On a real change it bumps `revision` (`saturating_add(1)`), swaps the snapshot, and broadcasts. `stage_typography` compares profiles and hierarchy equality when deciding whether a reload should bump revision. `RuntimeGenerationStore` exposes `active_typography()`, `subscribe_typography()`, and `replace_typography()` delegates.
 
 `apply_runtime_evaluation` and `reload_runtime_generation` call `install_active_typography`, passing `evaluation.active_typography.clone().unwrap_or_default()`. Typography state therefore persists across JS evaluations within a generation and defaults to `ActiveTypography::default()` when no evaluation sets it, unlike per-evaluation-reset decorations/SDUI/records. A failed reload reports a `RuntimeDiagnostic` and keeps the previous snapshot active.
 
@@ -55,13 +55,13 @@ The client handshake (`src/client/mod.rs::handshake_initial_state`) reads `Activ
 
 ### Client registry and resolution
 
-`TypographyRegistry` (`src/editor/typography.rs`) converts a validated `ActiveTypography` once into three `ResolvedFontProfile`s. `ResolvedFontProfile::from_wire` parses each family through `GenericFamily::parse`: recognized generic names become `FontFamily::Generic`, others become `FontFamily::Named`. If no family in the stack is generic, a role-appropriate fallback is appended (`Monospace` for monospace, `SansSerif` for proportional, `SystemUi` for ui) so unavailable named families never produce an empty stack. Because Clay disables system font enumeration (`use_system_fonts: false`), named families only resolve if registered via `RenderRoot::register_fonts`; generic families always resolve.
+`TypographyRegistry` (`src/editor/typography.rs`) converts a validated `ActiveTypography` once into three `ResolvedFontProfile`s and caches the installed `UiTypographyHierarchy`. `ResolvedFontProfile::from_wire` parses each family through `GenericFamily::parse`: recognized generic names become `FontFamily::Generic`, others become `FontFamily::Named`. If no family in the stack is generic, a role-appropriate fallback is appended (`Monospace` for monospace, `SansSerif` for proportional, `SystemUi` for ui) so unavailable named families never produce an empty stack. Because Clay disables system font enumeration (`use_system_fonts: false`), named families only resolve if registered via `RenderRoot::register_fonts`; generic families always resolve.
 
-`install()` is the live-update entry: it rejects same-or-lower revisions (`Ok(false)`) so duplicate broadcasts are no-ops, and on a newer revision rebuilds all three resolved profiles. `profile(role)` returns the `ResolvedFontProfile` for `Monospace`/`Proportional`/`Ui`; `revision()` exposes the current revision; `font_stack()`/`size()` feed Parley.
+`install()` is the live-update entry: it rejects same-or-lower revisions (`Ok(false)`) so duplicate broadcasts are no-ops, and on a newer revision rebuilds all three resolved profiles and the hierarchy cache. `profile(role)` returns the `ResolvedFontProfile` for `Monospace`/`Proportional`/`Ui`; `revision()` exposes the current revision; `font_stack()`/`size()` feed Parley.
 
 `document_line_height()` computes `max(monospace.size, proportional.size) * DOCUMENT_LINE_HEIGHT_MULTIPLIER` (1.4), intentionally excluding the UI profile. This is the conservative shared baseline for viewport extraction, pixel-scroll progression, and logical scrollbar progress; visible Parley `Layout::height()` and caret geometry remain the exact rendered authority. `document_line_height_uses_largest_document_profile_not_ui` locks that the UI profile cannot influence document geometry.
 
-`UiTextVariant` (`Body`/`Status`/`Title`/`Detail`) is a semantic scale, never a package-provided point size. `from_typography_token` maps shell theme tokens (`typography.title`, `typography.status`, otherwise `typography.body`). Each variant has a fixed scale: Body/Status = 1.0, Title = 14/12, Detail = 10/12. `ui_text_metrics(role, variant)` returns `UiTextMetrics` with `font_size = profile.size * variant.scale()`, `line_height = font_size * 1.2`, and `row_height = line_height + vertical_padding`. `button_height()`, `list_height(detail)`, and `status_height()` derive row/element heights from those metrics. `ui_variants_scale_from_configured_role_size` locks scale ownership.
+`UiTextVariant` (`Body`, `Status`, `Title`, `Detail`, `Display`, `Section`, `Caption`) is a semantic scale, never a package-provided point size. `from_typography_token` maps shell theme tokens (`typography.display`, `typography.title`, `typography.section`, `typography.status`, `typography.detail`, `typography.caption`, otherwise `typography.body`). Each variant resolves its scale from the installed `UiTypographyHierarchy` (defaults preserve legacy ratios: display 1.5, title 14/12, section 13/12, body/status 1.0, detail 10/12, caption 0.75; each field bounded `(0, 4.0]`). `ui_text_metrics(role, variant)` returns `UiTextMetrics` with `font_size = profile.size * variant.scale(&hierarchy)`, `line_height = font_size * 1.2`, and `row_height = line_height + vertical_padding`. Packages cannot override hierarchy scales through theme `designTokens`; all seven `typography.*` tokens reject scalar/color overrides with `TypographyNotOverridable`.
 
 ### Editor layout and role normalization
 
@@ -106,6 +106,15 @@ setTypography({
   monospace: { families: ["JetBrains Mono", "monospace"], size: 20 },
   proportional: { families: ["Inter", "sans-serif"], size: 20 },
   ui: { families: ["system-ui"], size: 12 },
+  hierarchy: {
+    display: 1.5,
+    title: 14 / 12,
+    section: 13 / 12,
+    body: 1.0,
+    status: 1.0,
+    detail: 10 / 12,
+    caption: 0.75,
+  },
 });
 ```
 
@@ -134,7 +143,7 @@ for run in style_runs {
 
 - `SemanticTypographyRole` — field-level extension of existing mode/decoration/syntax/UI primitives, not a new package setter or permission. Owning modules: `src/protocol/mod.rs`, `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`, `src/server/ui.rs`, `src/packages/record.rs`.
 - JS facade/op: `clay.theme.setTypography` (`runtime/js/theme.js`) → `op_clay_theme_set_typography` (`src/server/ops/typography.rs`). No separate package typography op exists; the only public surface is the user-facing setter documented in [`set-typography.md`](../../reference/clay-js-api/theme/set-typography.md).
-- Validation/budgets: `MAX_FONT_FAMILIES_PER_PROFILE=8`, `MAX_FONT_FAMILY_BYTES=128`, `MIN_FONT_SIZE=6.0`, `MAX_FONT_SIZE=96.0`, `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES=1024`; `FontProfile::validate()` requires a non-empty stack, a trailing generic fallback, finite bounded size, and no control characters; `ActiveTypography::validate()` validates all three profiles.
+- Validation/budgets: `MAX_FONT_FAMILIES_PER_PROFILE=8`, `MAX_FONT_FAMILY_BYTES=128`, `MIN_FONT_SIZE=6.0`, `MAX_FONT_SIZE=96.0`, `HIERARCHY_SCALE_MAX=4.0`, `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES=1024`; `FontProfile::validate()` requires a non-empty stack, a trailing generic fallback, finite bounded size, and no control characters; `ActiveTypography::validate()` validates all three profiles and the complete hierarchy atomically.
 - Hot-path policy: configuration/protocol/normalization run outside paint/input/layout; native hot paths read cached `TypographyRegistry`/profile/style/layout state only — no package JavaScript, IPC, filesystem/network access, font download, or server-side installed-font discovery. `typography_updates_do_not_enter_editor_hot_paths` guards this.
 - Future-mode reuse: declare `defaultFontRole` and optional style-map/decoration `fontRole` only; no language-name branches in client/editor/server rendering code. `first_party_modes_declare_roles_without_rendering_language_branches` statically asserts absence of mode-id string literals in layout/surface/editor/sdui sources.
 
@@ -153,7 +162,7 @@ for run in style_runs {
 
 ## Tests
 
-- `src/editor/typography.rs`: `typography_registry_resolves_each_role_and_revision`, `missing_named_family_retains_generic_fallback`, `unchanged_typography_revision_does_not_invalidate_layout`, `document_line_height_uses_largest_document_profile_not_ui`, `ui_variants_scale_from_configured_role_size`.
+- `src/editor/typography.rs`: `typography_registry_resolves_each_role_and_revision`, `missing_named_family_retains_generic_fallback`, `unchanged_typography_revision_does_not_invalidate_layout`, `document_line_height_uses_largest_document_profile_not_ui`, `ui_variants_scale_from_configured_role_size`, `ui_typography_hierarchy_defaults_preserve_existing_variant_metrics`, `display_section_and_caption_scale_from_selected_font_role`, `custom_hierarchy_updates_layout_hit_and_accessibility_geometry_together`, `unchanged_hierarchy_does_not_invalidate_layout`, `invalid_partial_or_extreme_hierarchy_is_rejected_atomically`.
 - `src/editor/layout.rs`: `mixed_role_line_height_keeps_largest_inline_profile_in_bounds`, `unicode_and_emoji_shape_with_unavailable_named_font_fallback`, `layout_cache_invalidates_on_typography_style_or_document_role_change`.
 - `src/editor/surface.rs`: `markdown_code_range_uses_monospace_inside_proportional_layout`, `overlapping_style_runs_resolve_deterministically_and_merge_adjacent_runs`, `diagnostic_and_invalid_utf8_spans_cannot_change_font_role`, `mixed_role_normalization_stays_bounded_by_visible_span_boundaries`, `empty_document_caret_uses_default_document_profile`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`.
 - `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility`.
@@ -183,7 +192,7 @@ cargo test --test protocol manual_smoke_docs::
 
 ## Related
 
-- [Editor Theme Registry](editor-theme-registry.md) — color/text-attribute ownership boundary.
+- [Editor Theme Registry](editor-theme-registry.md) — Phase 20.1 `ResolvedUiTheme`, `designTokens`, and editor color boundary.
 - [Decoration Transport](decoration-transport.md) — `DecorationSpan.font_role` transport and role overrides.
 - [Mode Registry](mode-registry.md) — `defaultFontRole` propagation.
 - [Masonry Editor Widget Status Observability](masonry-editor.md) — status-line typography and layout invalidation.

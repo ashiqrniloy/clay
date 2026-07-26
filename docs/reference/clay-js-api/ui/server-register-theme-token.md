@@ -23,7 +23,7 @@ custom_properties:
   - name: type
     type: enum
     default: required
-    description: Token type, one of `color-role`, `spacing`, `radius`, `typography`, or `opacity`.
+    description: Token type, one of `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, or `density`.
   - name: fallback
     type: string
     default: clay-core-token-same-type
@@ -55,7 +55,7 @@ Register a package-prefixed typed theme token declaration through the runtime-ba
 
 `serverRegisterThemeToken` declares a semantic package theme token and maps it to a same-type Clay core fallback. Clay validates package prefix, token type, fallback type compatibility, description text, prohibited raw value fields, duplicate tokens, and provenance before making the token available to component style validation.
 
-The token declaration is not a user override API. Phase 18.3 package tokens define typed contracts that Clay can resolve to native colors, spacing, radius, typography, and opacity values; future user overrides must use documented configuration APIs.
+The token declaration is not a user override API. Phase 18.3 package tokens defined typed contracts for `color-role`, `spacing`, `radius`, `typography`, and `opacity`. Phase 20.1 extended the typed catalog additively with `dimension` (panel/border logical-pixel defaults), `elevation` (near-invisible levels), `motion-duration` (bounded transition durations), `z-level` (ordered overlay stacking), and `density` (compact/default/spacious intent). Clay resolves every declared package token to a same-typed Clay core fallback; future user overrides must use documented configuration APIs.
 
 ## When to use
 
@@ -90,7 +90,7 @@ console.log(spacing.token, spacing.type, spacing.resolvedCoreToken);
 ## Options
 
 - `token` (`string`, default `package-prefixed`): Semantic token name. It must use the package `apiPrefix`.
-- `type` (`enum`, required): Token type: `color-role`, `spacing`, `radius`, `typography`, or `opacity`.
+- `type` (`enum`, required): Token type: `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, or `density`.
 - `fallback` (`string`, default `clay-core-token-same-type`): Clay core fallback token of the same type, such as `surface.panel` for `color-role` or `spacing.panel` for `spacing`.
 - `description` (`string`, required): Human-readable semantic purpose for diagnostics, help, and future configuration UIs.
 - `source` (`enum`, default `package`): Declaration provenance. Phase 18.3 accepts package declarations; user overrides remain planned.

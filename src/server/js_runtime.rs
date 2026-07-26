@@ -1828,6 +1828,19 @@ fn prepare_runtime_entry(
 /// registrations under the new generation (Plan 061 task 12).
 fn harvest_op_state_evaluation(op_state: &Arc<ClayOpState>) -> ClayRuntimeEvaluation {
     let behavior_manifest = op_state.behavior_manifest();
+    // Phase 20.6: if no explicit `setTheme` ran, resolve the canonical default
+    // theme from the appearance preference so a fresh config ships Modus
+    // Operandi/Vivendi instead of the bare Clay default. `os_dark = true` is
+    // the no-OS-signal fallback (`System` → dark). An explicit theme, once set,
+    // is already in `active_theme` and wins. Resolution failure (missing
+    // canonical package) leaves `None` so startup never breaks.
+    let active_theme = op_state.active_theme().or_else(|| {
+        crate::server::ops::theme::resolve_canonical_default_theme(
+            op_state,
+            op_state.appearance(),
+            true,
+        )
+    });
     ClayRuntimeEvaluation {
         op_records: op_state.records(),
         published_sdui_tree: op_state.published_sdui_tree(),
@@ -1844,7 +1857,7 @@ fn harvest_op_state_evaluation(op_state: &Arc<ClayOpState>) -> ClayRuntimeEvalua
         language_intelligence_providers: op_state.language_intelligence_providers(),
         js_language_intelligence_providers: op_state.js_language_intelligence_providers(),
         document_analyzers: op_state.document_analyzers(),
-        active_theme: op_state.active_theme(),
+        active_theme,
         active_typography: op_state.active_typography(),
     }
 }
@@ -1895,6 +1908,16 @@ async fn evaluate_loaded_module(
         result
             .await
             .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?;
+        // Phase 20.6: apply persisted user preferences (`preferences.json`,
+        // source `ui-session`) AFTER init.js so the documented precedence
+        // holds — package/canonical defaults < init.js < UI session. Validation
+        // reuses the same Rust functions as the `setTheme`/`setAppearance`/
+        // `setTypography` ops so no bounds/authority logic is duplicated. A
+        // corrupted preference field is dropped with a diagnostic record so a
+        // bad file never breaks startup.
+        if let Some(configuration) = &loaded_configuration.configuration {
+            apply_persisted_preferences(op_state, configuration);
+        }
         Ok(harvest_op_state_evaluation(op_state))
     }
     .await;
@@ -1908,6 +1931,44 @@ async fn evaluate_loaded_module(
         return Err(ClayRuntimeError::HeapLimit);
     }
     evaluation_result
+}
+
+/// Apply persisted UI-session preferences to `op_state` after init.js has run.
+/// Theme is applied first (marks an explicit theme active), then appearance
+/// (no canonical re-resolve over the explicit theme), then typography. Absent
+/// fields leave init.js / canonical defaults in place. Failures (corrupted
+/// field, unresolvable theme package) are recorded as diagnostics and skipped.
+fn apply_persisted_preferences(op_state: &Arc<ClayOpState>, configuration: &ConfigurationRuntime) {
+    let prefs = configuration.load_preferences();
+    for diagnostic in &prefs.diagnostics {
+        op_state.record(format!("preferences: {diagnostic}"));
+    }
+    if let Some(specifier) = &prefs.theme
+        && let Err(error) = crate::server::ops::theme::apply_theme(op_state, specifier)
+    {
+        op_state.record(format!(
+            "preferences: theme `{specifier}` rejected: {error}"
+        ));
+    }
+    if let Some(appearance) = prefs.appearance {
+        crate::server::ops::theme::apply_appearance(op_state, appearance, true);
+    }
+    if let Some(typography_value) = &prefs.typography {
+        match serde_json::to_string(typography_value) {
+            Ok(json) => {
+                if let Err(error) =
+                    crate::server::ops::typography::apply_typography(op_state, &json)
+                {
+                    op_state.record(format!("preferences: typography rejected: {error}"));
+                }
+            }
+            Err(error) => {
+                op_state.record(format!(
+                    "preferences: typography serialization failed: {error}"
+                ));
+            }
+        }
+    }
 }
 
 async fn evaluate_js_parse_handler(
@@ -10923,33 +10984,336 @@ mod tests {
 
     #[tokio::test]
     async fn set_theme_resolves_first_party_gruvbox_theme() {
-        let root = config_fixture("set-theme-e2e");
+        // Gruvbox stays opt-in: both Gruvbox Material variants are selectable by
+        // a one-line `setTheme` call; neither is a canonical default.
+        for specifier in [
+            "@clay/theme-gruvbox-material-dark",
+            "@clay/theme-gruvbox-material-light",
+        ] {
+            let root = config_fixture(&format!(
+                "set-theme-gruvbox-e2e-{}",
+                specifier.trim_start_matches("@clay/theme-gruvbox-material-")
+            ));
+            fs::write(
+                root.join("init.js"),
+                format!(
+                    r#"
+                    import {{ setTheme }} from "clay:theme";
+                    const summary = setTheme("{specifier}");
+                    Deno.core.ops.op_clay_runtime_record(
+                      `theme:${{summary.specifier}}:overrides:${{summary.overrideCount}}`
+                    );
+                    "#
+                ),
+            )
+            .unwrap();
+
+            let result = ClayJsRuntimeService::default()
+                .load_configuration_from_root(root)
+                .await
+                .unwrap_or_else(|err| panic!("setTheme('{specifier}') must succeed: {err:?}"));
+
+            let theme = result.active_theme.expect("active theme snapshot emitted");
+            assert_eq!(theme.specifier, specifier);
+            assert_eq!(theme.overrides.len(), 48);
+            assert!(
+                result
+                    .op_records
+                    .iter()
+                    .any(|record| *record == format!("theme:{specifier}:overrides:48")),
+                "setTheme('{specifier}') summary must reach init.js"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn default_config_resolves_canonical_dark_modus_vivendi() {
+        // No explicit setTheme: appearance defaults to System, which with no OS
+        // signal falls back to dark → canonical default Modus Vivendi.
+        let root = config_fixture("default-theme-appearance-e2e");
+        fs::write(root.join("init.js"), "// no setTheme call\n").unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("default config must evaluate");
+        let theme = result
+            .active_theme
+            .as_ref()
+            .expect("canonical default theme must be resolved when no explicit theme is set");
+        assert_eq!(theme.specifier, "@clay/theme-modus-vivendi");
+        assert_eq!(theme.overrides.len(), 48);
+    }
+
+    #[tokio::test]
+    async fn set_appearance_light_resolves_canonical_modus_operandi() {
+        let root = config_fixture("set-appearance-light-e2e");
         fs::write(
             root.join("init.js"),
             r#"
-            import { setTheme } from "clay:theme";
-            const summary = setTheme("@clay/theme-gruvbox-material-dark");
+            import { setAppearance } from "clay:theme";
+            const summary = setAppearance("light");
             Deno.core.ops.op_clay_runtime_record(
-              `theme:${summary.specifier}:overrides:${summary.overrideCount}`
+              `appearance:${summary.appearance}:theme:${summary.resolvedTheme}`
             );
             "#,
         )
         .unwrap();
-
         let result = ClayJsRuntimeService::default()
             .load_configuration_from_root(root)
             .await
-            .expect("setTheme('@clay/theme-gruvbox-material-dark') must succeed");
-
-        let theme = result.active_theme.expect("active theme snapshot emitted");
-        assert_eq!(theme.specifier, "@clay/theme-gruvbox-material-dark");
-        assert_eq!(theme.overrides.len(), 48);
+            .expect("setAppearance('light') must succeed");
+        let theme = result
+            .active_theme
+            .as_ref()
+            .expect("canonical light default must be resolved");
+        assert_eq!(theme.specifier, "@clay/theme-modus-operandi");
         assert!(
             result
                 .op_records
                 .iter()
-                .any(|record| record == "theme:@clay/theme-gruvbox-material-dark:overrides:48"),
-            "setTheme summary must reach init.js"
+                .any(|r| r == "appearance:light:theme:@clay/theme-modus-operandi"),
+            "setAppearance summary must reach init.js"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_set_theme_wins_over_appearance() {
+        let root = config_fixture("explicit-theme-wins-e2e");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setTheme, setAppearance } from "clay:theme";
+            setTheme("@clay/theme-gruvbox-material-dark");
+            const summary = setAppearance("light");
+            Deno.core.ops.op_clay_runtime_record(
+              `appearance:${summary.appearance}:resolved:${summary.resolvedTheme}`
+            );
+            "#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("config must evaluate");
+        let theme = result
+            .active_theme
+            .as_ref()
+            .expect("explicit theme must remain active");
+        assert_eq!(
+            theme.specifier, "@clay/theme-gruvbox-material-dark",
+            "explicit setTheme must win over appearance-derived default"
+        );
+        // setAppearance reports no re-resolution once an explicit theme is active.
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|r| r == "appearance:light:resolved:null"),
+            "setAppearance must not re-resolve over an explicit theme"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_appearance_rejects_unknown_value() {
+        let root = config_fixture("set-appearance-invalid-e2e");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setAppearance } from "clay:theme";
+            try {
+              setAppearance("nope");
+              Deno.core.ops.op_clay_runtime_record("appearance:accepted");
+            } catch (err) {
+              Deno.core.ops.op_clay_runtime_record(`appearance:rejected:${err.message.split(":")[0]}`);
+            }
+            "#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("config must evaluate");
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|r| r == "appearance:rejected:clay.theme.invalid_request"),
+            "unknown appearance must be rejected with clay.theme.invalid_request"
+        );
+    }
+
+    fn collect_kinds<'a>(
+        component: &'a crate::shell::PackageUiComponentTree,
+        out: &mut Vec<&'a str>,
+    ) {
+        out.push(component.kind.as_str());
+        for item in &component.items {
+            let _ = item;
+        }
+        for child in &component.children {
+            collect_kinds(child, out);
+        }
+    }
+
+    #[tokio::test]
+    async fn settings_package_registers_catalog_only_panel() {
+        let root = config_fixture("settings-package-e2e");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadPackage } from "clay:packages";
+            await loadPackage("@clay/settings");
+            "#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("@clay/settings must load");
+        let panel = result
+            .ui_contributions
+            .panels
+            .iter()
+            .find(|panel| panel.id == "settings.surface")
+            .expect("settings.surface panel contribution must register");
+        // Every action target is a settings.* command intent.
+        for target in &panel.action_targets {
+            assert!(
+                target.starts_with("settings."),
+                "settings panel action target `{target}` must be a settings.* intent"
+            );
+        }
+        // Every component kind in the tree is an implemented catalog kind.
+        let mut kinds: Vec<&str> = Vec::new();
+        collect_kinds(&panel.component_tree, &mut kinds);
+        assert!(
+            kinds.iter().all(|kind| matches!(
+                *kind,
+                "panel"
+                    | "label"
+                    | "button"
+                    | "list"
+                    | "flex"
+                    | "stack"
+                    | "overlay"
+                    | "scroll"
+                    | "portal"
+                    | "statusItem"
+                    | "dropdown"
+                    | "collapse"
+                    | "modal"
+                    | "textInput"
+                    | "editorView"
+            )),
+            "settings surface must use only catalog kinds, got {kinds:?}"
+        );
+        // Theme and appearance dropdowns plus typography textInputs are present.
+        assert!(
+            kinds.contains(&"dropdown"),
+            "theme/appearance dropdowns present"
+        );
+        assert!(
+            kinds.contains(&"textInput"),
+            "typography textInputs present"
+        );
+        assert!(kinds.contains(&"collapse"), "collapsible sections present");
+        assert!(kinds.contains(&"button"), "action buttons present");
+    }
+
+    #[tokio::test]
+    async fn set_theme_resolves_first_party_modus_themes() {
+        for specifier in ["@clay/theme-modus-operandi", "@clay/theme-modus-vivendi"] {
+            let root = config_fixture(&format!(
+                "set-theme-modus-e2e-{}",
+                specifier.trim_start_matches("@clay/theme-")
+            ));
+            fs::write(
+                root.join("init.js"),
+                format!(
+                    r#"
+                    import {{ setTheme }} from "clay:theme";
+                    const summary = setTheme("{specifier}");
+                    Deno.core.ops.op_clay_runtime_record(
+                      `theme:${{summary.specifier}}:overrides:${{summary.overrideCount}}`
+                    );
+                    "#
+                ),
+            )
+            .unwrap();
+
+            let result = ClayJsRuntimeService::default()
+                .load_configuration_from_root(root)
+                .await
+                .unwrap_or_else(|err| panic!("setTheme('{specifier}') must succeed: {err:?}"));
+
+            let theme = result.active_theme.expect("active theme snapshot emitted");
+            assert_eq!(theme.specifier, specifier);
+            assert_eq!(theme.overrides.len(), 48);
+            assert!(
+                result
+                    .op_records
+                    .iter()
+                    .any(|record| record == &format!("theme:{specifier}:overrides:48")),
+                "setTheme summary must reach init.js for {specifier}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn canonical_default_is_modus_not_gruvbox() {
+        // Gruvbox stays opt-in: a silent init.js resolves the Modus canonical
+        // default (dark / Modus Vivendi), never a Gruvbox theme. There is no
+        // promotion-by-naming for Gruvbox.
+        let root = config_fixture("canonical-default-not-gruvbox");
+        fs::write(root.join("init.js"), "// silent\n").unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("silent config must evaluate");
+        let theme = result.active_theme.expect("canonical default emitted");
+        assert_eq!(theme.specifier, "@clay/theme-modus-vivendi");
+        assert_ne!(theme.specifier, "@clay/theme-gruvbox-material-dark");
+        assert_ne!(theme.specifier, "@clay/theme-gruvbox-material-light");
+    }
+
+    #[tokio::test]
+    async fn explicit_set_theme_wins_over_canonical_default() {
+        // An explicit `setTheme` for a non-default bundled theme overrides the
+        // appearance-derived canonical default without any `loadPackage` call.
+        let root = config_fixture("explicit-theme-beats-canonical-default");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setTheme } from "clay:theme";
+            setTheme("@clay/theme-gruvbox-material-light");
+            "#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("explicit setTheme config must evaluate");
+        let theme = result.active_theme.expect("active theme emitted");
+        assert_eq!(theme.specifier, "@clay/theme-gruvbox-material-light");
+    }
+
+    #[tokio::test]
+    async fn absent_init_js_loads_no_runtime_theme() {
+        // Boundary: with no init.js at all the default-config loader returns
+        // None and resolves no runtime theme (the editor/shell core default
+        // applies; the canonical Modus default requires an init.js entry
+        // point to run). This documents the loading-experience boundary:
+        // canonical defaults need no `loadPackage`, but they do need the
+        // `init.js` entry point to evaluate.
+        let root = config_fixture("absent-init-js");
+        // Deliberately do NOT create init.js.
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await;
+        assert!(
+            result.is_err(),
+            "absent init.js must not silently evaluate, got {:?}",
+            result
         );
     }
 
@@ -11456,5 +11820,158 @@ mod tests {
                 .map(|k| &k.command_id)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn preferences_override_init_js_theme_on_reload() {
+        // Precedence: init.js setTheme < persisted UI-session theme. The
+        // preferences.json theme is applied AFTER init.js so the UI choice wins.
+        let root = config_fixture("preferences-override-init-theme");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setTheme } from "clay:theme";
+            setTheme("@clay/theme-gruvbox-material-light");
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("preferences.json"),
+            r#"{"theme":"@clay/theme-modus-vivendi"}"#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("preferences + init.js config must load");
+        let theme = result.active_theme.expect("active theme emitted");
+        assert_eq!(theme.specifier, "@clay/theme-modus-vivendi");
+        assert_eq!(theme.overrides.len(), 48);
+    }
+
+    #[tokio::test]
+    async fn preferences_appearance_applies_when_init_js_is_silent() {
+        // No init.js theme; preferences.appearance drives the canonical default.
+        let root = config_fixture("preferences-appearance-only");
+        fs::write(
+            root.join("init.js"),
+            "// silent
+",
+        )
+        .unwrap();
+        fs::write(root.join("preferences.json"), r#"{"appearance":"light"}"#).unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("appearance preference config must load");
+        let theme = result.active_theme.expect("canonical default emitted");
+        assert_eq!(theme.specifier, "@clay/theme-modus-operandi");
+    }
+
+    #[tokio::test]
+    async fn preferences_theme_beats_appearance_canonical_default() {
+        // Both theme and appearance persisted: explicit theme wins (applied
+        // first, marks explicit; appearance apply does not re-resolve).
+        let root = config_fixture("preferences-theme-over-appearance");
+        fs::write(
+            root.join("init.js"),
+            "// silent
+",
+        )
+        .unwrap();
+        fs::write(
+            root.join("preferences.json"),
+            r#"{"theme":"@clay/theme-gruvbox-material-dark","appearance":"light"}"#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("theme+appearance preference config must load");
+        let theme = result.active_theme.expect("active theme emitted");
+        assert_eq!(theme.specifier, "@clay/theme-gruvbox-material-dark");
+    }
+
+    #[tokio::test]
+    async fn preferences_typography_round_trips_through_reload() {
+        let root = config_fixture("preferences-typography-roundtrip");
+        fs::write(
+            root.join("init.js"),
+            "// silent
+",
+        )
+        .unwrap();
+        fs::write(
+            root.join("preferences.json"),
+            r#"{"typography":{"monospace":{"families":["JetBrains Mono","monospace"],"size":18},
+               "proportional":{"families":["Inter","sans-serif"],"size":17},
+               "ui":{"families":["system-ui"],"size":13}}}"#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("typography preference config must load");
+        let typography = result.active_typography.expect("typography emitted");
+        assert!(typography.revision >= 1, "revision assigned on apply");
+        assert_eq!(typography.monospace.families[0], "JetBrains Mono");
+        assert_eq!(typography.monospace.size, 18.0);
+        assert_eq!(typography.proportional.size, 17.0);
+        assert_eq!(typography.ui.families, ["system-ui"]);
+    }
+
+    #[tokio::test]
+    async fn invalid_preferences_theme_falls_back_safely_with_diagnostic() {
+        // A corrupted theme field is dropped; init.js / canonical default applies.
+        let root = config_fixture("preferences-invalid-theme-fallback");
+        fs::write(
+            root.join("init.js"),
+            "// silent
+",
+        )
+        .unwrap();
+        fs::write(
+            root.join("preferences.json"),
+            r#"{"theme":"@vendor/evil","appearance":"dark"}"#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("invalid-preference config must still load");
+        // Invalid theme dropped; appearance=dark resolves the canonical default.
+        let theme = result.active_theme.expect("canonical dark default emitted");
+        assert_eq!(theme.specifier, "@clay/theme-modus-vivendi");
+        assert!(
+            result
+                .op_records
+                .iter()
+                .any(|record| record.contains("preferences:"))
+                || result
+                    .op_records
+                    .iter()
+                    .any(|record| record.contains("preferences.json")),
+            "invalid preference field must record a diagnostic, got {:?}",
+            result.op_records
+        );
+    }
+
+    #[tokio::test]
+    async fn no_preferences_lets_init_js_win() {
+        let root = config_fixture("preferences-absent-init-wins");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setTheme } from "clay:theme";
+            setTheme("@clay/theme-gruvbox-material-light");
+            "#,
+        )
+        .unwrap();
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("init.js-only config must load");
+        let theme = result.active_theme.expect("active theme emitted");
+        assert_eq!(theme.specifier, "@clay/theme-gruvbox-material-light");
     }
 }

@@ -700,7 +700,7 @@
           "name": "source",
           "type": "enum",
           "default": "init-js",
-          "description": "One of `init-js`, `package-default`, or `clay-default`."
+          "description": "One of `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6 persisted user-preference source)."
         }
       ],
       "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden option keys, direct Masonry widgets, native widget handles, raw CSS, callbacks, or state-value authority.",
@@ -2903,6 +2903,40 @@
       "async": false
     },
     {
+      "id": "clay.theme.setAppearance",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/theme/set-appearance.md",
+      "js_module": "clay:theme",
+      "js_export": "setAppearance",
+      "js_facade": "runtime/js/theme.js::setAppearance",
+      "backing_rust": "src/server/ops/theme.rs::op_clay_theme_set_appearance; src/server/ops/theme.rs::apply_appearance; src/server/ops/theme.rs::canonical_default_specifier",
+      "deno_op": "op_clay_theme_set_appearance",
+      "deno_op_path": "src/server/ops/theme.rs::op_clay_theme_set_appearance",
+      "name": "setAppearance",
+      "user_facing_name": "Set Appearance",
+      "summary": "Set the bounded appearance preference (light/dark/system) that drives the canonical default theme; an explicit setTheme always wins.",
+      "owner": "server",
+      "phase": "Phase 20.6",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "appearance",
+          "type": "enum",
+          "default": "required",
+          "description": "One of `light`, `dark`, or `system`. `system` follows the OS color-scheme signal with a dark fallback when no signal is available."
+        }
+      ],
+      "security": "Accepts only the bounded `light` | `dark` | `system` enum, resolves the canonical default from bundled first-party `@clay/theme-modus-*` packages via the same `ensure_first_party_record` trust path as explicit setTheme, and stores an inert `ActiveTheme` snapshot; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, third-party theme loading, or promotion-by-naming authority.",
+      "agent_guidance": "Use setAppearance(\"light\" | \"dark\" | \"system\") from init.js to drive the canonical default theme. An explicit setTheme(\"@clay/theme-*\") always wins over the appearance-derived default.",
+      "lookup_tags": ["theme", "appearance", "light-dark", "system", "init"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.theme.setTheme",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-theme.md",
@@ -2914,7 +2948,7 @@
       "deno_op_path": "src/server/ops/theme.rs::op_clay_theme_set_theme",
       "name": "setTheme",
       "user_facing_name": "Set Theme",
-      "summary": "Select one first-party inert text-style theme for editor syntax and base UI colors.",
+      "summary": "Select one first-party inert theme for editor syntax colors, base UI chrome colors, and typed UI design-token overrides.",
       "owner": "server",
       "phase": "Phase 18.15",
       "visibility": "public",
@@ -2928,7 +2962,7 @@
           "description": "Bundled first-party theme package specifier."
         }
       ],
-      "security": "Accepts only bundled first-party @clay/* theme specifiers, reads static package.json textStyles contributions, and sends inert RGBA/style-attribute data to the client; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
+      "security": "Accepts only bundled first-party @clay/* theme specifiers, reads static package.json textStyles and optional designTokens contributions, validates typed UI overrides against core token types and domain bounds, and sends inert RGBA/style-attribute data plus validated typed UI token overrides to the client; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
       "agent_guidance": "Use setTheme(\"@clay/theme-gruvbox-material-dark\") or setTheme(\"@clay/theme-gruvbox-material-light\") from init.js. Do not expose arbitrary CSS, theme code execution, raw color ops, or third-party theme loading through this API.",
       "lookup_tags": ["theme", "syntax", "colors", "gruvbox", "init"],
       "app_visible": true,
@@ -2948,7 +2982,7 @@
       "deno_op_path": "src/server/ops/typography.rs::op_clay_theme_set_typography",
       "name": "setTypography",
       "user_facing_name": "Set Typography",
-      "summary": "Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks and logical-pixel sizes.",
+      "summary": "Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks, logical-pixel sizes, and optional UI text-variant hierarchy.",
       "owner": "server",
       "phase": "Phase 18.16.5",
       "visibility": "public",
@@ -2990,9 +3024,57 @@
           "type": "number",
           "default": "12",
           "description": "UI base size in logical pixels, from 6 through 96 inclusive."
+        },
+        {
+          "name": "hierarchy",
+          "type": "object | undefined",
+          "default": "{ display: 1.5, title: 14/12, section: 13/12, body: 1, status: 1, detail: 10/12, caption: 0.75 }",
+          "description": "Optional complete bounded UI variant scale ratios. Omission uses Clay defaults; when present all seven fields are required and each must be a finite number greater than 0 and at most 4."
+        },
+        {
+          "name": "hierarchy.display",
+          "type": "number",
+          "default": "1.5",
+          "description": "Display heading scale ratio (multiplies the selected role base size)."
+        },
+        {
+          "name": "hierarchy.title",
+          "type": "number",
+          "default": "14/12",
+          "description": "Title scale ratio."
+        },
+        {
+          "name": "hierarchy.section",
+          "type": "number",
+          "default": "13/12",
+          "description": "Section heading scale ratio."
+        },
+        {
+          "name": "hierarchy.body",
+          "type": "number",
+          "default": "1",
+          "description": "Body scale ratio."
+        },
+        {
+          "name": "hierarchy.status",
+          "type": "number",
+          "default": "1",
+          "description": "Status chrome scale ratio."
+        },
+        {
+          "name": "hierarchy.detail",
+          "type": "number",
+          "default": "10/12",
+          "description": "Detail/secondary scale ratio."
+        },
+        {
+          "name": "hierarchy.caption",
+          "type": "number",
+          "default": "0.75",
+          "description": "Caption scale ratio."
         }
       ],
-      "security": "Accepts one bounded inert three-profile value and does not grant filesystem, network, shell, font-download, package, extension loading, workspace mutation, AI mutation, native-widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Clay does not inspect installed fonts; packages may select semantic roles but cannot override these concrete user values.",
+      "security": "Accepts one bounded inert three-profile value plus an optional bounded UI hierarchy and does not grant filesystem, network, shell, font-download, package, extension loading, workspace mutation, AI mutation, native-widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Clay does not inspect installed fonts; packages may select semantic roles and variants but cannot override these concrete user values or hierarchy scales.",
       "agent_guidance": "Call once with all three profiles from init.js or a local configuration module. End every family stack with monospace, sans-serif, serif, system-ui, cursive, or fantasy. Never suggest font URLs, paths, bytes, downloads, package-controlled families, or partial profile updates.",
       "lookup_tags": ["js-api", "typography", "fonts", "monospace", "proportional", "ui", "configuration", "init", "phase18.16.5"],
       "app_visible": true,
@@ -3029,13 +3111,13 @@
           "name": "kind",
           "type": "enum",
           "default": "required",
-          "description": "Supported Phase 18.3 component kind such as `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, or `editorView`."
+          "description": "Supported component kind: `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, `editorView`, `dropdown`, `collapse`, `modal`, or `textInput`."
         },
         {
           "name": "deferredKinds",
           "type": "enum",
-          "default": "table|dropdown|collapse|modal",
-          "description": "Explicitly deferred component kinds that are rejected until later phases."
+          "default": "table",
+          "description": "Explicitly deferred component kinds rejected until a later phase. As of Phase 20.5 only `table` remains deferred."
         },
         {
           "name": "children",
@@ -3050,6 +3132,18 @@
           "description": "Typed style-variable token references resolved through Clay core or package theme tokens."
         },
         {
+          "name": "validationState",
+          "type": "enum",
+          "default": "none",
+          "description": "Phase 20.5: `textInput` validation border state: `none`, `error`, `warning`, or `success`. Parsed from `style.validationState`."
+        },
+        {
+          "name": "placeholderColor",
+          "type": "color-role token",
+          "default": "text.muted",
+          "description": "Phase 20.5: `textInput` placeholder text color-role token. Parsed from `style.placeholderColor`."
+        },
+        {
           "name": "actionTargets",
           "type": "string[]",
           "default": "[]",
@@ -3058,7 +3152,7 @@
       ],
       "security": "Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.",
       "agent_guidance": "Use `clay.ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.",
-      "lookup_tags": ["ui", "package-ui", "component-catalog", "style-tokens", "clay-js-api", "phase18.3", "runtime-backed"],
+      "lookup_tags": ["ui", "package-ui", "component-catalog", "style-tokens", "clay-js-api", "phase18.3", "phase20.5", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",
@@ -3245,7 +3339,7 @@
           "name": "type",
           "type": "enum",
           "default": "required",
-          "description": "Token type, one of `color-role`, `spacing`, `radius`, `typography`, or `opacity`."
+          "description": "Token type, one of `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, or `density`."
         },
         {
           "name": "fallback",
@@ -3409,6 +3503,64 @@
       "security": "Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.",
       "agent_guidance": "Use `clay.ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.",
       "lookup_tags": ["ui", "package-ui", "state", "lifecycle", "clay-js-api", "phase18.4", "runtime-backed"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.ui.serverRequestLayoutIntent",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/ui/server-request-layout-intent.md",
+      "js_module": "clay:ui",
+      "js_export": "serverRequestLayoutIntent",
+      "js_facade": "runtime/js/ui.js::serverRequestLayoutIntent",
+      "backing_rust": "src/server/ui.rs::PackageUiRegistry::request_layout_intent",
+      "deno_op": "op_clay_ui_request_layout_intent",
+      "deno_op_path": "src/server/ops/ui.rs::op_clay_ui_request_layout_intent",
+      "name": "serverRequestLayoutIntent",
+      "user_facing_name": "Request Layout Intent",
+      "summary": "Submit an inert versioned layout intent requesting a pane split through the runtime-backed `clay:ui` facade.",
+      "owner": "server",
+      "phase": "Phase 20.3",
+      "visibility": "public",
+      "permissions": ["package-configuration"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "package-prefixed",
+          "description": "Package-prefixed unique intent ID (e.g. `markdown.splitPreview`)."
+        },
+        {
+          "name": "targetPane",
+          "type": "string",
+          "default": "required",
+          "description": "Target pane identifier (e.g. `active`)."
+        },
+        {
+          "name": "orientation",
+          "type": "enum",
+          "default": "required",
+          "description": "One of `horizontal` or `vertical`."
+        },
+        {
+          "name": "ratio",
+          "type": "number",
+          "default": "required",
+          "description": "Split ratio between 0.05 and 0.95."
+        },
+        {
+          "name": "position",
+          "type": "enum",
+          "default": "second",
+          "description": "One of `first` or `second`; controls which side the new pane occupies."
+        }
+      ],
+      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callbacks. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.",
+      "agent_guidance": "Use only documented typed intent records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.",
+      "lookup_tags": ["ui", "package-ui", "layout-intent", "split", "configuration", "clay-js-api", "phase20.3", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",

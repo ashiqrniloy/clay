@@ -57,6 +57,17 @@ The client connection task converts decoded `ServerMessage::SduiSnapshot` and `S
 
 The schema stays separate from the `rkyv` codec boundary even though payload types derive `Archive`, `Serialize`, and `Deserialize` for protocol use.
 
+### Phase 20.4: active-theme routing and interaction states
+
+Phase 20.4 (restyle-only, no kind/token/variable/API change) closes the gap between the Phase 20.1/20.2 token/primitive substrate and the actual SDUI paint path:
+
+- **Active-theme routing.** Before Phase 20.4, SDUI paint read `SduiThemeStyle::default()` (core fallbacks only), ignoring the active `ResolvedUiTheme`'s design-token overrides. `SduiThemeStyle::from_ui_theme(&ResolvedUiTheme)` and `SduiNativeState::theme_style()` now resolve panel padding (`spacing.md` × `spacing_scale()`), backgrounds, text, and typography from the **active** theme; the free `sdui_theme_style()` fallback was deleted. `row_rect` moved into `impl SduiNativeState` to read `self.theme_style().panel_padding`. All `&self` paint/accessibility/action-region collectors read `self.theme_style()`.
+- **Interaction states.** `SduiNativeState` tracks client-local `pointer_pos`/`pointer_pressed`/`focused_action` (rebuilt-aware, not snapshot-persisted) and derives `InteractionState` (Disabled > Active > Hover > Focus > Rest). Buttons fill via `component_state_color(theme, "surface.control", state)` with a `paint_focus_ring` on Focus; list rows fill via `list_row_fill_color(theme, state, selected)`; labels/status items use `disabled_text_color` when disabled. Containers route through existing state-complete primitives.
+- **Disabled gating.** `collect_package_action_regions` skips disabled buttons/list items, so a disabled component is not hit-testable and cannot emit a `ClientMessage::SduiAction`; accessibility entries still include disabled components (visible to assistive tools).
+- **`PackageUiComponentTree.disabled`/`PackageUiListItem.disabled`** are new `pub(crate)` fields (default `false`, parsed from JSON) so package-declared components can express the Disabled state.
+
+`MasonyEditor::on_pointer_event` feeds the SDUI state: `Down` sets `pointer_pos`/`pointer_pressed`/`focused_action` on an action hit; `Move` always sets `pointer_pos` (passive hover); `Up` clears `pointer_pressed`; `Cancel`/`Leave` clear pointer state. See [Phase 20.4 Core Component Uplift](phase20.4-core-component-uplift-primitive-review.md).
+
 Public programmatic documentation for SDUI lives under `docs/reference/clay-js-api/sdui/`. Those pages define the `clay:sdui` facade exports (`definePanel`, `defineLabel`, `defineButton`, `defineList`, `defineEditorView`, `defineFlex`, and `defineStack`) and are linked from `docs/index.md` for generated registry lookup. In Phase 13, `runtime/js/sdui.js` included through `src/server/facades.rs` calls `op_clay_sdui_define_node` for inert helper objects and `op_clay_sdui_publish_tree` for explicit publication. Publication converts the JSON object graph into typed Rust `SduiTree` state at the server boundary; the client still receives only typed `SduiSnapshot`/`SduiUpdate` protocol messages and never executable JavaScript.
 
 ## Payload Costs and Codec Scope

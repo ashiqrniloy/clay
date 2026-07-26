@@ -684,6 +684,45 @@ Expected behavior:
 - The status message omits raw absolute paths and source snippets.
 - Typing and native rendering remain responsive; diagnostics are status events, not synchronous input/rendering work.
 
+### Phase 20.1 UI design language, token catalog, and typography hierarchy smoke
+
+Phase 20.1 expanded the typed token catalog, typography hierarchy, and token-backed geometry defaults. No new settings API was added; theme/typography configuration reuses existing `setTheme` and `setTypography`.
+
+Manual matrix (no pixel goldens):
+
+1. Launch with no `~/.config/clay/init.js` (empty defaults). Confirm editor renders with core fallback tokens (sidebar 240px, spacing scale 1.0). Open a file and type; status/shared-ui chrome must render without re-resolution artifacts.
+2. Set Gruvbox Material dark theme plus default typography:
+   ```js
+   import { setTheme, setTypography } from "clay:theme";
+   setTheme("@clay/theme-gruvbox-material-dark");
+   setTypography({ monospace: { families: ["monospace"], size: 20 }, proportional: { families: ["sans-serif"], size: 20 }, ui: { families: ["system-ui"], size: 12 } });
+   ```
+   Launch and confirm dark editor/status chrome + default hierarchy scales. Type, scroll, and switch tabs; editable/read-only status and runtime diagnostics must remain functional.
+3. Repeat step 2 with Gruvbox light (`@clay/theme-gruvbox-material-light`). Confirm light chrome.
+4. Add a custom hierarchy to `setTypography`:
+   ```js
+   setTypography({
+     monospace: { families: ["monospace"], size: 20 },
+     proportional: { families: ["sans-serif"], size: 18 },
+     ui: { families: ["system-ui"], size: 14 },
+     hierarchy: { display: 2.0, title: 1.3, section: 1.1, body: 1.0, status: 1.0, detail: 0.8, caption: 0.7 },
+   });
+   ```
+   Confirm status text, panel titles, and UI chrome scale proportionally. Row hit regions and accessibility bounds must scale with text. Scrollbar, viewport, and panel geometry must remain bounded.
+5. Narrow window to ~600px wide, then maximize. Sidebar/panel defaults (240px) should not clip text or overflow.
+6. Keyboard focus: tab through editor and Workspace file browser. Focus ring, text selection, and caret must remain visible with the active theme.
+7. Remove all configuration and relaunch. Defaults must return (core fallback token catalog + Clay default typography).
+
+What NOT to check manually (smoke-only, deferred):
+
+- Modus Operandi/Vivendi theme selection — deferred to Phase 20.6.
+- Live appearance-mode switching (system light/dark autodetection) — deferred to Phase 20.6.
+- Density compact/spacious scaling — Phase 20.4 component uplift consumes these.
+- Elevation/motion/z-level rendering — Phase 20.4/20.5 consume these.
+- Resize/collapse drag persistence — Phase 20.3.
+
+Automated coverage (no manual execution needed): `core_design_token_catalog_has_unique_names_and_typed_fallbacks`, `theme_install_is_atomic_across_editor_and_ui_tokens`, `gruvbox_and_default_themes_cover_new_tokens_via_fallback`, `theme_switch_does_not_parse_or_execute_package_code_in_paint_paths`, `unchanged_hierarchy_does_not_invalidate_layout`, `ui_typography_hierarchy_defaults_preserve_existing_variant_metrics`, `custom_hierarchy_updates_layout_hit_and_accessibility_geometry_together`, `legacy_sidebar_and_package_left_panel_share_default_dimension_token`, `ui_design_tokens_resolve_without_package_javascript_in_paint_layout_or_input_hot_paths`, plus existing Gruvbox theme contract tests, typography protocol round-trip, SDUI layout, and editor performance invariants.
+
 ## Security and Endpoint Boundaries
 
 Default and smoke launch paths use only local IPC transports:

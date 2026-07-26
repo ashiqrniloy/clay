@@ -1430,6 +1430,7 @@ registry_public = false
 
 [[api]]
 id = "clay.ui.serverRegisterPaneSplitTree"
+# Superseded by clay.ui.serverRequestLayoutIntent (Phase 20.3). Direct split-tree mutation replaced by inert versioned layout intent model. Remains planned/unavailable.
 category = "shell-pane-split-tree"
 visibility = "public"
 status = "planned"
@@ -1634,6 +1635,29 @@ custom_properties = ["targetId:string=package-prefixed", "property:enum=slot|vis
 permissions = ["package-configuration"]
 security_notes = "Validates documented ~/.config/clay/init.js layout overrides, package prefixes, target IDs, precedence, same-type registered theme-token remaps, input/action references, and bounded values and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden JSON/TOML layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callback authority."
 current_rust_owner = "src/server/ui.rs::PackageUiRegistry::set_layout_override; src/server/ops/ui.rs::op_clay_ui_set_layout_override"
+registry_public = true
+
+[[api]]
+id = "clay.ui.serverRequestLayoutIntent"
+category = "package-layout-intent"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:ui"
+js_export = "serverRequestLayoutIntent"
+user_facing_name = "Request Layout Intent"
+authority = "server-validated-package-layout-intent"
+runtime_path = "package-load-to-inert-layout-intent"
+hot_path_policy = "no-hot-path: layout intents are evaluated at package load/configuration time and never execute package JavaScript in Masonry paint/layout/input handlers."
+facade_path = "runtime/js/ui.js::serverRequestLayoutIntent"
+backing_rust = "src/server/ui.rs::PackageUiRegistry::request_layout_intent"
+deno_op = "op_clay_ui_request_layout_intent"
+deno_op_path = "src/server/ops/ui.rs::op_clay_ui_request_layout_intent"
+documentation_path = "docs/reference/clay-js-api/ui/server-request-layout-intent.md"
+key_bindings = []
+custom_properties = ["id:string=package-prefixed", "targetPane:string=required", "orientation:enum=horizontal|vertical", "ratio:number=0.05-0.95", "position:enum=first|second"]
+permissions = ["package-configuration"]
+security_notes = "Validates package-prefixed intent IDs, orientation, ratio bounds, position, payload size, and prohibited authority. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callback authority."
+current_rust_owner = "src/server/ui.rs::PackageUiRegistry::request_layout_intent; src/server/ops/ui.rs::op_clay_ui_request_layout_intent"
 registry_public = true
 
 [[api]]
@@ -2328,6 +2352,29 @@ current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_theme"
 registry_public = true
 
 [[api]]
+id = "clay.theme.setAppearance"
+category = "theme"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:theme"
+js_export = "setAppearance"
+user_facing_name = "Set Appearance"
+authority = "bounded-appearance-canonical-default-resolution"
+runtime_path = "init-js-op-to-canonical-default-theme-handshake"
+hot_path_policy = "Configuration-time only; resolves the bounded light/dark/system enum to a canonical first-party Modus theme via a bundled-inventory lookup before first paint. Paint reads the already-built StyleRegistry with no JS, filesystem, package resolution, or server IPC."
+facade_path = "runtime/js/theme.js::setAppearance"
+backing_rust = "src/server/ops/theme.rs::op_clay_theme_set_appearance; src/server/ops/theme.rs::apply_appearance; src/server/ops/theme.rs::canonical_default_specifier"
+deno_op = "op_clay_theme_set_appearance"
+deno_op_path = "src/server/ops/theme.rs::op_clay_theme_set_appearance"
+documentation_path = "docs/reference/clay-js-api/theme/set-appearance.md"
+key_bindings = []
+custom_properties = ["appearance:enum=required"]
+permissions = []
+security_notes = "Accepts only the bounded light | dark | system enum and resolves the canonical default from bundled first-party @clay/theme-modus-* packages via the same ensure_first_party_record trust path as explicit setTheme; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, third-party theme loading, or promotion-by-naming authority."
+current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_appearance"
+registry_public = true
+
+[[api]]
 id = "clay.theme.setTypography"
 category = "typography"
 visibility = "public"
@@ -2344,9 +2391,9 @@ deno_op = "op_clay_theme_set_typography"
 deno_op_path = "src/server/ops/typography.rs::op_clay_theme_set_typography"
 documentation_path = "docs/reference/clay-js-api/theme/set-typography.md"
 key_bindings = []
-custom_properties = ["monospace.families:string[]=[monospace]", "monospace.size:number=20", "proportional.families:string[]=[sans-serif]", "proportional.size:number=20", "ui.families:string[]=[system-ui]", "ui.size:number=12"]
+custom_properties = ["monospace.families:string[]=[monospace]", "monospace.size:number=20", "proportional.families:string[]=[sans-serif]", "proportional.size:number=20", "ui.families:string[]=[system-ui]", "ui.size:number=12", "hierarchy:object|undefined=optional", "hierarchy.display:number=1.5", "hierarchy.title:number=14/12", "hierarchy.section:number=13/12", "hierarchy.body:number=1", "hierarchy.status:number=1", "hierarchy.detail:number=10/12", "hierarchy.caption:number=0.75"]
 permissions = []
-security_notes = "Accepts one bounded inert three-profile value; performs no installed-font validation, font-file access, URL fetch, or download and does not grant filesystem, network, shell, package, extension loading, workspace mutation, AI mutation, native widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Packages may select semantic roles but cannot override concrete user values."
+security_notes = "Accepts one bounded inert three-profile value plus an optional bounded UI hierarchy; performs no installed-font validation, font-file access, URL fetch, or download and does not grant filesystem, network, shell, package, extension loading, workspace mutation, AI mutation, native widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Packages may select semantic roles and variants but cannot override concrete user values or hierarchy scales."
 current_rust_owner = "src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography"
 registry_public = true
 

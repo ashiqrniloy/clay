@@ -16,6 +16,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Documentation Validation Contracts](reference/documentation-contracts.json) — machine-readable primitive/package document inventory and narrow security-marker set used by generic non-mutating validators.
 - [Rendering Customization Strategy](reference/primitives/rendering-strategy.md) — Phase 16 inert rendering declarations, decoration update shape, SDUI reuse, client rendering attachment points, budgets, and security boundaries.
 - [Clay Shell and Package UI/Layout Strategy](reference/primitives/shell-layout-strategy.md) — Phase 18.1/18.2 shell vocabulary and runtime status, Phase 18.3 runtime-backed slot-aware package UI contribution contract, working area and pane/slot layout model, package UI/state/style contract, and Masonry implementation boundary.
+- [UI Chrome Primitives](reference/primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer, token-driven design, interaction states, accessibility roles, routing, conformance contract, and package authoring contract.
 - [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — cancellable server-side parse tasks, tiered syntax engines, non-blocking open, viewport-prioritized results, diagnostics, budgets, and security boundaries.
 - [Markdown Mode POC Requirements](reference/primitives/markdown-mode-requirements.md) — Phase 16 Markdown mode Phase 18 readiness checklist, primitive prerequisite map, performance targets, API stubs, and first-party package security scope.
 - [Package Primitive Security and Provenance Requirements](reference/primitives/package-security.md) — Phase 16 package primitive prefix, permission, validation, conflict, prohibited-authority, and provenance model.
@@ -92,6 +93,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `clay.syntax.serverRegisterSyntaxGrammar`
 - [setSyntaxEnginePreference](reference/clay-js-api/syntax/set-syntax-engine-preference.md) — `clay.syntax.setSyntaxEnginePreference`
 - [setTheme](reference/clay-js-api/theme/set-theme.md) — `clay.theme.setTheme`
+- [setAppearance](reference/clay-js-api/theme/set-appearance.md) — `clay.theme.setAppearance`
 - [setTypography](reference/clay-js-api/theme/set-typography.md) — `clay.theme.setTypography`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `clay.completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `clay.completion.serverListCompletionProvidersForTrigger`
@@ -111,6 +113,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterThemeToken](reference/clay-js-api/ui/server-register-theme-token.md) — `clay.ui.serverRegisterThemeToken`
 - [serverRegisterTransientOverlayContribution](reference/clay-js-api/ui/server-register-transient-overlay-contribution.md) — `clay.ui.serverRegisterTransientOverlayContribution`
 - [serverSetLayoutOverride](reference/clay-js-api/ui/server-set-layout-override.md) — `clay.ui.serverSetLayoutOverride`
+- [serverRequestLayoutIntent](reference/clay-js-api/ui/server-request-layout-intent.md) — `clay.ui.serverRequestLayoutIntent`
 - [defineButton](reference/clay-js-api/sdui/define-button.md) — `clay.sdui.defineButton`
 - [defineEditorView](reference/clay-js-api/sdui/define-editor-view.md) — `clay.sdui.defineEditorView`
 - [defineFlex](reference/clay-js-api/sdui/define-flex.md) — `clay.sdui.defineFlex`

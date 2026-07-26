@@ -105,6 +105,7 @@ mod tests {
             active_theme: ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
             sdui_tree: SduiTree {

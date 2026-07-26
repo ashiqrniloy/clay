@@ -79,6 +79,18 @@ Phase 18.20's `language_intelligence_result_to_menu_session` adapter keeps intel
 - No callbacks, raw ops, native handles, raw CSS, renderer callbacks, filesystem paths beyond sanitized labels, credentials, commands hidden inside completion items, or executable package code may be stored in session items.
 - `TransientMenuSession` does not own rendering, focus restoration, or command execution semantics; those belong to the overlay renderer and `CommandExecutor`.
 
+## Phase 20.5: Surface Origin
+
+Phase 20.5 added `TransientMenuOrigin` (`src/shell/transient_menu.rs`) to distinguish the surface that spawned a session:
+
+| Origin | Anchor | Focus policy default | Use case |
+|--------|--------|---------------------|----------|
+| `CommandPalette` | `Bottom` | `Modal` | Command palette, completion picker (default) |
+| `ContextMenu` | `Pointer` | `Modeless` | Right-click context menu |
+| `MenuBar` | `Main` | `Modeless` | Menu bar dropdown |
+
+`TransientMenuSession` gains an `origin: TransientMenuOrigin` field (default `CommandPalette`), a `with_origin()` builder, and an `origin()` accessor. `TransientPackageOverlay::from_menu_session` (`src/shell/package_ui.rs`) reads `session.origin()` to select the overlay anchor instead of hardcoding `Bottom`. Keyboard navigation (`route_menu_key` in `src/masonry_editor.rs`) is unchanged — ArrowUp/Down, Enter/Tab, Escape, and commit characters apply to all origins.
+
 ## Tests
 
 - `src/shell/transient_menu.rs`: `session_stores_prompt_and_starts_empty`
@@ -130,4 +142,5 @@ cargo test --lib masonry_sdui --quiet
 - [Phase 18.8 Transient Menu and Command Execution Primitive Review](phase18.8-transient-menu-command-execution-primitive-review.md)
 - [Completion Snippet Expansion](completion-snippet-expansion.md) — Phase 18.19 snippet accept path and session
 - [Language Intelligence](language-intelligence.md) — Phase 18.20 hover/signature/definition/code-action projection
+- [Phase 20.5 Overlay, Menu, and Input Components](phase20.5-overlay-menu-input-components.md) — `TransientMenuOrigin`, z-level stacking, new component kinds
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)

@@ -139,6 +139,10 @@ Expected shell/layout/package guide updates by phase:
 | Phase 18.13 | Document the read-only Git package contract: `@clay/git` consumes the server-owned `clay:git` discovery facade, declares no permissions, publishes a sanitized status panel, and receives no shell/network/filesystem/mutating Git authority. Branch/status commands are server-owned built-ins (`clay.git.listStatuses`, `clay.git.refreshStatus`); the package only composes read-only display state. Mutating Git operations remain deferred. |
 | Phase 18.15 | Document the locked text vocabulary (`TokenType` + `Modifiers`), inert `textStyles` theme-package contract, one-active-theme `setTheme()` selection API, and the separation between SDUI typed theme tokens and editor text `StyleRegistry` overrides. |
 | Phase 18.17 | Document bounded analyzer-owned `DiagnosticSpan`/`DiagnosticSet` publication through `serverPublishDiagnostics`, theme severity colors, additive squiggle rendering, Tree-sitter authority exclusion, and the no-LSP-process boundary. |
+| Phase 20.1 | Document the expanded typed token catalog (ten domains: `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, `density`), the seven semantic `UiTextVariant` tokens and the user-owned `UiTypographyHierarchy`, `clay.contributions.designTokens` typed UI overrides shipped on `ActiveTheme`, and token-backed panel/sidebar/density defaults. Packages reference tokens and select variants only; they cannot ship concrete hierarchy scales, raw values, or new component kinds. |
+| Phase 20.3 | Document layout primitives: split divider drag, fixed slot resize/collapse, layout persistence, inert versioned `LayoutIntent` API (`serverRequestLayoutIntent`), focus/input routing across splits, transient surface anchoring, and package limitations (no native layout mutation, no raw widget access). |
+| Phase 20.4 | Document the core component uplift: every implemented `ComponentKind` now honors the active theme (SDUI paint reads `ResolvedUiTheme`, not core fallbacks), is state-complete (`Rest`/`Hover`/`Active`/`Focus`/`Disabled` from state tokens), and follows the 4pt spacing rhythm scaled by `density`/`spacing_scale()`; the status bar uses token-driven insets; editor chrome (caret/selection/scrollbar/diagnostics) stays on the editor `StyleRegistry`. Compatibility guarantee: no `ComponentKind`, style-variable, or token-name change — packages require no manifest or style edit. |
+| Phase 20.5 | Document the overlay, menu, and input component phase: `dropdown`, `collapse`, `modal` promoted from reserved to implemented; `textInput` added (focus, placeholder, `style.validationState`/`style.placeholderColor`); `table` remains reserved (no first-party need); all transient surfaces (command palette, context menu, menu bar, completion pop-up) uplifted onto shared `paint_package_overlays` + `paint_tooltip_shell` with z-level stacking (`z.overlay`<`z.modal`<`z.tooltip`); `TransientMenuOrigin` selects overlay anchor; keyboard nav complete for all new surfaces (dropdown ArrowUp/Down/Enter/Space, collapse Enter/Space, modal Tab focus-trap). Compatibility guarantee: no existing `ComponentKind`, style-variable, or token-name change; `placeholderColor` and `validationState` are additive. |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `clay.ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Phase 19 hot reload is implemented as ordinary one-line `loadPackage` re-evaluation in a fresh runtime generation (see [Package Reload Lifecycle](#package-reload-lifecycle-phase-19)); no package-specific reload callback, `force` flag, or copied-manifest bootstrap is required. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, and package enable/disable from configuration remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
 
@@ -751,7 +755,7 @@ The current `clay:sdui` helpers publish bounded inert node trees through server 
 | Primitive | Inventory target | Phase 18.3 package-facing status |
 | --- | --- | --- |
 | `WorkingAreaLayout` | `clay.ui.serverRegisterWorkingAreaLayout` | Internal Rust runtime implemented; public callable layout-default API planned/unavailable. |
-| `PaneSplitTree` | `clay.ui.serverRegisterPaneSplitTree` | Internal Rust runtime implemented; public callable split-tree API planned/unavailable. |
+| `PaneSplitTree` | `clay.ui.serverRegisterPaneSplitTree` | Superseded by `serverRequestLayoutIntent` (Phase 20.3); internal Rust runtime implemented; direct split-tree mutation API unavailable. |
 | `PaneSlotLayout` | `clay.ui.serverSetPaneSlotLayout` | Internal Rust runtime implemented; public callable slot-layout/default API planned/unavailable. |
 | `PanelContribution` | `clay.ui.serverRegisterPanelContribution` | Implemented/runtime-backed public API with per-API Markdown and generated registry coverage. |
 | `ComponentContribution` | `clay.ui.serverRegisterComponentContribution` | Implemented/runtime-backed public API with per-API Markdown and generated registry coverage. |
@@ -853,7 +857,27 @@ Phase 18.3 component catalog status:
 
 Packages should not assume these are Masonry widget types. They are Clay components validated by `src/shell/components.rs` and rendered through Clay-owned native code.
 
-Component text defaults to the user-owned `ui` typography profile. Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` declarations may request only a semantic `style.fontRole` of `"ui"`, `"monospace"`, or `"proportional"`; it selects the user-configured family stack and size together. Structural components and `editorView` cannot set `fontRole`. Packages must not provide `fontFamily`, `fontSize`, font stacks, raw Parley properties, CSS, font files, URLs, or renderer callbacks. `style.typography` remains a semantic Clay variant such as `typography.body`, `typography.title`, or `typography.status`, scaled from the configured role rather than an absolute size.
+### UI chrome conformance (Phase 20.2)
+
+Phase 20.2 introduced a native chrome primitive layer (`src/shell/primitives.rs`) that is the only way to paint UI chrome (dividers, focus rings, panel backgrounds/borders, scrollbars, badges, keyboard hints, icon slots, tooltip shells). Primitives are `pub(crate)` inert paint helpers that read from `ResolvedUiTheme` tokens.
+
+**Package mapping:** Package-declared `ComponentKind` components map onto primitives by construction. The SDUI paint path (`src/masonry_sdui.rs`) calls primitive helpers for chrome (panel backgrounds/borders, overlay backgrounds/borders, scrollbar chrome). Packages declare inert `ComponentKind` components only; they cannot call primitives directly.
+
+**Conformance contract:**
+- Packages must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- Packages must not attempt to paint UI chrome directly; chrome is painted by Clay-owned primitives.
+- Package components are inert declarations; Clay renders them through native code and primitives.
+- Primitive customization flows through token contributions (`clay.ui.serverRegisterThemeToken`, `clay.contributions.themeTokens`/`designTokens`), not package code.
+
+**Enforcement:** The conformance contract is enforced by `tests/ui_primitive_conformance.rs`, which asserts:
+- Shell/SDUI chrome paint files contain no `Color::from_rgb8`/`Color::from_rgba8` literals outside `primitives.rs` and `theme.rs`.
+- Shell/SDUI chrome paint files contain no hardcoded chrome-size constants outside `primitives.rs` and `theme.rs`.
+- Package components map onto primitives by construction (SDUI paint routes chrome through primitive helpers).
+- Each primitive is token-driven and renders all declared interaction states.
+
+See `.agents/skills/clay-ui/references/components.md` for the full primitive inventory and token mappings.
+
+Component text defaults to the user-owned `ui` typography profile. Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` declarations may request only a semantic `style.fontRole` of `"ui"`, `"monospace"`, or `"proportional"`; it selects the user-configured family stack and size together. Structural components and `editorView` cannot set `fontRole`. Packages must not provide `fontFamily`, `fontSize`, font stacks, raw Parley properties, CSS, font files, URLs, or renderer callbacks. `style.typography` remains a semantic Clay variant such as `typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, or `typography.caption`, scaled from the configured role rather than an absolute size.
 
 ```json
 {
@@ -1205,6 +1229,127 @@ setTheme({ specifier: "@clay/theme-gruvbox-material-light" });
 Only one active theme is applied. `setTheme()` currently accepts first-party `@clay/*` theme packages; arbitrary local/registry theme specifiers are denied until package installation/authority is designed. Theme resolution happens during configuration/package-load and is sent to the client as an inert `ActiveTheme` snapshot before first paint. No theme JavaScript, package parser, or raw IPC runs in paint, layout, scroll, keypress, text-event, or edit-ack hot paths.
 
 Full first-party examples live in `packages/theme-gruvbox-material-dark/` and `packages/theme-gruvbox-material-light/`.
+
+#### Phase 20.6 canonical defaults vs opt-in themes
+
+Phase 20.6 segregates the default themes into dedicated packages and pins the default-vs-opt-in loading contract:
+
+- **Canonical defaults — `@clay/theme-modus-operandi` (light) and `@clay/theme-modus-vivendi` (dark).** These resolve **without any user `loadPackage` call**. When `init.js` runs and does not call `setTheme`, the runtime resolves the canonical default from the `appearance` preference (`light` → Modus Operandi, `dark` → Modus Vivendi, `system` → OS signal with a `dark` fallback). Resolution is a bundled-inventory lookup (`ensure_first_party_record`), so there is **no extra load cost** and no promotion-by-naming: a theme is a canonical default only because `canonical_default_specifier` names it, not because of its package prefix. The Modus packages are still regular first-party `@clay/theme-*` packages — identical manifest shape, inert `textStyles`, no permissions, no modes — and remain explicitly selectable by a one-line `setTheme("@clay/theme-modus-*")`.
+- **Opt-in themes — Gruvbox Material Dark/Light.** These are never selected automatically. They require an explicit one-line `setTheme("@clay/theme-gruvbox-material-*")` in `init.js`. A silent `init.js` always resolves a Modus canonical default, never Gruvbox.
+- **No silent behavior-changing package defaults beyond the pinned canonical pair.** A theme package cannot promote itself to a default by naming, manifest field, or load order. Only the two pinned Modus packages are canonical defaults; every other theme is opt-in via `setTheme`.
+- **Trust classification preserved.** Canonical-default resolution reuses the same `ensure_first_party_record` path that validates bundled-inventory provenance, fingerprint, and first-party trust for explicit `setTheme` calls. Selecting a canonical default grants no authority that an explicit `setTheme` of the same package would not.
+
+```js
+// ~/.config/clay/init.js — canonical default, no loadPackage needed
+// (appearance: system → dark → Modus Vivendi by default)
+
+// Explicit one-line override of any bundled theme, no loadPackage needed:
+import { setTheme } from "clay:theme";
+setTheme("@clay/theme-modus-operandi");   // pin light canonical default
+setTheme("@clay/theme-gruvbox-material-light"); // opt-in Gruvbox
+```
+
+See [Configuration: Phase 20.6 precedence and persistence](../clay-js-api/configuration.md#phase-206-themetypographyappearance-precedence-and-persistence) for the full source-order model (canonical/package default < `init.js` < UI session).
+
+#### Phase 20.6 user override APIs and the settings UI
+
+Users override theme, appearance, and typography through three surfaces, all bounded and authority-rejecting:
+
+- **Programmatic — `clay:theme` facades in `~/.config/clay/init.js`.** `setTheme("@clay/theme-*")` selects the active theme; `setAppearance("light" | "dark" | "system")` sets the appearance preference that drives the canonical default (and is overridden by any explicit `setTheme`); `setTypography({...})` sets the monospace/proportional/ui font stacks, base sizes, and optional bounded hierarchy. These are init.js APIs (source `init-js` in the precedence model).
+- **UI session — `@clay/settings` panel.** A first-party catalog-composed SDUI panel (`packages/settings/`) lets users switch theme, appearance, and typography from the UI. Controls emit inert `settings.*` command intents (`settings.setTheme`, `settings.setAppearance`, `settings.setTypography`, `settings.reset`) that the server validates, persists to `~/.config/clay/preferences.json` (source `ui-session`), and applies live through a runtime reload (persist → reload → `init.js` re-eval + preferences apply → `RuntimeStateSnapshot` fanout). No restart required. The panel uses only implemented `ComponentKind` kinds (`panel`, `collapse`, `dropdown`, `textInput`, `label`, `button`, `flex`) — no native chrome, no client JavaScript, no raw CSS.
+- **Persistence — `preferences.json`.** The closed `ui-session` store (theme, appearance, typography) overrides `init.js` on every reload, so a UI choice survives restart and beats the equivalent `init.js` call. See the package doc at `packages/settings/docs/index.md` for the catalog-composition table and command flow.
+
+Theme packages themselves declare **inert style data only** (`clay.contributions.textStyles` and optional `clay.contributions.designTokens`); they declare no permissions, no modes, and no override APIs. All override authority is user-owned through the three surfaces above. A theme package cannot promote itself, ship executable styling code, raw CSS, client JavaScript, or a third-party theme loader; `setTheme`/canonical-default resolution accepts only bundled first-party `@clay/*` specifiers.
+
+### Phase 20.1 authoring contract: typed token catalog, typography hierarchy, and token-backed defaults
+
+Phase 20.1 expanded the typed token catalog additively from five domains to ten. The full implemented catalog lives in the clay-ui skill reference (`.agents/skills/clay-ui/references/tokens.md`); this section records the package authoring contract.
+
+**Typed domains** (`ThemeTokenType`, ten): `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, `density`. Every package token `type` must be one of these, and every `fallback` must be a same-typed Clay core token. The original five domains are unchanged; `dimension`, `elevation`, `motion-duration`, `z-level`, and `density` are additive.
+
+**Typography hierarchy**: the seven `UiTextVariant` tokens (`typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, `typography.caption`) are semantic variant selectors, not absolute sizes. Their scale ratios form `UiTypographyHierarchy`, which is user-owned via [`setTypography`](../clay-js-api/theme/set-typography.md) and travels atomically with `ActiveTypography`. Packages select a variant name only; they **cannot** supply concrete scale ratios. A `clay.contributions.designTokens` entry targeting any `typography.*` token is rejected as a typography (variant) override, not a scale value.
+
+**Typed UI design-token overrides** (`clay.contributions.designTokens` / `UiDesignTokenOverride`): a theme package may ship typed UI overrides that resolve client-side into `ResolvedUiTheme`. Each override carries a core Clay token name, a typed value variant (`Color`, `Scalar`, `Opacity`, or `Level`), and provenance. Validation rejects unknown tokens, value/type mismatch against the core token, raw CSS/color/size fields, duplicates, out-of-range scalars (dimension ordering, opacity `[0,1]`, `motion-duration` `[0,1000]`), invalid level names, and any `typography.*` override. Existing Gruvbox themes ship no `designTokens` and resolve through core fallbacks unchanged — no package migration is required.
+
+**Token-backed panel/sidebar/density defaults**: `dimension.sidebar.default`, `dimension.panel.side.*`, `dimension.panel.vertical.*`, and `density.default` replace the prior hardcoded panel constants. Packages do not set these directly; theme/configuration overrides flow through `designTokens` or future documented configuration APIs. Invalid dimension ordering (`min > default` or `max < default`) falls back to the matching Clay constant tuple per domain before layout. `density.default` selects compact/default/spacious; it scales the token-owned UI spacing rhythm only and never scales panel dimensions or document typography. Phase 20.3 implemented resize/collapse persistence and split interaction on top of these defaults.
+
+**Resolution and hot paths**: token resolution happens at theme/configuration install time. `ActiveTheme.design_tokens` is validated server-side and resolved client-side into one cached `ResolvedUiTheme`. Native paint, layout, pointer, scroll, keypress, and text-event paths read cached resolved values only — no package JavaScript, theme parsing, raw IPC, or re-resolution runs per frame.
+
+```ts
+import { serverRegisterThemeToken } from "clay:ui";
+
+// Semantic package tokens resolve to same-typed Clay core fallbacks.
+serverRegisterThemeToken(manifest, {
+  token: "example.panel.elevation",
+  type: "elevation",
+  fallback: "elevation.raised",
+  description: "Raised panel surface for the example panel",
+});
+serverRegisterThemeToken(manifest, {
+  token: "example.overlay.z",
+  type: "z-level",
+  fallback: "z.overlay",
+  description: "Stacking level for the example overlay",
+});
+```
+
+### Phase 20.3 authoring contract: layout primitives, split interaction, and layout intents
+
+Phase 20.3 implements user-facing layout primitives: draggable split dividers, fixed slot resize handles with collapse/restore, layout persistence, focus/input routing across splits, and an inert versioned layout intent API for packages.
+
+**Split dividers and resize handles** (user-facing, not package-facing): users drag split dividers on `PaneSplitTree` to adjust pane ratios (clamped 0.05–0.95) and drag fixed slot resize handles to adjust panel sizes (clamped to token-backed min/max). Double-clicking a slot resize handle toggles collapse/restore. All interaction is client-side; no package JavaScript runs during drag, paint, or layout.
+
+**Layout persistence**: user-modified split ratios (≠ 0.5) and slot sizes (resized or collapsed) persist to `~/.config/clay/layout.json` with ≥500ms debounce. Corrupt or missing files fall back to defaults. Packages cannot read or write this file.
+
+**Focus and input routing**: Tab/Shift+Tab moves focus across panes in reading order. The active pane is tracked in `PaneSplitTree.active_pane_id`. A focus ring paints on the active pane when multiple panes exist. Package `PackageInputRouting` declarations scoped to a pane only receive events when that pane is focused. Transient surfaces (overlays, menus, completion pop-ups) anchor to the focused pane's geometry via `WorkingAreaLayout::focused_pane_rect()`, not the full working area.
+
+**Layout intent API** (package-facing): packages request pane splits through `serverRequestLayoutIntent` from `clay:ui`. The intent is inert and versioned; Clay validates and stores it, then composes it into `WorkingAreaLayoutUpdate` at Clay's discretion. Packages cannot mutate native layout directly.
+
+```ts
+import { serverRequestLayoutIntent } from "clay:ui";
+
+// Request a horizontal split of the active pane.
+serverRequestLayoutIntent({
+  id: "markdown.splitPreview",
+  targetPane: "active",
+  orientation: "horizontal",
+  ratio: 0.5,
+  position: "second",
+});
+```
+
+Validation rejects: missing/wrong package prefix on `id`, duplicate `id`, invalid `orientation` (must be `horizontal` or `vertical`), `ratio` outside 0.05–0.95, invalid `position` (must be `first` or `second`; defaults to `second`), and payloads exceeding the SDUI budget.
+
+**Package limitations**: packages cannot mutate `WorkingAreaLayout`, `PaneSplitTree`, or `PaneSlotLayout` directly. They cannot access Masonry widget IDs, raw callbacks, renderer state, or the layout persistence file. Layout authority is Clay-owned; packages participate through inert validated declarations only.
+
+### Phase 20.4 authoring contract: core component uplift on the existing catalog
+
+Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design language using the Phase 20.1 tokens and Phase 20.2 primitives, **without changing component kinds, style-variable schemas, or token names**. It is a restyle, not a catalog expansion: no new kind, no new style variable, no new token was added.
+
+**Active-theme routing**: SDUI component paint reads the active `ResolvedUiTheme` (the design-token registry layered over the core fallback catalog by the active theme/configuration), not core fallbacks. The prior `SduiThemeStyle::default()` core-fallback paint path is gone; `SduiThemeStyle::from_ui_theme(&ResolvedUiTheme)` resolves typed values from the active theme at each `&self` paint entry point. Theme packages (e.g. `@clay/theme-gruvbox-material-dark`) that contribute `clay.contributions.designTokens` overrides now flow through to SDUI component paint automatically — no manifest change required.
+
+**State-complete components**: every interactive component derives all five `InteractionState` variants from state tokens:
+
+| Kind | Rest fill | Hover | Active | Focus | Disabled |
+|------|-----------|-------|--------|-------|----------|
+| `button` | `surface.control` | `surface.hover` | `surface.active` | `accent.primary` + `paint_focus_ring` (`border.focus`) | `surface.disabled` × `opacity.disabled`, text `text.disabled` × `opacity.disabled`, action gated |
+| `list` row | `surface.list` (unselected) / `surface.selected` (selected) | `surface.hover` | `surface.active` | `surface.selected` | `surface.disabled` × `opacity.disabled`, action gated |
+| `label` / `statusItem` | text `text.muted` | — | — | focus ring | text `text.disabled` × `opacity.disabled` |
+| `panel` / `overlay` | chrome via `paint_panel_chrome` / `paint_tooltip_shell` (state-independent chrome; collapse/resize affordances route through the primitive) | | | | |
+| `editorView` | editor `StyleRegistry`-driven chrome (caret/selection/scrollbar/diagnostics); scrollbar reflects `Hover`/`Active` from pointer state (task 5) | | | | |
+| `flex` / `stack` / `scroll` / `portal` | container — recurse children, no chrome of their own | | | | |
+
+`InteractionState` is derived from client-local pointer/focus hit-testing (`SduiNativeState::interaction_state`): `Disabled` is checked first (gates actions out of the action region set), then `Active` (pointer pressed over the rect), `Hover` (pointer over the rect), `Focus` (click-to-focus; no Tab traversal yet), else `Rest`. The `component_state_color`/`list_row_fill_color`/`disabled_text_color` helpers in `src/shell/primitives.rs` centralize the token→state mapping.
+
+**Spacing rhythm**: SDUI panel padding reads `spacing.md` (16, the 4pt-grid default content padding) scaled by `spacing_scale()` (density `compact`=0.875 / `default`=1.0 / `spacious`=1.125). The status bar uses token-driven insets (`spacing.sm` × `spacing_scale()`) with a `border.hairline` divider. Per-element `spacing.xs`/`sm`/`lg` differentiation is deferred to a later spacing pass; `panel_padding` is the single rhythm entry point consumed by SDUI geometry.
+
+**Editor chrome stays on the editor theme**: caret, selection, diagnostics, and the status bar background/text read from the editor `StyleRegistry` (`BaseUiColors`: `caret`, `selection`, `diagnostic*`, `statusBg`, `statusText`), which remains the single source of color for editor paint and is separate from SDUI typed tokens. The editor scrollbar routes through `paint_scroll_chrome` with `InteractionState` derived from pointer state (`EditorSurface::scrollbar_interaction_state`). No new `BaseUiColorKey` was added.
+
+**Compatibility guarantee**: Phase 20.4 changes no `ComponentKind` (`src/shell/components.rs`), no typed style variable, no token name, and no package manifest field. Existing first-party packages (`@clay/markdown`, `@clay/git`, `@clay/rust`, `@clay/typescript`, `@clay/javascript`, the `lsp-*` bridges, `@clay/theme-gruvbox-material-*`) pass their test suite unmodified. `PackageUiComponentTree` and `PackageUiListItem` gained a `disabled` field (parsed from JSON, defaults `false`) so packages can declare disabled state, but existing declarations that omit it are unchanged.
+
+**Structural observability**: a test-local `component_state_palette` helper captures the resolved fill/border/text colors per component kind per `InteractionState` from the active `ResolvedUiTheme` — no pixel rendering, no GPU. This is test infrastructure only; no public `clay:sdui.queryUiState` introspection API is introduced (deferred per Phase 15/16 until a real agent-introspection need exists).
+
+**Package limitations (restated)**: packages declare inert `ComponentKind` components and typed tokens only. No raw CSS, no raw colors, no client JavaScript in paint/layout/pointer/scroll/keypress/text-event handlers, no native widget handles, no raw ops, no direct primitive calls. Packages cannot read or drive `InteractionState` directly; Clay derives it from pointer/focus hit-testing and renders state chrome through primitives.
 
 ## Rendering and Decorations
 
@@ -2234,7 +2379,7 @@ Allowed `clay:ui` surfaces for language packages in Phase 18.14:
 
 - **Status items** (`serverRegisterComponentContribution` with `kind: "statusItem"`): lightweight, read-only labels or indicators that read package/component state. Example: a `rust.status.mode` label that shows the active mode name.
 - **Transient overlays** (`serverRegisterTransientOverlayContribution`): dismissible panels anchored to the working area, active pane, main slot, or pointer. Use for transient language actions such as a quick-help overlay; default focus/dismissal policies keep them out of the editor hot path.
-- **Theme tokens** (`serverRegisterThemeToken`): package-prefixed semantic tokens with a Clay core fallback of the same type (`color-role`, `spacing`, `radius`, `typography`, `opacity`).
+- **Theme tokens** (`serverRegisterThemeToken`): package-prefixed semantic tokens with a Clay core fallback of the same type. The ten typed domains are `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, and `density` (Phase 20.1 extended the catalog additively from the original five).
 - **Input/state scopes** (`serverRegisterInputContribution`, `serverRegisterUiStateScope`): declare bounded input interests and durable state schemas when a language package owns a panel or overlay.
 - **Fixed panels** (`serverRegisterPanelContribution`): only when the language package genuinely owns persistent auxiliary UI. Fixed panels default to `defaultVisibility: "hidden"`; packages must not open a visible panel from `loadEntry` without explicit user opt-in through configuration.
 

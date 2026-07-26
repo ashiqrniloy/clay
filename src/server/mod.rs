@@ -270,6 +270,7 @@ impl ActiveTypographyState {
         if current.monospace == typography.monospace
             && current.proportional == typography.proportional
             && current.ui == typography.ui
+            && current.hierarchy == typography.hierarchy
         {
             return Ok(None);
         }
@@ -899,6 +900,7 @@ impl IpcServer {
             .unwrap_or_else(|| crate::protocol::ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             });
         let runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
         let runtime_snapshot = build_runtime_state_snapshot(
@@ -1309,6 +1311,7 @@ fn stage_typography(
     requested.revision = if current.monospace == requested.monospace
         && current.proportional == requested.proportional
         && current.ui == requested.ui
+        && current.hierarchy == requested.hierarchy
     {
         current.revision
     } else {
@@ -2189,6 +2192,7 @@ mod runtime_generation_tests {
         *server.active_theme.lock().await = Some(ActiveTheme {
             specifier: "@clay/conflict".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         });
 
         assert!(server.commit_runtime_generation(candidate).await.is_err());
@@ -2265,6 +2269,7 @@ mod runtime_generation_tests {
         evaluation.active_theme = Some(ActiveTheme {
             specifier: "@clay/theme-test".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         });
         evaluation.active_typography = Some(crate::protocol::ActiveTypography {
             revision: 99,
@@ -2280,6 +2285,7 @@ mod runtime_generation_tests {
                 families: vec!["system-ui".to_string()],
                 size: 14.0,
             },
+            ..crate::protocol::ActiveTypography::default()
         });
         let candidate = server
             .prepare_runtime_generation_candidate(
@@ -3044,6 +3050,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             active_theme: ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: crate::protocol::ActiveTypography::default(),
             sdui_tree: default_document_tree(1, 1),

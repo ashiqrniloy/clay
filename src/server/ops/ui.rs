@@ -5,7 +5,7 @@ use deno_error::JsErrorBox;
 use serde_json::{Value, json};
 
 use crate::server::ui::{
-    RegisteredComponentContribution, RegisteredPackageInputContribution,
+    RegisteredComponentContribution, RegisteredLayoutIntent, RegisteredPackageInputContribution,
     RegisteredPackageLayoutOverride, RegisteredPackageThemeTokenDeclaration,
     RegisteredPackageUiStateScope, RegisteredPanelContribution,
     RegisteredTransientOverlayContribution, UiContributionDiagnostic,
@@ -124,6 +124,24 @@ pub(super) fn op_clay_ui_set_layout_override(
         .map_err(ui_error("clay.ui.layout_override_failed"))?;
     serde_json::to_string(&layout_override_result(&registered))
         .map_err(serialize_error("clay.ui.layout_override_failed"))
+}
+
+#[op2]
+#[string]
+pub(super) fn op_clay_ui_request_layout_intent(
+    state: &mut OpState,
+    #[string] declaration_json: String,
+) -> Result<String, JsErrorBox> {
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
+    let declaration = parse_json(&declaration_json, "clay.ui.invalid_layout_intent")?;
+    let op_state = state.borrow::<Arc<ClayOpState>>();
+    let registered = op_state
+        .request_layout_intent(&package.manifest, &declaration)
+        .map_err(ui_error("clay.ui.layout_intent_failed"))?;
+    serde_json::to_string(&layout_intent_result(&registered))
+        .map_err(serialize_error("clay.ui.layout_intent_failed"))
 }
 
 #[op2]
@@ -249,6 +267,19 @@ fn layout_override_result(registered: &RegisteredPackageLayoutOverride) -> serde
         "value": registered.value,
         "source": registered.source,
         "precedenceRank": registered.precedence_rank,
+        "estimatedPayloadBytes": registered.estimated_payload_bytes,
+    })
+}
+
+fn layout_intent_result(registered: &RegisteredLayoutIntent) -> serde_json::Value {
+    json!({
+        "registered": true,
+        "id": registered.id,
+        "targetPane": registered.target_pane,
+        "orientation": registered.orientation,
+        "ratio": registered.ratio,
+        "position": registered.position,
+        "source": registered.source,
         "estimatedPayloadBytes": registered.estimated_payload_bytes,
     })
 }

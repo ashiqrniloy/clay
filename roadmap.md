@@ -1206,7 +1206,7 @@ Focus areas:
 - Audit the current token surface: core tokens in `src/shell/theme.rs`, editor base UI colors in `src/editor/theme.rs`, and typography variants in `src/editor/typography.rs`.
 - Define the minimalist design language for Clay: expanded 4pt spacing scale, restrained radius scale, near-invisible elevation, a single consistent accent, muted semantic colors, state color roles (hover/active/disabled), focus-ring token, motion duration tokens, and overlay z-level tokens. All additions are typed tokens with core fallbacks; additive-only, no existing token renames.
 - Expand the typography hierarchy beyond `Title`/`Body`/`Status`/`Detail` with clear title levels (for example `Display`, `Section`, `Caption`) that scale from the user-configured font roles and sizes. Packages and components continue to reference roles and variants, never concrete families or point sizes; font setup and title hierarchy stay user-configurable (theme, font from UI with config-file override).
-- Rethink and document defaults: default theme values, default panel sizes, and density defaults as token-backed values rather than hardcoded constants.
+- Rethink and document core fallback values, default panel sizes, and density defaults as token-backed values rather than hardcoded constants. This phase prepares the catalog and fallback contract; it does not ship or select the named light/dark default pair, which is owned by Phase 20.6.
 - Update `.agents/skills/clay-ui/references/tokens.md`, `docs/reference/packages/creating-packages.md`, and theme package docs with the new token catalog.
 
 Expected outcome:
@@ -1309,7 +1309,7 @@ Entry gate:
 
 Focus areas:
 
-- Segregate default themes into dedicated theme packages, shipping a light/dark default pair in the spirit of modus operandi / modus vivendi alongside the existing Gruvbox packages.
+- Segregate default themes into dedicated theme packages. Ship **Modus Operandi** (`@clay/theme-modus-operandi`) as Clay's canonical light-mode default and **Modus Vivendi** (`@clay/theme-modus-vivendi`) as Clay's canonical dark-mode default, alongside the existing optional Gruvbox packages. Preserve upstream naming, palette provenance, licensing/attribution, and accessibility intent; pin system/manual light-dark selection semantics in the Phase 20.6 plan before implementation.
 - Theme, font role, and font-size-hierarchy configuration from the UI, with `~/.config/clay/init.js` config-file override and documented precedence (package defaults < user config < UI session changes, or as decided).
 - Live theme switch without restart; typography changes revalidate through the existing revisioned typography registry.
 - Settings surfaces built exclusively from catalog components (dropdown, text input, multi-select, list) as a conformance proof.
@@ -1318,7 +1318,7 @@ Focus areas:
 Expected outcome:
 
 - Users switch and tune themes, fonts, and the title/text size hierarchy from the UI or config file.
-- Default themes live in segregated packages like any other theme.
+- Modus Operandi is the canonical light-mode default and Modus Vivendi is the canonical dark-mode default; both live in segregated packages like any other theme.
 
 ## Phase 20.7: Package UI Conformance and Aesthetic Guardrails
 
@@ -1361,7 +1361,13 @@ Expected outcome:
 - Any agent or developer can discover every reusable UI primitive/component and the rules for using them without reading paint code.
 - Documentation drift fails CI or phase acceptance.
 
+## UI Architecture (Explore if needed if we are not building a UI library)
+
 ## Window management with splits and tabs
+
+## Font ligatures, Caret Styles (Blinking, line, bar, underscore), Shift Down select line
+
+## Movement (Next word, previous word, next line, previous line, next paragraph, previous paragraph, end of paragraph, end of file, beginning of file, selection, select word, select line, select next line, select previous line)
 
 ## Command Centre
 

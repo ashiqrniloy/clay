@@ -24,7 +24,10 @@ use crate::perf::budgets::{
 use crate::shell::{
     components::validate_component_kind,
     components::validate_style_variables,
-    theme::{PackageThemeToken, ThemeTokenResolver, ThemeTokenType, core_fallback_matches_type},
+    theme::{
+        DensityLevel, ElevationLevel, MotionDuration, PackageThemeToken, ThemeTokenResolver,
+        ThemeTokenType, ZLevel, core_fallback_matches_type, core_token_type, is_valid_dimension,
+    },
 };
 
 use crate::editor::theme::{parse_hex_rgba, parse_override_token};
@@ -347,6 +350,62 @@ impl TextStyleOverrideDescriptor {
     }
 }
 
+/// Inert descriptor for a Phase 20.1 typed UI design-token override declared by
+/// a theme package via `clay.contributions.designTokens`. Stored as an `Eq`
+/// representation (RGBA bytes, `f64`/`f32` bits, or a validated level name) so it
+/// composes with the `Eq`-deriving contribution inventory; converted to the
+/// protocol [`crate::protocol::WireDesignTokenValue`] when the active theme is
+/// resolved (`setTheme`). Pure style data: no code/widgets/ops/CSS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesignTokenOverrideDescriptor {
+    /// Core Clay token name being overridden (e.g. `surface.hover`).
+    pub token: String,
+    /// Validated override value.
+    pub value: DesignTokenValueDescriptor,
+    /// Owning theme package api prefix (provenance).
+    pub provenance: String,
+}
+
+/// Eq-friendly validated design-token value. Floats travel as `to_bits()` so the
+/// descriptor stays `Eq`; the protocol layer reconstructs `f64`/`f32` from bits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesignTokenValueDescriptor {
+    /// `color-role` override as RGBA bytes.
+    Color([u8; 4]),
+    /// `spacing`/`radius`/`dimension`/`motion-duration` override as `f64::to_bits`.
+    Scalar(u64),
+    /// `opacity` override as `f32::to_bits`, validated to a finite `[0, 1]` value.
+    Opacity(u32),
+    /// `elevation`/`z-level`/`density` override as a validated level name.
+    Level(String),
+}
+
+impl DesignTokenOverrideDescriptor {
+    /// Convert to the protocol wire override shipped in
+    /// [`crate::protocol::ActiveTheme::design_tokens`].
+    pub(crate) fn to_wire(&self) -> crate::protocol::UiDesignTokenOverride {
+        let value = match &self.value {
+            DesignTokenValueDescriptor::Color(b) => {
+                crate::protocol::WireDesignTokenValue::Color(*b)
+            }
+            DesignTokenValueDescriptor::Scalar(bits) => {
+                crate::protocol::WireDesignTokenValue::Scalar(f64::from_bits(*bits))
+            }
+            DesignTokenValueDescriptor::Opacity(bits) => {
+                crate::protocol::WireDesignTokenValue::Opacity(f32::from_bits(*bits))
+            }
+            DesignTokenValueDescriptor::Level(s) => {
+                crate::protocol::WireDesignTokenValue::Level(s.clone())
+            }
+        };
+        crate::protocol::UiDesignTokenOverride {
+            token: self.token.clone(),
+            value,
+            provenance: self.provenance.clone(),
+        }
+    }
+}
+
 /// Inert descriptor for package-owned pointer/focus/action input metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputContributionDescriptor {
@@ -432,6 +491,10 @@ pub struct PackageContributions {
     /// Converted to the editor `StyleRegistry` override shape when the active
     /// theme is resolved (task 7 `setTheme`).
     pub text_styles: Vec<TextStyleOverrideDescriptor>,
+    /// Inert typed UI design-token overrides declared by theme packages
+    /// (Phase 20.1). Converted to [`crate::protocol::UiDesignTokenOverride`] when
+    /// the active theme is resolved (`setTheme`).
+    pub design_tokens: Vec<DesignTokenOverrideDescriptor>,
     pub input_contributions: Vec<InputContributionDescriptor>,
     pub ui_state_scopes: Vec<UiStateScopeContributionDescriptor>,
     pub layout_overrides: Vec<LayoutOverrideContributionDescriptor>,
@@ -880,6 +943,10 @@ fn parse_contributions(
         Some(v) => parse_text_style_contributions(v, api_prefix, ctx)?,
         None => Vec::new(),
     };
+    let design_tokens = match map.get("designTokens") {
+        Some(v) => parse_design_token_contributions(v, api_prefix, ctx)?,
+        None => Vec::new(),
+    };
     let registered_command_ids: Vec<String> =
         commands.iter().map(|command| command.id.clone()).collect();
     let theme_resolver = theme_resolver_for_package_tokens(&theme_tokens);
@@ -932,6 +999,7 @@ fn parse_contributions(
         ui_overlays,
         theme_tokens,
         text_styles,
+        design_tokens,
         input_contributions,
         ui_state_scopes,
         layout_overrides,
@@ -2424,7 +2492,10 @@ fn parse_theme_token_contributions(
             return Err(ctx.error(
                 PackageRecordRule::InvalidContributionDescriptor,
                 Some(token),
-                "theme token type must be color-role, spacing, radius, typography, or opacity",
+                format!(
+                    "theme token type must be one of: {}",
+                    ThemeTokenType::all_as_str().join(", ")
+                ),
             ));
         };
         let fallback = required_str_field(obj, "fallback", ctx)?;
@@ -2555,6 +2626,231 @@ fn parse_text_style_contributions(
             italic,
             underline,
             strike,
+            provenance: api_prefix.to_string(),
+        });
+    }
+    Ok(descriptors)
+}
+
+/// Parse `clay.contributions.designTokens` (Phase 20.1) into validated inert
+/// [`DesignTokenOverrideDescriptor`]s. Each entry names a core Clay token and
+/// supplies a typed value whose variant must match the core token type and pass
+/// domain-specific bounds. Unknown tokens, type mismatches, NaN/infinite/
+/// out-of-range scalars, unparseable levels, duplicate tokens, raw CSS/raw color
+/// injection fields, and oversize payloads are rejected before the descriptor
+/// is stored. Design tokens never override typography variants (that is the
+/// separate hierarchy path in task 5).
+fn parse_design_token_contributions(
+    value: &Value,
+    api_prefix: &str,
+    ctx: &ErrorContext,
+) -> Result<Vec<DesignTokenOverrideDescriptor>, PackageRecordError> {
+    let Value::Array(entries) = value else {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            "clay.contributions.designTokens must be an array",
+        ));
+    };
+
+    let mut seen = HashSet::new();
+    let mut descriptors = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let size = contribution_payload_size(entry);
+        if size > SDUI_UPDATE_PAYLOAD_BUDGET_BYTES {
+            return Err(ctx.error(
+                PackageRecordRule::PayloadBudgetExceeded,
+                None,
+                format!(
+                    "design token declaration payload ({size} bytes) exceeds SDUI_UPDATE_PAYLOAD_BUDGET_BYTES ({SDUI_UPDATE_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_ui_prohibited_authority(entry, ctx)?;
+        let obj = entry.as_object().ok_or_else(|| {
+            ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                "design token contribution entries must be objects",
+            )
+        })?;
+        // Reject the raw-injection spellings; the validated `value` field below is
+        // the only honored value path (it is typed, not raw CSS).
+        if obj.contains_key("rawColor")
+            || obj.contains_key("css")
+            || obj.contains_key("rawCss")
+            || obj.contains_key("cssText")
+        {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                "design token declarations must use the validated `value` field, not raw colors or CSS",
+            ));
+        }
+        let token = required_str_field(obj, "token", ctx)?;
+        let Some(core_type) = core_token_type(token) else {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(token),
+                "design token must name a known Clay core token",
+            ));
+        };
+        // Design tokens carry UI scalar/color/level overrides only; typography
+        // variant overrides belong to the separate typography hierarchy path.
+        if core_type == ThemeTokenType::Typography {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(token),
+                "design tokens cannot override typography variants; use the typography hierarchy",
+            ));
+        }
+        if !seen.insert(token.to_string()) {
+            return Err(ctx.error(
+                PackageRecordRule::DuplicateContributionId,
+                Some(token),
+                "design token names must be unique within a package",
+            ));
+        }
+        let value_field = obj.get("value").ok_or_else(|| {
+            ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(token),
+                "design token declaration must include a `value` field",
+            )
+        })?;
+        let descriptor_value = match core_type {
+            ThemeTokenType::ColorRole => {
+                let hex = value_field.as_str().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string",
+                    )
+                })?;
+                let [r, g, b, a] = parse_hex_rgba(hex).ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string",
+                    )
+                })?;
+                DesignTokenValueDescriptor::Color([r, g, b, a])
+            }
+            ThemeTokenType::Spacing | ThemeTokenType::Radius | ThemeTokenType::Dimension => {
+                let v = value_field.as_f64().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "scalar design token `value` must be a finite number",
+                    )
+                })?;
+                if !is_valid_dimension(v) {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "scalar design token `value` must be finite, non-negative, and bounded",
+                    ));
+                }
+                DesignTokenValueDescriptor::Scalar(v.to_bits())
+            }
+            ThemeTokenType::Opacity => {
+                let v = value_field.as_f64().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "opacity design token `value` must be a finite number",
+                    )
+                })? as f32;
+                if !v.is_finite() || !(0.0..=1.0).contains(&v) {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "opacity design token `value` must be a finite number in [0, 1]",
+                    ));
+                }
+                DesignTokenValueDescriptor::Opacity(v.to_bits())
+            }
+            ThemeTokenType::MotionDuration => {
+                let v = value_field.as_f64().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "motion-duration design token `value` must be a finite number of milliseconds",
+                    )
+                })?;
+                if MotionDuration::from_millis(v).is_none() {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "motion-duration design token `value` must be finite, non-negative, and at most 1000 ms",
+                    ));
+                }
+                DesignTokenValueDescriptor::Scalar(v.to_bits())
+            }
+            ThemeTokenType::Elevation => {
+                let s = value_field.as_str().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "elevation design token `value` must be a level name (none, raised, overlay)",
+                    )
+                })?;
+                if ElevationLevel::parse(s).is_none() {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "elevation design token `value` must be one of: none, raised, overlay",
+                    ));
+                }
+                DesignTokenValueDescriptor::Level(s.to_string())
+            }
+            ThemeTokenType::ZLevel => {
+                let s = value_field.as_str().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "z-level design token `value` must be a level name (base, panel, overlay, modal, tooltip)",
+                    )
+                })?;
+                if ZLevel::parse(s).is_none() {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "z-level design token `value` must be one of: base, panel, overlay, modal, tooltip",
+                    ));
+                }
+                DesignTokenValueDescriptor::Level(s.to_string())
+            }
+            ThemeTokenType::Density => {
+                let s = value_field.as_str().ok_or_else(|| {
+                    ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "density design token `value` must be a level name (compact, default, spacious)",
+                    )
+                })?;
+                if DensityLevel::parse(s).is_none() {
+                    return Err(ctx.error(
+                        PackageRecordRule::InvalidContributionDescriptor,
+                        Some(token),
+                        "density design token `value` must be one of: compact, default, spacious",
+                    ));
+                }
+                DesignTokenValueDescriptor::Level(s.to_string())
+            }
+            // `Typography` was rejected above; this arm is unreachable but keeps
+            // the match exhaustive without a wildcard.
+            ThemeTokenType::Typography => {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(token),
+                    "design tokens cannot override typography variants; use the typography hierarchy",
+                ));
+            }
+        };
+        descriptors.push(DesignTokenOverrideDescriptor {
+            token: token.to_string(),
+            value: descriptor_value,
             provenance: api_prefix.to_string(),
         });
     }
@@ -4815,5 +5111,139 @@ mod tests {
         let err = assemble_package_record(&fixture).unwrap_err();
         assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
         assert!(err.message.contains("at least one of color"));
+    }
+
+    fn theme_fixture_with_design_tokens(tokens: Value) -> Value {
+        json!({
+            "name": "@clay/theme-test",
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": "clay-theme-test",
+                "entry": "./dist/index.js",
+                "loadEntry": "./dist/load.js",
+                "docs": "./docs/index.md",
+                "permissions": [],
+                "modes": [],
+                "contributions": {
+                    "designTokens": tokens
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn design_token_contributions_parse_into_inert_descriptors_and_round_trip_to_wire() {
+        let fixture = theme_fixture_with_design_tokens(json!([
+            { "token": "surface.hover", "value": "#112233ff" },
+            { "token": "spacing.md", "value": 18 },
+            { "token": "opacity.full", "value": 0.9 },
+            { "token": "dimension.sidebar.default", "value": 200.0 },
+            { "token": "elevation.raised", "value": "raised" },
+            { "token": "motion.fast", "value": 80 },
+            { "token": "z.tooltip", "value": "tooltip" },
+            { "token": "density.spacious", "value": "spacious" }
+        ]));
+        let record = assemble_package_record(&fixture).expect("design tokens must validate");
+        assert_eq!(record.contributions.design_tokens.len(), 8);
+        let hover = record
+            .contributions
+            .design_tokens
+            .iter()
+            .find(|d| d.token == "surface.hover")
+            .unwrap();
+        assert_eq!(
+            hover.value,
+            DesignTokenValueDescriptor::Color([0x11, 0x22, 0x33, 0xff])
+        );
+        assert_eq!(hover.provenance, "clay-theme-test");
+        // to_wire reconstructs native f64/f32 from bits and preserves levels.
+        let wire = hover.to_wire();
+        assert_eq!(
+            wire.value,
+            crate::protocol::WireDesignTokenValue::Color([0x11, 0x22, 0x33, 0xff])
+        );
+        let spacing = record
+            .contributions
+            .design_tokens
+            .iter()
+            .find(|d| d.token == "spacing.md")
+            .unwrap();
+        assert_eq!(
+            spacing.value,
+            DesignTokenValueDescriptor::Scalar((18.0_f64).to_bits())
+        );
+        assert_eq!(
+            spacing.to_wire().value,
+            crate::protocol::WireDesignTokenValue::Scalar(18.0)
+        );
+    }
+
+    #[test]
+    fn design_token_rejects_unknown_type_mismatch_invalid_and_raw_fields() {
+        // Unknown token.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "nope.token", "value": "#fff" }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("known Clay core token"));
+        // Type mismatch: scalar for a color-role token.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "surface.hover", "value": 12 }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("hex string"));
+        // Out-of-range scalar.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "dimension.sidebar.default", "value": -5.0 }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("finite, non-negative"));
+        // Out-of-range opacity.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "opacity.full", "value": 2.0 }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("[0, 1]"));
+        // Out-of-range motion duration.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "motion.fast", "value": 5000 }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("1000 ms"));
+        // Invalid elevation level.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "elevation.raised", "value": "huge" }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("none, raised, overlay"));
+        // Typography override via design tokens is not allowed.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "typography.body", "value": "#fff" }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("typography hierarchy"));
+        // Duplicate token.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "surface.hover", "value": "#fff" },
+            { "token": "surface.hover", "value": "#000" }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::DuplicateContributionId);
+        // Raw CSS/color fields rejected.
+        let err = assemble_package_record(&theme_fixture_with_design_tokens(json!([
+            { "token": "surface.hover", "value": "#fff", "css": "foo" }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("raw colors or CSS"));
     }
 }

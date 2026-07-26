@@ -37,6 +37,7 @@ fn active_typography_round_trips_all_profiles_and_revision() {
             families: vec!["system-ui".to_string()],
             size: 13.0,
         },
+        ..ActiveTypography::default()
     };
     typography.validate().expect("valid bounded typography");
 

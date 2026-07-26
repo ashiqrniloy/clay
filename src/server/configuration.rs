@@ -12,7 +12,16 @@ use serde_json::Value;
 use crate::packages::manifest::is_valid_api_prefix;
 
 const PACKAGE_OPTION_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
-const PACKAGE_OPTION_SOURCES: &[&str] = &["init-js", "package-default", "clay-default"];
+const PACKAGE_OPTION_SOURCES: &[&str] =
+    &["init-js", "package-default", "clay-default", "ui-session"];
+/// Bounded persisted user preferences (`~/.config/clay/preferences.json`). The
+/// file is a closed JSON object: only `theme`, `appearance`, and `typography`
+/// keys are recognized; unknown keys are dropped with a diagnostic. Values are
+/// validated at load and persist time so a corrupted/manually-edited file falls
+/// back safely without granting authority.
+const PREFERENCES_PAYLOAD_BUDGET_BYTES: usize = 8 * 1024;
+const PREFERENCES_KEYS: &[&str] = &["theme", "appearance", "typography"];
+const PREFERENCES_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 const PANEL_VISIBILITY_VALUES: &[&str] = &["visible", "hidden", "collapsed"];
 const PANEL_SLOT_VALUES: &[&str] = &["left", "right", "top", "bottom"];
 const FALLBACK_VALUES: &[&str] = &["package-default", "hide", "ignore"];
@@ -204,7 +213,7 @@ impl ConfigurationRuntime {
             .unwrap_or("init-js");
         if !PACKAGE_OPTION_SOURCES.contains(&source) {
             return Err(ConfigurationError::InvalidPackageOption(
-                "source must be init-js, package-default, or clay-default".to_string(),
+                "source must be init-js, package-default, clay-default, or ui-session".to_string(),
             ));
         }
         let registered = RegisteredPackageOption {
@@ -229,6 +238,158 @@ impl ConfigurationRuntime {
         if !loaded_modules.iter().any(|loaded| loaded == &module_path) {
             loaded_modules.push(module_path);
         }
+    }
+
+    /// Path to the persisted user-preferences file (`preferences.json`) inside
+    /// the configuration root. Phase 20.6 configuration-precedence store.
+    pub(crate) fn preferences_path(&self) -> PathBuf {
+        self.config_root.join("preferences.json")
+    }
+
+    /// Load and validate persisted user preferences. A missing file yields an
+    /// empty preference set. A present but malformed/oversized file, or one
+    /// carrying an unknown key or an invalid value, is dropped field-by-field
+    /// with diagnostics recorded in [`PersistedPreferences::diagnostics`] so
+    /// startup never breaks and no authority is granted by a corrupted file.
+    /// Closed surface: only `theme`, `appearance`, `typography` are read.
+    pub(crate) fn load_preferences(&self) -> PersistedPreferences {
+        let bytes = match fs::read(self.preferences_path()) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return PersistedPreferences::default();
+            }
+            Err(error) => {
+                return PersistedPreferences {
+                    diagnostics: vec![format!(
+                        "preferences.json is unreadable: {error}; ignoring persisted preferences"
+                    )],
+                    ..Default::default()
+                };
+            }
+        };
+        if bytes.len() > PREFERENCES_PAYLOAD_BUDGET_BYTES {
+            return PersistedPreferences {
+                diagnostics: vec![format!(
+                    "preferences.json payload ({} bytes) exceeds {} bytes; ignoring persisted preferences",
+                    bytes.len(),
+                    PREFERENCES_PAYLOAD_BUDGET_BYTES
+                )],
+                ..Default::default()
+            };
+        }
+        let value: Value = match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(error) => {
+                return PersistedPreferences {
+                    diagnostics: vec![format!(
+                        "preferences.json is not valid JSON: {error}; ignoring persisted preferences"
+                    )],
+                    ..Default::default()
+                };
+            }
+        };
+        let Some(object) = value.as_object() else {
+            return PersistedPreferences {
+                diagnostics: vec![
+                    "preferences.json root must be an object; ignoring persisted preferences"
+                        .to_string(),
+                ],
+                ..Default::default()
+            };
+        };
+        let mut prefs = PersistedPreferences::default();
+        for (key, field) in object {
+            if !PREFERENCES_KEYS.contains(&key.as_str()) {
+                prefs.diagnostics.push(format!(
+                    "preferences.json key `{key}` is not recognized; dropping"
+                ));
+                continue;
+            }
+            // `null` means "absent" (write_preferences always emits all three
+            // keys); skip it so a serialized absence does not log a diagnostic.
+            if field.is_null() {
+                continue;
+            }
+            match key.as_str() {
+                "theme" => match validate_preference_theme(field) {
+                    Ok(specifier) => prefs.theme = Some(specifier),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
+                "appearance" => match validate_preference_appearance(field) {
+                    Ok(appearance) => prefs.appearance = Some(appearance),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
+                "typography" => match validate_preference_typography(field) {
+                    Ok(()) => prefs.typography = Some(field.clone()),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
+                _ => unreachable!("PREFERENCES_KEYS bounds the match"),
+            }
+        }
+        prefs
+    }
+
+    /// Persist a single validated preference field, merging with any existing
+    /// file. Atomic (tmp + rename), bounded, non-blocking. Returns the merged
+    /// preferences that will be loaded on the next reload.
+    pub(crate) fn persist_preference(
+        &self,
+        key: &str,
+        value: Value,
+    ) -> Result<PersistedPreferences, ConfigurationError> {
+        let mut prefs = self.load_preferences();
+        prefs.diagnostics.clear();
+        match key {
+            "theme" => validate_preference_theme(&value)
+                .map(|specifier| prefs.theme = Some(specifier))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
+            "appearance" => validate_preference_appearance(&value)
+                .map(|appearance| prefs.appearance = Some(appearance))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
+            "typography" => validate_preference_typography(&value)
+                .map(|_| prefs.typography = Some(value))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
+            _ => {
+                return Err(ConfigurationError::InvalidPackageOption(format!(
+                    "preferences key `{key}` is not recognized"
+                )));
+            }
+        }
+        self.write_preferences(&prefs)
+    }
+
+    /// Remove every persisted preference field (settings.reset). Atomic.
+    pub(crate) fn clear_preferences(&self) -> Result<(), ConfigurationError> {
+        self.write_preferences(&PersistedPreferences::default())?;
+        Ok(())
+    }
+
+    fn write_preferences(
+        &self,
+        prefs: &PersistedPreferences,
+    ) -> Result<PersistedPreferences, ConfigurationError> {
+        let object = serde_json::json!({
+            "theme": prefs.theme,
+            "appearance": prefs.appearance.map(crate::protocol::Appearance::as_str),
+            "typography": prefs.typography,
+        });
+        let bytes = serde_json::to_vec(&object).map_err(|error| {
+            ConfigurationError::InvalidPackageOption(format!(
+                "preferences serialization failed: {error}"
+            ))
+        })?;
+        if bytes.len() > PREFERENCES_PAYLOAD_BUDGET_BYTES {
+            return Err(ConfigurationError::InvalidPackageOption(format!(
+                "preferences payload ({} bytes) exceeds {} bytes",
+                bytes.len(),
+                PREFERENCES_PAYLOAD_BUDGET_BYTES
+            )));
+        }
+        let final_path = self.preferences_path();
+        let tmp_path = self.config_root.join(".preferences.json.tmp");
+        fs::write(&tmp_path, &bytes).map_err(ConfigurationError::Root)?;
+        fs::rename(&tmp_path, &final_path).map_err(ConfigurationError::Root)?;
+        Ok(prefs.clone())
     }
 }
 
@@ -513,6 +674,64 @@ fn display_relative_to(root: &Path, path: &Path) -> String {
     format!("./{}", relative.to_string_lossy().replace('\\', "/"))
 }
 
+/// Phase 20.6 persisted user preferences loaded from `preferences.json`. Each
+/// field is optional; an absent field means "no UI-session override, defer to
+/// init.js / canonical default". `typography` is the raw validated JSON value;
+/// the `setTypography` op re-validates bounds at apply time. `diagnostics`
+/// carries fallback reasons for any field that was dropped during load so a
+/// corrupted/manually-edited file never breaks startup.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PersistedPreferences {
+    pub(crate) theme: Option<String>,
+    pub(crate) appearance: Option<crate::protocol::Appearance>,
+    pub(crate) typography: Option<Value>,
+    pub(crate) diagnostics: Vec<String>,
+}
+
+/// Validate a persisted `theme` value: must be a first-party bundled
+/// `@clay/theme-*` specifier. Rejects arbitrary specifiers so a corrupted file
+/// cannot point the active theme at a non-bundled package.
+fn validate_preference_theme(value: &Value) -> Result<String, String> {
+    let specifier = value
+        .as_str()
+        .ok_or_else(|| "preferences.json `theme` must be a string; dropping".to_string())?;
+    if !specifier.starts_with("@clay/theme-")
+        || crate::packages::bundled::bundled_entry(specifier).is_none()
+    {
+        return Err(format!(
+            "preferences.json `theme` `{specifier}` is not a bundled first-party @clay/theme-* specifier; dropping"
+        ));
+    }
+    Ok(specifier.to_string())
+}
+
+/// Validate a persisted `appearance` value: bounded light/dark/system enum.
+fn validate_preference_appearance(value: &Value) -> Result<crate::protocol::Appearance, String> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| "preferences.json `appearance` must be a string; dropping".to_string())?;
+    if !PREFERENCES_APPEARANCE_VALUES.contains(&text) {
+        return Err(format!(
+            "preferences.json `appearance` `{text}` is not light/dark/system; dropping"
+        ));
+    }
+    crate::protocol::Appearance::parse(text)
+        .ok_or_else(|| format!("preferences.json `appearance` `{text}` failed to parse; dropping"))
+}
+
+/// Validate a persisted `typography` value structurally (the `setTypography`
+/// op re-validates numeric bounds at apply time). Rejects authority-bearing
+/// shapes (raw ops/css/callbacks) via [`reject_prohibited_authority`].
+fn validate_preference_typography(value: &Value) -> Result<(), String> {
+    reject_prohibited_authority(value).map_err(|error| {
+        format!("preferences.json `typography` carries prohibited authority: {error}; dropping")
+    })?;
+    if !value.is_object() {
+        return Err("preferences.json `typography` must be an object; dropping".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -717,5 +936,169 @@ mod tests {
         assert!(!state.contains("electricCharacters"));
         assert!(!state.contains("pairInsertion"));
         assert!(!state.contains("commentContinuation"));
+    }
+
+    fn preferences_runtime() -> ConfigurationRuntime {
+        let root = std::env::temp_dir().join(format!(
+            "clay-prefs-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock before epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("create temp config root");
+        fs::write(root.join("init.js"), "// test init\n").expect("write init.js");
+        ConfigurationRuntime::from_config_root(&root).expect("create configuration runtime")
+    }
+
+    #[test]
+    fn package_option_source_taxonomy_accepts_ui_session() {
+        let runtime = runtime();
+        let option = runtime
+            .set_package_option(&json!({
+                "packagePrefix": "markdown",
+                "option": "markdown.layout.defaultVisibility",
+                "value": "collapsed",
+                "source": "ui-session"
+            }))
+            .unwrap();
+        assert_eq!(option.source, "ui-session");
+    }
+
+    #[test]
+    fn preferences_persist_and_round_trip_through_a_fresh_runtime() {
+        let runtime = preferences_runtime();
+        let root = runtime.preferences_path().parent().unwrap().to_path_buf();
+        // Persist theme + appearance.
+        runtime
+            .persist_preference("theme", json!("@clay/theme-modus-vivendi"))
+            .expect("persist theme");
+        runtime
+            .persist_preference("appearance", json!("dark"))
+            .expect("persist appearance");
+        // A fresh runtime (simulating reload) reads the file back.
+        let reloaded = ConfigurationRuntime::from_config_root(&root).expect("reload runtime");
+        let prefs = reloaded.load_preferences();
+        assert_eq!(prefs.theme.as_deref(), Some("@clay/theme-modus-vivendi"));
+        assert_eq!(prefs.appearance, Some(crate::protocol::Appearance::Dark));
+        assert!(prefs.diagnostics.is_empty(), "no diagnostics: {prefs:?}");
+    }
+
+    #[test]
+    fn preferences_clear_wipes_the_store() {
+        let runtime = preferences_runtime();
+        let root = runtime.preferences_path().parent().unwrap().to_path_buf();
+        runtime
+            .persist_preference("theme", json!("@clay/theme-modus-operandi"))
+            .unwrap();
+        runtime.clear_preferences().expect("clear");
+        let reloaded = ConfigurationRuntime::from_config_root(&root).expect("reload runtime");
+        let prefs = reloaded.load_preferences();
+        assert!(prefs.theme.is_none());
+        assert!(prefs.appearance.is_none());
+    }
+
+    #[test]
+    fn preferences_persist_rejects_non_first_party_theme() {
+        let runtime = preferences_runtime();
+        let err = runtime
+            .persist_preference("theme", json!("@vendor/evil"))
+            .expect_err("non-first-party theme must be rejected at persist");
+        assert!(err.to_string().contains("first-party"));
+        // File must not have been written with the bad value.
+        let prefs = runtime.load_preferences();
+        assert!(prefs.theme.is_none());
+    }
+
+    #[test]
+    fn preferences_persist_rejects_unknown_appearance() {
+        let runtime = preferences_runtime();
+        runtime
+            .persist_preference("appearance", json!("auto"))
+            .expect_err("unknown appearance must be rejected");
+        let prefs = runtime.load_preferences();
+        assert!(prefs.appearance.is_none());
+    }
+
+    #[test]
+    fn preferences_persist_rejects_unknown_key() {
+        let runtime = preferences_runtime();
+        runtime
+            .persist_preference("authority", json!("root"))
+            .expect_err("unknown preferences key must be rejected");
+    }
+
+    #[test]
+    fn preferences_load_drops_corrupted_field_with_diagnostic() {
+        let runtime = preferences_runtime();
+        fs::write(runtime.preferences_path(), r#"{"theme":42,"unknown":"x"}"#).unwrap();
+        let prefs = runtime.load_preferences();
+        assert!(prefs.theme.is_none(), "non-string theme dropped");
+        assert!(
+            !prefs.diagnostics.is_empty(),
+            "diagnostics recorded: {prefs:?}"
+        );
+        assert!(
+            prefs.diagnostics.iter().any(|d| d.contains("theme")),
+            "theme diagnostic present"
+        );
+        assert!(
+            prefs.diagnostics.iter().any(|d| d.contains("unknown")),
+            "unknown-key diagnostic present"
+        );
+    }
+
+    #[test]
+    fn preferences_load_falls_back_when_file_is_not_json() {
+        let runtime = preferences_runtime();
+        fs::write(runtime.preferences_path(), "not json {{{").unwrap();
+        let prefs = runtime.load_preferences();
+        assert!(prefs.theme.is_none());
+        assert!(prefs.appearance.is_none());
+        assert!(!prefs.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn preferences_load_falls_back_when_payload_exceeds_budget() {
+        let runtime = preferences_runtime();
+        let huge = format!(
+            "{{\"theme\":\"{}\"}}",
+            "x".repeat(PREFERENCES_PAYLOAD_BUDGET_BYTES)
+        );
+        fs::write(runtime.preferences_path(), huge).unwrap();
+        let prefs = runtime.load_preferences();
+        assert!(prefs.theme.is_none());
+        assert!(!prefs.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn preferences_typography_persists_and_round_trips() {
+        let runtime = preferences_runtime();
+        let root = runtime.preferences_path().parent().unwrap().to_path_buf();
+        let typography = json!({
+            "monospace": { "families": ["JetBrains Mono"], "size": 16 },
+            "proportional": { "families": ["Inter"], "size": 17 },
+            "ui": { "families": ["system-ui"], "size": 13 }
+        });
+        runtime
+            .persist_preference("typography", typography.clone())
+            .expect("persist typography");
+        let reloaded = ConfigurationRuntime::from_config_root(&root).expect("reload runtime");
+        let prefs = reloaded.load_preferences();
+        let typography_back = prefs.typography.expect("typography round-tripped");
+        assert_eq!(typography_back, typography);
+        assert!(prefs.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn preferences_typography_rejects_authority_bearing_shape() {
+        let runtime = preferences_runtime();
+        let err = runtime
+            .persist_preference(
+                "typography",
+                json!({ "monospace": { "families": ["x"], "size": 16 }, "rawOps": "Deno.core.ops" }),
+            )
+            .expect_err("authority-bearing typography must be rejected");
+        assert!(err.to_string().contains("prohibited"));
     }
 }

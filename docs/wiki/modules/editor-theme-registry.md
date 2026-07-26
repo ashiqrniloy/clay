@@ -19,6 +19,8 @@
 - `runtime/js/theme.js`
 - `packages/theme-gruvbox-material-dark/package.json`
 - `packages/theme-gruvbox-material-light/package.json`
+- `packages/theme-modus-operandi/package.json`
+- `packages/theme-modus-vivendi/package.json`
 - `tests/theme_packages.rs`
 - `tests/decoration_transport.rs`
 - `tests/editor_performance_invariants.rs`
@@ -44,7 +46,7 @@ The authoritative package authoring and vocabulary references are:
 - Preserve legacy style-token compatibility through `DecorationSpan::from_style_token` and `TokenType::classify_style_token` while rendering through the new vocabulary.
 - Apply static theme-package `textStyles` over the Clay default with last-wins ordering.
 - Keep paint hot paths free of package JavaScript, raw IPC, package resolution, filesystem access, allocation-heavy maps, and raw color literals outside theme definitions.
-- Keep SDUI component theme tokens separate from editor text theming. `src/shell/theme.rs::ThemeTokenResolver` styles SDUI typed scalars; `StyleRegistry` styles editor text/decorations/base UI.
+- Keep SDUI typed scalars on `ResolvedUiTheme` (Phase 20.1) and editor text on `StyleRegistry`. `ThemeTokenResolver` remains the package-alias resolver for semantic `themeTokens`; `ResolvedUiTheme` is the cached active-theme UI design-token registry for shell/SDUI geometry and paint reads.
 
 ## How It Works
 
@@ -191,12 +193,54 @@ let color = style.color;
 
 ## Phase 20 verification
 
-Roadmap Phase 20's "theme system" item is **satisfied by Phase 18.15**. Phase 20 only verified completeness and landed accessibility/theme polish: status/shell chrome already reads `StyleRegistry` base colors; `theme_display_label` / `SduiStatusObservation.theme_label` expose the active specifier; `status_chrome_meets_contrast` locks WCAG AA contrast for Clay default and Gruvbox Material status chrome. Do not invent a second theme registry.
+Roadmap Phase 20's "theme system" item is **satisfied by Phase 18.15**. Phase 20 only verified completeness and landed accessibility/theme polish: status/shell chrome already reads `StyleRegistry` base colors; `theme_display_label` / `SduiStatusObservation.theme_label` expose the active specifier; `status_chrome_meets_contrast` locks WCAG AA contrast for Clay default and Gruvbox Material status chrome. Do not invent a second editor color registry.
 
+## Phase 20.1 UI design tokens and resolved shell theme
+
+Phase 20.1 extends the same `ActiveTheme` snapshot and `setTheme` path with a separate cached UI design-token registry. Editor vocabulary colors stay on `StyleRegistry`; generic UI scalars (spacing, dimensions, density, elevation, motion, z-level, opacity, and semantic color roles for SDUI) resolve through `ResolvedUiTheme` in `src/shell/theme.rs`.
+
+### Typed catalog and wire shape
+
+- `ThemeTokenType` now has ten domains: `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, and `density`. The core fallback catalog in `core_theme_value()` holds 73 named tokens (4pt spacing scale, restrained radii, panel/sidebar dimension defaults, near-invisible elevation, bounded motion durations, overlay z-levels, compact/default/spacious density, and seven typography variant tokens).
+- `ActiveTheme` gained `design_tokens: Vec<UiDesignTokenOverride>` with typed `WireDesignTokenValue` variants (`Color`, `Scalar`, `Opacity`, `Level`). Theme packages may declare static `clay.contributions.designTokens` entries (parsed in `src/packages/record.rs` as `DesignTokenOverrideDescriptor` with Eq-friendly bit-encoded floats). Package `themeTokens` remain semantic aliases only; `designTokens` carry resolved override values for theme packages.
+- `setTheme` (`src/server/ops/theme.rs`) converts descriptors to wire values, validates token existence, value-type match, and domain bounds, then stores the full snapshot. Telemetry includes `designTokenCount` alongside `overrideCount`.
+
+### `ResolvedUiTheme` construction and resolution
+
+`ResolvedUiTheme::from_active_theme(&design_tokens)` validates each override against `core_token_type()` and domain bounds (`is_valid_dimension`, opacity `[0,1]`, level parse, `MotionDuration` bounds). Valid overrides live in a lazy `BTreeMap<String, ResolvedThemeValue>`; `resolved(token)` checks overrides first, then `core_theme_value()` fallbacks. Empty override sets mean all-core defaults, so existing Gruvbox manifests need no edits.
+
+Typed accessors (`color`, `scalar_f64`, `opacity`, `dimension`, `elevation`, `motion_duration`, `z_level`, `density`) and `panel_defaults()` / `active_density()` / `spacing_scale()` feed shell layout. `PanelDefaults` validates min ≤ default ≤ max triples and falls back to Clay core constants (`240/120/48/480/240` px) when overrides are missing or misordered.
+
+Packages cannot override `typography.*` design tokens (`DesignTokenError::TypographyNotOverridable`); typography scale ratios remain user-owned through `ActiveTypography.hierarchy`.
+
+### Client install and hot-path policy
+
+`SduiNativeState` owns `ui_theme: ResolvedUiTheme`, installed atomically with `StyleRegistry` at three `masonry_editor.rs` sites: bootstrap (`with_initial_state`), live `ClientConnectionEvent::ActiveTheme`, and runtime snapshot install. Paint/layout/input hot paths read cached fields only; they do not call `core_theme_value()`, `ThemeTokenResolver`, or color parsers. Source guard `ui_design_tokens_resolve_without_package_javascript_in_paint_layout_or_input_hot_paths` in `tests/editor_performance_invariants.rs` enforces this for `masonry_sdui.rs`, `masonry_editor.rs`, and `masonry_shell.rs`.
+
+`theme_switch_does_not_parse_or_execute_package_code_in_paint_paths` (1000-iteration cached read lock) verifies theme switches stay on installed native values.
+
+Phase 20.4/20.5 defer consuming elevation/motion/z-level tokens in component paint; Phase 20.4 also owns density spacing-rhythm consumption beyond the resolved `spacing_scale()` multiplier.
+
+Authoritative token catalog: `.agents/skills/clay-ui/references/tokens.md`. Package authoring: [Phase 20.1 authoring contract](../../reference/packages/creating-packages.md#phase-201-authoring-contract-typed-token-catalog-typography-hierarchy-and-token-backed-defaults).
+
+### Phase 20.1 tests
+
+- `src/shell/theme.rs`: catalog uniqueness, four-point spacing defaults, design-token validation/rejection, Gruvbox core-fallback compatibility, panel geometry from overrides, density spacing scale without typography revision churn, atomic theme install.
+- `src/packages/record.rs`: `designTokens` parse/round-trip and rejection of unknown/type-mismatch/invalid/raw/duplicate/typography overrides.
+- `src/protocol/codec.rs`: `active_theme_round_trips_typed_ui_token_overrides`.
+- `tests/editor_performance_invariants.rs`: hot-path source guard above.
+- `tests/primitives_docs.rs`: token catalog completeness against `core_theme_value()` match block.
+
+Commands: `cargo test --lib shell::theme`, `cargo test --test editor editor_performance_invariants::`, `cargo test --test protocol primitives_docs::`.
+
+## Phase 20.6 canonical Modus defaults and appearance
+
+Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `clay.theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
 
 ## Related
 
-- [Phase 18.15 Text Vocabulary, Two-Axis Decorations, and Theme Registry Primitive Review](text-vocabulary-and-theme-primitive-review.md)
+- [Phase 20.1 UI Design Language Primitive Review](phase20.1-ui-design-language-primitive-review.md)
+- [Token catalog reference](../../../.agents/skills/clay-ui/references/tokens.md)
 - [Masonry Editor Widget Status Observability](masonry-editor.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Decoration Transport](decoration-transport.md)

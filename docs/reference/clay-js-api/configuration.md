@@ -573,6 +573,59 @@ await publishTree(
 
 Configuration can customize documented Clay behavior through Clay JS APIs. It must not implicitly grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority. Modular loading is constrained to local configuration files under the configuration root; it is not a package manager, extension loader, workspace scanner, network fetcher, shell runner, or client-side JavaScript execution hook. Permission-bearing APIs still require explicit documented permissions and server-side validation.
 
+## Phase 20.1 UI design language, typed token catalog, and typography hierarchy configuration review
+
+Phase 20.1 expanded the typed token catalog from five domains to ten and added user-owned typography hierarchy scales, all additively through existing Clay JS APIs. No new `clay:configuration` API was promoted; no hidden configuration key was introduced.
+
+### What changed
+
+- **Typed token catalog**: five new domains (`dimension`, `elevation`, `motion-duration`, `z-level`, `density`) joined the lexical five (`color-role`, `spacing`, `radius`, `typography`, `opacity`) in `ThemeTokenType`. The core fallback catalog grew from ~21 to 61 tokens additively; no legacy token was renamed or repurposed.
+- **Typography hierarchy**: seven semantic `UiTextVariant` tokens (`typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, `typography.caption`) with user-owned `UiTypographyHierarchy` scale ratios, delivered atomically through the existing [`clay.theme.setTypography`](theme/set-typography.md) API via an optional `hierarchy` object. Omission preserves Clay defaults; partial hierarchies are rejected atomically.
+- **Typed UI design-token overrides**: `ActiveTheme` gained a `design_tokens` field carrying validated typed UI overrides (dimension, elevation, motion-duration, z-level, density, color-role, spacing, radius, opacity) from `clay.contributions.designTokens`. These are validated server-side against core token types and domain bounds, then resolved client-side into `ResolvedUiTheme` — a cached registry serving paint/layout hot paths with no per-frame parsing or IPC.
+- **Token-backed panel/sidebar/density defaults**: the legacy hardcoded panel/sidebar dimension constants and density default moved behind typed tokens (`dimension.sidebar.default`, `dimension.panel.side.*`, `dimension.panel.vertical.*`, `density.default`), resolved through `ResolvedUiTheme::panel_defaults()` and `ResolvedUiTheme::density()`. Dimension ordering is validated with fallback to Clay constants on invalid order; density scales only the token-owned UI spacing rhythm (Phase 20.4 component uplift), never panel dimensions or document typography.
+
+### Configuration surfaces
+
+| Behavior | API / surface | Notes |
+|---|---|---|
+| Theme selection with typed UI overrides | [`clay.theme.setTheme`](theme/set-theme.md) | `ActiveTheme` now carries `design_tokens` alongside `textStyles`; existing Gruvbox themes unchanged |
+| Typography profiles and hierarchy | [`clay.theme.setTypography`](theme/set-typography.md) | Optional `hierarchy` object with seven bounded scale fields; omission = defaults |
+| Package theme token declarations | [`clay.ui.serverRegisterThemeToken`](ui/server-register-theme-token.md) | Now accepts all ten token types; fallback must be same-typed Clay core token |
+| Package design-token overrides | `clay.contributions.designTokens` (manifest) | Ship typed UI overrides inside theme packages; validated against core types and bounds |
+| Panel layout / density settings | **Deferred beyond Phase 20.6** | No `init.js` API exists for panel-size, density, elevation-level, motion-duration, or z-level preferences; density defaults flow through theme `designTokens` |
+| Live appearance mode (light/dark) | [`clay.theme.setAppearance`](theme/set-appearance.md) | Phase 20.6: bounded `light`\|`dark`\|`system` enum drives the canonical Modus Operandi/Vivendi default; explicit `setTheme` always wins; `system` follows the OS signal with a dark fallback. See [Phase 20.6 precedence and persistence](#phase-206-themetypographyappearance-precedence-and-persistence) |
+
+### Rejected hidden configuration keys
+
+No hidden JSON/TOML/ad hoc keys are valid for Phase 20.1 token, hierarchy, or layout behavior. Rejected examples include:
+
+- `tokens.dimension.sidebar`, `design.sidebar.px`, `sidebarPixelWidth`, `panelSideDefaultPx`
+- `hierarchy.display`, `hierarchy.title`, `hierarchy.section`, `hierarchy.body`, `hierarchy.status`, `hierarchy.detail`, `hierarchy.caption` when expressed as top-level `init.js` keys outside `setTypography`
+- `density`, `density.level`, `density.compact`, `density.spacious`, `density.scale`
+- `elevation.raised`, `motion.fast`, `z.overlay`, `z.table` — must go through `designTokens` in a theme package, not `init.js` configuration
+- `fontScale`, `typography.hierarchy.display`, `typography.scale`, `typeScale`, `typeScaleRatio`
+- Raw panel dimension keys (`leftPanelWidth`, `rightPanelWidth`, `sidebar.width`, `sidebarWidth`, `panel.side.default`, `panel.vertical.default`)
+- Ad hoc theme token override keys, raw color injection, inline CSS blobs, or renderer callback hooks
+
+All token-backed values (panel dimensions, density, elevation, motion, z-level) are resolved from `ActiveTheme.design_tokens` or core fallbacks. The user-owned hierarchy is configured through `setTypography`. Theme selection remains `setTheme`. No new parallel API, JSON key, TOML key, or environment variable exists for these values.
+
+### Compiled budgets (not configurable)
+
+| Budget | Constant | Value |
+|---|---|---|
+| Max dimension | `MAX_DIMENSION_PX` | 8192 |
+| Max motion duration | `MotionDuration::MAX_MILLIS` | 1000 ms |
+| Max hierarchy scale | `HIERARCHY_SCALE_MAX` | 4.0 |
+| Typography payload budget | `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES` | 1024 |
+
+These are compiled security/performance boundaries, not `init.js` keys.
+
+### Security
+
+Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Ordinary keypress, paint, layout, scroll, pointer, text-event handling, edit acknowledgement, parse-result publication, decoration rendering, and completion result construction do not execute configuration JavaScript, compute token overrides, or revalidate UI design tokens. `ResolvedUiTheme` is a cached read-only registry installed at theme/configuration time; its hot-path accessors perform no parsing, IPC, or JavaScript.
+
+This review grants no filesystem, network, shell, package-manager, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native-widget, client-side JavaScript, CSS, renderer callback, raw value injection, or token-mutation authority. Typography hierarchy scales remain user-owned; packages cannot supply concrete hierarchy values even through `designTokens`.
+
 ## Historical Plan 035 unified package authority configuration review (superseded)
 
 > **Superseded by Plan 061 and the Plan 060 review below.** This section records the earlier single-runtime `RuntimeProfile` design only. Current trust classification uses two fixed runtime domains, exact bundled provenance/integrity, and durable out-of-band third-party adoption; normal configuration cannot select a runtime profile, promote a package, or authorize capabilities.
@@ -882,3 +935,37 @@ Representative rejected keys include `runtime.domain`, `runtime.packageContext`,
 `clay:configuration` remains trusted-only. Its exact facade surface is three runtime-backed APIs (`loadConfigurationModule`, `getConfigurationState`, `setPackageOption`) and three explicit planned/unavailable stubs (`setModePreference`, `setDecorationTheme`, `setParsePolicy`). Internal controls are absent from all `custom_properties` and public facades. Configuration evaluation stays in startup/reload/explicit setting work and adds no keypress, paint, layout, scroll, filesystem traversal, process, IPC, or parser hot-path work.
 
 Tests pin this closure in `src/server/configuration.rs::plan060_internal_security_and_performance_controls_are_not_configurable` and `tests/clay_js_api_inventory.rs::configuration_surface_is_closed_and_security_controls_are_not_properties`.
+
+## Phase 20.6 theme/typography/appearance precedence and persistence
+
+Phase 20.6 segregates the canonical default themes into packages (`@clay/theme-modus-operandi`, `@clay/theme-modus-vivendi`) and ships a settings UI panel (`@clay/settings`) for theme, appearance, font, and size-hierarchy selection. The settings panel emits inert `settings.*` command intents; the server validates them, persists the choice, and triggers a runtime reload so the change applies live through the canonical apply path (persist → reload → `init.js` re-evaluation + preference apply → `RuntimeStateSnapshot` fanout). No restart is required.
+
+### Precedence
+
+Configuration values for theme, appearance, and typography resolve in a single documented source order. Highest source wins:
+
+| Rank | Source | Origin | Wins over |
+|------|--------|--------|-----------|
+| 1 (highest) | `ui-session` | `~/.config/clay/preferences.json`, written by `settings.setTheme` / `settings.setAppearance` (and `settings.setTypography` once free-form textInput value carriage lands) | everything below |
+| 2 | `init-js` | `~/.config/clay/init.js` calls to `setTheme` / `setAppearance` / `setTypography` | package / canonical defaults |
+| 3 (lowest) | canonical / package default | appearance-derived Modus default (`System` → dark → `@clay/theme-modus-vivendi`; `Light` → `@clay/theme-modus-operandi`), or the Clay core default | — |
+
+On every startup and reload, `init.js` evaluates first; persisted `ui-session` preferences apply immediately after so a UI choice always overrides the equivalent `init.js` call. An explicit `setTheme` always wins over the appearance-derived canonical default. Absent preference fields are no-ops: `init.js` (or the canonical default) stays in effect.
+
+### Persistence store
+
+`~/.config/clay/preferences.json` is a closed JSON object with at most three keys: `theme` (a bundled first-party `@clay/theme-*` specifier), `appearance` (`light` | `dark` | `system`), and `typography` (the `setTypography` payload). The file is bounded (8 KiB), validated at load and persist time, and authority-rejecting (no raw ops, CSS, callbacks, client JavaScript, or state values). A corrupted, oversized, or manually-edited file is dropped field-by-field with a diagnostic so startup never breaks and no authority is granted. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values.
+
+### Settings command flow
+
+`settings.setTheme` / `settings.setAppearance` validate the value, merge it into `preferences.json` (atomic tmp + rename), and reload the runtime. `settings.reset` clears the store and reloads. `settings.open` / `settings.close` / `settings.setTypography` validate and acknowledge; `settings.setTypography` does not yet persist because free-form `textInput` value carriage is a follow-up protocol task — its bounds are still enforced by the `setTypography` op at apply time, so a persisted `typography` field (e.g. written by a future UI or by hand) round-trips safely through reload today.
+
+### Example
+
+```js
+// ~/.config/clay/init.js — package defaults overridden by init.js
+import { setTheme } from "clay:theme";
+setTheme("@clay/theme-gruvbox-material-light"); // source: init-js
+// A later UI choice of Modus Vivendi writes preferences.json (source: ui-session)
+// and wins on the next reload.
+```

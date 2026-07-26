@@ -23,11 +23,11 @@ custom_properties:
   - name: kind
     type: enum
     default: required
-    description: Supported Phase 18.3 component kind such as `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, or `editorView`.
+    description: Supported component kind: `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, `editorView`, `dropdown`, `collapse`, `modal`, or `textInput`.
   - name: deferredKinds
     type: enum
-    default: table|dropdown|collapse|modal
-    description: Explicitly deferred component kinds that are rejected until later phases.
+    default: table
+    description: Explicitly deferred component kinds rejected until a later phase. As of Phase 20.5 only `table` remains deferred.
   - name: children
     type: ComponentContributionDefinition[]
     default: []
@@ -36,13 +36,21 @@ custom_properties:
     type: string[]
     default: []
     description: Typed style-variable token references resolved through Clay core or package theme tokens.
+  - name: validationState
+    type: enum
+    default: none
+    description: "Phase 20.5: `textInput` validation border state: `none`, `error`, `warning`, or `success`. Parsed from `style.validationState`."
+  - name: placeholderColor
+    type: color-role token
+    default: text.muted
+    description: "Phase 20.5: `textInput` placeholder text color-role token. Parsed from `style.placeholderColor`."
   - name: actionTargets
     type: string[]
     default: []
     description: Registered package-prefixed command IDs referenced by component action intents.
 security: Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
 agent_guidance: Use `clay.ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.
-lookup_tags: [ui, package-ui, component-catalog, style-tokens, clay-js-api, phase18.3, runtime-backed]
+lookup_tags: [ui, package-ui, component-catalog, style-tokens, clay-js-api, phase18.3, phase20.5, runtime-backed]
 app_visible: true
 help_visible: true
 stability: runtime-backed
@@ -106,8 +114,8 @@ console.log(toolbar.id, toolbar.rootKind, toolbar.componentCount);
 ## Options
 
 - `id` (`string`, default `package-prefixed`): Root component ID. It must use the package `apiPrefix`.
-- `kind` (`enum`, required): Supported kind: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, or `statusItem`.
-- `deferredKinds` (`enum`, default `table|dropdown|collapse|modal`): `table`, `dropdown`, `collapse`, and `modal` are explicitly deferred and rejected with diagnostics.
+- `kind` (`enum`, required): Supported kind: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, `dropdown`, `collapse`, `modal`, or `textInput`.
+- `deferredKinds` (`enum`, default `table`): As of Phase 20.5 only `table` remains deferred and rejected with diagnostics.
 - `children` (`ComponentContributionDefinition[]`, default `[]`): Bounded child component declarations.
 - `styleTokens` (`string[]`, default `[]`): Typed style-variable token references through known Clay core tokens or package theme tokens.
 - `actionTargets` (`string[]`, default `[]`): Registered command IDs referenced by action intents in this tree.
@@ -120,7 +128,7 @@ No default key binding is assigned. Components may emit inert command intents on
 
 - `id` (`string`, default `package-prefixed`): Root component ID.
 - `kind` (`enum`, default `required`): Component catalog kind.
-- `deferredKinds` (`enum`, default `table|dropdown|collapse|modal`): Rejected future component kinds.
+- `deferredKinds` (`enum`, default `table`): Rejected future component kinds (only `table` as of Phase 20.5).
 - `children` (`ComponentContributionDefinition[]`, default `[]`): Bounded child declarations.
 - `styleTokens` (`string[]`, default `[]`): Typed style-token references.
 - `actionTargets` (`string[]`, default `[]`): Registered command action IDs.
@@ -161,5 +169,5 @@ Use `clay.ui.serverRegisterComponentContribution` when the user asks for a publi
 - Kind: `clay-js-api`
 - Module/export: `clay:ui` / `serverRegisterComponentContribution`
 - Default key bindings: none
-- Custom properties: `id`, `kind`, `deferredKinds`, `children`, `styleTokens`, `actionTargets`
-- Tags: `ui`, `package-ui`, `component-catalog`, `style-tokens`, `clay-js-api`, `phase18.3`, `runtime-backed`
+- Custom properties: `id`, `kind`, `deferredKinds`, `children`, `styleTokens`, `actionTargets`, `validationState`, `placeholderColor`
+- Tags: `ui`, `package-ui`, `component-catalog`, `style-tokens`, `clay-js-api`, `phase18.3`, `phase20.5`, `runtime-backed`

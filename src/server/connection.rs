@@ -23,7 +23,7 @@ use crate::{
         LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
         LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParseInputEdit, ParsePolicy,
         ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
-        SduiActionIntent, SduiActionValue, ServerMessage, WorkspaceRootId,
+        SduiActionIntent, SduiActionSource, SduiActionValue, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
@@ -1348,6 +1348,50 @@ async fn execute_command_intent(
     let executor = CommandExecutor::new();
     let registry = CommandRegistry::new();
 
+    if crate::server::command_execution::is_settings_command(&request.command_id) {
+        // Phase 20.6: settings intents validate, then persist + reload so the
+        // change applies live through the canonical apply path (persist →
+        // reload → init.js re-eval + preferences apply → RuntimeStateSnapshot
+        // fanout). `setTheme`/`setAppearance` carry their value as
+        // `arguments.item_id`; `setTypography` has no value payload yet (free-
+        // form textInput value carriage is a follow-up protocol task), so it
+        // validates and acknowledges without persisting. `settings.reset`
+        // clears the persisted preferences store.
+        let validated = match executor.execute_settings(request.clone()) {
+            Ok(result) => result,
+            Err(error) => {
+                return Some(ServerMessage::Error {
+                    code: ProtocolErrorCode::InvalidMessage,
+                    message: format!(
+                        "command execution rejected: {:?}: {}",
+                        error.rule, error.message
+                    ),
+                });
+            }
+        };
+        if let Some(server) = reload_server {
+            match persist_settings_change(server, &validated.command_id, &request.arguments).await {
+                Ok(PersistOutcome::Reloaded(outcome)) => {
+                    if !outcome.reloaded {
+                        return outcome
+                            .diagnostics
+                            .into_iter()
+                            .next()
+                            .map(ServerMessage::RuntimeDiagnostic);
+                    }
+                }
+                Ok(PersistOutcome::Acknowledged) => {}
+                Err(message) => {
+                    return Some(ServerMessage::Error {
+                        code: ProtocolErrorCode::InvalidMessage,
+                        message,
+                    });
+                }
+            }
+        }
+        return None;
+    }
+
     if crate::server::command_execution::is_reload_command(&request.command_id) {
         let Some(server) = reload_server else {
             return Some(ServerMessage::Error {
@@ -1448,23 +1492,118 @@ async fn workspace_command_result_message(
     }
 }
 
+/// Outcome of persisting a settings command and (optionally) reloading.
+enum PersistOutcome {
+    /// Preference persisted and the runtime reloaded; the reload outcome is
+    /// forwarded so the caller can surface any reload diagnostic.
+    Reloaded(super::RuntimeReloadOutcome),
+    /// Command acknowledged without persistence (e.g. `settings.open`,
+    /// `settings.close`, `settings.setTypography` which has no value payload).
+    Acknowledged,
+}
+
+/// Persist a settings command to `preferences.json` and trigger a runtime
+/// reload so the change applies live through the canonical apply path. Returns
+/// `Acknowledged` for commands that do not carry a persistable value.
+/// `settings.reset` clears the store and reloads.
+async fn persist_settings_change(
+    server: &super::IpcServer,
+    command_id: &str,
+    arguments: &serde_json::Value,
+) -> Result<PersistOutcome, String> {
+    use crate::server::configuration::ConfigurationRuntime;
+    let Some(config_root) = server.config.configuration_root.as_ref() else {
+        return Err("settings persistence requires a configured configuration root".to_string());
+    };
+    let runtime = ConfigurationRuntime::from_config_root(config_root)
+        .map_err(|error| format!("settings persistence root error: {error}"))?;
+    let should_reload = match command_id {
+        "settings.setTheme" => {
+            let value = settings_value(arguments).ok_or_else(|| {
+                "settings.setTheme requires an item_id/specifier argument".to_string()
+            })?;
+            runtime
+                .persist_preference("theme", serde_json::Value::String(value))
+                .map(|_| true)
+                .map_err(|error| format!("settings.setTheme persistence failed: {error}"))?
+        }
+        "settings.setAppearance" => {
+            let value = settings_value(arguments).ok_or_else(|| {
+                "settings.setAppearance requires an item_id/appearance argument".to_string()
+            })?;
+            runtime
+                .persist_preference("appearance", serde_json::Value::String(value))
+                .map(|_| true)
+                .map_err(|error| format!("settings.setAppearance persistence failed: {error}"))?
+        }
+        "settings.reset" => runtime
+            .clear_preferences()
+            .map(|_| true)
+            .map_err(|error| format!("settings.reset failed: {error}"))?,
+        // settings.open / settings.close / settings.setTypography: no
+        // persistable value yet (setTypography free-form value carriage is a
+        // follow-up protocol task). Acknowledge without reloading.
+        "settings.open" | "settings.close" | "settings.setTypography" => false,
+        _ => false,
+    };
+    if should_reload {
+        let outcome = server.reload_runtime_generation().await;
+        Ok(PersistOutcome::Reloaded(outcome))
+    } else {
+        Ok(PersistOutcome::Acknowledged)
+    }
+}
+
+fn settings_value(arguments: &serde_json::Value) -> Option<String> {
+    arguments
+        .as_object()
+        .and_then(|object| {
+            object
+                .get("item_id")
+                .or_else(|| object.get("specifier"))
+                .or_else(|| object.get("appearance"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
 fn sdui_command_request(intent: &SduiActionIntent) -> CommandExecutionRequest {
     CommandExecutionRequest {
         command_id: intent.command_id.clone(),
-        arguments: sdui_action_arguments_json(&intent.arguments),
+        arguments: sdui_action_arguments_json(&intent.arguments, &intent.source),
         target: CommandExecutionTarget::Global,
         provenance: None,
         expected_permissions: Vec::new(),
     }
 }
 
-fn sdui_action_arguments_json(arguments: &[SduiActionArgument]) -> serde_json::Value {
+/// Phase 20.6: forward the originating `SduiActionSource` so command handlers
+/// receive the selected list/dropdown item id (`arguments.item_id`) or the
+/// originating node id (`arguments.node_id`). Package component declarations
+/// carry no argument data, so without this the choice value never reaches the
+/// handler. Additive: handlers that ignore `arguments` are unaffected.
+fn sdui_action_arguments_json(
+    arguments: &[SduiActionArgument],
+    source: &SduiActionSource,
+) -> serde_json::Value {
     let mut object = serde_json::Map::new();
     for argument in arguments {
         object.insert(
             argument.name.clone(),
             sdui_action_value_json(&argument.value),
         );
+    }
+    match source {
+        SduiActionSource::ListItem { item_id, .. } => {
+            object
+                .entry("item_id".to_string())
+                .or_insert_with(|| serde_json::Value::String(item_id.clone()));
+        }
+        SduiActionSource::Button { node_id } => {
+            object
+                .entry("node_id".to_string())
+                .or_insert_with(|| serde_json::Value::String(node_id.0.to_string()));
+        }
     }
     serde_json::Value::Object(object)
 }
@@ -1525,6 +1664,7 @@ where
         .unwrap_or_else(|| crate::protocol::ActiveTheme {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         });
     codec
         .write_server_message(stream, &ServerMessage::ActiveTheme(theme))
@@ -2841,6 +2981,119 @@ await loadPackage("@clay/markdown");"#,
                 if code == "clay.runtime.reload_succeeded"
         ));
         assert_eq!(server.runtime_generation.generation_id().await, 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn settings_live_switch_persists_and_reloads_end_to_end() {
+        // Plan 067 task 12: full live-switch + persistence matrix through the
+        // real command executor + persist + reload path. From a clean config:
+        // settings.setTheme selects Gruvbox (proving Gruvbox remains
+        // selectable), persists to preferences.json, and advances the runtime
+        // generation so the change applies live via reload→fanout;
+        // settings.setAppearance persists appearance; settings.reset clears the
+        // store and reloads; a non-bundled @clay/theme-* specifier is rejected
+        // by execute_settings without advancing the generation.
+        let root = temp_workspace("settings-live-switch-e2e");
+        fs::write(root.join("init.js"), "").unwrap();
+        let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+            "settings-live-switch-e2e",
+        ));
+        config.configuration_root = Some(root.clone());
+        let server = super::super::IpcServer::new(config);
+        let preferences = root.join("preferences.json");
+        let workspace = workspace_state();
+        let document = document_state();
+        let sdui = sdui_state();
+
+        let settings_request = |command_id: &str, item_id: &str| {
+            execute_command_intent(
+                CommandExecutionRequest {
+                    command_id: command_id.to_string(),
+                    arguments: serde_json::json!({ "item_id": item_id }),
+                    target: CommandExecutionTarget::Global,
+                    provenance: None,
+                    expected_permissions: Vec::new(),
+                },
+                Arc::clone(&workspace),
+                &document,
+                &sdui,
+                1,
+                Some(&server),
+            )
+        };
+
+        // 1. settings.setTheme selects Gruvbox Material Light (opt-in theme
+        //    remains selectable), persists, and reloads live.
+        let response =
+            settings_request("settings.setTheme", "@clay/theme-gruvbox-material-light").await;
+        assert!(
+            response.is_none(),
+            "settings.setTheme returns no error on success"
+        );
+        assert_eq!(server.runtime_generation.generation_id().await, 2);
+        let persisted = fs::read_to_string(&preferences).expect("preferences.json written");
+        assert!(
+            persisted.contains("@clay/theme-gruvbox-material-light"),
+            "preferences.json persists the selected theme: {persisted}"
+        );
+
+        // 2. settings.setAppearance persists appearance and reloads again.
+        let response = settings_request("settings.setAppearance", "light").await;
+        assert!(
+            response.is_none(),
+            "settings.setAppearance returns no error on success"
+        );
+        assert_eq!(server.runtime_generation.generation_id().await, 3);
+        let persisted = fs::read_to_string(&preferences).expect("preferences.json updated");
+        assert!(
+            persisted.contains("\"appearance\"") && persisted.contains("light"),
+            "preferences.json persists appearance: {persisted}"
+        );
+
+        // 3. A non-bundled @clay/theme-* specifier is rejected by execute_settings
+        //    and does not advance the generation (authority denial).
+        let generation_before = server.runtime_generation.generation_id().await;
+        let response = settings_request("settings.setTheme", "@clay/theme-evil").await;
+        assert!(
+            matches!(response, Some(ServerMessage::Error { .. })),
+            "non-bundled theme specifier is rejected"
+        );
+        assert_eq!(
+            server.runtime_generation.generation_id().await,
+            generation_before,
+            "rejected settings intent does not reload"
+        );
+
+        // 4. settings.reset clears the persisted store and reloads.
+        let response = execute_command_intent(
+            CommandExecutionRequest {
+                command_id: "settings.reset".to_string(),
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            Arc::clone(&workspace),
+            &document,
+            &sdui,
+            1,
+            Some(&server),
+        )
+        .await;
+        assert!(
+            response.is_none(),
+            "settings.reset returns no error on success"
+        );
+        assert_eq!(
+            server.runtime_generation.generation_id().await,
+            generation_before + 1
+        );
+        let reset = fs::read_to_string(&preferences).unwrap_or_default();
+        assert!(
+            !reset.contains("@clay/theme-"),
+            "preferences.json cleared after reset: {reset}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -6085,6 +6338,56 @@ await loadPackage("@clay/markdown");"#,
             snapshot.first().map(|d| d.message.as_str()),
             Some("diagnostic 8"),
             "oldest entries drop first"
+        );
+    }
+    #[test]
+    fn sdui_command_request_forwards_list_item_id_as_argument() {
+        let intent = SduiActionIntent {
+            command_id: "settings.setTheme".to_string(),
+            source: SduiActionSource::ListItem {
+                node_id: SduiNodeId(7),
+                item_id: "@clay/theme-modus-vivendi".to_string(),
+            },
+            arguments: Vec::new(),
+        };
+        let request = sdui_command_request(&intent);
+        assert_eq!(request.command_id, "settings.setTheme");
+        assert_eq!(
+            request.arguments,
+            serde_json::json!({ "item_id": "@clay/theme-modus-vivendi" })
+        );
+    }
+
+    #[test]
+    fn sdui_command_request_forwards_button_node_id_as_argument() {
+        let intent = SduiActionIntent {
+            command_id: "settings.close".to_string(),
+            source: SduiActionSource::Button {
+                node_id: SduiNodeId(42),
+            },
+            arguments: Vec::new(),
+        };
+        let request = sdui_command_request(&intent);
+        assert_eq!(request.arguments, serde_json::json!({ "node_id": "42" }));
+    }
+
+    #[test]
+    fn sdui_command_request_preserves_explicit_arguments() {
+        let intent = SduiActionIntent {
+            command_id: "clay.workspace.openFile".to_string(),
+            source: SduiActionSource::Button {
+                node_id: SduiNodeId(1),
+            },
+            arguments: vec![SduiActionArgument {
+                name: "path".to_string(),
+                value: SduiActionValue::String("/tmp/a.md".to_string()),
+            }],
+        };
+        let request = sdui_command_request(&intent);
+        // Explicit arguments are preserved; source node_id is added additively.
+        assert_eq!(
+            request.arguments,
+            serde_json::json!({ "path": "/tmp/a.md", "node_id": "1" })
         );
     }
 }

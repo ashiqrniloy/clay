@@ -303,6 +303,7 @@ fn markdown_representative_decoration_payload_fits_budget_and_client_applies() {
         active_theme: clay::protocol::ActiveTheme {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
     };
@@ -852,6 +853,7 @@ fn decoration_render_hook_applies_validated_spans_without_package_js() {
         active_theme: clay::protocol::ActiveTheme {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
     };

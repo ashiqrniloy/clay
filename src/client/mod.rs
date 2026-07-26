@@ -1355,6 +1355,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -1728,6 +1729,7 @@ mod tests {
                 &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                     specifier: "@clay/default".to_string(),
                     overrides: Vec::new(),
+                    design_tokens: Vec::new(),
                 }),
             )
             .await
@@ -2054,6 +2056,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2153,6 +2156,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2259,6 +2263,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2379,6 +2384,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2441,6 +2447,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2504,6 +2511,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2579,6 +2587,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2663,6 +2672,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2748,6 +2758,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2842,6 +2853,7 @@ mod tests {
                         &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                             specifier: "@clay/default".to_string(),
                             overrides: Vec::new(),
+                            design_tokens: Vec::new(),
                         }),
                     )
                     .await
@@ -2922,6 +2934,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2946,6 +2959,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -2982,6 +2996,7 @@ mod tests {
             active_theme: crate::protocol::ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
             sdui_tree: SduiTree {
@@ -3046,6 +3061,7 @@ mod tests {
                 &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                     specifier: "@clay/default".to_string(),
                     overrides: Vec::new(),
+                    design_tokens: Vec::new(),
                 }),
             )
             .await
@@ -3184,6 +3200,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -3209,6 +3226,7 @@ mod tests {
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await
@@ -3806,6 +3824,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                     &ServerMessage::ActiveTheme(crate::protocol::ActiveTheme {
                         specifier: "@clay/default".to_string(),
                         overrides: Vec::new(),
+                        design_tokens: Vec::new(),
                     }),
                 )
                 .await

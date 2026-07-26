@@ -44,6 +44,8 @@ pub(crate) struct TransientMenuSession {
     selected_index: usize,
     status: TransientMenuStatus,
     focus_policy: TransientMenuFocusPolicy,
+    /// Phase 20.5: surface origin (command palette, context menu, menu bar).
+    origin: TransientMenuOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +89,18 @@ pub(crate) enum TransientMenuFocusPolicy {
     Modeless,
 }
 
+/// Phase 20.5: surface origin for transient menu sessions.
+/// Determines overlay anchor and focus policy defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransientMenuOrigin {
+    /// Bottom-anchored command palette / completion picker (default).
+    CommandPalette,
+    /// Pointer-anchored context menu.
+    ContextMenu,
+    /// Main-area-anchored menu bar dropdown.
+    MenuBar,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TransientMenuStatus {
     Active,
@@ -106,6 +120,7 @@ impl TransientMenuSession {
                 message: "No results".to_string(),
             },
             focus_policy: TransientMenuFocusPolicy::Modal,
+            origin: TransientMenuOrigin::CommandPalette,
         }
     }
 
@@ -137,8 +152,19 @@ impl TransientMenuSession {
         self.focus_policy
     }
 
+    /// Phase 20.5: surface origin for this session.
+    pub(crate) fn origin(&self) -> TransientMenuOrigin {
+        self.origin
+    }
+
     pub(crate) fn with_focus_policy(mut self, policy: TransientMenuFocusPolicy) -> Self {
         self.focus_policy = policy;
+        self
+    }
+
+    /// Phase 20.5: set the surface origin (command palette, context menu, menu bar).
+    pub(crate) fn with_origin(mut self, origin: TransientMenuOrigin) -> Self {
+        self.origin = origin;
         self
     }
 

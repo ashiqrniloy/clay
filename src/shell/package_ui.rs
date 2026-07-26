@@ -22,18 +22,15 @@ use crate::{
 };
 
 use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
+use super::theme::PanelDefaults;
 use super::transient_menu::{
-    TransientMenuFocusPolicy, TransientMenuItem, TransientMenuSession, TransientMenuStatus,
+    TransientMenuFocusPolicy, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
+    TransientMenuStatus,
 };
 
 const MAX_FIXED_PANELS: usize = 4;
 const MAX_TRANSIENT_OVERLAYS: usize = 16;
 const MAX_INPUT_ROUTES: usize = 64;
-const DEFAULT_SIDE_PANEL_SIZE: f64 = 240.0;
-const DEFAULT_VERTICAL_PANEL_SIZE: f64 = 120.0;
-const MIN_PANEL_SIZE: f64 = 48.0;
-const MAX_SIDE_PANEL_SIZE: f64 = 480.0;
-const MAX_VERTICAL_PANEL_SIZE: f64 = 240.0;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PackageUiRuntimeState {
@@ -75,6 +72,9 @@ pub(crate) struct TransientPackageOverlay {
     pub(crate) dismissal_policy: String,
     pub(crate) component: PackageUiComponentTree,
     pub(crate) action_targets: Vec<String>,
+    /// Phase 20.5: z-level token name for overlay stacking order.
+    /// One of `"z.overlay"`, `"z.modal"`, `"z.tooltip"`.
+    pub(crate) z_level_token: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +112,13 @@ pub(crate) struct PackageUiComponentTree {
     pub(crate) action_command_id: Option<String>,
     pub(crate) items: Vec<PackageUiListItem>,
     pub(crate) children: Vec<PackageUiComponentTree>,
+    /// Phase 20.4: component-level disabled flag. Disabled components render
+    /// with the disabled state tokens and are gated out of `SduiVisibleAction`
+    /// (their actions are not dispatchable).
+    pub(crate) disabled: bool,
+    /// Phase 20.5: text input validation state (`none`/`error`/`warning`/`success`).
+    /// Parsed from `style.validationState`; `None` means no validation state declared.
+    pub(crate) validation_state: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +128,9 @@ pub(crate) struct PackageUiListItem {
     pub(crate) detail: Option<String>,
     pub(crate) action_command_id: Option<String>,
     pub(crate) selected: bool,
+    /// Phase 20.4: row-level disabled flag. Disabled rows render with the
+    /// disabled state tokens and are gated out of `SduiVisibleAction`.
+    pub(crate) disabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -262,19 +272,20 @@ impl PackageUiRuntimeState {
         self.input_routing.clear();
     }
 
-    pub(crate) fn slot_layout(&self) -> PaneSlotLayout {
+    pub(crate) fn slot_layout(&self, defaults: &PanelDefaults) -> PaneSlotLayout {
         self.fixed_panels
             .values()
             .fold(PaneSlotLayout::main_only(), |layout, panel| {
-                layout.with_fixed_slot(panel.fixed_slot_state())
+                layout.with_fixed_slot(panel.fixed_slot_state(defaults))
             })
     }
 
     pub(crate) fn fixed_panel_observations(
         &self,
         working_area: Rect,
+        defaults: &PanelDefaults,
     ) -> Vec<PackageUiPanelObservation> {
-        let geometry = self.slot_layout().compute_geometry(working_area);
+        let geometry = self.slot_layout(defaults).compute_geometry(working_area);
         self.fixed_panels
             .iter()
             .map(|(slot_id, panel)| {
@@ -299,8 +310,9 @@ impl PackageUiRuntimeState {
     pub(crate) fn overlay_observations(
         &self,
         working_area: Rect,
+        defaults: &PanelDefaults,
     ) -> Vec<PackageUiOverlayObservation> {
-        let slot_geometry = self.slot_layout().compute_geometry(working_area);
+        let slot_geometry = self.slot_layout(defaults).compute_geometry(working_area);
         self.transient_overlays
             .values()
             .map(|overlay| PackageUiOverlayObservation {
@@ -318,8 +330,9 @@ impl PackageUiRuntimeState {
     pub(crate) fn visible_fixed_panels(
         &self,
         working_area: Rect,
+        defaults: &PanelDefaults,
     ) -> Vec<(Rect, &FixedPackagePanel)> {
-        let geometry = self.slot_layout().compute_geometry(working_area);
+        let geometry = self.slot_layout(defaults).compute_geometry(working_area);
         self.fixed_panels
             .iter()
             .filter_map(|(slot_id, panel)| {
@@ -390,20 +403,12 @@ impl FixedPackagePanel {
         }
     }
 
-    fn fixed_slot_state(&self) -> FixedSlotState {
-        let (size, max_size) = match self.slot_id {
-            FixedSlotId::Left | FixedSlotId::Right => {
-                (DEFAULT_SIDE_PANEL_SIZE, MAX_SIDE_PANEL_SIZE)
-            }
-            FixedSlotId::Top | FixedSlotId::Bottom => {
-                (DEFAULT_VERTICAL_PANEL_SIZE, MAX_VERTICAL_PANEL_SIZE)
-            }
-        };
+    fn fixed_slot_state(&self, defaults: &PanelDefaults) -> FixedSlotState {
         FixedSlotState {
             slot_id: self.slot_id,
-            size,
-            min_size: MIN_PANEL_SIZE,
-            max_size,
+            size: defaults.default_size(self.slot_id),
+            min_size: defaults.min_size(self.slot_id),
+            max_size: defaults.max_size(self.slot_id),
             visible: self.visibility == PackagePanelVisibility::Visible,
             collapsed: self.visibility == PackagePanelVisibility::Collapsed,
             resized_by_user: false,
@@ -419,6 +424,7 @@ impl TransientPackageOverlay {
         dismissal_policy: impl Into<String>,
         component: PackageUiComponentTree,
         action_targets: Vec<String>,
+        z_level_token: &'static str,
     ) -> Self {
         Self {
             id: id.into(),
@@ -427,6 +433,7 @@ impl TransientPackageOverlay {
             dismissal_policy: dismissal_policy.into(),
             component,
             action_targets,
+            z_level_token,
         }
     }
 
@@ -435,6 +442,12 @@ impl TransientPackageOverlay {
     /// tree carries only inert command IDs and bounded JSON arguments; it does
     /// not embed callbacks, native handles, raw CSS, or executable code.
     pub(crate) fn from_menu_session(session: &TransientMenuSession) -> Self {
+        // Phase 20.5: anchor selected by surface origin.
+        let anchor = match session.origin() {
+            TransientMenuOrigin::ContextMenu => PackageOverlayAnchor::Pointer,
+            TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
+            TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
+        };
         let prompt_id = format!("clay.menu.{}.prompt", session.session_id().0);
         let query_id = format!("clay.menu.{}.query", session.session_id().0);
         let list_id = format!("clay.menu.{}.list", session.session_id().0);
@@ -443,6 +456,7 @@ impl TransientPackageOverlay {
         let mut children = vec![
             PackageUiComponentTree {
                 id: prompt_id,
+                disabled: false,
                 kind: "label".to_string(),
                 font_role: FontRole::Ui,
                 text_variant: None,
@@ -452,9 +466,11 @@ impl TransientPackageOverlay {
                 action_command_id: None,
                 items: Vec::new(),
                 children: Vec::new(),
+                validation_state: None,
             },
             PackageUiComponentTree {
                 id: query_id,
+                disabled: false,
                 kind: "label".to_string(),
                 font_role: FontRole::Ui,
                 text_variant: None,
@@ -464,6 +480,7 @@ impl TransientPackageOverlay {
                 action_command_id: None,
                 items: Vec::new(),
                 children: Vec::new(),
+                validation_state: None,
             },
         ];
 
@@ -471,6 +488,7 @@ impl TransientPackageOverlay {
             TransientMenuStatus::Empty { message } => {
                 children.push(PackageUiComponentTree {
                     id: status_id,
+                    disabled: false,
                     kind: "statusItem".to_string(),
                     font_role: FontRole::Ui,
                     text_variant: Some(UiTextVariant::Status),
@@ -480,6 +498,7 @@ impl TransientPackageOverlay {
                     action_command_id: None,
                     items: Vec::new(),
                     children: Vec::new(),
+                    validation_state: None,
                 });
             }
             _ => {
@@ -498,6 +517,7 @@ impl TransientPackageOverlay {
                     .collect();
                 children.push(PackageUiComponentTree {
                     id: list_id,
+                    disabled: false,
                     kind: "list".to_string(),
                     font_role: FontRole::Ui,
                     text_variant: None,
@@ -507,10 +527,11 @@ impl TransientPackageOverlay {
                     action_command_id: None,
                     items,
                     children: Vec::new(),
+                    validation_state: None,
                 });
                 return Self {
                     id: format!("clay.menu.{}", session.session_id().0),
-                    anchor: PackageOverlayAnchor::Bottom,
+                    anchor,
                     focus_policy: match session.focus_policy() {
                         TransientMenuFocusPolicy::Modal => "modal".to_string(),
                         TransientMenuFocusPolicy::Modeless => "modeless".to_string(),
@@ -518,6 +539,7 @@ impl TransientPackageOverlay {
                     dismissal_policy: "escape".to_string(),
                     component: PackageUiComponentTree {
                         id: format!("clay.menu.{}.root", session.session_id().0),
+                        disabled: false,
                         kind: "stack".to_string(),
                         font_role: FontRole::Ui,
                         text_variant: None,
@@ -527,15 +549,17 @@ impl TransientPackageOverlay {
                         action_command_id: None,
                         items: Vec::new(),
                         children,
+                        validation_state: None,
                     },
                     action_targets,
+                    z_level_token: "z.overlay",
                 };
             }
         }
 
         Self {
             id: format!("clay.menu.{}", session.session_id().0),
-            anchor: PackageOverlayAnchor::Bottom,
+            anchor,
             focus_policy: match session.focus_policy() {
                 TransientMenuFocusPolicy::Modal => "modal".to_string(),
                 TransientMenuFocusPolicy::Modeless => "modeless".to_string(),
@@ -543,6 +567,7 @@ impl TransientPackageOverlay {
             dismissal_policy: "escape".to_string(),
             component: PackageUiComponentTree {
                 id: format!("clay.menu.{}.root", session.session_id().0),
+                disabled: false,
                 kind: "stack".to_string(),
                 font_role: FontRole::Ui,
                 text_variant: None,
@@ -552,8 +577,10 @@ impl TransientPackageOverlay {
                 action_command_id: None,
                 items: Vec::new(),
                 children,
+                validation_state: None,
             },
             action_targets: Vec::new(),
+            z_level_token: "z.overlay",
         }
     }
 }
@@ -565,6 +592,7 @@ fn menu_item_to_list_item(
 ) -> PackageUiListItem {
     PackageUiListItem {
         id: format!("item.{index}"),
+        disabled: false,
         label: item.label.clone(),
         detail: item.detail.clone(),
         action_command_id: item
@@ -661,6 +689,17 @@ impl PackageUiComponentTree {
             })
             .transpose()?
             .unwrap_or_default();
+        let disabled = object
+            .get("disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let validation_state = object
+            .get("style")
+            .and_then(Value::as_object)
+            .and_then(|style| style.get("validationState"))
+            .and_then(Value::as_str)
+            .filter(|s| matches!(*s, "none" | "error" | "warning" | "success"))
+            .map(ToOwned::to_owned);
         Ok(Self {
             id,
             kind,
@@ -672,6 +711,8 @@ impl PackageUiComponentTree {
             action_command_id,
             items,
             children,
+            disabled,
+            validation_state,
         })
     }
 }
@@ -688,6 +729,7 @@ impl PackageUiListItem {
             detail: None,
             action_command_id,
             selected: false,
+            disabled: false,
         }
     }
 
@@ -711,6 +753,10 @@ impl PackageUiListItem {
                 .map(ToOwned::to_owned),
             selected: object
                 .get("selected")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            disabled: object
+                .get("disabled")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         })
@@ -808,8 +854,9 @@ mod tests {
             })
             .unwrap();
 
+        let defaults = crate::shell::theme::ResolvedUiTheme::default().panel_defaults();
         let geometry = runtime
-            .slot_layout()
+            .slot_layout(&defaults)
             .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
         assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 660.0, 600.0));
         assert_eq!(geometry.fixed_slots[0].slot_id, FixedSlotId::Right);
@@ -873,15 +920,18 @@ mod tests {
                     "escape",
                     component("markdown.preview.quickOpen.root"),
                     Vec::new(),
+                    "z.overlay",
                 )],
                 input_routing: Vec::new(),
             })
             .unwrap();
 
+        let defaults = crate::shell::theme::ResolvedUiTheme::default().panel_defaults();
         let geometry = with_overlay
-            .slot_layout()
+            .slot_layout(&defaults)
             .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
-        let overlay = with_overlay.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0));
+        let overlay =
+            with_overlay.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0), &defaults);
         assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 900.0, 480.0));
         assert_eq!(overlay[0].rect, geometry.main_rect);
     }
@@ -959,14 +1009,16 @@ mod tests {
             })
             .unwrap();
 
+        let defaults = crate::shell::theme::ResolvedUiTheme::default().panel_defaults();
         let geometry = runtime
-            .slot_layout()
+            .slot_layout(&defaults)
             .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
         // Bottom fixed panel consumes the fixed slot; the transient menu overlay
         // is projected inside the remaining main rect and does not alter it.
         assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 900.0, 480.0));
 
-        let overlay_rect = runtime.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0))[0].rect;
+        let overlay_rect =
+            runtime.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0), &defaults)[0].rect;
         assert!(overlay_rect.y0 >= geometry.main_rect.y0);
         assert_eq!(overlay_rect.y1, geometry.main_rect.y1);
         assert_eq!(overlay_rect.x0, geometry.main_rect.x0);

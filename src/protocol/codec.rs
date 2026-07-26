@@ -972,6 +972,7 @@ mod tests {
             active_theme: ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
             sdui_tree: representative_sdui_tree(),
@@ -1004,6 +1005,37 @@ mod tests {
     }
 
     #[test]
+    fn active_theme_round_trips_typed_ui_token_overrides() {
+        use crate::protocol::{UiDesignTokenOverride, WireDesignTokenValue};
+        let codec = Codec::default();
+        let active_theme = ActiveTheme {
+            specifier: "@clay/theme-x".to_string(),
+            overrides: Vec::new(),
+            design_tokens: vec![
+                UiDesignTokenOverride {
+                    token: "surface.hover".to_string(),
+                    value: WireDesignTokenValue::Color([0x11, 0x22, 0x33, 0xff]),
+                    provenance: "theme-x".to_string(),
+                },
+                UiDesignTokenOverride {
+                    token: "spacing.md".to_string(),
+                    value: WireDesignTokenValue::Scalar(20.0),
+                    provenance: "theme-x".to_string(),
+                },
+                UiDesignTokenOverride {
+                    token: "density.spacious".to_string(),
+                    value: WireDesignTokenValue::Level("spacious".to_string()),
+                    provenance: "theme-x".to_string(),
+                },
+            ],
+        };
+        let message = ServerMessage::ActiveTheme(active_theme.clone());
+        let frame = codec.encode_server_message(&message).unwrap();
+        assert!(frame.len() < DEFAULT_MAX_FRAME_SIZE);
+        assert_eq!(codec.decode_server_message(&frame).unwrap(), message);
+    }
+
+    #[test]
     fn oversized_or_invalid_runtime_snapshot_is_rejected_before_install() {
         let codec = Codec::new(64);
         let mut snapshot = RuntimeStateSnapshot {
@@ -1013,6 +1045,7 @@ mod tests {
             active_theme: ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
             sdui_tree: representative_sdui_tree(),

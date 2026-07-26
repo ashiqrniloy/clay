@@ -7,36 +7,52 @@ use std::borrow::Cow;
 
 use masonry::parley::style::{FontFamily, FontStack, GenericFamily};
 
-use crate::protocol::{ActiveTypography, ActiveTypographyValidationError, FontProfile, FontRole};
+use crate::protocol::{
+    ActiveTypography, ActiveTypographyValidationError, FontProfile, FontRole, UiTypographyHierarchy,
+};
 
 /// Shared conservative line-height policy for viewport extraction and logical
 /// scroll progression. Visible Parley layout/caret metrics remain exact.
 pub(crate) const DOCUMENT_LINE_HEIGHT_MULTIPLIER: f64 = 1.4;
 
 /// Native UI text variants are semantic scale choices, never package-provided
-/// point sizes. The configured role selects both its family stack and base size.
+/// point sizes. The configured role selects both its family stack and base size;
+/// the active [`UiTypographyHierarchy`] supplies the bounded scale ratio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UiTextVariant {
     Body,
     Status,
     Title,
     Detail,
+    Display,
+    Section,
+    Caption,
 }
 
 impl UiTextVariant {
     pub(crate) fn from_typography_token(token: &str) -> Self {
         match token {
+            "typography.display" => Self::Display,
             "typography.title" => Self::Title,
+            "typography.section" => Self::Section,
             "typography.status" => Self::Status,
+            "typography.detail" => Self::Detail,
+            "typography.caption" => Self::Caption,
             _ => Self::Body,
         }
     }
 
-    const fn scale(self) -> f32 {
+    /// Resolve this variant's bounded scale ratio against the active hierarchy.
+    /// A cached numeric read; never parses strings or allocates.
+    fn scale(self, hierarchy: &UiTypographyHierarchy) -> f32 {
         match self {
-            Self::Body | Self::Status => 1.0,
-            Self::Title => 14.0 / 12.0,
-            Self::Detail => 10.0 / 12.0,
+            Self::Body => hierarchy.body,
+            Self::Status => hierarchy.status,
+            Self::Title => hierarchy.title,
+            Self::Detail => hierarchy.detail,
+            Self::Display => hierarchy.display,
+            Self::Section => hierarchy.section,
+            Self::Caption => hierarchy.caption,
         }
     }
 }
@@ -128,6 +144,7 @@ pub(crate) struct TypographyRegistry {
     monospace: ResolvedFontProfile,
     proportional: ResolvedFontProfile,
     ui: ResolvedFontProfile,
+    hierarchy: UiTypographyHierarchy,
 }
 
 impl Default for TypographyRegistry {
@@ -149,6 +166,7 @@ impl TypographyRegistry {
                 GenericFamily::SansSerif,
             ),
             ui: ResolvedFontProfile::from_wire(&active.ui, GenericFamily::SystemUi),
+            hierarchy: active.hierarchy,
             active,
         })
     }
@@ -185,7 +203,13 @@ impl TypographyRegistry {
     }
 
     pub(crate) fn ui_text_metrics(&self, role: FontRole, variant: UiTextVariant) -> UiTextMetrics {
-        UiTextMetrics::new(self.profile(role).size() * variant.scale())
+        UiTextMetrics::new(self.profile(role).size() * variant.scale(&self.hierarchy))
+    }
+
+    /// Expose the active hierarchy for tests and revision/invalidation checks.
+    #[cfg(test)]
+    pub(crate) fn hierarchy(&self) -> UiTypographyHierarchy {
+        self.hierarchy
     }
 }
 
@@ -265,5 +289,194 @@ mod tests {
                 .abs()
                 < 0.001
         );
+    }
+
+    #[test]
+    fn ui_typography_hierarchy_defaults_preserve_existing_variant_metrics() {
+        let h = UiTypographyHierarchy::DEFAULT;
+        // Legacy scales are preserved exactly.
+        assert!((h.body - 1.0).abs() < 1e-6);
+        assert!((h.status - 1.0).abs() < 1e-6);
+        assert!((h.title - 14.0 / 12.0).abs() < 1e-6);
+        assert!((h.detail - 10.0 / 12.0).abs() < 1e-6);
+        // New Phase 20.1 variants have restrained, monotonic defaults.
+        assert!(h.display > h.title);
+        assert!(h.title > h.section);
+        assert!(h.section > h.body);
+        assert!(h.caption < h.body);
+        // Default ActiveTypography carries the default hierarchy.
+        let registry =
+            TypographyRegistry::from_active_typography(ActiveTypography::default()).unwrap();
+        assert_eq!(registry.hierarchy(), UiTypographyHierarchy::DEFAULT);
+        // Title/body/status still resolve to the legacy ratios through the registry.
+        let ui = 12.0_f32; // default ActiveTypography.ui.size
+        assert!(
+            (registry
+                .ui_text_metrics(FontRole::Ui, UiTextVariant::Body)
+                .font_size
+                - ui)
+                .abs()
+                < 1e-6
+        );
+        assert!(
+            (registry
+                .ui_text_metrics(FontRole::Ui, UiTextVariant::Title)
+                .font_size
+                - ui * 14.0 / 12.0)
+                .abs()
+                < 1e-6
+        );
+    }
+
+    #[test]
+    fn display_section_and_caption_scale_from_selected_font_role() {
+        let mut active = ActiveTypography::default();
+        active.ui.size = 20.0;
+        active.monospace.size = 16.0;
+        let registry = TypographyRegistry::from_active_typography(active).unwrap();
+        let h = UiTypographyHierarchy::DEFAULT;
+
+        // Each new variant scales the *selected* role's base size by its ratio.
+        for (role, base) in [(FontRole::Ui, 20.0_f32), (FontRole::Monospace, 16.0_f32)] {
+            assert!(
+                (registry
+                    .ui_text_metrics(role, UiTextVariant::Display)
+                    .font_size
+                    - base * h.display)
+                    .abs()
+                    < 1e-4
+            );
+            assert!(
+                (registry
+                    .ui_text_metrics(role, UiTextVariant::Section)
+                    .font_size
+                    - base * h.section)
+                    .abs()
+                    < 1e-4
+            );
+            assert!(
+                (registry
+                    .ui_text_metrics(role, UiTextVariant::Caption)
+                    .font_size
+                    - base * h.caption)
+                    .abs()
+                    < 1e-4
+            );
+            // Row/line geometry derives from the same scaled font size.
+            let m = registry.ui_text_metrics(role, UiTextVariant::Display);
+            assert!(
+                (m.line_height - (base * h.display) as f64 * UiTextMetrics::LINE_HEIGHT_MULTIPLIER)
+                    .abs()
+                    < 1e-3
+            );
+            assert!(m.row_height > m.line_height);
+        }
+    }
+
+    #[test]
+    fn custom_hierarchy_updates_layout_hit_and_accessibility_geometry_together() {
+        let mut active = ActiveTypography::default();
+        active.ui.size = 20.0;
+        active.hierarchy = UiTypographyHierarchy {
+            display: 2.0,
+            title: 1.5,
+            section: 1.25,
+            body: 1.0,
+            status: 1.0,
+            detail: 0.875,
+            caption: 0.7,
+        };
+        let registry = TypographyRegistry::from_active_typography(active).unwrap();
+
+        // A single hierarchy change moves font size, line height, and row
+        // (hit/accessibility) height together, since they all derive from one
+        // `ui_text_metrics` call.
+        let display = registry.ui_text_metrics(FontRole::Ui, UiTextVariant::Display);
+        assert!((display.font_size - 40.0).abs() < 1e-4);
+        assert!(
+            (display.line_height - 40.0_f64 * UiTextMetrics::LINE_HEIGHT_MULTIPLIER).abs() < 1e-3
+        );
+        assert!((display.row_height - display.line_height - 11.6).abs() < 1e-3);
+        // Caption shrinks below body.
+        let caption = registry.ui_text_metrics(FontRole::Ui, UiTextVariant::Caption);
+        assert!((caption.font_size - 14.0).abs() < 1e-4);
+        assert!(caption.row_height < display.row_height);
+        // Custom hierarchy is cached on the registry.
+        assert!((registry.hierarchy().display - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn unchanged_hierarchy_does_not_invalidate_layout() {
+        // Equal snapshots (profiles + hierarchy) keep their revision in
+        // `stage_typography`; the registry's `install` is a no-op for equal
+        // revisions, so layout does not churn.
+        let mut registry = TypographyRegistry::default();
+        let same = ActiveTypography::default();
+        assert!(!registry.install(same).unwrap());
+        // A hierarchy-only change bumps the revision and invalidates once.
+        let mut changed_hierarchy = UiTypographyHierarchy::DEFAULT;
+        changed_hierarchy.display = 1.75;
+        let changed = ActiveTypography {
+            revision: 1,
+            hierarchy: changed_hierarchy,
+            ..ActiveTypography::default()
+        };
+        assert!(registry.install(changed).unwrap());
+        // Installing the same changed revision again is a no-op.
+        let again = ActiveTypography {
+            revision: 1,
+            hierarchy: changed_hierarchy,
+            ..ActiveTypography::default()
+        };
+        assert!(!registry.install(again).unwrap());
+    }
+
+    #[test]
+    fn invalid_partial_or_extreme_hierarchy_is_rejected_atomically() {
+        use crate::protocol::{HIERARCHY_SCALE_MAX, UiTypographyHierarchyValidationError};
+
+        let bad =
+            |mut h: UiTypographyHierarchy, field: &str, value: f32| -> UiTypographyHierarchy {
+                match field {
+                    "display" => h.display = value,
+                    "title" => h.title = value,
+                    "section" => h.section = value,
+                    "body" => h.body = value,
+                    "status" => h.status = value,
+                    "detail" => h.detail = value,
+                    "caption" => h.caption = value,
+                    _ => unreachable!(),
+                }
+                h
+            };
+
+        for (field, value, case) in [
+            ("display", f32::NAN, "non-finite"),
+            ("title", f32::INFINITY, "infinite"),
+            ("body", 0.0, "non-positive zero"),
+            ("status", -1.0, "negative"),
+            ("caption", HIERARCHY_SCALE_MAX + 0.1, "extreme high"),
+            ("detail", HIERARCHY_SCALE_MAX, "at-max boundary is allowed"),
+        ] {
+            let h = bad(UiTypographyHierarchy::DEFAULT, field, value);
+            let result = h.validate();
+            if case.contains("allowed") {
+                assert!(result.is_ok(), "{case} should be valid");
+            } else {
+                assert_eq!(
+                    result,
+                    Err(UiTypographyHierarchyValidationError::InvalidScale { field }),
+                    "{case} should be rejected for {field}"
+                );
+            }
+        }
+
+        // ActiveTypography.validate surfaces hierarchy errors atomically; a
+        // bad hierarchy rejects the whole snapshot before any profile install.
+        let mut active = ActiveTypography::default();
+        active.hierarchy.display = f32::NAN;
+        assert!(active.validate().is_err());
+        // And a valid hierarchy on an otherwise-default snapshot still validates.
+        assert!(ActiveTypography::default().validate().is_ok());
     }
 }

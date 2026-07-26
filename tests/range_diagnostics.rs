@@ -245,6 +245,7 @@ fn diagnostic_set_routes_server_to_client_and_applies_to_matching_document() {
         active_theme: clay::protocol::ActiveTheme {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
     };
@@ -497,6 +498,7 @@ fn runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline()
         active_theme: clay::protocol::ActiveTheme {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
     };

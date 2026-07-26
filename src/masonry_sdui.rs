@@ -31,7 +31,8 @@ use crate::{
         CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiComponentTree,
         PackageUiOverlayObservation, PackageUiPanelObservation, PackageUiRuntimeError,
         PackageUiRuntimeState, PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession,
-        layout::PaneSlotId, theme::SduiThemeStyle,
+        layout::PaneSlotId,
+        theme::{PanelDefaults, SduiThemeStyle},
     },
 };
 
@@ -40,6 +41,7 @@ use crate::shell::{
     FixedPackagePanel, PackageOverlayAnchor, PackagePanelVisibility, TransientPackageOverlay,
 };
 
+#[cfg(test)]
 const SIDEBAR_WIDTH: f64 = 240.0;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,6 +89,11 @@ pub struct SduiNativeState {
     actions: Vec<SduiVisibleAction>,
     package_ui: PackageUiRuntimeState,
     typography: TypographyRegistry,
+    // Phase 20.1: cached resolved UI design-token registry layered over the
+    // core fallback catalog. Installed atomically with the editor
+    // `StyleRegistry` when the active theme changes; paint reads cached typed
+    // values via the accessors without parsing strings or allocating maps.
+    ui_theme: crate::shell::theme::ResolvedUiTheme,
     active_menu: Option<TransientMenuSession>,
     // Client-local vertical scroll offset (pixels) for the Clay-owned left
     // file-browser panel. Scroll reveals already-listed rows only; it never
@@ -96,6 +103,19 @@ pub struct SduiNativeState {
     // captured during paint so scroll clamping can run without repainting.
     content_height: f64,
     viewport_height: f64,
+    // Phase 20.4: client-local interaction inputs for SDUI component state
+    // derivation. Paint hit-tests the current action rect against these to
+    // derive `InteractionState` (Hover/Active/Focus); no per-component state
+    // map is kept. `focused_action` is set when a package action is invoked
+    // (pointer Down on an action region); disabled components never receive
+    // focus. All three are client-side only and carry no package authority.
+    pointer_pos: Option<Point>,
+    pointer_pressed: bool,
+    focused_action: Option<SduiActionIntent>,
+    /// Phase 20.5: client-local dropdown selected-item index, keyed by component node id hash.
+    dropdown_selected: BTreeMap<u64, usize>,
+    /// Phase 20.5: client-local collapse expanded state, keyed by component node id hash.
+    collapse_expanded: BTreeSet<u64>,
 }
 
 impl SduiNativeState {
@@ -108,10 +128,16 @@ impl SduiNativeState {
             actions: Vec::new(),
             package_ui: PackageUiRuntimeState::new(),
             typography: TypographyRegistry::default(),
+            ui_theme: crate::shell::theme::ResolvedUiTheme::default(),
             active_menu: None,
             scroll_offset: 0.0,
             content_height: 0.0,
             viewport_height: 0.0,
+            pointer_pos: None,
+            pointer_pressed: false,
+            focused_action: None,
+            dropdown_selected: BTreeMap::new(),
+            collapse_expanded: BTreeSet::new(),
         }
     }
 
@@ -130,12 +156,135 @@ impl SduiNativeState {
         self.actions.clear();
     }
 
+    /// Install a resolved UI design-token registry built from the active
+    /// theme's validated overrides. Called atomically with the editor
+    /// `StyleRegistry` install; cached for paint/layout reads. Invalid overrides
+    /// (a malformed snapshot) fall back to core fallbacks rather than crash.
+    pub(crate) fn set_ui_theme(&mut self, ui_theme: crate::shell::theme::ResolvedUiTheme) {
+        self.ui_theme = ui_theme;
+    }
+
+    /// Resolve the SDUI paint style from the active `ui_theme` so package
+    /// component fills, typography variants, and the spacing rhythm honor the
+    /// user theme (Phase 20.4). Reads cached resolved token values only.
+    fn theme_style(&self) -> SduiThemeStyle {
+        SduiThemeStyle::from_ui_theme(&self.ui_theme)
+    }
+
+    /// Phase 20.4: update the client-local pointer position used to derive
+    /// `Hover`/`Active` states. `None` clears hover (pointer left the widget).
+    pub(crate) fn set_pointer_pos(&mut self, pos: Option<Point>) {
+        self.pointer_pos = pos;
+    }
+
+    /// Phase 20.4: set whether the primary pointer button is currently held,
+    /// used to derive `Active` state.
+    pub(crate) fn set_pointer_pressed(&mut self, pressed: bool) {
+        self.pointer_pressed = pressed;
+    }
+
+    /// Phase 20.4: clear pointer hover/press state (pointer leave/cancel).
+    pub(crate) fn clear_pointer_state(&mut self) {
+        self.pointer_pos = None;
+        self.pointer_pressed = false;
+    }
+
+    /// Phase 20.4: set the focused package action. Set when a package action
+    /// region is activated (pointer Down); disabled actions never receive
+    /// focus. Used to paint a focus ring and `Focus` fill.
+    pub(crate) fn set_focused_action(&mut self, action: Option<SduiActionIntent>) {
+        self.focused_action = action;
+    }
+
+    /// Phase 20.4: the currently focused package action, if any (test access).
+    pub(crate) fn focused_action(&self) -> Option<&SduiActionIntent> {
+        self.focused_action.as_ref()
+    }
+
+    /// True when `action` is the currently focused package action.
+    fn is_focused(&self, action: &SduiActionIntent) -> bool {
+        self.focused_action.as_ref() == Some(action)
+    }
+
+    /// Phase 20.5: selected item index for a dropdown component (0 if unset).
+    pub(crate) fn dropdown_selected_index(&self, node_hash: u64) -> usize {
+        self.dropdown_selected.get(&node_hash).copied().unwrap_or(0)
+    }
+
+    /// Phase 20.5: cycle dropdown selection by `delta` (-1 or +1), wrapping.
+    pub(crate) fn dropdown_cycle(&mut self, node_hash: u64, item_count: usize, delta: isize) {
+        if item_count == 0 {
+            return;
+        }
+        let current = self.dropdown_selected.get(&node_hash).copied().unwrap_or(0);
+        let next = if delta >= 0 {
+            (current + 1) % item_count
+        } else {
+            current.checked_sub(1).unwrap_or(item_count - 1)
+        };
+        self.dropdown_selected.insert(node_hash, next);
+    }
+
+    /// Phase 20.5: whether a collapse component is expanded.
+    pub(crate) fn is_collapse_expanded(&self, node_hash: u64) -> bool {
+        self.collapse_expanded.contains(&node_hash)
+    }
+
+    /// Phase 20.5: toggle collapse expanded state.
+    pub(crate) fn collapse_toggle(&mut self, node_hash: u64) {
+        if !self.collapse_expanded.remove(&node_hash) {
+            self.collapse_expanded.insert(node_hash);
+        }
+    }
+
+    /// Phase 20.5: collect focusable action intents from the active modal overlay's
+    /// component tree, in paint order. Used for Tab focus-trap cycling.
+    pub(crate) fn modal_focusable_intents(&self) -> Vec<SduiActionIntent> {
+        let modal_overlay = self
+            .package_ui
+            .overlays()
+            .find(|o| o.focus_policy == "modal");
+        let Some(overlay) = modal_overlay else {
+            return Vec::new();
+        };
+        let mut intents = Vec::new();
+        collect_component_intents(&overlay.component, &mut intents);
+        intents
+    }
+
+    /// Phase 20.4: derive the `InteractionState` for an interactive element
+    /// with action rect `rect` and intent `action`, honoring `disabled`.
+    /// Precedence: Disabled > Active (pressed + over) > Hover (over) > Focus >
+    /// Rest. O(1); no allocation. The focus ring is painted separately by the
+    /// caller when `is_focused(action)`.
+    fn interaction_state(
+        &self,
+        rect: Rect,
+        action: &SduiActionIntent,
+        disabled: bool,
+    ) -> crate::shell::primitives::InteractionState {
+        use crate::shell::primitives::InteractionState as S;
+        if disabled {
+            return S::Disabled;
+        }
+        let over = self.pointer_pos.is_some_and(|p| rect.contains(p));
+        if over && self.pointer_pressed {
+            S::Active
+        } else if over {
+            S::Hover
+        } else if self.is_focused(action) {
+            S::Focus
+        } else {
+            S::Rest
+        }
+    }
+
     fn text_metrics(&self, role: FontRole, variant: UiTextVariant) -> UiTextMetrics {
         self.typography.ui_text_metrics(role, variant)
     }
 
     fn body_metrics(&self) -> UiTextMetrics {
-        self.text_metrics(FontRole::Ui, sdui_theme_style().body_text)
+        self.text_metrics(FontRole::Ui, self.theme_style().body_text)
     }
 
     fn component_variant(
@@ -354,7 +503,7 @@ impl SduiNativeState {
             editor_region_non_empty: false,
             package_fixed_panels: self
                 .package_ui
-                .fixed_panel_observations(widget_size.to_rect()),
+                .fixed_panel_observations(widget_size.to_rect(), &self.ui_theme.panel_defaults()),
             package_transient_overlays: self.package_overlay_observations(widget_size),
         };
 
@@ -441,7 +590,7 @@ impl SduiNativeState {
         if let Some(root_id) = self.root_id
             && let Some(sidebar) = sdui_panel_left_slot_rect(size, self)
         {
-            let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding - self.scroll_offset;
+            let mut cursor_y = sidebar.y0 + self.theme_style().panel_padding - self.scroll_offset;
             self.collect_accessibility_entries(
                 root_id,
                 0,
@@ -451,8 +600,11 @@ impl SduiNativeState {
                 &mut entries,
             );
         }
-        for (rect, panel) in self.package_ui.visible_fixed_panels(size.to_rect()) {
-            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+        for (rect, panel) in self
+            .package_ui
+            .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
+        {
+            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
             self.collect_package_accessibility_entries(
                 &panel.component,
                 0,
@@ -465,7 +617,7 @@ impl SduiNativeState {
         let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
         for overlay in self.package_ui.overlays() {
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
-            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
             self.collect_package_accessibility_entries(
                 &overlay.component,
                 0,
@@ -480,7 +632,7 @@ impl SduiNativeState {
         {
             let overlay = crate::shell::TransientPackageOverlay::from_menu_session(menu);
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
-            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
             self.collect_active_menu_accessibility_entries(menu, rect, &mut cursor_y, &mut entries);
         }
         entries
@@ -517,7 +669,7 @@ impl SduiNativeState {
             entries.push(SduiAccessibilityEntry {
                 role: Role::MenuItem,
                 label: Some(label),
-                bounds: row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
+                bounds: self.row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
             });
             *cursor_y += body.row_height;
         }
@@ -527,7 +679,7 @@ impl SduiNativeState {
             entries.push(SduiAccessibilityEntry {
                 role: Role::Status,
                 label: Some(summary),
-                bounds: row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
+                bounds: self.row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
             });
         }
     }
@@ -548,12 +700,12 @@ impl SduiNativeState {
         match &node.kind {
             SduiNodeKind::Panel { title, children } => {
                 let height = self
-                    .text_metrics(FontRole::Ui, sdui_theme_style().title_text)
+                    .text_metrics(FontRole::Ui, self.theme_style().title_text)
                     .row_height;
                 entries.push(SduiAccessibilityEntry {
                     role: Role::Pane,
                     label: Some(title.clone()),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
                 });
                 *cursor_y += height;
                 for child_id in children {
@@ -571,7 +723,7 @@ impl SduiNativeState {
                 entries.push(SduiAccessibilityEntry {
                     role: Role::Label,
                     label: Some(text.clone()),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
                 });
                 *cursor_y += body.row_height;
             }
@@ -580,7 +732,7 @@ impl SduiNativeState {
                 entries.push(SduiAccessibilityEntry {
                     role: Role::Button,
                     label: Some(label.clone()),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
                 });
                 *cursor_y += height;
             }
@@ -592,21 +744,27 @@ impl SduiNativeState {
                     entries.push(SduiAccessibilityEntry {
                         role: Role::ListItem,
                         label: Some(item.label.clone()),
-                        bounds: row_rect(depth, *cursor_y, width, origin_x, row_height),
+                        bounds: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
                     });
                     *cursor_y += row_height;
                 }
                 entries.push(SduiAccessibilityEntry {
                     role: Role::List,
                     label: None,
-                    bounds: row_rect(depth, list_start, width, origin_x, *cursor_y - list_start),
+                    bounds: self.row_rect(
+                        depth,
+                        list_start,
+                        width,
+                        origin_x,
+                        *cursor_y - list_start,
+                    ),
                 });
             }
             SduiNodeKind::EditorView { binding } => {
                 entries.push(SduiAccessibilityEntry {
                     role: Role::MultilineTextInput,
                     label: Some(format!("Editor view for document {}", binding.document_id)),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
                 });
                 *cursor_y += body.row_height;
             }
@@ -653,16 +811,16 @@ impl SduiNativeState {
         origin_x: f64,
         entries: &mut Vec<SduiAccessibilityEntry>,
     ) {
-        let body = self.component_metrics(component, sdui_theme_style().body_text);
+        let body = self.component_metrics(component, self.theme_style().body_text);
         match component.kind.as_str() {
             "panel" => {
                 if let Some(title) = &component.title {
-                    let variant = Self::component_variant(component, sdui_theme_style().title_text);
+                    let variant = Self::component_variant(component, self.theme_style().title_text);
                     let height = self.text_metrics(component.font_role, variant).row_height;
                     entries.push(SduiAccessibilityEntry {
                         role: Role::Pane,
                         label: Some(title.clone()),
-                        bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                        bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
                     });
                     *cursor_y += height;
                 }
@@ -691,7 +849,7 @@ impl SduiNativeState {
                         Role::Label
                     },
                     label: Some(label),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
                 });
                 *cursor_y += body.row_height;
             }
@@ -705,7 +863,7 @@ impl SduiNativeState {
                             .clone()
                             .unwrap_or_else(|| component.id.clone()),
                     ),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
                 });
                 *cursor_y += height;
             }
@@ -717,21 +875,27 @@ impl SduiNativeState {
                     entries.push(SduiAccessibilityEntry {
                         role: Role::ListItem,
                         label: Some(item.label.clone()),
-                        bounds: row_rect(depth, *cursor_y, width, origin_x, row_height),
+                        bounds: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
                     });
                     *cursor_y += row_height;
                 }
                 entries.push(SduiAccessibilityEntry {
                     role: Role::List,
                     label: None,
-                    bounds: row_rect(depth, list_start, width, origin_x, *cursor_y - list_start),
+                    bounds: self.row_rect(
+                        depth,
+                        list_start,
+                        width,
+                        origin_x,
+                        *cursor_y - list_start,
+                    ),
                 });
             }
             "editorView" => {
                 entries.push(SduiAccessibilityEntry {
                     role: Role::MultilineTextInput,
                     label: Some(format!("Editor view · {}", component.id)),
-                    bounds: row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
                 });
                 *cursor_y += body.row_height;
             }
@@ -742,6 +906,85 @@ impl SduiNativeState {
                     );
                 }
             }
+            // Phase 20.5: dropdown — ComboBox role for the trigger.
+            "dropdown" => {
+                let height = body.button_height();
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::ComboBox,
+                    label: Some(
+                        component
+                            .label
+                            .clone()
+                            .or_else(|| component.text.clone())
+                            .unwrap_or_else(|| component.id.clone()),
+                    ),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
+                });
+                *cursor_y += height;
+            }
+            // Phase 20.5: collapse — group role with title, then children.
+            "collapse" => {
+                let title = component
+                    .title
+                    .clone()
+                    .or_else(|| component.label.clone())
+                    .unwrap_or_else(|| component.id.clone());
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::Group,
+                    label: Some(title),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                });
+                *cursor_y += body.row_height;
+                if !component.disabled {
+                    for child in &component.children {
+                        self.collect_package_accessibility_entries(
+                            child,
+                            depth + 1,
+                            cursor_y,
+                            width,
+                            origin_x,
+                            entries,
+                        );
+                    }
+                }
+            }
+            // Phase 20.5: modal — Dialog role.
+            "modal" => {
+                let title = component
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| component.id.clone());
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::Dialog,
+                    label: Some(title),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
+                });
+                *cursor_y += body.row_height;
+                for child in &component.children {
+                    self.collect_package_accessibility_entries(
+                        child,
+                        depth + 1,
+                        cursor_y,
+                        width,
+                        origin_x,
+                        entries,
+                    );
+                }
+            }
+            // Phase 20.5: text input — TextInput role.
+            "textInput" => {
+                let label = component
+                    .label
+                    .clone()
+                    .or_else(|| component.text.clone())
+                    .unwrap_or_else(|| component.id.clone());
+                entries.push(SduiAccessibilityEntry {
+                    role: Role::TextInput,
+                    label: Some(label),
+                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.button_height()),
+                });
+                *cursor_y += body.button_height();
+            }
             _ => {}
         }
     }
@@ -751,12 +994,12 @@ impl SduiNativeState {
         self.actions.clear();
         let package_panels: Vec<_> = self
             .package_ui
-            .visible_fixed_panels(size.to_rect())
+            .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
             .into_iter()
             .map(|(rect, panel)| (rect, panel.clone()))
             .collect();
         for (rect, panel) in package_panels {
-            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
             self.collect_package_action_regions(
                 &panel.component,
                 0,
@@ -772,7 +1015,7 @@ impl SduiNativeState {
             return;
         };
         self.viewport_height = sidebar.height();
-        let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding - self.scroll_offset;
+        let mut cursor_y = sidebar.y0 + self.theme_style().panel_padding - self.scroll_offset;
         self.collect_action_regions(root_id, 0, &mut cursor_y, sidebar.width(), sidebar.x0);
         self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
         let max_scroll = (self.content_height - self.viewport_height).max(0.0);
@@ -787,18 +1030,22 @@ impl SduiNativeState {
         if let Some(root_id) = self.root_id
             && let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self)
         {
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                sdui_theme_style().panel_background,
-                None,
-                &sidebar,
+            // Route sidebar chrome through primitive (Phase 20.2)
+            crate::shell::primitives::paint_panel_chrome(
+                scene,
+                sidebar,
+                &crate::shell::primitives::PanelChrome {
+                    title: None,
+                    collapse: crate::shell::primitives::InteractionState::Rest,
+                    resize: crate::shell::primitives::InteractionState::Rest,
+                },
+                &self.ui_theme,
             );
             self.viewport_height = sidebar.height();
             // Clip panel content to the sidebar so scrolled-out rows do not
             // paint over the editor main region.
             scene.push_clip_layer(Affine::IDENTITY, &sidebar);
-            let mut cursor_y = sidebar.y0 + sdui_theme_style().panel_padding - self.scroll_offset;
+            let mut cursor_y = sidebar.y0 + self.theme_style().panel_padding - self.scroll_offset;
             self.paint_node(
                 ctx,
                 scene,
@@ -1005,7 +1252,7 @@ impl SduiNativeState {
         match node.kind {
             SduiNodeKind::Panel { children, .. } => {
                 *cursor_y += self
-                    .text_metrics(FontRole::Ui, sdui_theme_style().title_text)
+                    .text_metrics(FontRole::Ui, self.theme_style().title_text)
                     .row_height;
                 for child_id in children {
                     self.collect_action_regions(child_id, depth + 1, cursor_y, width, origin_x);
@@ -1016,7 +1263,7 @@ impl SduiNativeState {
             }
             SduiNodeKind::Button { action, .. } => {
                 self.actions.push(SduiVisibleAction {
-                    rect: row_rect(depth, *cursor_y, width, origin_x, body.button_height()),
+                    rect: self.row_rect(depth, *cursor_y, width, origin_x, body.button_height()),
                     intent: action,
                 });
                 *cursor_y += body.button_height();
@@ -1027,7 +1274,7 @@ impl SduiNativeState {
                 for item in items {
                     if let Some(action) = item.action {
                         self.actions.push(SduiVisibleAction {
-                            rect: row_rect(depth, *cursor_y, width, origin_x, row_height),
+                            rect: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
                             intent: action,
                         });
                     }
@@ -1071,12 +1318,12 @@ impl SduiNativeState {
         width: f64,
         origin_x: f64,
     ) {
-        let metrics = self.component_metrics(component, sdui_theme_style().body_text);
+        let metrics = self.component_metrics(component, self.theme_style().body_text);
         match component.kind.as_str() {
             "panel" => {
                 if component.title.is_some() {
                     *cursor_y += self
-                        .component_metrics(component, sdui_theme_style().title_text)
+                        .component_metrics(component, self.theme_style().title_text)
                         .row_height;
                 }
                 for child in &component.children {
@@ -1090,9 +1337,17 @@ impl SduiNativeState {
                 }
             }
             "button" => {
-                if let Some(command_id) = &component.action_command_id {
+                if !component.disabled
+                    && let Some(command_id) = &component.action_command_id
+                {
                     self.actions.push(SduiVisibleAction {
-                        rect: row_rect(depth, *cursor_y, width, origin_x, metrics.button_height()),
+                        rect: self.row_rect(
+                            depth,
+                            *cursor_y,
+                            width,
+                            origin_x,
+                            metrics.button_height(),
+                        ),
                         intent: package_action_intent(command_id, &component.id),
                     });
                 }
@@ -1102,9 +1357,11 @@ impl SduiNativeState {
                 let row_height = metrics
                     .list_height(self.text_metrics(component.font_role, UiTextVariant::Detail));
                 for item in &component.items {
-                    if let Some(command_id) = &item.action_command_id {
+                    if !item.disabled
+                        && let Some(command_id) = &item.action_command_id
+                    {
                         self.actions.push(SduiVisibleAction {
-                            rect: row_rect(depth, *cursor_y, width, origin_x, row_height),
+                            rect: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
                             intent: package_action_intent(
                                 command_id,
                                 &format!("{}.{}", component.id, item.id),
@@ -1136,12 +1393,15 @@ impl SduiNativeState {
         width: f64,
         origin_x: f64,
     ) {
+        use crate::shell::{
+            InteractionState, component_state_color, list_row_fill_color, paint_focus_ring,
+        };
         let Some(node) = self.nodes.get(&node_id).cloned() else {
             return;
         };
         match node.kind {
             SduiNodeKind::Panel { title, children } => {
-                let variant = sdui_theme_style().title_text;
+                let variant = self.theme_style().title_text;
                 self.paint_text(
                     ctx,
                     scene,
@@ -1152,7 +1412,7 @@ impl SduiNativeState {
                     origin_x,
                     FontRole::Ui,
                     variant,
-                    sdui_theme_style().text_color,
+                    self.theme_style().text_color,
                 );
                 *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
                 for child_id in children {
@@ -1160,7 +1420,7 @@ impl SduiNativeState {
                 }
             }
             SduiNodeKind::Label { text } => {
-                let variant = sdui_theme_style().body_text;
+                let variant = self.theme_style().body_text;
                 self.paint_text(
                     ctx,
                     scene,
@@ -1171,21 +1431,21 @@ impl SduiNativeState {
                     origin_x,
                     FontRole::Ui,
                     variant,
-                    sdui_theme_style().muted_text_color,
+                    self.theme_style().muted_text_color,
                 );
                 *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
             }
             SduiNodeKind::Button { label, action } => {
-                let variant = sdui_theme_style().body_text;
+                let variant = self.theme_style().body_text;
                 let metrics = self.text_metrics(FontRole::Ui, variant);
-                let rect = row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
-                scene.fill(
-                    Fill::NonZero,
-                    Affine::IDENTITY,
-                    sdui_theme_style().button_background,
-                    None,
-                    &rect,
-                );
+                let rect =
+                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
+                let state = self.interaction_state(rect, &action, false);
+                if self.is_focused(&action) {
+                    paint_focus_ring(scene, rect, &self.ui_theme);
+                }
+                let fill = component_state_color(&self.ui_theme, "surface.control", state);
+                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
                 self.actions.push(SduiVisibleAction {
                     rect,
                     intent: action,
@@ -1200,29 +1460,36 @@ impl SduiNativeState {
                     origin_x,
                     FontRole::Ui,
                     variant,
-                    sdui_theme_style().text_color,
+                    self.theme_style().text_color,
                 );
                 *cursor_y += metrics.button_height();
             }
             SduiNodeKind::List { items } => {
-                let variant = sdui_theme_style().body_text;
+                let variant = self.theme_style().body_text;
                 let metrics = self.text_metrics(FontRole::Ui, variant);
                 let detail_metrics = self.text_metrics(FontRole::Ui, UiTextVariant::Detail);
                 let row_height = metrics.list_height(detail_metrics);
                 for item in items {
-                    let rect = row_rect(depth, *cursor_y, width, origin_x, row_height);
-                    scene.fill(
-                        Fill::NonZero,
-                        Affine::IDENTITY,
-                        sdui_theme_style().list_background,
-                        None,
-                        &rect,
-                    );
-                    if let Some(action) = item.action {
-                        self.actions.push(SduiVisibleAction {
-                            rect,
-                            intent: action,
-                        });
+                    let rect = self.row_rect(depth, *cursor_y, width, origin_x, row_height);
+                    let (fill, push) = match item.action {
+                        Some(action) => {
+                            let state = self.interaction_state(rect, &action, false);
+                            if self.is_focused(&action) {
+                                paint_focus_ring(scene, rect, &self.ui_theme);
+                            }
+                            (
+                                list_row_fill_color(&self.ui_theme, state, false),
+                                Some(action),
+                            )
+                        }
+                        None => (
+                            list_row_fill_color(&self.ui_theme, InteractionState::Rest, false),
+                            None,
+                        ),
+                    };
+                    scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
+                    if let Some(intent) = push {
+                        self.actions.push(SduiVisibleAction { rect, intent });
                     }
                     self.paint_text(
                         ctx,
@@ -1234,7 +1501,7 @@ impl SduiNativeState {
                         origin_x,
                         FontRole::Ui,
                         variant,
-                        sdui_theme_style().text_color,
+                        self.theme_style().text_color,
                     );
                     if let Some(detail) = item.detail {
                         self.paint_text(
@@ -1247,14 +1514,14 @@ impl SduiNativeState {
                             origin_x,
                             FontRole::Ui,
                             UiTextVariant::Detail,
-                            sdui_theme_style().muted_text_color,
+                            self.theme_style().muted_text_color,
                         );
                     }
                     *cursor_y += row_height;
                 }
             }
             SduiNodeKind::EditorView { binding } => {
-                let variant = sdui_theme_style().body_text;
+                let variant = self.theme_style().body_text;
                 self.paint_text(
                     ctx,
                     scene,
@@ -1265,7 +1532,7 @@ impl SduiNativeState {
                     origin_x,
                     FontRole::Ui,
                     variant,
-                    sdui_theme_style().muted_text_color,
+                    self.theme_style().muted_text_color,
                 );
                 *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
             }
@@ -1301,19 +1568,23 @@ impl SduiNativeState {
         let size = ctx.size();
         let fixed_panels: Vec<_> = self
             .package_ui
-            .visible_fixed_panels(size.to_rect())
+            .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
             .into_iter()
             .map(|(rect, panel)| (rect, panel.clone()))
             .collect();
         for (rect, panel) in fixed_panels {
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                sdui_theme_style().panel_background,
-                None,
-                &rect,
+            // Route panel chrome through primitive (Phase 20.2)
+            crate::shell::primitives::paint_panel_chrome(
+                scene,
+                rect,
+                &crate::shell::primitives::PanelChrome {
+                    title: None,
+                    collapse: crate::shell::primitives::InteractionState::Rest,
+                    resize: crate::shell::primitives::InteractionState::Rest,
+                },
+                &self.ui_theme,
             );
-            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
             self.paint_package_component(
                 ctx,
                 scene,
@@ -1338,16 +1609,23 @@ impl SduiNativeState {
                 menu,
             ));
         }
+        // Phase 20.5: sort overlays by z-level token before painting.
+        // Order: z.overlay (0) < z.modal (1) < z.tooltip (2).
+        fn z_order(token: &str) -> u8 {
+            match token {
+                "z.modal" => 1,
+                "z.tooltip" => 2,
+                _ => 0, // z.overlay and any unknown token
+            }
+        }
+        overlays.sort_by_key(|o| z_order(o.z_level_token));
         for overlay in overlays {
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                sdui_theme_style().panel_background,
-                None,
-                &rect,
-            );
-            let mut cursor_y = rect.y0 + sdui_theme_style().panel_padding;
+            // Route overlay chrome through primitive (Phase 20.2)
+            crate::shell::primitives::paint_tooltip_shell(scene, rect, &self.ui_theme);
+            // Phase 20.5: cursor inset sourced from ui_theme (not theme_style cache).
+            let overlay_padding = self.ui_theme.scalar_f64("spacing.panel").unwrap_or(16.0);
+            let mut cursor_y = rect.y0 + overlay_padding;
             self.paint_package_component(
                 ctx,
                 scene,
@@ -1370,10 +1648,14 @@ impl SduiNativeState {
         width: f64,
         origin_x: f64,
     ) {
+        use crate::shell::{
+            InteractionState, component_state_color, disabled_text_color, list_row_fill_color,
+            paint_focus_ring,
+        };
         match component.kind.as_str() {
             "panel" => {
                 if let Some(title) = &component.title {
-                    let variant = Self::component_variant(component, sdui_theme_style().title_text);
+                    let variant = Self::component_variant(component, self.theme_style().title_text);
                     self.paint_text(
                         ctx,
                         scene,
@@ -1384,7 +1666,7 @@ impl SduiNativeState {
                         origin_x,
                         component.font_role,
                         variant,
-                        sdui_theme_style().text_color,
+                        self.theme_style().text_color,
                     );
                     *cursor_y += self.text_metrics(component.font_role, variant).row_height;
                 }
@@ -1407,12 +1689,20 @@ impl SduiNativeState {
                     .or(component.label.as_deref())
                     .unwrap_or(&component.id);
                 let fallback = if component.kind == "statusItem" {
-                    sdui_theme_style().status_text
+                    self.theme_style().status_text
                 } else {
-                    sdui_theme_style().body_text
+                    self.theme_style().body_text
                 };
                 let variant = Self::component_variant(component, fallback);
                 let metrics = self.text_metrics(component.font_role, variant);
+                // Labels/statusItems are non-interactive (no action region);
+                // only the Disabled state applies (dimmed text). Focus/hover
+                // are N/A without an action rect to hit-test.
+                let text_color = if component.disabled {
+                    disabled_text_color(&self.ui_theme)
+                } else {
+                    self.theme_style().muted_text_color
+                };
                 self.paint_text(
                     ctx,
                     scene,
@@ -1423,28 +1713,38 @@ impl SduiNativeState {
                     origin_x,
                     component.font_role,
                     variant,
-                    sdui_theme_style().muted_text_color,
+                    text_color,
                 );
                 *cursor_y += metrics.row_height;
             }
             "button" => {
-                let variant = Self::component_variant(component, sdui_theme_style().body_text);
+                let variant = Self::component_variant(component, self.theme_style().body_text);
                 let metrics = self.text_metrics(component.font_role, variant);
-                let rect = row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
-                scene.fill(
-                    Fill::NonZero,
-                    Affine::IDENTITY,
-                    sdui_theme_style().button_background,
-                    None,
-                    &rect,
-                );
-                if let Some(command_id) = &component.action_command_id {
-                    self.actions.push(SduiVisibleAction {
-                        rect,
-                        intent: package_action_intent(command_id, &component.id),
-                    });
-                }
+                let rect =
+                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
+                let fill = match &component.action_command_id {
+                    Some(command_id) if !component.disabled => {
+                        let intent = package_action_intent(command_id, &component.id);
+                        let state = self.interaction_state(rect, &intent, false);
+                        if self.is_focused(&intent) {
+                            paint_focus_ring(scene, rect, &self.ui_theme);
+                        }
+                        self.actions.push(SduiVisibleAction { rect, intent });
+                        component_state_color(&self.ui_theme, "surface.control", state)
+                    }
+                    _ => component_state_color(
+                        &self.ui_theme,
+                        "surface.control",
+                        InteractionState::Disabled,
+                    ),
+                };
+                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
                 let label = component.label.as_deref().unwrap_or(&component.id);
+                let label_color = if component.disabled {
+                    disabled_text_color(&self.ui_theme)
+                } else {
+                    self.theme_style().text_color
+                };
                 self.paint_text(
                     ctx,
                     scene,
@@ -1455,32 +1755,41 @@ impl SduiNativeState {
                     origin_x,
                     component.font_role,
                     variant,
-                    sdui_theme_style().text_color,
+                    label_color,
                 );
                 *cursor_y += metrics.button_height();
             }
             "list" => {
-                let variant = Self::component_variant(component, sdui_theme_style().body_text);
+                let variant = Self::component_variant(component, self.theme_style().body_text);
                 let metrics = self.text_metrics(component.font_role, variant);
                 let detail_metrics = self.text_metrics(component.font_role, UiTextVariant::Detail);
                 let row_height = metrics.list_height(detail_metrics);
                 for item in &component.items {
-                    let rect = row_rect(depth, *cursor_y, width, origin_x, row_height);
-                    let background = if item.selected {
-                        sdui_theme_style().selected_background
-                    } else {
-                        sdui_theme_style().list_background
-                    };
-                    scene.fill(Fill::NonZero, Affine::IDENTITY, background, None, &rect);
-                    if let Some(command_id) = &item.action_command_id {
-                        self.actions.push(SduiVisibleAction {
-                            rect,
-                            intent: package_action_intent(
-                                command_id,
-                                &format!("{}.{}", component.id, item.id),
+                    let rect = self.row_rect(depth, *cursor_y, width, origin_x, row_height);
+                    let source_id = format!("{}.{}", component.id, item.id);
+                    let (fill, label_color) = match &item.action_command_id {
+                        Some(command_id) if !item.disabled => {
+                            let intent = package_action_intent(command_id, &source_id);
+                            let state = self.interaction_state(rect, &intent, false);
+                            if self.is_focused(&intent) {
+                                paint_focus_ring(scene, rect, &self.ui_theme);
+                            }
+                            self.actions.push(SduiVisibleAction { rect, intent });
+                            (
+                                list_row_fill_color(&self.ui_theme, state, item.selected),
+                                self.theme_style().text_color,
+                            )
+                        }
+                        _ => (
+                            list_row_fill_color(
+                                &self.ui_theme,
+                                InteractionState::Disabled,
+                                item.selected,
                             ),
-                        });
-                    }
+                            disabled_text_color(&self.ui_theme),
+                        ),
+                    };
+                    scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
                     self.paint_text(
                         ctx,
                         scene,
@@ -1491,7 +1800,7 @@ impl SduiNativeState {
                         origin_x,
                         component.font_role,
                         variant,
-                        sdui_theme_style().text_color,
+                        label_color,
                     );
                     if let Some(detail) = &item.detail {
                         self.paint_text(
@@ -1504,14 +1813,14 @@ impl SduiNativeState {
                             origin_x,
                             component.font_role,
                             UiTextVariant::Detail,
-                            sdui_theme_style().muted_text_color,
+                            self.theme_style().muted_text_color,
                         );
                     }
                     *cursor_y += row_height;
                 }
             }
             "editorView" => {
-                let variant = sdui_theme_style().body_text;
+                let variant = self.theme_style().body_text;
                 self.paint_text(
                     ctx,
                     scene,
@@ -1522,7 +1831,7 @@ impl SduiNativeState {
                     origin_x,
                     FontRole::Ui,
                     variant,
-                    sdui_theme_style().muted_text_color,
+                    self.theme_style().muted_text_color,
                 );
                 *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
             }
@@ -1532,6 +1841,254 @@ impl SduiNativeState {
                         ctx, scene, child, depth, cursor_y, width, origin_x,
                     );
                 }
+            }
+            // Phase 20.5: dropdown trigger row — label + chevron, list-in-overlay
+            // when open. Paint renders the closed trigger; the open list is
+            // routed through paint_package_overlays via the overlay primitive.
+            "dropdown" => {
+                let variant = Self::component_variant(component, self.theme_style().body_text);
+                let metrics = self.text_metrics(component.font_role, variant);
+                let rect =
+                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
+                let node_hash = stable_package_source_id(&component.id);
+                let is_focused = match &component.action_command_id {
+                    Some(command_id) if !component.disabled => {
+                        let intent = package_action_intent(command_id, &component.id);
+                        let state = self.interaction_state(rect, &intent, false);
+                        let focused = self.is_focused(&intent);
+                        if focused {
+                            paint_focus_ring(scene, rect, &self.ui_theme);
+                        }
+                        self.actions.push(SduiVisibleAction { rect, intent });
+                        let fill = component_state_color(&self.ui_theme, "surface.control", state);
+                        scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
+                        focused
+                    }
+                    _ => {
+                        let fill = component_state_color(
+                            &self.ui_theme,
+                            "surface.control",
+                            InteractionState::Disabled,
+                        );
+                        scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
+                        false
+                    }
+                };
+                // Phase 20.5: show selected item label from keyboard nav state.
+                let selected_index = self.dropdown_selected_index(node_hash);
+                let label = component
+                    .items
+                    .get(selected_index)
+                    .map(|item| item.label.as_str())
+                    .or(component.label.as_deref())
+                    .or(component.text.as_deref())
+                    .unwrap_or(&component.id);
+                let label_color = if component.disabled {
+                    disabled_text_color(&self.ui_theme)
+                } else {
+                    self.theme_style().text_color
+                };
+                self.paint_text(
+                    ctx,
+                    scene,
+                    label,
+                    depth,
+                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
+                    width,
+                    origin_x,
+                    component.font_role,
+                    variant,
+                    label_color,
+                );
+                *cursor_y += metrics.button_height();
+                // Phase 20.5: paint item list when focused (open state).
+                if is_focused && !component.disabled {
+                    for child in &component.children {
+                        self.paint_package_component(
+                            ctx,
+                            scene,
+                            child,
+                            depth + 1,
+                            cursor_y,
+                            width,
+                            origin_x,
+                        );
+                    }
+                }
+            }
+            // Phase 20.5: collapse section — title row with toggle action, children when expanded.
+            "collapse" => {
+                let title = component
+                    .title
+                    .as_deref()
+                    .or(component.label.as_deref())
+                    .unwrap_or(&component.id);
+                let variant = Self::component_variant(component, self.theme_style().title_text);
+                let metrics = self.text_metrics(component.font_role, variant);
+                let rect = self.row_rect(depth, *cursor_y, width, origin_x, metrics.row_height);
+                let node_hash = stable_package_source_id(&component.id);
+                // Phase 20.5: toggle action so collapse can receive focus and keyboard events.
+                if !component.disabled {
+                    let intent = package_action_intent("clay.ui.collapseToggle", &component.id);
+                    if self.is_focused(&intent) {
+                        paint_focus_ring(scene, rect, &self.ui_theme);
+                    }
+                    self.actions.push(SduiVisibleAction { rect, intent });
+                }
+                let text_color = if component.disabled {
+                    disabled_text_color(&self.ui_theme)
+                } else {
+                    self.theme_style().text_color
+                };
+                self.paint_text(
+                    ctx,
+                    scene,
+                    title,
+                    depth,
+                    *cursor_y,
+                    width,
+                    origin_x,
+                    component.font_role,
+                    variant,
+                    text_color,
+                );
+                *cursor_y += metrics.row_height;
+                // Phase 20.5: children visible only when expanded (keyboard toggled).
+                if !component.disabled && self.is_collapse_expanded(node_hash) {
+                    for child in &component.children {
+                        self.paint_package_component(
+                            ctx,
+                            scene,
+                            child,
+                            depth + 1,
+                            cursor_y,
+                            width,
+                            origin_x,
+                        );
+                    }
+                }
+            }
+            // Phase 20.5: modal dialog — overlay-surface chrome, title, children.
+            // Focus-trap and z.modal stacking are enforced by the overlay routing
+            // layer; paint renders the dialog body.
+            "modal" => {
+                crate::shell::primitives::paint_tooltip_shell(
+                    scene,
+                    self.row_rect(depth, *cursor_y, width, origin_x, 1.0),
+                    &self.ui_theme,
+                );
+                if let Some(title) = &component.title {
+                    let variant = Self::component_variant(component, self.theme_style().title_text);
+                    let metrics = self.text_metrics(component.font_role, variant);
+                    let text_color = if component.disabled {
+                        disabled_text_color(&self.ui_theme)
+                    } else {
+                        self.theme_style().text_color
+                    };
+                    self.paint_text(
+                        ctx,
+                        scene,
+                        title,
+                        depth,
+                        *cursor_y,
+                        width,
+                        origin_x,
+                        component.font_role,
+                        variant,
+                        text_color,
+                    );
+                    *cursor_y += metrics.row_height;
+                }
+                for child in &component.children {
+                    self.paint_package_component(
+                        ctx,
+                        scene,
+                        child,
+                        depth + 1,
+                        cursor_y,
+                        width,
+                        origin_x,
+                    );
+                }
+            }
+            // Phase 20.5: single-line text input — bordered field, placeholder,
+            // focus ring, validation-state border color.
+            "textInput" => {
+                let variant = Self::component_variant(component, self.theme_style().body_text);
+                let metrics = self.text_metrics(component.font_role, variant);
+                let rect =
+                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
+                // Border color: validation state > focus > default.
+                let border_color = match component.validation_state.as_deref() {
+                    Some("error") => self
+                        .ui_theme
+                        .color("diagnostic.error")
+                        .unwrap_or(Color::TRANSPARENT),
+                    Some("warning") => self
+                        .ui_theme
+                        .color("diagnostic.warning")
+                        .unwrap_or(Color::TRANSPARENT),
+                    Some("success") => self
+                        .ui_theme
+                        .color("diagnostic.success")
+                        .unwrap_or(Color::TRANSPARENT),
+                    _ => self
+                        .ui_theme
+                        .color("border.subtle")
+                        .unwrap_or(Color::TRANSPARENT),
+                };
+                let fill = component_state_color(
+                    &self.ui_theme,
+                    "surface.control",
+                    if component.disabled {
+                        InteractionState::Disabled
+                    } else {
+                        InteractionState::Rest
+                    },
+                );
+                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
+                // Border stroke (1px inset rect).
+                let border_rect = Rect::new(rect.x0, rect.y0, rect.x1, rect.y0 + 1.0);
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    border_color,
+                    None,
+                    &border_rect,
+                );
+                let intent = package_action_intent("clay.ui.textInputFocus", &component.id);
+                if self.is_focused(&intent) {
+                    paint_focus_ring(scene, rect, &self.ui_theme);
+                }
+                if !component.disabled {
+                    self.actions.push(SduiVisibleAction { rect, intent });
+                }
+                // Placeholder text (text field as placeholder when unfocused/empty).
+                let placeholder = component
+                    .text
+                    .as_deref()
+                    .or(component.label.as_deref())
+                    .unwrap_or("");
+                let placeholder_color = if component.disabled {
+                    disabled_text_color(&self.ui_theme)
+                } else {
+                    self.ui_theme
+                        .color("text.muted")
+                        .unwrap_or(Color::TRANSPARENT)
+                };
+                self.paint_text(
+                    ctx,
+                    scene,
+                    placeholder,
+                    depth,
+                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
+                    width,
+                    origin_x,
+                    component.font_role,
+                    variant,
+                    placeholder_color,
+                );
+                *cursor_y += metrics.button_height();
             }
             _ => {}
         }
@@ -1551,7 +2108,7 @@ impl SduiNativeState {
         color: Color,
     ) {
         let max_width =
-            (width - sdui_theme_style().panel_padding * 2.0 - depth as f64 * 10.0).max(1.0) as f32;
+            (width - self.theme_style().panel_padding * 2.0 - depth as f64 * 10.0).max(1.0) as f32;
         let metrics = self.text_metrics(role, variant);
         let (font_context, layout_context) = ctx.text_contexts();
         let mut builder = layout_context.ranged_builder(font_context, text, 1.0, true);
@@ -1568,13 +2125,25 @@ impl SduiNativeState {
         render_text(
             scene,
             Affine::translate((
-                origin_x + sdui_theme_style().panel_padding + depth as f64 * 10.0,
+                origin_x + self.theme_style().panel_padding + depth as f64 * 10.0,
                 y,
             )),
             &layout,
             &[color.into()],
             true,
         );
+    }
+
+    /// Compute a row's rect inset by the active panel padding and per-depth
+    /// indent (Phase 20.4: padding reads the active theme spacing rhythm).
+    fn row_rect(&self, depth: usize, y: f64, width: f64, origin_x: f64, height: f64) -> Rect {
+        let x0 = origin_x + self.theme_style().panel_padding + depth as f64 * 10.0;
+        Rect::new(
+            x0,
+            y,
+            (origin_x + width - self.theme_style().panel_padding).max(x0),
+            y + height,
+        )
     }
 }
 
@@ -1598,7 +2167,10 @@ impl Widget for SduiNativeState {
         if bc.is_width_bounded() && bc.is_height_bounded() {
             bc.max()
         } else {
-            bc.constrain(Size::new(SIDEBAR_WIDTH, 600.0))
+            bc.constrain(Size::new(
+                self.ui_theme.panel_defaults().sidebar_width,
+                600.0,
+            ))
         }
     }
 
@@ -1647,32 +2219,35 @@ pub fn editor_region_for_document(
     // document while a freshly opened workspace document is active. Reserving
     // by panel presence (not binding match) keeps the editor main region from
     // overlapping the left file browser after a workspace file opens.
+    let defaults = sdui.ui_theme.panel_defaults();
     let full_rect = size.to_rect();
-    let mut layout = sdui.package_ui.slot_layout();
+    let mut layout = sdui.package_ui.slot_layout(&defaults);
     if (sdui.root_id.is_some() || sdui.editor_binding().is_some())
-        && size.width > SIDEBAR_WIDTH + 100.0
+        && size.width > defaults.sidebar_width + 100.0
         && !layout.contains_slot(PaneSlotId::Left)
     {
-        layout = layout.with_fixed_slot(fixed_sdui_left_slot());
+        layout = layout.with_fixed_slot(fixed_sdui_left_slot(&defaults));
     }
     layout.compute_geometry(full_rect).main_rect
 }
 
 fn sdui_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
-    let mut layout = sdui.package_ui.slot_layout();
+    let defaults = sdui.ui_theme.panel_defaults();
+    let mut layout = sdui.package_ui.slot_layout(&defaults);
     if sdui.editor_binding().is_some()
-        && size.width > SIDEBAR_WIDTH + 100.0
+        && size.width > defaults.sidebar_width + 100.0
         && !layout.contains_slot(PaneSlotId::Left)
     {
-        layout = layout.with_fixed_slot(fixed_sdui_left_slot());
+        layout = layout.with_fixed_slot(fixed_sdui_left_slot(&defaults));
     }
     layout
 }
 
 fn sdui_panel_slot_layout(sdui: &SduiNativeState) -> PaneSlotLayout {
-    let mut layout = sdui.package_ui.slot_layout();
+    let defaults = sdui.ui_theme.panel_defaults();
+    let mut layout = sdui.package_ui.slot_layout(&defaults);
     if sdui.root_id.is_some() && !layout.contains_slot(PaneSlotId::Left) {
-        layout = layout.with_fixed_slot(fixed_sdui_left_slot());
+        layout = layout.with_fixed_slot(fixed_sdui_left_slot(&defaults));
     }
     layout
 }
@@ -1681,12 +2256,12 @@ fn combined_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
     sdui_slot_layout(size, sdui)
 }
 
-fn fixed_sdui_left_slot() -> FixedSlotState {
+fn fixed_sdui_left_slot(defaults: &PanelDefaults) -> FixedSlotState {
     FixedSlotState {
         slot_id: FixedSlotId::Left,
-        size: SIDEBAR_WIDTH,
-        min_size: SIDEBAR_WIDTH,
-        max_size: SIDEBAR_WIDTH,
+        size: defaults.sidebar_width,
+        min_size: defaults.sidebar_width,
+        max_size: defaults.sidebar_width,
         visible: true,
         collapsed: false,
         resized_by_user: false,
@@ -1702,20 +2277,6 @@ fn sdui_panel_left_slot_rect(size: Size, sdui: &SduiNativeState) -> Option<Rect>
         .map(|slot| slot.rect)
 }
 
-fn sdui_theme_style() -> SduiThemeStyle {
-    SduiThemeStyle::default()
-}
-
-fn row_rect(depth: usize, y: f64, width: f64, origin_x: f64, height: f64) -> Rect {
-    let x0 = origin_x + sdui_theme_style().panel_padding + depth as f64 * 10.0;
-    Rect::new(
-        x0,
-        y,
-        (origin_x + width - sdui_theme_style().panel_padding).max(x0),
-        y + height,
-    )
-}
-
 fn package_action_intent(command_id: &str, source_id: &str) -> SduiActionIntent {
     SduiActionIntent::command(
         command_id.to_string(),
@@ -1723,6 +2284,34 @@ fn package_action_intent(command_id: &str, source_id: &str) -> SduiActionIntent 
             node_id: SduiNodeId(stable_package_source_id(source_id)),
         },
     )
+}
+
+/// Phase 20.5: collect focusable action intents from a component tree in paint order.
+/// Used for modal focus-trap Tab cycling.
+fn collect_component_intents(
+    component: &crate::shell::PackageUiComponentTree,
+    intents: &mut Vec<SduiActionIntent>,
+) {
+    if component.disabled {
+        return;
+    }
+    if let Some(command_id) = &component.action_command_id {
+        intents.push(package_action_intent(command_id, &component.id));
+    }
+    for item in &component.items {
+        if let Some(command_id) = &item.action_command_id {
+            intents.push(SduiActionIntent::command(
+                command_id.clone(),
+                SduiActionSource::ListItem {
+                    node_id: SduiNodeId(stable_package_source_id(&component.id)),
+                    item_id: item.id.clone(),
+                },
+            ));
+        }
+    }
+    for child in &component.children {
+        collect_component_intents(child, intents);
+    }
 }
 
 fn json_object_to_sdui_arguments(
@@ -1971,6 +2560,7 @@ mod tests {
                     "escape",
                     package_component("markdown.preview.quickOpen.root"),
                     Vec::new(),
+                    "z.overlay",
                 )],
                 input_routing: Vec::new(),
             })
@@ -2032,6 +2622,7 @@ mod tests {
                     "escape-or-outside",
                     package_component("markdown.preview.quickOpen.root"),
                     Vec::new(),
+                    "z.overlay",
                 )],
                 input_routing: Vec::new(),
             })
@@ -2058,8 +2649,16 @@ mod tests {
         state.apply_snapshot(sample_tree());
 
         state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
+        // Phase 20.4: the spacing-rhythm padding (spacing.md) shifted row
+        // geometry, so derive the probe point from the installed action region
+        // instead of hardcoding pixel coordinates.
+        let refresh = state
+            .actions
+            .iter()
+            .find(|a| a.intent.command_id == "workspace.refresh")
+            .expect("workspace.refresh action installed");
         let intent = state
-            .action_for_point(Point::new(30.0, 70.0))
+            .action_for_point(refresh.rect.center())
             .expect("button action should be installed in left slot geometry");
 
         assert_eq!(intent.command_id, "workspace.refresh");
@@ -2067,15 +2666,505 @@ mod tests {
 
     #[test]
     fn sdui_renderer_uses_resolved_theme_tokens_for_panel_styles() {
-        let style = sdui_theme_style();
+        // Phase 20.4: SDUI paint resolves from the active ResolvedUiTheme, not
+        // the core-fallback-only resolver. Default theme (no overrides) resolves
+        // core tokens; panel_padding is on the 4pt spacing.md rhythm (16) and
+        // fills come from core surface tokens.
+        let state = SduiNativeState::empty();
+        let style = state.theme_style();
 
-        assert_eq!(style.panel_padding, 14.0);
+        assert_eq!(style.panel_padding, 16.0);
         assert_eq!(style.title_text, UiTextVariant::Title);
         assert_eq!(style.body_text, UiTextVariant::Body);
         assert_eq!(style.status_text, UiTextVariant::Status);
         assert_eq!(style.panel_background, Color::from_rgb8(0x21, 0x20, 0x2b));
         assert_eq!(style.button_background, Color::from_rgb8(0x39, 0x35, 0x4a));
         assert_eq!(style.list_background, Color::from_rgb8(0x29, 0x28, 0x35));
+    }
+
+    #[test]
+    fn sdui_paint_uses_active_theme_not_core_fallbacks() {
+        // Phase 20.4: installing a ResolvedUiTheme with design-token overrides
+        // must change what SDUI paint reads. The core-fallback path
+        // (SduiThemeStyle::default / from_resolver) is no longer in the paint
+        // path, so user/theme-package overrides reach component fills.
+        use crate::protocol::{UiDesignTokenOverride, WireDesignTokenValue};
+        use crate::shell::theme::ResolvedUiTheme;
+
+        let overrides = vec![
+            UiDesignTokenOverride {
+                token: "surface.panel".to_string(),
+                value: WireDesignTokenValue::Color([0x11, 0x22, 0x33, 0xff]),
+                provenance: "test".to_string(),
+            },
+            UiDesignTokenOverride {
+                token: "surface.control".to_string(),
+                value: WireDesignTokenValue::Color([0x44, 0x55, 0x66, 0xff]),
+                provenance: "test".to_string(),
+            },
+            UiDesignTokenOverride {
+                token: "spacing.md".to_string(),
+                value: WireDesignTokenValue::Scalar(20.0),
+                provenance: "test".to_string(),
+            },
+        ];
+        let mut state = SduiNativeState::empty();
+        state
+            .set_ui_theme(ResolvedUiTheme::from_active_theme(&overrides).expect("valid overrides"));
+
+        let style = state.theme_style();
+        assert_eq!(style.panel_background, Color::from_rgb8(0x11, 0x22, 0x33));
+        assert_eq!(style.button_background, Color::from_rgb8(0x44, 0x55, 0x66));
+        // spacing.md (20) scaled by default density (1.0).
+        assert_eq!(style.panel_padding, 20.0);
+    }
+
+    #[test]
+    fn sdui_spacing_rhythm_scales_with_density() {
+        // Phase 20.4: panel_padding is spacing.md x spacing_scale(); density
+        // scales the UI spacing rhythm only. compact=0.875, default=1.0,
+        // spacious=1.125.
+        use crate::protocol::{UiDesignTokenOverride, WireDesignTokenValue};
+        use crate::shell::theme::ResolvedUiTheme;
+
+        let compact = UiDesignTokenOverride {
+            token: "density.default".to_string(),
+            value: WireDesignTokenValue::Level("compact".to_string()),
+            provenance: "test".to_string(),
+        };
+        let spacious = UiDesignTokenOverride {
+            token: "density.default".to_string(),
+            value: WireDesignTokenValue::Level("spacious".to_string()),
+            provenance: "test".to_string(),
+        };
+
+        let mut state = SduiNativeState::empty();
+        // core spacing.md = 16.
+        assert_eq!(state.theme_style().panel_padding, 16.0);
+
+        state
+            .set_ui_theme(ResolvedUiTheme::from_active_theme(&[compact]).expect("compact density"));
+        assert_eq!(state.theme_style().panel_padding, 16.0 * 0.875);
+
+        let mut state = SduiNativeState::empty();
+        state.set_ui_theme(
+            ResolvedUiTheme::from_active_theme(&[spacious]).expect("spacious density"),
+        );
+        assert_eq!(state.theme_style().panel_padding, 16.0 * 1.125);
+    }
+
+    #[test]
+    fn disabled_component_applies_opacity_disabled_and_gates_actions() {
+        // Plan 065 (Phase 20.4) task 4: disabled components render with the
+        // disabled state tokens (dimmed) and are gated out of SduiVisibleAction
+        // (their actions are not dispatchable). Enabled siblings remain.
+        use crate::shell::primitives::{
+            InteractionState, component_state_color, disabled_text_color,
+        };
+        use crate::shell::theme::ResolvedUiTheme;
+
+        let theme = ResolvedUiTheme::from_active_theme(&[]).unwrap();
+        // Disabled button fill: surface.disabled dimmed by opacity.disabled.
+        assert_eq!(
+            component_state_color(&theme, "surface.control", InteractionState::Disabled),
+            Color::from_rgba8(0x1b, 0x1a, 0x24, 140)
+        );
+        // Disabled label text: text.disabled dimmed by opacity.disabled.
+        assert_eq!(
+            disabled_text_color(&theme),
+            Color::from_rgba8(0x6f, 0x6a, 0x87, 140)
+        );
+
+        let panel = PackageUiComponentTree::from_declaration(&json!({
+            "kind": "panel",
+            "id": "disabled.test.root",
+            "children": [
+                { "kind": "button", "id": "enabled.btn", "label": "On",
+                  "action": { "commandId": "cmd.enabled" } },
+                { "kind": "button", "id": "disabled.btn", "label": "Off",
+                  "disabled": true, "action": { "commandId": "cmd.disabled" } },
+                { "kind": "list", "id": "list", "items": [
+                    { "id": "i.on", "label": "row on",
+                      "action": { "commandId": "cmd.row.on" } },
+                    { "id": "i.off", "label": "row off", "disabled": true,
+                      "action": { "commandId": "cmd.row.off" } }
+                ]}
+            ]
+        }))
+        .unwrap();
+
+        let mut state = SduiNativeState::empty();
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "disabled.test",
+                    FixedSlotId::Left,
+                    PackagePanelVisibility::Visible,
+                    panel,
+                    Vec::new(),
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
+
+        let cmds: Vec<String> = state
+            .actions
+            .iter()
+            .map(|a| a.intent.command_id.clone())
+            .collect();
+        assert!(
+            cmds.contains(&"cmd.enabled".to_string()),
+            "enabled button action present"
+        );
+        assert!(
+            cmds.contains(&"cmd.row.on".to_string()),
+            "enabled list row action present"
+        );
+        assert!(
+            !cmds.contains(&"cmd.disabled".to_string()),
+            "disabled button action must be gated out"
+        );
+        assert!(
+            !cmds.contains(&"cmd.row.off".to_string()),
+            "disabled list row action must be gated out"
+        );
+    }
+
+    #[test]
+    fn focused_component_tracks_focus_and_derives_interaction_state() {
+        // Plan 065 (Phase 20.4) task 4: focused interactive components track
+        // focus (for the focus ring) and derive InteractionState from
+        // pointer/focus/disabled with the precedence Disabled > Active > Hover >
+        // Focus > Rest.
+        use crate::shell::primitives::InteractionState;
+
+        let panel = PackageUiComponentTree::from_declaration(&json!({
+            "kind": "panel",
+            "id": "focus.test.root",
+            "children": [{
+                "kind": "button", "id": "btn", "label": "Go",
+                "action": { "commandId": "cmd.go" }
+            }]
+        }))
+        .unwrap();
+        let mut state = SduiNativeState::empty();
+        state
+            .apply_package_ui_update(PackageUiRuntimeUpdate {
+                base_version: 0,
+                fixed_panels: vec![FixedPackagePanel::new(
+                    "focus.test",
+                    FixedSlotId::Left,
+                    PackagePanelVisibility::Visible,
+                    panel,
+                    Vec::new(),
+                )],
+                transient_overlays: Vec::new(),
+                input_routing: Vec::new(),
+            })
+            .unwrap();
+        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
+
+        let action = state
+            .actions
+            .iter()
+            .find(|a| a.intent.command_id == "cmd.go")
+            .expect("button action");
+        let rect = action.rect;
+        let intent = action.intent.clone();
+
+        // Rest: no pointer, no focus.
+        assert_eq!(
+            state.interaction_state(rect, &intent, false),
+            InteractionState::Rest
+        );
+
+        // Focus: focused action, pointer off-rect, not pressed.
+        state.set_focused_action(Some(intent.clone()));
+        assert!(state.is_focused(&intent));
+        assert_eq!(state.focused_action(), Some(&intent));
+        assert_eq!(
+            state.interaction_state(rect, &intent, false),
+            InteractionState::Focus
+        );
+
+        // Hover overrides Focus when the pointer is over the rect (not pressed).
+        state.set_pointer_pos(Some(rect.center()));
+        assert_eq!(
+            state.interaction_state(rect, &intent, false),
+            InteractionState::Hover
+        );
+
+        // Active overrides Hover when pressed + over.
+        state.set_pointer_pressed(true);
+        assert_eq!(
+            state.interaction_state(rect, &intent, false),
+            InteractionState::Active
+        );
+
+        // Disabled overrides everything.
+        assert_eq!(
+            state.interaction_state(rect, &intent, true),
+            InteractionState::Disabled
+        );
+    }
+
+    /// Plan 065 task 7: per-component-per-state structural observability
+    /// palette. Captures the resolved fill/border/text colors the SDUI paint
+    /// path derives for a component kind in a given InteractionState from the
+    /// active ResolvedUiTheme — no pixel rendering. Containers
+    /// (flex/stack/scroll/portal) and `editorView` carry no SDUI state-driven
+    /// chrome (editorView chrome is editor-theme-driven; see task 5).
+    #[derive(Debug, Clone, PartialEq)]
+    struct ComponentStatePalette {
+        fill: Option<Color>,
+        border: Option<Color>,
+        text: Option<Color>,
+    }
+
+    fn component_state_palette(
+        theme: &crate::shell::theme::ResolvedUiTheme,
+        kind: &str,
+        state: crate::shell::primitives::InteractionState,
+    ) -> ComponentStatePalette {
+        use crate::shell::primitives::InteractionState;
+        use crate::shell::primitives::{
+            component_state_color, disabled_text_color, list_row_fill_color,
+        };
+        let primary = || theme.color("text.primary").unwrap_or(Color::TRANSPARENT);
+        let muted = || theme.color("text.muted").unwrap_or(Color::TRANSPARENT);
+        let text_for = |default_muted: bool| {
+            if state == InteractionState::Disabled {
+                disabled_text_color(theme)
+            } else if default_muted {
+                muted()
+            } else {
+                primary()
+            }
+        };
+        match kind {
+            "button" => ComponentStatePalette {
+                fill: Some(component_state_color(theme, "surface.control", state)),
+                border: (state == InteractionState::Focus)
+                    .then(|| theme.color("border.focus").unwrap_or(Color::TRANSPARENT)),
+                text: Some(text_for(false)),
+            },
+            "list" => ComponentStatePalette {
+                fill: Some(list_row_fill_color(theme, state, false)),
+                border: None,
+                text: Some(text_for(false)),
+            },
+            "label" | "statusItem" => ComponentStatePalette {
+                fill: None,
+                border: None,
+                text: Some(text_for(true)),
+            },
+            "panel" => ComponentStatePalette {
+                fill: theme.color("surface.panel"),
+                border: theme.color("border.subtle"),
+                text: theme.color("text.primary"),
+            },
+            "overlay" => ComponentStatePalette {
+                fill: theme.color("surface.overlay"),
+                border: theme.color("border.subtle"),
+                text: theme.color("text.primary"),
+            },
+            // Containers recurse children; editorView chrome is editor-theme.
+            "flex" | "stack" | "scroll" | "portal" | "editorView" => ComponentStatePalette {
+                fill: None,
+                border: None,
+                text: None,
+            },
+            // Phase 20.5: dropdown trigger — same state model as button.
+            "dropdown" => ComponentStatePalette {
+                fill: Some(component_state_color(theme, "surface.control", state)),
+                border: (state == InteractionState::Focus)
+                    .then(|| theme.color("border.focus").unwrap_or(Color::TRANSPARENT)),
+                text: Some(text_for(false)),
+            },
+            // Phase 20.5: collapse — title text, no fill of its own.
+            "collapse" => ComponentStatePalette {
+                fill: None,
+                border: None,
+                text: Some(text_for(false)),
+            },
+            // Phase 20.5: modal — overlay-surface chrome.
+            "modal" => ComponentStatePalette {
+                fill: theme.color("surface.overlay"),
+                border: theme.color("border.subtle"),
+                text: theme.color("text.primary"),
+            },
+            // Phase 20.5: text input — control fill, validation-state border.
+            "textInput" => ComponentStatePalette {
+                fill: Some(component_state_color(theme, "surface.control", state)),
+                border: (state == InteractionState::Focus)
+                    .then(|| theme.color("border.focus").unwrap_or(Color::TRANSPARENT))
+                    .or_else(|| theme.color("border.subtle")),
+                text: Some(text_for(true)),
+            },
+            _ => ComponentStatePalette {
+                fill: None,
+                border: None,
+                text: None,
+            },
+        }
+    }
+
+    #[test]
+    fn each_component_kind_renders_all_five_states() {
+        // Plan 065 task 7 + Phase 20.5: 14 kinds × 5 states snapshot matrix.
+        // Pins the resolved palette per kind per state against the core token
+        // values so regressions in token routing or state mapping fail
+        // deterministically.
+        use crate::shell::primitives::InteractionState;
+        use crate::shell::theme::ResolvedUiTheme;
+        let theme = ResolvedUiTheme::from_active_theme(&[]).unwrap();
+        let kinds = [
+            "editorView",
+            "panel",
+            "label",
+            "button",
+            "list",
+            "flex",
+            "stack",
+            "overlay",
+            "scroll",
+            "portal",
+            "statusItem",
+            // Phase 20.5
+            "dropdown",
+            "collapse",
+            "modal",
+            "textInput",
+        ];
+        let states = [
+            InteractionState::Rest,
+            InteractionState::Hover,
+            InteractionState::Active,
+            InteractionState::Focus,
+            InteractionState::Disabled,
+        ];
+        for kind in kinds {
+            for state in states {
+                let palette = component_state_palette(&theme, kind, state);
+                // Every kind must produce a palette for every state (no panic,
+                // no None where a fill is expected).
+                match kind {
+                    "button" | "dropdown" | "textInput" => {
+                        assert!(palette.fill.is_some(), "{kind} needs a fill for {state:?}")
+                    }
+                    "list" => assert!(palette.fill.is_some(), "list needs a fill for {state:?}"),
+                    "panel" | "overlay" | "modal" => {
+                        assert!(
+                            palette.fill.is_some(),
+                            "{kind} needs a chrome fill for {state:?}"
+                        );
+                        assert!(
+                            palette.border.is_some(),
+                            "{kind} needs a chrome border for {state:?}"
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn component_state_colors_are_token_derived() {
+        // Plan 065 task 7: the per-state palette matches the exact core token
+        // values (state mapping + token values pinned), not literals from paint.
+        use crate::shell::primitives::InteractionState;
+        use crate::shell::theme::ResolvedUiTheme;
+        let theme = ResolvedUiTheme::from_active_theme(&[]).unwrap();
+
+        // Button fill across all five states.
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Rest).fill,
+            Some(Color::from_rgb8(0x39, 0x35, 0x4a))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Hover).fill,
+            Some(Color::from_rgb8(0x2d, 0x2b, 0x3d))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Active).fill,
+            Some(Color::from_rgb8(0x34, 0x31, 0x47))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Focus).fill,
+            Some(Color::from_rgb8(0x7c, 0x6f, 0xff))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Focus).border,
+            Some(Color::from_rgb8(0x7c, 0x6f, 0xff))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Disabled).fill,
+            Some(Color::from_rgba8(0x1b, 0x1a, 0x24, 140))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "button", InteractionState::Disabled).text,
+            Some(Color::from_rgba8(0x6f, 0x6a, 0x87, 140))
+        );
+
+        // List row fill: Rest unselected → surface.list; selected-style states.
+        assert_eq!(
+            component_state_palette(&theme, "list", InteractionState::Rest).fill,
+            Some(Color::from_rgb8(0x29, 0x28, 0x35))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "list", InteractionState::Hover).fill,
+            Some(Color::from_rgb8(0x2d, 0x2b, 0x3d))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "list", InteractionState::Active).fill,
+            Some(Color::from_rgb8(0x34, 0x31, 0x47))
+        );
+
+        // Label/statusItem: no fill, muted text at Rest, disabled text when Disabled.
+        assert_eq!(
+            component_state_palette(&theme, "label", InteractionState::Rest).fill,
+            None
+        );
+        assert_eq!(
+            component_state_palette(&theme, "label", InteractionState::Rest).text,
+            Some(Color::from_rgb8(0xb9, 0xb2, 0xcf))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "statusItem", InteractionState::Disabled).text,
+            Some(Color::from_rgba8(0x6f, 0x6a, 0x87, 140))
+        );
+
+        // Panel/overlay chrome: token-driven fill + border, state-independent.
+        assert_eq!(
+            component_state_palette(&theme, "panel", InteractionState::Rest).fill,
+            Some(Color::from_rgb8(0x21, 0x20, 0x2b))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "panel", InteractionState::Rest).border,
+            Some(Color::from_rgb8(0x2f, 0x2c, 0x40))
+        );
+        assert_eq!(
+            component_state_palette(&theme, "overlay", InteractionState::Rest).fill,
+            Some(Color::from_rgb8(0x18, 0x17, 0x20))
+        );
+
+        // Containers + editorView: no SDUI state-driven chrome.
+        for kind in ["flex", "stack", "scroll", "portal", "editorView"] {
+            let palette = component_state_palette(&theme, kind, InteractionState::Hover);
+            assert_eq!(
+                palette,
+                ComponentStatePalette {
+                    fill: None,
+                    border: None,
+                    text: None
+                },
+                "{kind} has no SDUI state chrome"
+            );
+        }
     }
 
     #[test]
@@ -2272,8 +3361,8 @@ mod tests {
         let sidebar = sdui_panel_left_slot_rect(size, &state).expect("left file-browser panel");
         let row_height = state.body_metrics().row_height;
         let click_point = Point::new(
-            sidebar.x0 + sdui_theme_style().panel_padding + 10.0 + 4.0,
-            sidebar.y0 + sdui_theme_style().panel_padding + row_height + 4.0,
+            sidebar.x0 + state.theme_style().panel_padding + 10.0 + 4.0,
+            sidebar.y0 + state.theme_style().panel_padding + row_height + 4.0,
         );
 
         let before = state

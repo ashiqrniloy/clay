@@ -498,14 +498,63 @@ fn phase18_9_keypress_to_paint_budget_orders_below_mode_activation_budget() {
 /// `#[cfg(test)]` or `mod tests` boundary. Files without a test module return
 /// the whole source.
 fn non_test_body(src: &str) -> &str {
-    let mut cut = src.len();
-    if let Some(i) = src.find("\n#[cfg(test)]") {
-        cut = cut.min(i);
-    }
+    // Prefer the `\nmod tests` boundary when present so test-only `#[cfg(test)]
+    // use` imports (e.g. masonry_sdui.rs line 39) do not truncate the scan
+    // before the real paint code. Fall back to `#[cfg(test)]` only when no
+    // `mod tests` boundary exists.
     if let Some(i) = src.find("\nmod tests") {
-        cut = cut.min(i);
+        return &src[..i];
     }
-    &src[..cut]
+    if let Some(i) = src.find("\n#[cfg(test)]") {
+        return &src[..i];
+    }
+    src
+}
+
+#[test]
+fn hot_path_no_theme_resolution_or_package_js() {
+    // Plan 065 (Phase 20.4) task 11: restyled paint hot paths must read cached
+    // ResolvedUiTheme/SduiThemeStyle values only — no per-frame theme
+    // re-resolution (ThemeTokenResolver/from_resolver/core_theme_value parse),
+    // no package JavaScript, no server round trip, no filesystem/network/shell
+    // work. Theme resolution happens once at install time into ResolvedUiTheme;
+    // paint reads cached typed values.
+    let files = [
+        "src/masonry_sdui.rs",
+        "src/editor/surface.rs",
+        "src/masonry_editor.rs",
+        "src/shell/primitives.rs",
+    ];
+    let mut hot_paths = String::new();
+    for file in files {
+        let src = fs::read_to_string(file).unwrap_or_else(|error| panic!("read {file}: {error}"));
+        hot_paths.push_str(non_test_body(&src));
+        hot_paths.push('\n');
+    }
+    for forbidden in [
+        "ThemeTokenResolver::new()",
+        "ThemeTokenResolver::new",
+        "from_resolver(",
+        "core_theme_value",
+        "Deno.core",
+        "op_clay_theme_set_theme",
+        "op_clay_theme_set_typography",
+        "reqwest",
+        "ureq",
+        "TcpStream",
+        "Command::new",
+        "std::fs::read",
+    ] {
+        assert!(
+            !hot_paths.contains(forbidden),
+            "Phase 20.4 paint hot paths must not re-resolve themes or run package/server/IO work: {forbidden}"
+        );
+    }
+    // The SDUI path must resolve through from_ui_theme (cached), not from_resolver.
+    assert!(
+        hot_paths.contains("from_ui_theme"),
+        "SDUI paint must resolve via SduiThemeStyle::from_ui_theme (cached ResolvedUiTheme)"
+    );
 }
 
 #[test]
@@ -694,4 +743,56 @@ fn semantic_intelligence_reuses_existing_decoration_paths_without_hot_path_work(
             "semantic paint/layout must stay additive over cached spans without publish/process/JS work: {forbidden}"
         );
     }
+}
+
+#[test]
+fn ui_design_tokens_resolve_without_package_javascript_in_paint_layout_or_input_hot_paths() {
+    // Phase 20.1 source guard: token resolution (core_theme_value,
+    // ThemeTokenResolver::resolve) must never run in Masonry paint/layout/
+    // pointer/scroll hot paths. Token resolution happens at theme-install time
+    // into a cached ResolvedUiTheme; paint paths read cached fields only.
+    let hot_path_files = [
+        "src/masonry_sdui.rs",
+        "src/masonry_editor.rs",
+        "src/masonry_shell.rs",
+    ];
+    for file in hot_path_files {
+        let src =
+            fs::read_to_string(file).unwrap_or_else(|e| panic!("{file} should be readable: {e}"));
+        let body = non_test_body(&src);
+        assert!(
+            !body.contains("core_theme_value("),
+            "{file} hot path must not call core_theme_value(); token resolution is theme-install-time only"
+        );
+        assert!(
+            !body.contains("ThemeTokenResolver"),
+            "{file} hot path must not reference ThemeTokenResolver; use cached ResolvedUiTheme instead"
+        );
+        assert!(
+            !body.contains("parse_override_token("),
+            "{file} hot path must not parse theme tokens; that is package-load/configuration-time work"
+        );
+        assert!(
+            !body.contains("parse_hex_rgba(") && !body.contains("parse_hex_color("),
+            "{file} hot path must not parse hex colors; all color resolution goes through StyleRegistry"
+        );
+    }
+
+    // ResolvedUiTheme construction and panel_defaults() must live in the
+    // theme module, not in hot-path files.
+    let theme_src =
+        fs::read_to_string("src/shell/theme.rs").expect("shell/theme.rs should be readable");
+    let theme_body = non_test_body(&theme_src);
+    assert!(
+        theme_body.contains("pub(crate) struct ResolvedUiTheme"),
+        "ResolvedUiTheme must be the single cached UI token registry defined in shell/theme.rs"
+    );
+    assert!(
+        theme_body.contains("fn resolved(&self"),
+        "ResolvedUiTheme::resolved() must live in shell/theme.rs"
+    );
+    assert!(
+        theme_body.contains("pub(crate) struct PanelDefaults"),
+        "PanelDefaults must live in shell/theme.rs as the resolved token-backed geometry source"
+    );
 }

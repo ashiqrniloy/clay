@@ -350,6 +350,12 @@ impl EditorWidget {
         );
         let mut sdui = SduiNativeState::empty();
         sdui.set_typography(editor.typography().clone());
+        sdui.set_ui_theme(
+            crate::shell::theme::ResolvedUiTheme::from_active_theme(
+                &initial_state.active_theme.design_tokens,
+            )
+            .unwrap_or_default(),
+        );
         Self {
             editor,
             edit_queue: None,
@@ -486,6 +492,10 @@ impl EditorWidget {
             }
             ClientConnectionEvent::ActiveTheme(theme) => {
                 self.editor.set_active_theme(&theme);
+                self.sdui.set_ui_theme(
+                    crate::shell::theme::ResolvedUiTheme::from_active_theme(&theme.design_tokens)
+                        .unwrap_or_default(),
+                );
                 true
             }
             ClientConnectionEvent::ActiveTypography(typography) => {
@@ -598,6 +608,12 @@ impl EditorWidget {
         self.editor
             .install_behavior_manifest(candidate.behavior.clone());
         self.editor.set_active_theme(&candidate.active_theme);
+        self.sdui.set_ui_theme(
+            crate::shell::theme::ResolvedUiTheme::from_active_theme(
+                &candidate.active_theme.design_tokens,
+            )
+            .unwrap_or_default(),
+        );
         let typography_changed = self
             .editor
             .install_runtime_typography(candidate.active_typography.clone());
@@ -1703,6 +1719,9 @@ impl EditorWidget {
     }
 
     fn local_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
+        if self.route_package_component_key(ctx, &key) {
+            return;
+        }
         if self.route_menu_key(ctx, &key) {
             return;
         }
@@ -1754,6 +1773,95 @@ impl EditorWidget {
                 );
             }
             ctx.set_handled();
+        }
+    }
+
+    /// Phase 20.5: routes keys to focused package UI components (dropdown,
+    /// collapse, modal focus trap). Returns `true` if the key was consumed.
+    fn route_package_component_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
+        let Some(focused) = self.sdui.focused_action().cloned() else {
+            return false;
+        };
+        match focused.command_id.as_str() {
+            "clay.ui.dropdownToggle" => {
+                let node_hash = match &focused.source {
+                    crate::protocol::SduiActionSource::Button { node_id } => node_id.0,
+                    crate::protocol::SduiActionSource::ListItem { node_id, .. } => node_id.0,
+                };
+                match &key.key {
+                    KeyCode::ArrowDown => {
+                        self.sdui.dropdown_cycle(node_hash, usize::MAX, 1);
+                        ctx.request_render();
+                        ctx.set_handled();
+                        true
+                    }
+                    KeyCode::ArrowUp => {
+                        self.sdui.dropdown_cycle(node_hash, usize::MAX, -1);
+                        ctx.request_render();
+                        ctx.set_handled();
+                        true
+                    }
+                    KeyCode::Enter => {
+                        self.sdui.set_focused_action(None);
+                        ctx.request_render();
+                        ctx.set_handled();
+                        true
+                    }
+                    KeyCode::Character(c) if c == " " => {
+                        self.sdui.set_focused_action(None);
+                        ctx.request_render();
+                        ctx.set_handled();
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            "clay.ui.collapseToggle" => {
+                let node_hash = match &focused.source {
+                    crate::protocol::SduiActionSource::Button { node_id } => node_id.0,
+                    crate::protocol::SduiActionSource::ListItem { node_id, .. } => node_id.0,
+                };
+                match &key.key {
+                    KeyCode::Enter => {
+                        self.sdui.collapse_toggle(node_hash);
+                        ctx.request_render();
+                        ctx.set_handled();
+                        true
+                    }
+                    KeyCode::Character(c) if c == " " => {
+                        self.sdui.collapse_toggle(node_hash);
+                        ctx.request_render();
+                        ctx.set_handled();
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            _ => {
+                // Phase 20.5: modal focus trap — Tab cycles focusable intents
+                // within the active modal overlay.
+                if key.key == KeyCode::Tab {
+                    let intents = self.sdui.modal_focusable_intents();
+                    if intents.is_empty() {
+                        return false;
+                    }
+                    let current_pos = intents
+                        .iter()
+                        .position(|i| *i == focused)
+                        .unwrap_or(intents.len() - 1);
+                    let next = if key.modifiers.shift {
+                        current_pos.checked_sub(1).unwrap_or(intents.len() - 1)
+                    } else {
+                        (current_pos + 1) % intents.len()
+                    };
+                    self.sdui.set_focused_action(Some(intents[next].clone()));
+                    ctx.request_render();
+                    ctx.set_handled();
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -2057,8 +2165,21 @@ impl EditorWidget {
             &rect,
         );
 
+        // Phase 20.4 task 6: token-driven status insets (spacing.sm scaled by
+        // the active density) replace the hardcoded 12.0/24.0. A top hairline
+        // divider separates the status bar from the editor above.
+        let ui_theme = self.editor.ui_theme();
+        let inset =
+            ui_theme.scalar_f64("spacing.sm").unwrap_or(12.0) * ui_theme.spacing_scale() as f64;
+        crate::shell::primitives::paint_divider(
+            scene,
+            rect,
+            crate::shell::primitives::Axis::Horizontal,
+            ui_theme,
+        );
+
         let status = self.status_text();
-        let max_width = (size.width - 24.0).max(1.0) as f32;
+        let max_width = (size.width - inset * 2.0).max(1.0) as f32;
         let (font_context, layout_context) = ctx.text_contexts();
         let mut builder = layout_context.ranged_builder(font_context, &status, 1.0, true);
         builder.push_default(StyleProperty::FontStack(
@@ -2074,7 +2195,7 @@ impl EditorWidget {
         render_text(
             scene,
             Affine::translate((
-                12.0,
+                inset,
                 y0 + (metrics.status_height() - metrics.line_height) / 2.0,
             )),
             &layout,
@@ -2160,10 +2281,33 @@ impl Widget for EditorWidget {
                 if button_event.button == Some(PointerButton::Primary) =>
             {
                 let point = ctx.local_position(button_event.state.position);
+                // Phase 20.4: feed pointer press + position into SDUI state so
+                // interactive components render Active/Hover, and record the
+                // focused action for the focus ring.
+                self.sdui.set_pointer_pos(Some(point));
+                self.sdui.set_pointer_pressed(true);
+                // Phase 20.4 task 5: feed the editor chrome the same pointer
+                // state so the scrollbar derives Active on thumb press.
+                self.editor.set_pointer_pos(Some(point));
+                self.editor.set_pointer_pressed(true);
                 if let Some(intent) = self.sdui.action_for_point(point) {
+                    self.sdui.set_focused_action(Some(intent.clone()));
                     if let Some(edit_queue) = &self.edit_queue {
                         let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
                     }
+                    ctx.request_paint_only();
+                    (false, true)
+                } else if self
+                    .editor
+                    .scrollbar_thumb_rect(self.editor_main_rect(ctx.size()))
+                    .is_some_and(|thumb| thumb.contains(point))
+                {
+                    // Phase 20.4 task 5: pressing the scrollbar thumb enters
+                    // the Active state; the editor does not place a caret or
+                    // capture the pointer for text selection.
+                    // ponytail: thumb-drag scrolling is deferred; the press
+                    // only sets the Active visual state for now.
+                    ctx.request_paint_only();
                     (false, true)
                 } else if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
                     ctx.capture_pointer();
@@ -2176,15 +2320,55 @@ impl Widget for EditorWidget {
                     (false, true)
                 }
             }
-            PointerEvent::Move(pointer_update) if ctx.is_active() => {
+            PointerEvent::Move(pointer_update) => {
                 let point = ctx.local_position(pointer_update.current.position);
-                if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
-                    (self.editor.extend_selection_to_point(local_point), true)
+                // Phase 20.4: track hover position passively (not only during a
+                // drag) so SDUI components render Hover.
+                self.sdui.set_pointer_pos(Some(point));
+                // Phase 20.4 task 5: feed the editor chrome hover position so
+                // the scrollbar derives Hover over the track.
+                self.editor.set_pointer_pos(Some(point));
+                ctx.request_paint_only();
+                if ctx.is_active() {
+                    if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
+                        (self.editor.extend_selection_to_point(local_point), true)
+                    } else {
+                        (false, true)
+                    }
                 } else {
-                    (false, true)
+                    (false, false)
                 }
             }
-            PointerEvent::Up(_) | PointerEvent::Cancel(_) if ctx.is_active() => (false, true),
+            PointerEvent::Up(_) => {
+                self.sdui.set_pointer_pressed(false);
+                // Phase 20.4 task 5: release the editor chrome press state;
+                // keep the pointer position so hover persists after release.
+                self.editor.set_pointer_pressed(false);
+                ctx.request_paint_only();
+                if ctx.is_active() {
+                    (false, true)
+                } else {
+                    (false, false)
+                }
+            }
+            PointerEvent::Cancel(_) => {
+                self.sdui.clear_pointer_state();
+                // Phase 20.4 task 5: clear editor chrome pointer state too.
+                self.editor.clear_pointer_chrome_state();
+                ctx.request_paint_only();
+                if ctx.is_active() {
+                    (false, true)
+                } else {
+                    (false, false)
+                }
+            }
+            PointerEvent::Leave(_) => {
+                self.sdui.clear_pointer_state();
+                // Phase 20.4 task 5: clear editor chrome pointer state too.
+                self.editor.clear_pointer_chrome_state();
+                ctx.request_paint_only();
+                (false, false)
+            }
             PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {
                 let point = ctx.local_position(state.position);
                 if self.sdui.scrolls_point(ctx.size(), point) {
@@ -2670,6 +2854,7 @@ mod tests {
             active_theme: crate::protocol::ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: crate::protocol::ActiveTypography::default(),
         }
@@ -3694,6 +3879,7 @@ mod tests {
                 crate::protocol::ActiveTheme {
                     specifier: "@clay/theme-gruvbox-material-dark".to_string(),
                     overrides: Vec::new(),
+                    design_tokens: Vec::new(),
                 },
             ))
         );
@@ -4600,6 +4786,7 @@ mod tests {
                     PackagePanelVisibility::Visible,
                     PackageUiComponentTree {
                         id: "markdown.preview.root".to_string(),
+                        disabled: false,
                         kind: "panel".to_string(),
                         font_role: FontRole::Ui,
                         text_variant: None,
@@ -4609,6 +4796,7 @@ mod tests {
                         action_command_id: None,
                         items: Vec::new(),
                         children: Vec::new(),
+                        validation_state: None,
                     },
                     Vec::new(),
                 )],
@@ -4724,6 +4912,7 @@ mod tests {
             active_theme: crate::protocol::ActiveTheme {
                 specifier: format!("@clay/theme-gen-{generation}"),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: {
                 crate::protocol::ActiveTypography {
@@ -4783,6 +4972,7 @@ mod tests {
                     PackagePanelVisibility::Visible,
                     PackageUiComponentTree {
                         id: "old.panel.root".to_string(),
+                        disabled: false,
                         kind: "panel".to_string(),
                         font_role: FontRole::Ui,
                         text_variant: None,
@@ -4792,6 +4982,7 @@ mod tests {
                         action_command_id: None,
                         items: Vec::new(),
                         children: Vec::new(),
+                        validation_state: None,
                     },
                     Vec::new(),
                 )],

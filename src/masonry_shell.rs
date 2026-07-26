@@ -1,22 +1,27 @@
 use masonry::accesskit::{Node, Role};
+use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    AccessCtx, BoxConstraints, ChildrenIds, LayoutCtx, NewWidget, NoAction, PaintCtx,
-    PropertiesMut, PropertiesRef, RegisterCtx, Widget, WidgetId, WidgetPod,
+    AccessCtx, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, NewWidget, NoAction, PaintCtx,
+    PointerButton, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Widget,
+    WidgetId, WidgetPod,
 };
 use masonry::kurbo::{Point, Rect, Size};
 use masonry::vello::Scene;
 
 use crate::masonry_editor::EditorWidget;
 use crate::shell::{
-    ShellComponentKind, WorkingAreaLayout, WorkingAreaLayoutObservation, WorkingAreaLayoutUpdate,
-    WorkingAreaLayoutUpdateError,
+    Axis, FixedSlotId, InteractionState, PanelChrome, ResolvedUiTheme, ShellComponentKind,
+    SlotDragState, SplitDragState, WorkingAreaLayout, WorkingAreaLayoutObservation,
+    WorkingAreaLayoutUpdate, WorkingAreaLayoutUpdateError, compute_slot_resize_size,
+    hit_test_slot_handle, hit_test_split_divider, paint_divider, paint_focus_ring,
+    paint_panel_chrome, slot_handle_rect,
 };
 
 #[cfg(test)]
 use crate::shell::{
-    FixedSlotId, FixedSlotState, PaneId, PaneSlotId, PaneSlotLayout, PaneSlotLayoutAssignment,
-    PaneSplitNode, PaneSplitTree, PaneTreeObservation, ShellComponentId, ShellLayoutVersion,
-    SplitOrientation, SplitRatio, WorkingAreaId,
+    FixedSlotState, PaneId, PaneSlotId, PaneSlotLayout, PaneSlotLayoutAssignment, PaneSplitNode,
+    PaneSplitTree, PaneTreeObservation, ShellComponentId, ShellLayoutVersion, SplitOrientation,
+    SplitRatio, WorkingAreaId,
 };
 
 /// Internal structural shell snapshot for tests and agent inspection.
@@ -48,6 +53,14 @@ pub struct ClayShellWidget {
     layout: WorkingAreaLayout,
     editor: WidgetPod<EditorWidget>,
     editor_widget_id: WidgetId,
+    /// Phase 20.3: split divider drag session state.
+    split_drag: SplitDragState,
+    /// Phase 20.3: fixed slot resize drag session state.
+    slot_drag: SlotDragState,
+    /// Phase 20.3: double-click detection for slot collapse toggle.
+    last_slot_click: Option<(std::time::Instant, FixedSlotId)>,
+    /// Phase 20.3: debounced layout persistence timestamp.
+    last_persist: Option<std::time::Instant>,
 }
 
 impl ClayShellWidget {
@@ -55,13 +68,21 @@ impl ClayShellWidget {
         Self::single_editor_with_layout(editor, WorkingAreaLayout::single_editor())
     }
 
-    fn single_editor_with_layout(editor: EditorWidget, layout: WorkingAreaLayout) -> Self {
+    fn single_editor_with_layout(editor: EditorWidget, mut layout: WorkingAreaLayout) -> Self {
+        // Phase 20.3: restore persisted layout state at startup.
+        if let Some(state) = crate::shell::layout_persist::load_layout() {
+            crate::shell::layout_persist::apply_persisted_state(&mut layout, &state);
+        }
         let editor = NewWidget::new(editor);
         let editor_widget_id = editor.id();
         Self {
             layout,
             editor: editor.to_pod(),
             editor_widget_id,
+            split_drag: SplitDragState::Idle,
+            slot_drag: SlotDragState::Idle,
+            last_slot_click: None,
+            last_persist: None,
         }
     }
 
@@ -116,6 +137,19 @@ impl ClayShellWidget {
         self.layout
             .editor_component_rect(Rect::new(0.0, 0.0, size.width, size.height))
     }
+
+    /// Phase 20.3: debounced layout persistence (≥500ms between writes).
+    fn persist_debounced(&mut self) {
+        let now = std::time::Instant::now();
+        if self
+            .last_persist
+            .is_some_and(|t| now.duration_since(t).as_millis() < 500)
+        {
+            return;
+        }
+        self.last_persist = Some(now);
+        crate::shell::layout_persist::save_layout(&self.layout);
+    }
 }
 
 impl Widget for ClayShellWidget {
@@ -140,7 +174,235 @@ impl Widget for ClayShellWidget {
         size
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _scene: &mut Scene) {}
+    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        let area = Rect::new(0.0, 0.0, _ctx.size().width, _ctx.size().height);
+        let theme = ResolvedUiTheme::default();
+
+        // Phase 20.3: paint split dividers.
+        for divider in self.layout.pane_tree().divider_rects(area) {
+            let axis = match divider.orientation {
+                crate::shell::SplitOrientation::Horizontal => Axis::Vertical,
+                crate::shell::SplitOrientation::Vertical => Axis::Horizontal,
+            };
+            paint_divider(scene, divider.line_rect, axis, &theme);
+        }
+
+        // Phase 20.3: paint fixed slot resize handles via paint_panel_chrome.
+        let pane_id = self.layout.active_pane_id();
+        if let Some(geometry) = self.layout.pane_slot_geometry(pane_id, area) {
+            for slot in &geometry.fixed_slots {
+                let handle = slot_handle_rect(slot.slot_id, slot.rect);
+                let resizing = matches!(
+                    &self.slot_drag,
+                    SlotDragState::Resizing { slot_id, .. } if *slot_id == slot.slot_id
+                );
+                let chrome = PanelChrome {
+                    title: None,
+                    collapse: InteractionState::Rest,
+                    resize: if resizing {
+                        InteractionState::Active
+                    } else {
+                        InteractionState::Rest
+                    },
+                };
+                paint_panel_chrome(scene, handle, &chrome, &theme);
+            }
+        }
+
+        // Phase 20.3: paint focus ring on the active pane.
+        if self.layout.pane_tree().pane_count() > 1
+            && let Some(focus_rect) = self.layout.focused_pane_rect(area)
+        {
+            paint_focus_ring(scene, focus_rect, &theme);
+        }
+    }
+
+    fn on_text_event(
+        &mut self,
+        ctx: &mut EventCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        event: &TextEvent,
+    ) {
+        // Phase 20.3: Tab/Shift+Tab focus navigation across panes.
+        if let TextEvent::Keyboard(keyboard) = event
+            && keyboard.state == KeyState::Down
+            && keyboard.key == Key::Named(NamedKey::Tab)
+            && self.layout.pane_tree().pane_count() > 1
+        {
+            if keyboard.modifiers.shift() {
+                self.layout.focus_prev_pane();
+            } else {
+                self.layout.focus_next_pane();
+            }
+            ctx.request_layout();
+            ctx.request_paint_only();
+        }
+    }
+
+    fn on_pointer_event(
+        &mut self,
+        ctx: &mut EventCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        event: &PointerEvent,
+    ) {
+        let area = Rect::new(0.0, 0.0, ctx.size().width, ctx.size().height);
+        let pane_id = self.layout.active_pane_id();
+
+        match event {
+            PointerEvent::Down(button_event)
+                if button_event.button == Some(PointerButton::Primary) =>
+            {
+                let point = ctx.local_position(button_event.state.position);
+
+                // Check slot handles first (they render on top of split dividers).
+                if let Some(slot_id) = self
+                    .layout
+                    .pane_slot_geometry(pane_id, area)
+                    .as_ref()
+                    .and_then(|g| hit_test_slot_handle(g, point))
+                {
+                    let now = std::time::Instant::now();
+                    // Double-click detection: same slot within 300ms → toggle collapse.
+                    let is_double = self.last_slot_click.is_some_and(|(t, id)| {
+                        id == slot_id && now.duration_since(t).as_millis() < 300
+                    });
+                    self.last_slot_click = Some((now, slot_id));
+
+                    if is_double {
+                        self.layout.toggle_slot_collapse(pane_id, slot_id);
+                        self.last_slot_click = None;
+                        self.persist_debounced();
+                        ctx.request_layout();
+                        return;
+                    }
+
+                    // Start resize drag.
+                    let original_size = self
+                        .layout
+                        .slot_layout_mut(pane_id)
+                        .and_then(|l| l.fixed_slot_mut(slot_id))
+                        .map(|s| s.size)
+                        .unwrap_or(0.0);
+                    self.slot_drag = SlotDragState::Resizing {
+                        slot_id,
+                        pane_id,
+                        original_size,
+                    };
+                    ctx.capture_pointer();
+                    return;
+                }
+
+                // Check split dividers.
+                if let Some(hit) = hit_test_split_divider(self.layout.pane_tree(), area, point) {
+                    let original_ratio = self
+                        .layout
+                        .pane_tree()
+                        .split_ratio_at_path(&hit.path)
+                        .unwrap_or_else(crate::shell::SplitRatio::balanced);
+                    self.split_drag = SplitDragState::Dragging {
+                        path: hit.path,
+                        orientation: hit.orientation,
+                        parent_rect: hit.parent_rect,
+                        original_ratio,
+                    };
+                    ctx.capture_pointer();
+                }
+            }
+            PointerEvent::Move(pointer_update) => {
+                let point = ctx.local_position(pointer_update.current.position);
+
+                // Slot resize live preview.
+                if let SlotDragState::Resizing {
+                    slot_id, pane_id, ..
+                } = &self.slot_drag
+                {
+                    let slot_id = *slot_id;
+                    let pane_id = *pane_id;
+                    if let Some(pane_rect) = self.layout.pane_tree().pane_rect(pane_id, area) {
+                        let new_size = compute_slot_resize_size(slot_id, pane_rect, point);
+                        self.layout.resize_slot_live(pane_id, slot_id, new_size);
+                        ctx.request_layout();
+                    }
+                    return;
+                }
+
+                // Split divider drag live preview.
+                if let SplitDragState::Dragging {
+                    path,
+                    orientation,
+                    parent_rect,
+                    ..
+                } = &self.split_drag
+                {
+                    let ratio = crate::shell::compute_drag_ratio(*orientation, *parent_rect, point);
+                    self.layout.pane_tree_mut().update_split_ratio(path, ratio);
+                    ctx.request_layout();
+                }
+            }
+            PointerEvent::Up(_) => {
+                // Commit slot resize.
+                if let SlotDragState::Resizing {
+                    slot_id, pane_id, ..
+                } = &self.slot_drag
+                {
+                    let slot_id = *slot_id;
+                    let pane_id = *pane_id;
+                    self.layout.commit_slot_resize(pane_id, slot_id);
+                    self.slot_drag = SlotDragState::Idle;
+                    self.persist_debounced();
+                    ctx.release_pointer();
+                    ctx.request_layout();
+                    return;
+                }
+
+                // Commit split drag.
+                if let SplitDragState::Dragging { path, .. } = &self.split_drag {
+                    let path = path.clone();
+                    if let Some(ratio) = self.layout.pane_tree().split_ratio_at_path(&path) {
+                        self.layout.commit_split_drag(&path, ratio);
+                    }
+                    self.split_drag = SplitDragState::Idle;
+                    self.persist_debounced();
+                    ctx.release_pointer();
+                    ctx.request_layout();
+                }
+            }
+            PointerEvent::Cancel(_) => {
+                // Cancel slot resize.
+                if let SlotDragState::Resizing {
+                    slot_id,
+                    pane_id,
+                    original_size,
+                } = &self.slot_drag
+                {
+                    let slot_id = *slot_id;
+                    let pane_id = *pane_id;
+                    let original_size = *original_size;
+                    self.layout
+                        .cancel_slot_resize(pane_id, slot_id, original_size);
+                    self.slot_drag = SlotDragState::Idle;
+                    ctx.release_pointer();
+                    ctx.request_layout();
+                    return;
+                }
+
+                // Cancel split drag.
+                if let SplitDragState::Dragging {
+                    path,
+                    original_ratio,
+                    ..
+                } = &self.split_drag
+                {
+                    let path = path.clone();
+                    self.layout.cancel_split_drag(&path, *original_ratio);
+                    self.split_drag = SplitDragState::Idle;
+                    ctx.release_pointer();
+                    ctx.request_layout();
+                }
+            }
+            _ => {}
+        }
+    }
 
     fn accessibility_role(&self) -> Role {
         Role::Group
@@ -191,6 +453,7 @@ mod tests {
             active_theme: crate::protocol::ActiveTheme {
                 specifier: "@clay/default".to_string(),
                 overrides: Vec::new(),
+                design_tokens: Vec::new(),
             },
             active_typography: crate::protocol::ActiveTypography::default(),
         }

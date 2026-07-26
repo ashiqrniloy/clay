@@ -256,6 +256,52 @@ fn wiki_index_links_every_wiki_page() {
 }
 
 #[test]
+fn phase20_1_ui_design_language_primitive_review_is_linked_and_complete() {
+    let path = "docs/wiki/modules/phase20.1-ui-design-language-primitive-review.md";
+    let review = read(path);
+
+    assert!(
+        index_links("docs/wiki/index.md", path),
+        "Phase 20.1 primitive review must be linked from the wiki index"
+    );
+    for primitive in [
+        "`ThemeTokenType`",
+        "`ThemeTokenResolver`",
+        "`SduiThemeStyle`",
+        "`StyleRegistry`",
+        "`ActiveTheme`",
+        "`TypographyRegistry`",
+        "`ActiveTypography`",
+        "`UiTextVariant`",
+        "Component style validation",
+        "Package theme-token declarations",
+        "Panel/slot geometry",
+    ] {
+        assert!(
+            review.contains(primitive),
+            "primitive review missing {primitive}"
+        );
+    }
+    for contract in [
+        "## Reusable Capability Before New Code",
+        "## Locked Generic Phase 20.1 Gaps",
+        "## Additive Compatibility Contract",
+        "## Hot-Path Boundary",
+        "## Security Boundary",
+        "## Phase Boundary",
+        "`dimension`, `elevation`, `motion-duration`, `z-level`, and `density`",
+        "`UiTypographyHierarchy`",
+        "`ResolvedUiTheme`",
+        "No new component kind",
+    ] {
+        assert!(
+            review.contains(contract),
+            "primitive review missing {contract}"
+        );
+    }
+}
+
+#[test]
 fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
     fn marked_section<'a>(text: &'a str, name: &str) -> &'a str {
         let start = format!("<!-- plan061-task1-{name}:start -->");
@@ -298,7 +344,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 67);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 68);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -328,6 +374,282 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
     let package_section = marked_section(&plan, "package-inventory");
     assert_exact_inventory(package_section, &packages, 11);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
+}
+
+/// Every RustSec exception ignored by cargo-audit must be documented with one
+/// unexpired owner-reviewed expiry. CI invokes this test by name.
+#[test]
+fn phase20_1_token_catalog_is_complete_and_matches_core_registry() {
+    let theme_source = read("src/shell/theme.rs");
+    let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
+
+    // Extract every implemented core token name from `core_theme_value`.
+    let mut core_tokens = BTreeSet::new();
+    for line in theme_source.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('"')
+            && let Some((name, after)) = rest.split_once('"')
+            && after.trim_start().starts_with("=> CoreThemeValue")
+            && name
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.')
+        {
+            core_tokens.insert(name.to_string());
+        }
+    }
+    assert!(
+        !core_tokens.is_empty(),
+        "core token inventory must not be empty"
+    );
+
+    // Every implemented core token must appear in the catalog.
+    let mut missing = Vec::new();
+    for token in &core_tokens {
+        if !tokens_doc.contains(&format!("`{token}`")) {
+            missing.push(token.clone());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "tokens.md missing implemented core tokens: {}",
+        missing.join(", ")
+    );
+
+    // The ten typed domains are all documented.
+    for token_type in [
+        "color-role",
+        "spacing",
+        "radius",
+        "typography",
+        "opacity",
+        "dimension",
+        "elevation",
+        "motion-duration",
+        "z-level",
+        "density",
+    ] {
+        assert!(
+            tokens_doc.contains(token_type),
+            "tokens.md missing token type {token_type:?}"
+        );
+    }
+
+    // All seven semantic typography variants are documented.
+    for variant in [
+        "typography.body",
+        "typography.title",
+        "typography.status",
+        "typography.display",
+        "typography.section",
+        "typography.detail",
+        "typography.caption",
+    ] {
+        assert!(
+            tokens_doc.contains(variant),
+            "tokens.md missing typography variant {variant}"
+        );
+    }
+}
+
+#[test]
+fn package_authoring_guide_documents_typed_tokens_and_typography_hierarchy() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    for token_type in [
+        "color-role",
+        "spacing",
+        "radius",
+        "typography",
+        "opacity",
+        "dimension",
+        "elevation",
+        "motion-duration",
+        "z-level",
+        "density",
+    ] {
+        assert!(
+            guide.contains(token_type),
+            "package authoring guide missing token type {token_type:?}"
+        );
+    }
+    assert!(
+        guide.contains("UiTypographyHierarchy"),
+        "package authoring guide must document the user-owned typography hierarchy"
+    );
+    assert!(
+        guide.contains("designTokens"),
+        "package authoring guide must document the designTokens contribution contract"
+    );
+    for variant in [
+        "typography.display",
+        "typography.section",
+        "typography.detail",
+        "typography.caption",
+    ] {
+        assert!(
+            guide.contains(variant),
+            "package authoring guide missing typography variant {variant}"
+        );
+    }
+    assert!(
+        guide.contains("supply concrete scale ratios"),
+        "package authoring guide must reject package-supplied concrete hierarchy scales"
+    );
+    assert!(
+        guide.contains("Phase 20.1"),
+        "package authoring guide must record the Phase 20.1 authoring contract"
+    );
+}
+
+#[test]
+fn planned_phase20_components_remain_marked_planned_or_reserved() {
+    let components = read(".agents/skills/clay-ui/references/components.md");
+    let tokens = read(".agents/skills/clay-ui/references/tokens.md");
+    // No Phase 20.2/20.5 component is marked implemented early.
+    for kind in ["table", "dropdown", "collapse", "modal"] {
+        let row_marker = format!("| `{kind}` | reserved");
+        assert!(
+            components.contains(&row_marker),
+            "component {kind} must remain reserved, not implemented, in Phase 20.1"
+        );
+    }
+    for component in [
+        "Pop-up / dialog",
+        "Dropdown / select",
+        "Text input field",
+        "Tooltip",
+        "Tabs",
+    ] {
+        let row_marker = format!("| {component} | planned |");
+        assert!(
+            components.contains(&row_marker),
+            "planned component {component} must remain planned, not implemented"
+        );
+    }
+    // Phase 20.3: Split divider is now implemented.
+    assert!(
+        components.contains("| Split divider | implemented |"),
+        "Split divider must be marked implemented after Phase 20.3"
+    );
+    // The token catalog must not claim Phase 20.4/20.5 surfaces are consumed yet.
+    assert!(
+        tokens.contains("Phase 20.4 component uplift"),
+        "tokens.md must mark elevation/motion/density consumption as Phase 20.4"
+    );
+    assert!(
+        tokens.contains("Phase 20.5 overlay/menu component work"),
+        "tokens.md must mark z-level consumption as Phase 20.5"
+    );
+}
+
+#[test]
+fn package_guide_documents_phase20_4_uplift() {
+    // Plan 065 task 8: creating-packages.md records the Phase 20.4 restyling
+    // contract — active-theme routing, state-complete components, spacing
+    // rhythm, token-driven status bar insets, and the compatibility guarantee.
+    let guide = read("docs/reference/packages/creating-packages.md");
+    assert!(
+        guide.contains("Phase 20.4 authoring contract"),
+        "package authoring guide must have a Phase 20.4 authoring contract section"
+    );
+    assert!(
+        guide.contains("ResolvedUiTheme") && guide.contains("from_ui_theme"),
+        "Phase 20.4 section must document active-theme routing through ResolvedUiTheme"
+    );
+    for state in ["Rest", "Hover", "Active", "Focus", "Disabled"] {
+        assert!(
+            guide.contains(state),
+            "Phase 20.4 section must reference InteractionState {state}"
+        );
+    }
+    assert!(
+        guide.contains("spacing.md") && guide.contains("spacing_scale"),
+        "Phase 20.4 section must document the spacing rhythm (spacing.md × spacing_scale)"
+    );
+    assert!(
+        guide.contains("status bar") && guide.contains("spacing.sm"),
+        "Phase 20.4 section must document token-driven status bar insets"
+    );
+    assert!(
+        guide.contains("Compatibility guarantee"),
+        "Phase 20.4 section must state the compatibility guarantee"
+    );
+    assert!(
+        guide.contains("no `ComponentKind`") && guide.contains("token-name change"),
+        "Phase 20.4 section must guarantee no ComponentKind/style-variable/token-name change"
+    );
+}
+
+#[test]
+fn clay_ui_catalog_notes_state_completeness() {
+    // Plan 065 task 8: components.md notes all five interaction states and the
+    // spacing rhythm for each implemented kind.
+    let components = read(".agents/skills/clay-ui/references/components.md");
+    assert!(
+        components.contains("Phase 20.4 interaction-state and spacing rhythm notes"),
+        "components.md must have a Phase 20.4 interaction-state/spacing section"
+    );
+    for kind in [
+        "button",
+        "list",
+        "label",
+        "statusItem",
+        "panel",
+        "overlay",
+        "editorView",
+        "flex",
+        "stack",
+        "scroll",
+        "portal",
+    ] {
+        assert!(
+            components.contains(kind),
+            "components.md must reference implemented kind {kind}"
+        );
+    }
+    for state in ["Rest", "Hover", "Active", "Focus", "Disabled"] {
+        assert!(
+            components.contains(state),
+            "components.md must reference InteractionState {state}"
+        );
+    }
+    assert!(
+        components.contains("component_state_color"),
+        "components.md must reference the component_state_color state mapping"
+    );
+    assert!(
+        components.contains("spacing.md") && components.contains("spacing_scale"),
+        "components.md must document the spacing rhythm"
+    );
+}
+
+#[test]
+fn primitives_reference_documents_component_state_color() {
+    // Plan 065 task 8: ui-chrome-primitives.md records the Phase 20.4
+    // state-color helpers.
+    let doc = read("docs/reference/primitives/ui-chrome-primitives.md");
+    assert!(
+        doc.contains("component_state_color"),
+        "ui-chrome-primitives.md must record the component_state_color helper"
+    );
+    assert!(
+        doc.contains("list_row_fill_color"),
+        "ui-chrome-primitives.md must record the list_row_fill_color helper"
+    );
+    assert!(
+        doc.contains("disabled_text_color"),
+        "ui-chrome-primitives.md must record the disabled_text_color helper"
+    );
+    assert!(
+        doc.contains("State-color helpers (Phase 20.4)"),
+        "ui-chrome-primitives.md must have a Phase 20.4 state-color helpers section"
+    );
+    // The helper mapping must be documented as token-driven.
+    assert!(
+        doc.contains("surface.hover")
+            && doc.contains("surface.active")
+            && doc.contains("surface.disabled"),
+        "ui-chrome-primitives.md must document the state→token mapping"
+    );
 }
 
 /// Every RustSec exception ignored by cargo-audit must be documented with one
@@ -410,4 +732,281 @@ fn documentation_validators_do_not_mutate_files() {
         before, after,
         "documentation tests must not mutate source or generated artifacts"
     );
+}
+
+#[test]
+fn phase20_2_primitive_documentation_exists_and_is_linked() {
+    // Plan 063 task 6: verify Phase 20.2 primitive documentation exists and is
+    // linked from the primitive index, docs index, and wiki index.
+    let primitive_doc = read("docs/reference/primitives/ui-chrome-primitives.md");
+    assert!(
+        primitive_doc.contains("UI Chrome Primitives (Phase 20.2)"),
+        "ui-chrome-primitives.md must document Phase 20.2 primitives"
+    );
+    assert!(
+        primitive_doc.contains("paint_divider"),
+        "ui-chrome-primitives.md must list paint_divider primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_focus_ring"),
+        "ui-chrome-primitives.md must list paint_focus_ring primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_panel_chrome"),
+        "ui-chrome-primitives.md must list paint_panel_chrome primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_scroll_chrome"),
+        "ui-chrome-primitives.md must list paint_scroll_chrome primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_badge"),
+        "ui-chrome-primitives.md must list paint_badge primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_kbd_hint"),
+        "ui-chrome-primitives.md must list paint_kbd_hint primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_icon_slot"),
+        "ui-chrome-primitives.md must list paint_icon_slot primitive"
+    );
+    assert!(
+        primitive_doc.contains("paint_tooltip_shell"),
+        "ui-chrome-primitives.md must list paint_tooltip_shell primitive"
+    );
+
+    // Verify the primitive doc is linked from the primitive index.
+    let primitive_index = read("docs/reference/primitives/index.md");
+    assert!(
+        primitive_index.contains("[UI Chrome Primitives](ui-chrome-primitives.md)"),
+        "docs/reference/primitives/index.md must link ui-chrome-primitives.md"
+    );
+
+    // Verify the primitive doc is linked from the docs index.
+    let docs_index = read("docs/index.md");
+    assert!(
+        docs_index.contains("[UI Chrome Primitives](reference/primitives/ui-chrome-primitives.md)"),
+        "docs/index.md must link ui-chrome-primitives.md"
+    );
+
+    // Verify the primitive doc is linked from the wiki index.
+    let wiki_index = read("docs/wiki/index.md");
+    assert!(
+        wiki_index.contains(
+            "[UI Chrome Primitives Reference](../reference/primitives/ui-chrome-primitives.md)"
+        ),
+        "docs/wiki/index.md must link ui-chrome-primitives.md"
+    );
+
+    // Verify components.md lists all eight primitives.
+    let components = read(".agents/skills/clay-ui/references/components.md");
+    assert!(
+        components.contains("## Clay-Native Chrome Primitives (internal)"),
+        "components.md must have a Clay-Native Chrome Primitives section"
+    );
+    for primitive in [
+        "paint_divider",
+        "paint_focus_ring",
+        "paint_panel_chrome",
+        "paint_scroll_chrome",
+        "paint_badge",
+        "paint_kbd_hint",
+        "paint_icon_slot",
+        "paint_tooltip_shell",
+    ] {
+        let row_marker = format!("| `{primitive}` | internal |");
+        assert!(
+            components.contains(&row_marker),
+            "components.md must list {primitive} primitive in the Clay-Native Chrome Primitives section"
+        );
+    }
+}
+
+#[test]
+fn phase20_4_core_component_uplift_primitive_review_is_linked_and_complete() {
+    // Plan 065 (Phase 20.4) task 12: verify the Phase 20.4 primitive-review
+    // wiki page exists, is linked from the wiki index, and records the restyle-
+    // only uplift inventory, state helpers, compatibility contract, and phase
+    // boundary.
+    let path = "docs/wiki/modules/phase20.4-core-component-uplift-primitive-review.md";
+    let review = read(path);
+
+    assert!(
+        index_links("docs/wiki/index.md", path),
+        "Phase 20.4 primitive review must be linked from the wiki index"
+    );
+    for section in [
+        "## Reusable Capability Before New Code",
+        "## Locked Generic Phase 20.4 Gaps (closed)",
+        "## State-Color Helpers",
+        "## Additive Compatibility Contract",
+        "## Hot-Path Boundary",
+        "## Security Boundary",
+        "## Phase Boundary",
+    ] {
+        assert!(
+            review.contains(section),
+            "Phase 20.4 primitive review missing {section}"
+        );
+    }
+    for item in [
+        "`component_state_color`",
+        "`list_row_fill_color`",
+        "`disabled_text_color`",
+        "`SduiThemeStyle::from_ui_theme`",
+        "`theme_style`",
+        "`ResolvedUiTheme`",
+        "`InteractionState`",
+        "`surface.hover`",
+        "`surface.active`",
+        "`surface.disabled`",
+        "`opacity.disabled`",
+        "`spacing.md`",
+        "`spacing_scale`",
+        "`paint_focus_ring`",
+        "`scrollbar_interaction_state`",
+        "No new component kind",
+        "Zero breaking changes",
+    ] {
+        assert!(
+            review.contains(item),
+            "Phase 20.4 primitive review missing {item}"
+        );
+    }
+}
+
+#[test]
+fn no_component_kind_or_token_renamed() {
+    // Plan 065 (Phase 20.4) task 11: Phase 20.4 is restyle-only — no
+    // ComponentKind, typed style variable, ThemeTokenType, or core/package
+    // token name was renamed or removed. Verify the 11 implemented kinds and
+    // 4 reserved kinds all still parse in components.rs and are cataloged in
+    // components.md, and the Phase 20.1 state tokens are still core tokens in
+    // theme.rs and cataloged in tokens.md (additive-only).
+    let components_src = read("src/shell/components.rs");
+    let components_doc = read(".agents/skills/clay-ui/references/components.md");
+    let tokens_src = read("src/shell/theme.rs");
+    let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
+
+    // 11 implemented + 4 reserved ComponentKind entries still parse.
+    for kind in [
+        "editorView",
+        "panel",
+        "label",
+        "button",
+        "list",
+        "flex",
+        "stack",
+        "overlay",
+        "scroll",
+        "portal",
+        "statusItem",
+    ] {
+        let marker = format!("\"{kind}\" => Some(Self::");
+        assert!(
+            components_src.contains(&marker),
+            "ComponentKind {kind} must still parse in components.rs (not renamed/removed)"
+        );
+        let row = format!("| `{kind}` | implemented");
+        assert!(
+            components_doc.contains(&row),
+            "components.md must still catalog {kind} as implemented"
+        );
+    }
+    for kind in ["table", "dropdown", "collapse", "modal"] {
+        let marker = format!("\"{kind}\" => Some(Self::");
+        assert!(
+            components_src.contains(&marker),
+            "reserved ComponentKind {kind} must still parse in components.rs"
+        );
+        let row = format!("| `{kind}` | reserved");
+        assert!(
+            components_doc.contains(&row),
+            "components.md must still catalog {kind} as reserved"
+        );
+    }
+
+    // Phase 20.1 state tokens are still core tokens (additive-only).
+    for token in [
+        "surface.hover",
+        "surface.active",
+        "surface.disabled",
+        "text.disabled",
+        "accent.primary",
+        "border.focus",
+        "opacity.disabled",
+    ] {
+        let core_marker = format!("\"{token}\" => CoreThemeValue");
+        assert!(
+            tokens_src.contains(&core_marker),
+            "core token {token} must still exist in theme.rs (not renamed/removed)"
+        );
+        assert!(
+            tokens_doc.contains(token),
+            "tokens.md must still catalog core token {token}"
+        );
+    }
+}
+
+#[test]
+fn existing_packages_render_unchanged() {
+    // Plan 065 (Phase 20.4) task 11: first-party packages render unchanged —
+    // no package source file may reference Phase 20.4 internal Rust paint/state
+    // helpers (the compatibility boundary: packages declare inert components
+    // and typed tokens only; they cannot reach pub(crate) paint internals). The
+    // full integration suite (which loads @clay/* packages) passing green is
+    // the runtime half of this gate; this is the static boundary half.
+    let package_root = root().join("packages");
+    let internal_helpers = [
+        "component_state_color",
+        "list_row_fill_color",
+        "disabled_text_color",
+        "from_ui_theme",
+        "theme_style",
+        "interaction_state",
+        "scrollbar_interaction_state",
+        "set_pointer_pos",
+        "set_focused_action",
+        "is_focused",
+        "SduiThemeStyle",
+    ];
+    let mut scanned = 0;
+    for entry in fs::read_dir(&package_root).expect("read packages/ directory") {
+        let pkg = entry.expect("package entry").path();
+        for src in ["src", "dist"] {
+            let dir = pkg.join(src);
+            if !dir.is_dir() {
+                continue;
+            }
+            for file in walk_js(&dir) {
+                scanned += 1;
+                let text = fs::read_to_string(&file)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+                for helper in internal_helpers {
+                    assert!(
+                        !text.contains(helper),
+                        "{} must not reference Phase 20.4 internal Rust helper {helper}",
+                        file.display()
+                    );
+                }
+            }
+        }
+    }
+    assert!(scanned > 0, "must scan at least one package source file");
+}
+
+fn walk_js(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                out.extend(walk_js(&p));
+            } else if matches!(p.extension().and_then(|e| e.to_str()), Some("js" | "ts")) {
+                out.push(p);
+            }
+        }
+    }
+    out
 }

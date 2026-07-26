@@ -847,6 +847,75 @@ pub struct ActiveTypography {
     pub monospace: FontProfile,
     pub proportional: FontProfile,
     pub ui: FontProfile,
+    /// Phase 20.1: user-owned bounded hierarchy of UI variant scale ratios
+    /// carried atomically with the typography snapshot. Packages/components
+    /// select a semantic role plus variant only; concrete scales stay
+    /// user-owned here. Defaults preserve the legacy `Title = 14/12`,
+    /// `Body/Status = 1`, `Detail = 10/12` behavior.
+    pub hierarchy: UiTypographyHierarchy,
+}
+
+/// Bounded hierarchy of UI text-variant scale ratios. Each scale multiplies
+/// the selected role's base size; packages cannot supply these values. All
+/// scales must be finite and within `(0, HIERARCHY_SCALE_MAX]`.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct UiTypographyHierarchy {
+    pub display: f32,
+    pub title: f32,
+    pub section: f32,
+    pub body: f32,
+    pub status: f32,
+    pub detail: f32,
+    pub caption: f32,
+}
+
+/// Inclusive upper bound for any hierarchy scale ratio. Generous enough for
+/// large display headings while keeping cached geometry within sane layout
+/// bounds. Lower bound is exclusive-zero (scales must be strictly positive).
+pub const HIERARCHY_SCALE_MIN: f32 = 0.0;
+pub const HIERARCHY_SCALE_MAX: f32 = 4.0;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UiTypographyHierarchyValidationError {
+    InvalidScale { field: &'static str },
+}
+
+impl UiTypographyHierarchy {
+    /// Default hierarchy preserving legacy variant metrics plus restrained
+    /// defaults for the three new Phase 20.1 variants.
+    pub const DEFAULT: Self = Self {
+        display: 1.5,
+        title: 14.0 / 12.0,
+        section: 13.0 / 12.0,
+        body: 1.0,
+        status: 1.0,
+        detail: 10.0 / 12.0,
+        caption: 0.75,
+    };
+
+    pub fn validate(&self) -> Result<(), UiTypographyHierarchyValidationError> {
+        let scales: [(&'static str, f32); 7] = [
+            ("display", self.display),
+            ("title", self.title),
+            ("section", self.section),
+            ("body", self.body),
+            ("status", self.status),
+            ("detail", self.detail),
+            ("caption", self.caption),
+        ];
+        for (field, scale) in scales {
+            if !scale.is_finite() || scale <= HIERARCHY_SCALE_MIN || scale > HIERARCHY_SCALE_MAX {
+                return Err(UiTypographyHierarchyValidationError::InvalidScale { field });
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for UiTypographyHierarchy {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -854,6 +923,9 @@ pub enum ActiveTypographyValidationError {
     InvalidProfile {
         role: FontRole,
         source: FontProfileValidationError,
+    },
+    InvalidHierarchy {
+        source: UiTypographyHierarchyValidationError,
     },
 }
 
@@ -872,6 +944,9 @@ impl ActiveTypography {
                 ActiveTypographyValidationError::InvalidProfile { role, source }
             })?;
         }
+        self.hierarchy
+            .validate()
+            .map_err(|source| ActiveTypographyValidationError::InvalidHierarchy { source })?;
         Ok(())
     }
 }
@@ -892,20 +967,117 @@ impl Default for ActiveTypography {
                 families: vec!["system-ui".to_string()],
                 size: 12.0,
             },
+            hierarchy: UiTypographyHierarchy::DEFAULT,
         }
     }
+}
+
+/// Typed override value for a UI design token. The variant present must match
+/// the core token's type (validated before install). Levels travel as
+/// validated names so the protocol stays independent of shell-side level enums.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+pub enum WireDesignTokenValue {
+    /// `color-role` override as RGBA bytes.
+    Color([u8; 4]),
+    /// `spacing`/`radius`/`dimension`/`motion-duration` override as a finite,
+    /// non-negative, bounded scalar.
+    Scalar(f64),
+    /// `opacity` override as a finite `[0, 1]` scalar.
+    Opacity(f32),
+    /// `elevation`/`z-level`/`density` override as a validated level name.
+    Level(String),
+}
+
+/// Bounded inert typed UI design-token override shipped within [`ActiveTheme`].
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+pub struct UiDesignTokenOverride {
+    /// Core Clay token name being overridden (e.g. `surface.hover`).
+    pub token: String,
+    /// Typed override value; the variant must match the core token's type.
+    pub value: WireDesignTokenValue,
+    /// Owning theme package api prefix (provenance).
+    pub provenance: String,
 }
 
 /// Resolved active theme snapshot shipped from the server (which owns package
 /// records) to the client (which owns the editor `StyleRegistry`). Sent once
 /// during the welcome handshake when `setTheme("...")` ran in `init.js`; the
 /// client reconstructs and installs the registry before/at startup paint.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
 pub struct ActiveTheme {
     /// Selected package specifier (e.g. `@clay/theme-gruvbox-material-dark`).
     pub specifier: String,
     /// Inert text-style + base-UI-color overrides for the selected theme.
     pub overrides: Vec<TextThemeOverride>,
+    /// Phase 20.1: bounded inert typed UI design-token overrides declared by the
+    /// theme package via `clay.contributions.designTokens`. Clay validates each
+    /// token name, value type, and bounds against the core fallback catalog
+    /// before install. Themes that omit the contribution ship an empty vector
+    /// and resolve every UI value from core fallbacks unchanged. Pure data: no
+    /// CSS, callbacks, JS execution, or native handles.
+    pub design_tokens: Vec<UiDesignTokenOverride>,
+}
+
+/// Bounded user appearance preference (Phase 20.6). Selects the canonical
+/// default theme only when the user has not explicitly called `setTheme`.
+/// `System` follows the observable OS color-scheme signal; when no signal is
+/// available it resolves to dark (Modus Vivendi). An explicit `setTheme`
+/// specifier always wins over appearance-derived selection.
+#[derive(
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+pub enum Appearance {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+impl Appearance {
+    /// Parse a bounded appearance value from its JSON string form. Unknown
+    /// values are rejected so a future field never silently round-trips.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "light" => Some(Self::Light),
+            "dark" => Some(Self::Dark),
+            "system" => Some(Self::System),
+            _ => None,
+        }
+    }
+
+    /// Lowercase JSON string form used on the wire and in config.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::System => "system",
+        }
+    }
+
+    /// Resolve `System` to a concrete light/dark choice given the observed OS
+    /// color-scheme signal. `os_dark = true` means the OS reports a dark
+    /// preference; `false` means light or unobservable. `System` with no signal
+    /// falls back to dark per the Phase 20.6 pinned semantics.
+    pub fn resolve(self, os_dark: bool) -> ResolvedAppearance {
+        match self {
+            Self::Light => ResolvedAppearance::Light,
+            Self::Dark => ResolvedAppearance::Dark,
+            Self::System => {
+                if os_dark {
+                    ResolvedAppearance::Dark
+                } else {
+                    ResolvedAppearance::Light
+                }
+            }
+        }
+    }
+}
+
+/// Concrete light/dark choice after resolving `Appearance::System`.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedAppearance {
+    Light,
+    Dark,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]

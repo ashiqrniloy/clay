@@ -1643,3 +1643,223 @@ fn diagnostics_api_docs_and_generated_registry_are_fresh() {
         );
     }
 }
+
+#[test]
+fn configuration_api_covers_phase20_4_needs_or_defers() {
+    // Plan 065 task 9: Phase 20.4 is a restyling phase that consumes existing
+    // tokens (density.default/spacing_scale(), state tokens, typography
+    // hierarchy). Verify the existing clay.theme/clay.configuration APIs
+    // (setTheme, setTypography, designTokens overrides) already expose control
+    // of those tokens, and that no new undocumented configuration key was
+    // introduced. The deferral of a new config API is recorded in the plan.
+    let root = repository_root();
+    let set_theme =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/theme/set-theme.md"))
+            .expect("read setTheme API doc");
+    // setTheme + designTokens cover density, state/spacing tokens, ResolvedUiTheme.
+    assert!(
+        set_theme.contains("designTokens"),
+        "setTheme must document designTokens overrides"
+    );
+    assert!(
+        set_theme.contains("density"),
+        "setTheme must document density coverage"
+    );
+    assert!(
+        set_theme.contains("ResolvedUiTheme"),
+        "setTheme must document ResolvedUiTheme resolution"
+    );
+    for token in ["spacing", "opacity"] {
+        assert!(
+            set_theme.contains(token),
+            "setTheme must document {token} token coverage"
+        );
+    }
+
+    let set_typography =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/theme/set-typography.md"))
+            .expect("read setTypography API doc");
+    assert!(
+        set_typography.contains("hierarchy.display"),
+        "setTypography must document the typography hierarchy custom properties"
+    );
+
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration doc");
+    assert!(
+        configuration.contains("clay.theme.setTheme"),
+        "configuration.md must link setTheme"
+    );
+    assert!(
+        configuration.contains("clay.theme.setTypography"),
+        "configuration.md must link setTypography"
+    );
+
+    // No new Phase 20.4 configuration API was introduced.
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+    for deferred_id in [
+        "clay.theme.setDensity",
+        "clay.ui.setComponentState",
+        "clay.theme.setComponentState",
+        "clay.ui.setSpacingRhythm",
+    ] {
+        assert!(
+            registry.by_id(deferred_id).is_none(),
+            "Phase 20.4 must not introduce a new configuration API {deferred_id}; the need is covered by setTheme/setTypography/designTokens"
+        );
+    }
+}
+
+#[test]
+fn configuration_api_no_authority_grant() {
+    // Plan 065 task 9: the configuration APIs Phase 20.4 consumes (setTheme,
+    // setTypography) must not implicitly grant filesystem/network/shell/AI/
+    // workspace authority. Their security metadata must deny each authority.
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+    for id in ["clay.theme.setTheme", "clay.theme.setTypography"] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("{id} must be a registered configuration API"));
+        for denied in denied_configuration_authorities() {
+            assert!(
+                entry.security.contains(denied),
+                "{id} security metadata must deny {denied} authority"
+            );
+        }
+    }
+}
+
+#[test]
+fn clay_js_api_inventory_unchanged_or_documented() {
+    // Plan 065 task 10: Phase 20.4 is pub(crate) paint/interaction work with
+    // no new public programmatic capability. Verify the generated Clay JS API
+    // registry contains no new Phase 20.4 programmatic surface id — i.e. no
+    // new public API was introduced, and none is missing docs/registry entry.
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    // No Phase 20.4 helper or interaction primitive may appear as a public API id.
+    for absent_id in [
+        "clay.ui.componentStateColor",
+        "clay.ui.interactionState",
+        "clay.theme.spacingRhythm",
+        "clay.ui.spacingRhythm",
+        "clay.editor.scrollbarState",
+        "clay.ui.scrollbarState",
+        "clay.ui.focusedAction",
+        "clay.ui.pointerState",
+        "clay.theme.fromUiTheme",
+        "clay.ui.themeStyle",
+        "clay.ui.disabled",
+    ] {
+        assert!(
+            registry.by_id(absent_id).is_none(),
+            "Phase 20.4 must not introduce a public Clay JS API {absent_id}; all new helpers are pub(crate)"
+        );
+    }
+    // No registered API id may reference a Phase 20.4 internal helper name.
+    let forbidden_fragments = [
+        "componentStateColor",
+        "listRowFillColor",
+        "disabledTextColor",
+        "fromUiTheme",
+        "themeStyle",
+        "interactionState",
+        "scrollbarInteractionState",
+        "focusedAction",
+    ];
+    for entry in &registry.entries {
+        for fragment in forbidden_fragments {
+            assert!(
+                !entry.id.contains(fragment),
+                "Phase 20.4 must not register a public API id containing {fragment}: {}",
+                entry.id
+            );
+        }
+    }
+}
+
+#[test]
+fn configuration_api_documents_phase20_6_appearance_and_precedence() {
+    // Plan 067 task 11: Phase 20.6 treats appearance + persistence as
+    // documented Clay JS configuration APIs. setAppearance is a registry-
+    // public `clay:theme` API (not an undocumented config key), its
+    // behavior-changing `appearance` input is in `custom_properties`, the
+    // configuration guide documents the precedence model + ui-session source,
+    // and every configuration API denies authority.
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+
+    // setAppearance is registry-public, in clay:theme, with `appearance` in
+    // custom_properties (behavior-changing setting present in custom_properties).
+    let appearance = registry
+        .by_id("clay.theme.setAppearance")
+        .expect("clay.theme.setAppearance must be a registered public configuration API");
+    assert_eq!(appearance.visibility, "public");
+    assert_eq!(appearance.js_module, "clay:theme");
+    assert_eq!(appearance.phase, "Phase 20.6");
+    let property_names: BTreeSet<_> = appearance
+        .custom_properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(
+        property_names.contains("appearance"),
+        "setAppearance must list `appearance` in custom_properties, got {property_names:?}"
+    );
+
+    // The appearance enum is bounded; the security/denied sections reject
+    // out-of-enum and authority grants.
+    assert!(
+        appearance.security.contains("light") && appearance.security.contains("dark"),
+        "setAppearance security must state the bounded enum"
+    );
+    for denied in denied_configuration_authorities() {
+        assert!(
+            appearance.security.contains(denied),
+            "clay.theme.setAppearance must deny {denied} authority"
+        );
+    }
+
+    // configuration.md documents the Phase 20.6 precedence model + setAppearance.
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration doc");
+    assert!(
+        configuration.contains("clay.theme.setAppearance"),
+        "configuration.md must link setAppearance"
+    );
+    assert!(
+        configuration.contains("ui-session"),
+        "configuration.md must document the ui-session persisted-preference source"
+    );
+    assert!(
+        configuration.contains("preferences.json"),
+        "configuration.md must document the preferences.json persistence store"
+    );
+    // Precedence order: canonical/package default < init-js < ui-session.
+    let precedence_anchor = configuration.find("ui-session");
+    let init_js_anchor = configuration.find("init-js");
+    assert!(
+        precedence_anchor.is_some() && init_js_anchor.is_some(),
+        "configuration.md must name both ui-session and init-js sources"
+    );
+
+    // set-package-option.md documents the extended source taxonomy.
+    let set_package_option = std::fs::read_to_string(
+        root.join("docs/reference/clay-js-api/configuration/set-package-option.md"),
+    )
+    .expect("read setPackageOption API doc");
+    assert!(
+        set_package_option.contains("ui-session"),
+        "setPackageOption must document the `ui-session` source"
+    );
+
+    // The closed clay:configuration module did not gain appearance: appearance
+    // is a clay:theme API, and clay:configuration stays closed (setPackageOption
+    // + loadConfigurationModule + getConfigurationState only).
+    assert!(
+        registry.by_id("clay.configuration.setAppearance").is_none(),
+        "appearance must not be a clay:configuration API; it lives in clay:theme"
+    );
+}

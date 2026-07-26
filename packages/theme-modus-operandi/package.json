@@ -1,0 +1,237 @@
+{
+  "name": "@clay/theme-modus-operandi",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js"
+  },
+  "clay": {
+    "apiPrefix": "theme-modus-operandi",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "permissions": [],
+    "modes": [],
+    "docs": "./docs/index.md",
+    "performance": {
+      "estimatedManifestBytes": 3200,
+      "hotPathPolicy": "inert style data parsed at load; no hot-path JS"
+    },
+    "contributions": {
+      "textStyles": [
+        {
+          "token": "shellBg",
+          "color": "#ffffff"
+        },
+        {
+          "token": "panelBg",
+          "color": "#f2f2f2"
+        },
+        {
+          "token": "text",
+          "color": "#000000"
+        },
+        {
+          "token": "placeholder",
+          "color": "#595959"
+        },
+        {
+          "token": "selection",
+          "color": "#c0deff66"
+        },
+        {
+          "token": "caret",
+          "color": "#000000"
+        },
+        {
+          "token": "scrollbar",
+          "color": "#9f9f9faa"
+        },
+        {
+          "token": "scrollbarTrack",
+          "color": "#9f9f9f22"
+        },
+        {
+          "token": "statusBg",
+          "color": "#c8c8c8"
+        },
+        {
+          "token": "statusText",
+          "color": "#000000"
+        },
+        {
+          "token": "diagnosticError",
+          "color": "#a60000"
+        },
+        {
+          "token": "diagnosticWarning",
+          "color": "#884900"
+        },
+        {
+          "token": "diagnosticInfo",
+          "color": "#005f5f"
+        },
+        {
+          "token": "Keyword",
+          "color": "#531ab6"
+        },
+        {
+          "token": "Modifier",
+          "color": "#8f0075"
+        },
+        {
+          "token": "Operator",
+          "color": "#000000"
+        },
+        {
+          "token": "Comment",
+          "color": "#595959"
+        },
+        {
+          "token": "String",
+          "color": "#3548cf"
+        },
+        {
+          "token": "Number",
+          "color": "#000000"
+        },
+        {
+          "token": "Regexp",
+          "color": "#7c318f"
+        },
+        {
+          "token": "Function",
+          "color": "#721045"
+        },
+        {
+          "token": "Method",
+          "color": "#721045"
+        },
+        {
+          "token": "Macro",
+          "color": "#a0132f"
+        },
+        {
+          "token": "Namespace",
+          "color": "#005e8b"
+        },
+        {
+          "token": "Type",
+          "color": "#005f5f"
+        },
+        {
+          "token": "Class",
+          "color": "#005f5f"
+        },
+        {
+          "token": "Enum",
+          "color": "#005f5f"
+        },
+        {
+          "token": "Interface",
+          "color": "#005f5f"
+        },
+        {
+          "token": "Struct",
+          "color": "#005f5f"
+        },
+        {
+          "token": "TypeParameter",
+          "color": "#005e8b"
+        },
+        {
+          "token": "Parameter",
+          "color": "#005e8b"
+        },
+        {
+          "token": "Variable",
+          "color": "#000000"
+        },
+        {
+          "token": "Property",
+          "color": "#005e8b"
+        },
+        {
+          "token": "EnumMember",
+          "color": "#0000b0"
+        },
+        {
+          "token": "Event",
+          "color": "#a0132f"
+        },
+        {
+          "token": "Decorator",
+          "color": "#a0132f"
+        },
+        {
+          "token": "Heading1",
+          "color": "#000000",
+          "bold": true
+        },
+        {
+          "token": "Heading2",
+          "color": "#624416",
+          "bold": true
+        },
+        {
+          "token": "Heading3",
+          "color": "#193668",
+          "bold": true
+        },
+        {
+          "token": "Heading4",
+          "color": "#721045",
+          "bold": true
+        },
+        {
+          "token": "Heading5",
+          "color": "#2a5045",
+          "bold": true
+        },
+        {
+          "token": "Heading6",
+          "color": "#7f0000",
+          "bold": true
+        },
+        {
+          "token": "ListItem",
+          "color": "#595959"
+        },
+        {
+          "token": "Quote",
+          "color": "#595959"
+        },
+        {
+          "token": "CodeBlock",
+          "color": "#000000"
+        },
+        {
+          "token": "CodeSpan",
+          "color": "#00663f"
+        },
+        {
+          "token": "Link",
+          "color": "#3548cf",
+          "underline": true
+        },
+        {
+          "token": "Paragraph",
+          "color": "#000000"
+        }
+      ]
+    },
+    "extensionPoints": [
+      {
+        "id": "theme-modus-operandi.tokens",
+        "version": 1,
+        "operations": [
+          "replace"
+        ],
+        "contributionKinds": [
+          "themeTokens"
+        ],
+        "summary": "Derive from this theme and override typed token values."
+      }
+    ]
+  }
+}

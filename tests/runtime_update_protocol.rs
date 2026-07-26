@@ -14,6 +14,7 @@ fn valid_snapshot(generation: u64, client_id: u64) -> RuntimeStateSnapshot {
         active_theme: ActiveTheme {
             specifier: "@clay/default".to_string(),
             overrides: Vec::new(),
+            design_tokens: Vec::new(),
         },
         active_typography: ActiveTypography::default(),
         sdui_tree: SduiTree {
