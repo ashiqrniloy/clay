@@ -213,6 +213,8 @@ Theme packages may also ship typed UI design-token overrides via `clay.contribut
 4. Theme packages (e.g. `@clay/theme-gruvbox-material-dark`) contribute values, not structure. Existing Gruvbox themes need no manifest change — they resolve through core fallbacks.
 5. `typography.*` tokens are variant selectors, not scale values. Packages cannot ship concrete hierarchy scales.
 6. Update this file when tokens, variants, or hierarchy defaults change.
+7. **Contrast and fallback correctness are enforced at validation (Phase 20.7).** The active theme's status-chrome token pairs must meet `TEXT_CONTRAST_MIN` (4.5) and `UI_CONTRAST_MIN` (3.0) (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`) — a below-AA theme is not activated. A package token's `fallback` must be a same-typed Clay core token; type mismatches and invalid units are rejected (`core_fallback_matches_type`, `src/shell/theme.rs`; parsed in `src/packages/record.rs`). Raw colors, raw CSS, and raw sizes in `designTokens` overrides or component `style.*` variables are rejected at load time. These are host-authority checks run inside Clay's Rust host validator; no package-facing op or facade exposes them. See `docs/reference/packages/creating-packages.md` § "Phase 20.7 authoring contract: UI conformance guardrails".
+8. **Code-vs-catalog drift is linted (Phase 20.7).** The `core_theme_value` match arms in `src/shell/theme.rs` must stay in sync with the Core Tokens tables above; `tests/package_ui_conformance.rs::core_token_catalog_matches_tokens_md` fails the build if they drift.
 
 ## Phase 20.4 consumption (no new tokens)
 

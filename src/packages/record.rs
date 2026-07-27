@@ -2632,6 +2632,36 @@ fn parse_text_style_contributions(
     Ok(descriptors)
 }
 
+// ponytail: duplicated from src/shell/components.rs (json_value_kind +
+// sanitize_rejected) rather than promoted to a shared module — one tiny fn
+// pair, two validation modules; sharing would add a module + import churn for
+// no callers beyond these two. Fold into a shared diagnostic module if a third
+// author-JSON validator appears.
+/// Compact description of a rejected `serde_json::Value`'s shape for a "got …"
+/// diagnostic fragment.
+fn json_value_kind(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => format!("boolean {b}"),
+        Value::Number(n) => format!("number {n}"),
+        Value::String(s) => format!("string `{}`", sanitize_rejected(s)),
+        Value::Array(_) => "array".to_string(),
+        Value::Object(_) => "object".to_string(),
+    }
+}
+
+/// Trim, strip backticks, and bound to 80 chars so an author-supplied value
+/// cannot break the diagnostic shape or leak unbounded content.
+fn sanitize_rejected(value: &str) -> String {
+    let trimmed = value.trim().replace('`', "'");
+    if trimmed.chars().count() > 80 {
+        let bounded: String = trimmed.chars().take(80).collect();
+        format!("{bounded}…")
+    } else {
+        trimmed
+    }
+}
+
 /// Parse `clay.contributions.designTokens` (Phase 20.1) into validated inert
 /// [`DesignTokenOverrideDescriptor`]s. Each entry names a core Clay token and
 /// supplies a typed value whose variant must match the core token type and pass
@@ -2724,14 +2754,20 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string",
+                        format!(
+                            "color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string; got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })?;
                 let [r, g, b, a] = parse_hex_rgba(hex).ok_or_else(|| {
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string",
+                        format!(
+                            "color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string; got `{}`",
+                            sanitize_rejected(hex)
+                        ),
                     )
                 })?;
                 DesignTokenValueDescriptor::Color([r, g, b, a])
@@ -2741,14 +2777,19 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "scalar design token `value` must be a finite number",
+                        format!(
+                            "scalar design token `value` must be a finite number; got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })?;
                 if !is_valid_dimension(v) {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "scalar design token `value` must be finite, non-negative, and bounded",
+                        format!(
+                            "scalar design token `value` must be finite, non-negative, and bounded; got {v}"
+                        ),
                     ));
                 }
                 DesignTokenValueDescriptor::Scalar(v.to_bits())
@@ -2758,14 +2799,19 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "opacity design token `value` must be a finite number",
+                        format!(
+                            "opacity design token `value` must be a finite number; got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })? as f32;
                 if !v.is_finite() || !(0.0..=1.0).contains(&v) {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "opacity design token `value` must be a finite number in [0, 1]",
+                        format!(
+                            "opacity design token `value` must be a finite number in [0, 1]; got {v}"
+                        ),
                     ));
                 }
                 DesignTokenValueDescriptor::Opacity(v.to_bits())
@@ -2775,14 +2821,19 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "motion-duration design token `value` must be a finite number of milliseconds",
+                        format!(
+                            "motion-duration design token `value` must be a finite number of milliseconds; got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })?;
                 if MotionDuration::from_millis(v).is_none() {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "motion-duration design token `value` must be finite, non-negative, and at most 1000 ms",
+                        format!(
+                            "motion-duration design token `value` must be finite, non-negative, and at most 1000 ms; got {v} ms"
+                        ),
                     ));
                 }
                 DesignTokenValueDescriptor::Scalar(v.to_bits())
@@ -2792,14 +2843,20 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "elevation design token `value` must be a level name (none, raised, overlay)",
+                        format!(
+                            "elevation design token `value` must be a level name (none, raised, overlay); got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })?;
                 if ElevationLevel::parse(s).is_none() {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "elevation design token `value` must be one of: none, raised, overlay",
+                        format!(
+                            "elevation design token `value` must be one of: none, raised, overlay; got `{}`",
+                            sanitize_rejected(s)
+                        ),
                     ));
                 }
                 DesignTokenValueDescriptor::Level(s.to_string())
@@ -2809,14 +2866,20 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "z-level design token `value` must be a level name (base, panel, overlay, modal, tooltip)",
+                        format!(
+                            "z-level design token `value` must be a level name (base, panel, overlay, modal, tooltip); got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })?;
                 if ZLevel::parse(s).is_none() {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "z-level design token `value` must be one of: base, panel, overlay, modal, tooltip",
+                        format!(
+                            "z-level design token `value` must be one of: base, panel, overlay, modal, tooltip; got `{}`",
+                            sanitize_rejected(s)
+                        ),
                     ));
                 }
                 DesignTokenValueDescriptor::Level(s.to_string())
@@ -2826,14 +2889,20 @@ fn parse_design_token_contributions(
                     ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "density design token `value` must be a level name (compact, default, spacious)",
+                        format!(
+                            "density design token `value` must be a level name (compact, default, spacious); got {}",
+                            json_value_kind(value_field)
+                        ),
                     )
                 })?;
                 if DensityLevel::parse(s).is_none() {
                     return Err(ctx.error(
                         PackageRecordRule::InvalidContributionDescriptor,
                         Some(token),
-                        "density design token `value` must be one of: compact, default, spacious",
+                        format!(
+                            "density design token `value` must be one of: compact, default, spacious; got `{}`",
+                            sanitize_rejected(s)
+                        ),
                     ));
                 }
                 DesignTokenValueDescriptor::Level(s.to_string())

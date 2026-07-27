@@ -5,6 +5,7 @@ pub mod editor;
 pub mod ipc;
 pub mod masonry_editor;
 pub mod masonry_sdui;
+pub(crate) mod masonry_sdui_region;
 #[doc(hidden)]
 pub mod masonry_shell;
 pub mod packages;

@@ -6,10 +6,10 @@ use std::collections::HashSet;
 
 use clay::editor::theme::{
     STATUS_CHROME_MIN_CONTRAST, StyleRegistry, TextStyleOverride, parse_override_token,
-    status_chrome_contrast_ratio, status_chrome_meets_contrast,
+    status_chrome_contrast_ratio, status_chrome_meets_contrast, validate_active_theme_contrast,
 };
 use clay::packages::record::{PackageRecord, assemble_package_record};
-use clay::protocol::TokenType;
+use clay::protocol::{ActiveTheme, TokenType, UiDesignTokenOverride, WireDesignTokenValue};
 
 const EXPECTED_BASE_UI_KEYS: &[&str] = &[
     "shellBg",
@@ -340,4 +340,73 @@ fn gruvbox_themes_status_chrome_meets_aa_contrast() {
             "{specifier} status chrome contrast {ratio:.2} must be >= {STATUS_CHROME_MIN_CONTRAST}"
         );
     }
+}
+
+/// Phase 20.7 task 3: every bundled theme package's SDUI color-role palette
+/// meets WCAG AA on every required foreground/background pair. The bundled
+/// themes declare `designTokens` overrides for editor chrome/syntax only
+/// (zero SDUI `designTokens`), so each resolves to the core SDUI palette —
+/// this pins the core palette to AA and guards any future `designTokens`
+/// theme against a sub-AA install.
+#[test]
+fn bundled_themes_sdui_pairs_meet_aa_contrast() {
+    let bundled = [
+        (
+            "@clay/theme-gruvbox-material-dark",
+            "theme-gruvbox-material-dark",
+        ),
+        (
+            "@clay/theme-gruvbox-material-light",
+            "theme-gruvbox-material-light",
+        ),
+        ("@clay/theme-modus-operandi", "theme-modus-operandi"),
+        ("@clay/theme-modus-vivendi", "theme-modus-vivendi"),
+    ];
+    for (specifier, dir) in bundled {
+        // Validates the package parses; the parsed design-token set is empty
+        // for every bundled theme, so the snapshot resolves to core fallbacks.
+        let value = read_theme_package(specifier, dir);
+        assemble_package_record(&value).expect("theme validates");
+        let snapshot = ActiveTheme {
+            specifier: specifier.to_string(),
+            overrides: Vec::new(),
+            design_tokens: Vec::new(),
+        };
+        validate_active_theme_contrast(&snapshot).unwrap_or_else(|failure| {
+            panic!(
+                "{specifier} SDUI pair {}/{} ratio {:.2} below {:.1}",
+                failure.foreground, failure.background, failure.ratio, failure.threshold
+            )
+        });
+    }
+}
+
+/// Phase 20.7 task 3: a theme snapshot whose `text.primary` overrides to match
+/// `surface.main` is rejected with a `ContrastFailure` naming the pair, ratio,
+/// and threshold (4.5 text). The AA floor is enforced before install so a
+/// low-contrast palette never reaches the client.
+#[test]
+fn theme_package_below_aa_contrast_is_rejected() {
+    // surface.main core fallback is #100f17. Override text.primary to the same
+    // color so the pair collapses to a 1.0 contrast ratio.
+    let surface_main = [0x10, 0x0f, 0x17, 0xff];
+    let snapshot = ActiveTheme {
+        specifier: "@clay/theme-low-contrast".to_string(),
+        overrides: Vec::new(),
+        design_tokens: vec![UiDesignTokenOverride {
+            token: "text.primary".to_string(),
+            value: WireDesignTokenValue::Color(surface_main),
+            provenance: "theme-low-contrast".to_string(),
+        }],
+    };
+    let failure = validate_active_theme_contrast(&snapshot)
+        .expect_err("low-contrast text.primary/surface.main pair must be rejected");
+    assert_eq!(failure.foreground, "text.primary");
+    assert_eq!(failure.background, "surface.main");
+    assert_eq!(failure.threshold, 4.5);
+    assert!(
+        failure.ratio < 4.5,
+        "ratio {:.2} must be below 4.5",
+        failure.ratio
+    );
 }

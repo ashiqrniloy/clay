@@ -3167,6 +3167,110 @@ mod tests {
         }
     }
 
+    /// Phase 20.7 task 5: ground-truth tie between `applicable_states` (Plan
+    /// 068 task 4) and the `component_state_palette` paint path. For each
+    /// `ComponentKind` category, asserts the applicable-state set matches the
+    /// documented per-kind notes AND the palette renders token-driven output
+    /// (Some fill or text) for every applicable state of interactive kinds.
+    /// Catches drift between the `applicable_states` table and the paint path
+    /// — the ground truth the task-4 `ponytail:` note deferred to this matrix.
+    #[test]
+    fn applicable_states_match_component_state_palette() {
+        use crate::shell::components::{ComponentKind as K, applicable_states};
+        use crate::shell::primitives::InteractionState;
+        use crate::shell::theme::ResolvedUiTheme;
+        use InteractionState as S;
+        let theme = ResolvedUiTheme::from_active_theme(&[]).unwrap();
+        let all_five = [S::Rest, S::Hover, S::Active, S::Focus, S::Disabled];
+
+        // Interactive triggers: all five states applicable; palette renders a
+        // fill (button/list/dropdown/textInput) or text (collapse) for every
+        // state — state-complete from tokens.
+        for kind in [K::Button, K::List, K::Dropdown, K::Collapse, K::TextInput] {
+            assert_eq!(
+                applicable_states(kind),
+                all_five,
+                "{kind:?} applicable = all five"
+            );
+            for state in all_five {
+                let p = component_state_palette(&theme, kind.as_str(), state);
+                assert!(
+                    p.fill.is_some() || p.text.is_some(),
+                    "{kind:?} must render a fill or text for {state:?}"
+                );
+            }
+        }
+
+        // Chrome containers: Rest only; palette renders a chrome fill+border.
+        for kind in [K::Panel, K::Overlay, K::Modal] {
+            assert_eq!(
+                applicable_states(kind),
+                [S::Rest],
+                "{kind:?} applicable = Rest"
+            );
+            let p = component_state_palette(&theme, kind.as_str(), S::Rest);
+            assert!(
+                p.fill.is_some() && p.border.is_some(),
+                "{kind:?} chrome fill+border"
+            );
+        }
+
+        // Text-no-fill: Rest/Focus/Disabled; palette text renders, fill None.
+        for kind in [K::Label, K::StatusItem] {
+            assert_eq!(
+                applicable_states(kind),
+                [S::Rest, S::Focus, S::Disabled],
+                "{kind:?} applicable = Rest/Focus/Disabled"
+            );
+            for state in [S::Rest, S::Focus, S::Disabled] {
+                let p = component_state_palette(&theme, kind.as_str(), state);
+                assert!(
+                    p.text.is_some() && p.fill.is_none(),
+                    "{kind:?} renders text not fill for {state:?}"
+                );
+            }
+        }
+
+        // Scrollbar-bearing: Rest/Hover/Active; no SDUI state-token chrome
+        // (scrollbar chrome is editor-side via paint_scroll_chrome).
+        for kind in [K::EditorView, K::Scroll] {
+            assert_eq!(
+                applicable_states(kind),
+                [S::Rest, S::Hover, S::Active],
+                "{kind:?} applicable = Rest/Hover/Active"
+            );
+            let p = component_state_palette(&theme, kind.as_str(), S::Hover);
+            assert_eq!(
+                p,
+                ComponentStatePalette {
+                    fill: None,
+                    border: None,
+                    text: None
+                },
+                "{kind:?} has no SDUI state chrome"
+            );
+        }
+
+        // Layout containers: Rest only; no chrome of their own.
+        for kind in [K::Flex, K::Stack, K::Portal] {
+            assert_eq!(
+                applicable_states(kind),
+                [S::Rest],
+                "{kind:?} applicable = Rest"
+            );
+            let p = component_state_palette(&theme, kind.as_str(), S::Rest);
+            assert_eq!(
+                p,
+                ComponentStatePalette {
+                    fill: None,
+                    border: None,
+                    text: None
+                },
+                "{kind:?} has no chrome"
+            );
+        }
+    }
+
     #[test]
     fn ui_size_change_scales_row_hit_and_accessibility_bounds_together() {
         let size = Size::new(900.0, 600.0);

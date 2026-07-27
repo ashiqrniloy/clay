@@ -837,7 +837,7 @@ Packages should use these generic contribution APIs instead of teaching users to
 
 Clay components are package-facing declarations mapped to native widgets internally.
 
-Phase 18.3 component catalog status:
+Component catalog status (single source of truth: [`.agents/skills/clay-ui/references/components.md`](../../../.agents/skills/clay-ui/references/components.md); see also the [UI Components, Tokens, and Conformance](../ui-components.md) navigation page):
 
 | Component kind | Status | Purpose |
 | --- | --- | --- |
@@ -850,10 +850,13 @@ Phase 18.3 component catalog status:
 | `stack` / `overlay` | Implemented/runtime-backed | Layered/transient composition. |
 | `scroll` / `portal` | Implemented/runtime-backed | Scrollable or portal-like component region. |
 | `statusItem` | Implemented/runtime-backed | Status bar/panel status contribution. |
-| `table` | Planned/deferred | Structured rows/columns in a later component-catalog phase. |
-| `dropdown` | Planned/deferred | Selection/action menu in a later component-catalog phase. |
-| `collapse` | Planned/deferred | Expand/collapse sections in a later component-catalog phase. |
-| `modal` | Planned/deferred | Shell-owned transient dialog in a later component-catalog phase. |
+| `dropdown` | Implemented/runtime-backed (Phase 20.5) | Single-select drop-down; keyboard nav (ArrowUp/Down/Enter/Space). |
+| `collapse` | Implemented/runtime-backed (Phase 20.5) | Expand/collapse section; Enter/Space toggles. |
+| `modal` | Implemented/runtime-backed (Phase 20.5) | Blocking dialog; Tab focus-trap; `z.modal` stacking. |
+| `textInput` | Implemented/runtime-backed (Phase 20.5) | Single-line editable field; focus ring, placeholder, `style.validationState`/`style.placeholderColor`. |
+| `table` | Reserved/deferred | Structured rows/columns in a later component-catalog phase. |
+
+Status markers match the `clay-ui` catalog legend: `implemented` (usable now), `reserved` (name locked, validation rejects use until its phase), `planned` (approved for a future UI revamp phase), `internal` (Clay-native surface, not package-facing). `table` is the only reserved kind; no planned package-facing kind remains unimplemented after Phase 20.5. The catalog's "Planned Components (UI Revamp)" table tracks composition-only planned surfaces (tooltip, tabs, badge, toast, kbd hint, icon slot) that reuse implemented kinds.
 
 Packages should not assume these are Masonry widget types. They are Clay components validated by `src/shell/components.rs` and rendered through Clay-owned native code.
 
@@ -1350,6 +1353,59 @@ Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design l
 **Structural observability**: a test-local `component_state_palette` helper captures the resolved fill/border/text colors per component kind per `InteractionState` from the active `ResolvedUiTheme` — no pixel rendering, no GPU. This is test infrastructure only; no public `clay:sdui.queryUiState` introspection API is introduced (deferred per Phase 15/16 until a real agent-introspection need exists).
 
 **Package limitations (restated)**: packages declare inert `ComponentKind` components and typed tokens only. No raw CSS, no raw colors, no client JavaScript in paint/layout/pointer/scroll/keypress/text-event handlers, no native widget handles, no raw ops, no direct primitive calls. Packages cannot read or drive `InteractionState` directly; Clay derives it from pointer/focus hit-testing and renders state chrome through primitives.
+
+### Phase 20.7 authoring contract: UI conformance guardrails
+
+**Status: Implemented/internal runtime.** Phase 20.7 hardens the host-authority validation boundary for package UI. Every check below runs at package parse/install or theme-apply time inside Clay's Rust host validator — none is exposed to packages as a callable API. Conformance is host authority, not package-facing: a third-party package cannot bypass validation, and no `clay.ui.validate*` op or `clay:*` facade exists for conformance (asserted by `tests/package_ui_conformance.rs`).
+
+**Enforced checks:**
+
+| Check | Status | What is rejected | Where enforced |
+|------|--------|------------------|----------------|
+| Typed-token-only styling | Implemented | Raw colors, raw CSS, style strings, renderer callbacks, unknown/mistyped style-variable tokens | `src/shell/components.rs` (`validate_style_variables`/`validate_style_variable`/`reject_raw_style_token`); mapped to `UiContributionRule::ProhibitedAuthority` (raw CSS/color) or `InvalidThemeToken` (mistyped token) at the runtime boundary |
+| Reserved-kind gating | Implemented | Declaring a reserved `ComponentKind` (currently `table`) | `src/shell/components.rs` (`validate_component_kind`); `InvalidContributionDescriptor` |
+| Contrast / legibility | Implemented | Active theme whose status-chrome pairs fall below `TEXT_CONTRAST_MIN` (4.5) or `UI_CONTRAST_MIN` (3.0) | `src/shell/theme.rs` (`validate_active_theme_contrast`) + `src/server/ops/theme.rs` (`enforce_contrast`); a below-AA theme is not activated and records a `clay.theme.contrast` diagnostic |
+| State-completeness | Implemented | Catalog drift between the `applicable_states(kind)` table and the documented per-kind interaction notes | `src/shell/components.rs` (`applicable_states`); pinned by `tests/masonry_sdui.rs` against `component_state_palette` |
+| Payload budgets | Implemented | SDUI snapshot estimate > 4096 B, update estimate > 1024 B; runtime tree > 16 KiB / > 128 nodes / > 16 depth / > 4096-char text node | `src/packages/record.rs` + `src/server/ui.rs` + `src/server/ops/sdui.rs`; `PayloadBudgetExceeded` |
+| Raw-color / raw-size rejection | Implemented | Raw color values in component `style.*` variables; raw colors / raw CSS in `designTokens` overrides | `src/shell/components.rs` + `src/packages/record.rs` |
+| Code-vs-catalog drift lint | Implemented | `ComponentKind` enum, `component_state_palette` match arms, typed-style-variable match arms, or `core_theme_value` match arms drifting from `components.md`/`tokens.md` | `tests/package_ui_conformance.rs` (four drift guards) |
+| Author diagnostics | Implemented | Rejection messages that omit the rejected value, expected type, or field | `ComponentCatalogError::reject` (`src/shell/components.rs`) + `; got {actual}` appends (`src/packages/record.rs`) |
+| Trust-domain boundaries | Implemented | Third-party raw values / oversized payloads reaching the trusted runtime; conformance exposed as a package-facing op/facade | `tests/package_ui_conformance.rs` (three trust-domain tests) |
+
+**Diagnostic message format.** Component-catalog rejections use a single stable shape via `ComponentCatalogError::reject`:
+
+```text
+{field} = `{value}` rejected: expected {expected}; {reason}
+```
+
+Design-token `value` rejections append `; got {actual}` to the existing typed-shape message, naming the rejected value kind (e.g. `got number 12`, `got string "#zz"`). Example rejections a package author will see:
+
+```text
+style.background = `#ff00aa` rejected: expected color-role token; raw colors or raw CSS are not allowed; reference a Clay token (e.g. surface.main)
+color-role design token `value` must be a #rgb, #rrggbb, or #rrggbbaa hex string; got number 12
+```
+
+The rejected value is sanitized (trimmed, backticks stripped, bounded to 80 characters) so an author-supplied string cannot break the diagnostic shape or inject markdown. Conformance helpers that run at theme-apply time are `pub(crate)`; `validate_active_theme_contrast` and `ContrastFailure` are re-exported from `clay::editor::theme` for integration tests only and are not wired to any `deno_core` op or JS facade (no package-facing trust path).
+
+**Example rejection (raw color in a component style):**
+
+```json
+{
+  "kind": "panel",
+  "id": "vendor.preview",
+  "style": { "background": "#ff00aa" }
+}
+```
+
+This is rejected at `assemble_package_record` with `InvalidContributionDescriptor`, `contribution_id = "style.background"`, and the message above. No `PackageRecord` is produced, so no contribution descriptor is installed — the raw value never reaches the trusted runtime.
+
+**Authority boundaries (security):**
+- No raw CSS, no client JavaScript, no native widget handles, no raw `Deno.core.ops` in package UI contributions.
+- No third-party theme loader: themes are first-party packages activated from `~/.config/clay/init.js`; a theme package below the AA contrast floor is not activated.
+- Conformance is host authority, not package-facing: validation runs inside Clay's Rust host validator at parse/install/theme-apply time; no `clay.ui.validate*` op or `clay:*` facade exposes it.
+- Trusted classification comes from the compiled bundled inventory and provenance/integrity, never package naming or `@clay/*` prefix.
+
+See `.agents/skills/clay-ui/references/components.md` (conformance contract) and `.agents/skills/clay-ui/references/tokens.md` (rules) for the enforced-check lists. The conformance suite lives at `tests/package_ui_conformance.rs` and `tests/ui_primitive_conformance.rs`.
 
 ## Rendering and Decorations
 

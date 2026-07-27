@@ -6,6 +6,8 @@ mod editor_performance_invariants;
 mod markdown_mode;
 #[path = "../markdown_rendered_styles.rs"]
 mod markdown_rendered_styles;
+#[path = "../package_ui_conformance.rs"]
+mod package_ui_conformance;
 #[path = "../range_diagnostics.rs"]
 mod range_diagnostics;
 #[path = "../theme_packages.rs"]

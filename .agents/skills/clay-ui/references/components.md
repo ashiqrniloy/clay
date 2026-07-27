@@ -118,11 +118,21 @@ All primitives:
 - Are panic-free on zero-size rects.
 - Are deterministic and allocation-free in paint paths.
 
-Conformance contract (enforced by `tests/ui_primitive_conformance.rs`):
+Conformance contract (enforced by `tests/ui_primitive_conformance.rs` and `tests/package_ui_conformance.rs`):
 - Shell/SDUI chrome paint files contain no `Color::from_rgb8`/`Color::from_rgba8` literals outside `primitives.rs` and `theme.rs`.
 - Shell/SDUI chrome paint files contain no hardcoded chrome-size constants outside `primitives.rs` and `theme.rs`.
 - Package components map onto primitives by construction (SDUI paint routes chrome through primitive helpers).
 - Each primitive is token-driven and renders all declared interaction states.
+
+**Phase 20.7 enforced checks** (host authority; see `docs/reference/packages/creating-packages.md` § "Phase 20.7 authoring contract: UI conformance guardrails"):
+- **Contrast / legibility:** active-theme status-chrome pairs must meet `TEXT_CONTRAST_MIN` (4.5) and `UI_CONTRAST_MIN` (3.0); a below-AA theme is not activated (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`).
+- **State-completeness:** `applicable_states(kind)` (`src/shell/components.rs`) is the per-kind interaction-state contract; pinned against the documented per-kind notes and `component_state_palette` in `tests/masonry_sdui.rs`.
+- **Payload budgets:** SDUI snapshot ≤ 4096 B, update ≤ 1024 B; runtime tree ≤ 16 KiB / ≤ 128 nodes / ≤ 16 depth / ≤ 4096-char text node (`src/packages/record.rs`, `src/server/ui.rs`, `src/server/ops/sdui.rs`).
+- **Code-vs-catalog drift:** `ComponentKind` enum ↔ `component_state_palette` match arms ↔ this catalog's `Package-Facing Component Kinds` table; typed-style-variable match arms ↔ `Typed Style Variables` table; `core_theme_value` arms ↔ `tokens.md` Core Tokens. All four drift guards live in `tests/package_ui_conformance.rs`.
+- **Author diagnostics:** rejection messages name the rejected value, expected type, and field via `ComponentCatalogError::reject` (`{field} = `{value}` rejected: expected {expected}; {reason}`).
+- **Trust domains:** no `clay.ui.validate*` op or `clay:*` facade exposes conformance; third-party raw values and oversized payloads are rejected at `assemble_package_record` without reaching the trusted runtime.
+
+Conformance is host authority, not package-facing: validation runs inside Clay's Rust host validator at parse/install/theme-apply time.
 
 ## Planned Components (UI Revamp Phases 20.2/20.5)
 

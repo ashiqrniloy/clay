@@ -1515,7 +1515,7 @@ deno_op = "op_clay_ui_register_component_contribution"
 deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_component_contribution"
 documentation_path = "docs/reference/clay-js-api/ui/server-register-component-contribution.md"
 key_bindings = []
-custom_properties = ["id:string=package-prefixed", "kind:enum=editorView|panel|label|button|list|flex|stack|overlay|scroll|portal|statusItem", "deferredKinds:enum=table|dropdown|collapse|modal", "children:ComponentContribution[]=bounded", "styleTokens:string[]=[]", "actionTargets:string[]=[]"]
+custom_properties = ["id:string=package-prefixed", "kind:enum=editorView|panel|label|button|list|flex|stack|overlay|scroll|portal|statusItem|dropdown|collapse|modal|textInput", "deferredKinds:enum=table", "children:ComponentContribution[]=bounded", "styleTokens:string[]=[]", "validationState:enum=none|error|warning|success", "placeholderColor:color-role-token=text.muted", "actionTargets:string[]=[]"]
 permissions = []
 security_notes = "Runtime-backed Clay JS API validates component kind, duplicate component IDs, package provenance, bounded payloads, action targets, and style-token boundaries and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or native component mutation authority."
 current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.js"

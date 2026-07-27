@@ -18,6 +18,13 @@ use masonry::peniko::Color;
 
 use crate::protocol::{DecorationKind, DiagnosticSeverity, Modifiers, TokenType};
 
+/// Public SDUI contrast guardrail surface (Phase 20.7 task 3): the WCAG AA
+/// contrast checker over resolved theme design-token pairs. The engine lives
+/// in `crate::editor::theme::contrast_ratio`; the required-pairs policy lives
+/// in `crate::shell::theme`. Re-exported here so integration tests reach it
+/// via the already-public `clay::editor::theme` module.
+pub use crate::shell::theme::{ContrastFailure, validate_active_theme_contrast};
+
 /// Resolved visual style for one decoration span: a background tint `color` plus
 /// the text attributes the span's modifiers request (or the theme declares by
 /// default). The current paint path consumes `color`; the text attributes are

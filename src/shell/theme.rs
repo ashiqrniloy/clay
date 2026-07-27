@@ -954,6 +954,91 @@ pub(crate) fn validate_design_token_override(
     Ok(resolved)
 }
 
+/// WCAG AA minimum contrast for body/label/tooltip text foreground/background
+/// pairs in the SDUI color-role palette. Normal text per WCAG 2.1 SC 1.4.3.
+pub(crate) const TEXT_CONTRAST_MIN: f64 = 4.5;
+
+/// WCAG AA minimum contrast for non-text UI pairs (accent, focus ring, focus
+/// border) and standalone UI chips (`kbd`), which are not prose. WCAG 2.1
+/// non-text contrast (SC 1.4.11) floor is 3.0.
+pub(crate) const UI_CONTRAST_MIN: f64 = 3.0;
+
+/// A required foreground/background color-role pair that must meet a WCAG AA
+/// contrast threshold. Token names are core color-role tokens resolved through
+/// [`ResolvedUiTheme::color`] (active override first, then same-typed core
+/// fallback). Generic over every theme package: no package-specific branch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContrastFailure {
+    pub foreground: &'static str,
+    pub background: &'static str,
+    pub ratio: f64,
+    pub threshold: f64,
+}
+
+/// Required SDUI foreground/background contrast pairs and their thresholds.
+/// `text.*` on `surface.*` are body/label/tooltip text (4.5); `accent.primary`,
+/// `focus.ring`, and `border.focus` on `surface.main` are non-text UI (3.0);
+/// `text.kbd`/`surface.kbd` is a standalone UI chip, not prose, so 3.0.
+/// ponytail: raise `text.kbd` to 4.5 only if kbd ever carries prose text.
+pub(crate) const REQUIRED_CONTRAST_PAIRS: &[(&str, &str, f64)] = &[
+    ("text.primary", "surface.main", TEXT_CONTRAST_MIN),
+    ("text.muted", "surface.panel", TEXT_CONTRAST_MIN),
+    ("text.primary", "surface.panel", TEXT_CONTRAST_MIN),
+    ("text.primary", "surface.control", TEXT_CONTRAST_MIN),
+    ("text.badge", "surface.badge", TEXT_CONTRAST_MIN),
+    ("text.kbd", "surface.kbd", UI_CONTRAST_MIN),
+    ("text.tooltip", "surface.tooltip", TEXT_CONTRAST_MIN),
+    ("accent.primary", "surface.main", UI_CONTRAST_MIN),
+    ("focus.ring", "surface.main", UI_CONTRAST_MIN),
+    ("border.focus", "surface.main", UI_CONTRAST_MIN),
+];
+
+/// Validate that every required contrast pair in `theme` meets its threshold.
+/// Returns the first failing pair. Reuses [`crate::editor::theme::contrast_ratio`]
+/// as the WCAG engine; this helper only adds the required-pairs policy. A pair
+/// whose foreground or background color role does not resolve (returns `None`)
+/// is skipped — the core catalog guarantees all `REQUIRED_CONTRAST_PAIRS`
+/// tokens are color roles, so a `None` indicates a non-color override of a
+/// color token, which is a separate type-mismatch error surfaced elsewhere.
+pub(crate) fn theme_meets_contrast(theme: &ResolvedUiTheme) -> Result<(), ContrastFailure> {
+    for &(foreground, background, threshold) in REQUIRED_CONTRAST_PAIRS {
+        let (Some(fg), Some(bg)) = (theme.color(foreground), theme.color(background)) else {
+            continue;
+        };
+        let ratio = crate::editor::theme::contrast_ratio(fg, bg);
+        if ratio < threshold {
+            return Err(ContrastFailure {
+                foreground,
+                background,
+                ratio,
+                threshold,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Validate an [`crate::protocol::ActiveTheme`] snapshot's contrast by
+/// resolving its `design_tokens` overrides through the core catalog and
+/// checking [`theme_meets_contrast`]. Shared by the `setTheme` apply path and
+/// the canonical-default resolver so both enforce the same AA floor. The
+/// snapshot's design tokens are already package-parse-validated, so resolution
+/// only fails if the wire snapshot was malformed (defensive: mapped to a
+/// contrast failure so the caller rejects without crashing).
+pub fn validate_active_theme_contrast(
+    snapshot: &crate::protocol::ActiveTheme,
+) -> Result<(), ContrastFailure> {
+    let resolved = ResolvedUiTheme::from_active_theme(&snapshot.design_tokens).map_err(|_| {
+        ContrastFailure {
+            foreground: "<malformed override>",
+            background: "<malformed override>",
+            ratio: 0.0,
+            threshold: TEXT_CONTRAST_MIN,
+        }
+    })?;
+    theme_meets_contrast(&resolved)
+}
+
 /// Resolved shell panel/sidebar geometry view, the single shared default
 /// source for the legacy SDUI left-slot bridge and package fixed-panel state.
 /// Built from validated `dimension.*` overrides layered over the core

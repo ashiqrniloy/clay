@@ -501,36 +501,70 @@ fn package_authoring_guide_documents_typed_tokens_and_typography_hierarchy() {
 }
 
 #[test]
-fn planned_phase20_components_remain_marked_planned_or_reserved() {
+fn component_catalog_status_partition_is_current() {
+    // Phase 20.8: forward-looking catalog status-partition guard. Replaces the
+    // frozen pre-Phase-20.5 snapshot (`planned_phase20_components_remain_marked_planned_or_reserved`)
+    // which went stale when Phase 20.5 promoted `dropdown`/`collapse`/`modal` to
+    // implemented and added `textInput`. The catalog is the single source of
+    // truth; this guard fails if an implemented kind is demoted, a reserved/
+    // planned kind is prematurely promoted, or the token consumption markers
+    // drift.
     let components = read(".agents/skills/clay-ui/references/components.md");
     let tokens = read(".agents/skills/clay-ui/references/tokens.md");
-    // No Phase 20.2/20.5 component is marked implemented early.
-    for kind in ["table", "dropdown", "collapse", "modal"] {
-        let row_marker = format!("| `{kind}` | reserved");
+
+    // `table` is the only reserved package-facing kind.
+    assert!(
+        components.contains("| `table` | reserved"),
+        "`table` must remain reserved (no first-party need identified)"
+    );
+
+    // Phase 20.5 promoted these from reserved to implemented.
+    for kind in ["dropdown", "collapse", "modal", "textInput"] {
+        let row = format!("| `{kind}` | implemented");
         assert!(
-            components.contains(&row_marker),
-            "component {kind} must remain reserved, not implemented, in Phase 20.1"
+            components.contains(&row),
+            "Phase 20.5-promoted kind `{kind}` must be cataloged implemented, not reserved"
         );
     }
+
+    // Composition-only planned surfaces stay planned (no premature promotion).
     for component in [
-        "Pop-up / dialog",
-        "Dropdown / select",
-        "Text input field",
         "Tooltip",
         "Tabs",
+        "Badge / tag",
+        "Toast / notification",
+        "`kbd` hint",
+        "Icon slot",
     ] {
         let row_marker = format!("| {component} | planned |");
         assert!(
             components.contains(&row_marker),
-            "planned component {component} must remain planned, not implemented"
+            "planned composition surface {component} must remain planned, not implemented"
         );
     }
-    // Phase 20.3: Split divider is now implemented.
+
+    // Phase 20.3 Split divider and Phase 20.5 promoted composition surfaces are implemented.
     assert!(
         components.contains("| Split divider | implemented |"),
         "Split divider must be marked implemented after Phase 20.3"
     );
-    // The token catalog must not claim Phase 20.4/20.5 surfaces are consumed yet.
+    for component in [
+        "Pop-up / dialog",
+        "Dropdown / select",
+        "Multi-select",
+        "Text input field",
+        "Menu (context / menu bar)",
+        "Completion pop-up (uplift)",
+        "Command palette",
+    ] {
+        let row_marker = format!("| {component} | implemented |");
+        assert!(
+            components.contains(&row_marker),
+            "composition surface {component} must be marked implemented after Phase 20.5"
+        );
+    }
+
+    // Token consumption markers stay aligned with the phases that introduced them.
     assert!(
         tokens.contains("Phase 20.4 component uplift"),
         "tokens.md must mark elevation/motion/density consumption as Phase 20.4"
@@ -878,18 +912,21 @@ fn phase20_4_core_component_uplift_primitive_review_is_linked_and_complete() {
 
 #[test]
 fn no_component_kind_or_token_renamed() {
-    // Plan 065 (Phase 20.4) task 11: Phase 20.4 is restyle-only — no
-    // ComponentKind, typed style variable, ThemeTokenType, or core/package
-    // token name was renamed or removed. Verify the 11 implemented kinds and
-    // 4 reserved kinds all still parse in components.rs and are cataloged in
-    // components.md, and the Phase 20.1 state tokens are still core tokens in
-    // theme.rs and cataloged in tokens.md (additive-only).
+    // Phase 20.8: no-rename regression guard for the Phase 20.1/20.4 inventory.
+    // Phase 20.5 promoted `dropdown`/`collapse`/`modal` from reserved to
+    // implemented and added `textInput`, so the original "11 implemented + 4
+    // reserved" partition is now "15 implemented + 1 reserved (`table`)". This
+    // guard pins the current partition: every cataloged kind still parses in
+    // `components.rs` with the matching status, and the Phase 20.1 state tokens
+    // remain core tokens (additive-only). The enum<->catalog-table agreement is
+    // also enforced by `tests/package_ui_conformance.rs::catalog_is_drift_free_across_doc_enum_and_paint_path`;
+    // this test additionally pins specific kind names and the Phase 20.1 tokens.
     let components_src = read("src/shell/components.rs");
     let components_doc = read(".agents/skills/clay-ui/references/components.md");
     let tokens_src = read("src/shell/theme.rs");
     let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
 
-    // 11 implemented + 4 reserved ComponentKind entries still parse.
+    // 15 implemented ComponentKind entries still parse and are cataloged implemented.
     for kind in [
         "editorView",
         "panel",
@@ -902,6 +939,10 @@ fn no_component_kind_or_token_renamed() {
         "scroll",
         "portal",
         "statusItem",
+        "dropdown",
+        "collapse",
+        "modal",
+        "textInput",
     ] {
         let marker = format!("\"{kind}\" => Some(Self::");
         assert!(
@@ -914,7 +955,9 @@ fn no_component_kind_or_token_renamed() {
             "components.md must still catalog {kind} as implemented"
         );
     }
-    for kind in ["table", "dropdown", "collapse", "modal"] {
+    // `table` is the only reserved kind.
+    {
+        let kind = "table";
         let marker = format!("\"{kind}\" => Some(Self::");
         assert!(
             components_src.contains(&marker),
@@ -1009,4 +1052,197 @@ fn walk_js(dir: &Path) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+// --- Phase 20.8: UI reference documentation and agent convention drift gates ---
+
+/// Parse a Markdown table region's rows into (raw-kind-cell, raw-status-cell)
+/// pairs. `start` is the section header line that begins the table; the region
+/// ends at the next `## ` or `### ` header. Only `|`-delimited rows are
+/// returned; header/separator rows are skipped.
+fn parse_component_table(text: &str, start_header: &str) -> Vec<(String, String)> {
+    let region = text
+        .split_once(start_header)
+        .map(|(_, rest)| rest)
+        .unwrap_or_else(|| panic!("section {start_header:?} not found"));
+    let region = region
+        .split_once("\n### ")
+        .or_else(|| region.split_once("\n## "))
+        .map(|(region, _)| region)
+        .unwrap_or(region);
+    let mut rows = Vec::new();
+    for line in region.lines() {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            continue;
+        }
+        let fields: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+        if fields.len() < 2 {
+            continue;
+        }
+        // Skip the header row and the `|---|---|` separator row.
+        if fields
+            .iter()
+            .all(|field| field.chars().all(|ch| ch == '-' || ch == ' '))
+            || fields.first() == Some(&"Kind")
+            || fields.first() == Some(&"Component kind")
+        {
+            continue;
+        }
+        rows.push((fields[0].to_string(), fields[1].to_string()));
+    }
+    rows
+}
+
+/// Extract backtick-wrapped kind names from a table cell, splitting grouped
+/// rows like `` `stack` / `overlay` `` into [`stack`, `overlay`].
+fn kind_names(cell: &str) -> Vec<String> {
+    cell.split('/')
+        .map(|part| part.trim())
+        .filter_map(|part| {
+            part.strip_prefix('`')
+                .and_then(|rest| rest.strip_suffix('`'))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+#[test]
+fn ui_components_page_is_linked_from_master_index() {
+    // Phase 20.8 task 3/6: the new UI components navigation page is linked from
+    // the master documentation index.
+    let index = read("docs/index.md");
+    assert!(
+        index.contains("](reference/ui-components.md)"),
+        "docs/index.md must link reference/ui-components.md under Developer Guides"
+    );
+}
+
+#[test]
+fn ui_components_page_links_catalog_and_token_tables() {
+    // Phase 20.8 task 3/6: the UI components page links the authoritative
+    // component catalog and token catalog (single source of truth), the chrome
+    // primitives reference, the package authoring guide, and the Phase 20.7
+    // conformance wiki page.
+    let page = read("docs/reference/ui-components.md");
+    assert!(
+        page.contains("components.md)"),
+        "docs/reference/ui-components.md must link the component catalog (components.md)"
+    );
+    assert!(
+        page.contains("tokens.md)"),
+        "docs/reference/ui-components.md must link the token catalog (tokens.md)"
+    );
+    assert!(
+        page.contains("primitives/ui-chrome-primitives.md)"),
+        "docs/reference/ui-components.md must link the UI chrome primitives reference"
+    );
+    assert!(
+        page.contains("packages/creating-packages.md)"),
+        "docs/reference/ui-components.md must link the package authoring guide"
+    );
+    assert!(
+        page.contains("phase20.7-package-ui-conformance-and-aesthetic-guardrails.md)"),
+        "docs/reference/ui-components.md must link the Phase 20.7 conformance wiki page"
+    );
+    assert!(
+        page.contains("create-plan/references/clay.md)"),
+        "docs/reference/ui-components.md must link the create-plan UI requirements"
+    );
+}
+
+#[test]
+fn creating_packages_status_markers_match_clay_ui_catalog() {
+    // Phase 20.8 task 4/6: the `creating-packages.md` Components table status
+    // markers agree with the `clay-ui` component catalog partition. A kind
+    // marked implemented/reserved in the catalog must be marked implemented/
+    // reserved in the guide (not planned/deferred), and vice versa.
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let catalog = read(".agents/skills/clay-ui/references/components.md");
+
+    let guide_rows = parse_component_table(&guide, "## Components");
+    let catalog_rows = parse_component_table(&catalog, "## Package-Facing Component Kinds");
+
+    // Build kind -> (guide_status, catalog_status) from the parsed tables.
+    let mut guide_status = std::collections::BTreeMap::new();
+    for (kind_cell, status) in &guide_rows {
+        for kind in kind_names(kind_cell) {
+            guide_status.insert(kind, status.to_lowercase());
+        }
+    }
+    let mut catalog_status = std::collections::BTreeMap::new();
+    for (kind_cell, status) in &catalog_rows {
+        for kind in kind_names(kind_cell) {
+            catalog_status.insert(kind, status.to_lowercase());
+        }
+    }
+
+    // Every catalog kind must appear in the guide and agree on the
+    // implemented/reserved partition.
+    for (kind, cat_status) in &catalog_status {
+        let guide = guide_status.get(kind).unwrap_or_else(|| {
+            panic!("creating-packages.md Components table missing kind `{kind}`")
+        });
+        let cat_implemented = cat_status.contains("implemented");
+        let cat_reserved = cat_status.contains("reserved");
+        let guide_implemented = guide.contains("implemented");
+        let guide_reserved = guide.contains("reserved");
+        assert_eq!(
+            cat_implemented, guide_implemented,
+            "kind `{kind}` implemented/partition mismatch: catalog={cat_status:?} guide={guide:?}"
+        );
+        assert_eq!(
+            cat_reserved, guide_reserved,
+            "kind `{kind}` reserved/partition mismatch: catalog={cat_status:?} guide={guide:?}"
+        );
+    }
+    // The guide must not invent kinds absent from the catalog.
+    for kind in guide_status.keys() {
+        assert!(
+            catalog_status.contains_key(kind),
+            "creating-packages.md lists kind `{kind}` absent from the clay-ui catalog"
+        );
+    }
+    // Sanity: the partition is non-trivial (implemented and reserved both present).
+    assert!(
+        catalog_status
+            .values()
+            .any(|status| status.contains("implemented"))
+            && catalog_status
+                .values()
+                .any(|status| status.contains("reserved")),
+        "catalog partition must contain both implemented and reserved kinds"
+    );
+}
+
+#[test]
+fn create_plan_ui_requirements_name_existing_catalog_files() {
+    // Phase 20.8 task 5/6: the create-plan UI requirements reference the catalog
+    // files and the UI components navigation page that actually exist.
+    let requirements = read(".agents/skills/create-plan/references/clay.md");
+    for reference in [
+        "components.md",
+        "tokens.md",
+        "creating-packages.md",
+        "ui-components.md",
+        ".agents/skills/clay-ui",
+    ] {
+        assert!(
+            requirements.contains(reference),
+            "create-plan UI requirements must reference {reference:?} (exists on disk)"
+        );
+        // Each referenced path that is a concrete file must exist.
+        if let Some(path) = match reference {
+            "components.md" => Some(".agents/skills/clay-ui/references/components.md"),
+            "tokens.md" => Some(".agents/skills/clay-ui/references/tokens.md"),
+            "creating-packages.md" => Some("docs/reference/packages/creating-packages.md"),
+            "ui-components.md" => Some("docs/reference/ui-components.md"),
+            _ => None,
+        } {
+            assert!(
+                root().join(path).is_file(),
+                "create-plan UI requirement references {reference:?} but {path} does not exist"
+            );
+        }
+    }
 }
