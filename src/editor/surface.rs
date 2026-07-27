@@ -932,20 +932,17 @@ fn interpolate_decoration_span(
             span.byte_start = start;
             span.byte_end = end;
         } else if edit_start == span.byte_start {
-            if broad_syntax {
-                let Some(end) = span.byte_end.checked_add(inserted_len) else {
-                    return false;
-                };
-                span.byte_end = end;
-            } else {
-                let Some((start, end)) =
-                    shift_range(span.byte_start, span.byte_end, inserted_len, 0)
-                else {
-                    return false;
-                };
-                span.byte_start = start;
-                span.byte_end = end;
-            }
+            // Text inserted exactly at the span's first byte lands *before* the
+            // span, so the span shifts right unchanged. Extending here (the old
+            // broad-token behavior) absorbed the typed char into the span and
+            // bled its color onto preceding text — e.g. typing before `one`
+            // painted the new char as code until the next re-parse.
+            let Some((start, end)) = shift_range(span.byte_start, span.byte_end, inserted_len, 0)
+            else {
+                return false;
+            };
+            span.byte_start = start;
+            span.byte_end = end;
         } else if edit_start < span.byte_end
             || (edit_start == span.byte_end && (broad_syntax || same_word_suffix))
         {
@@ -3419,7 +3416,7 @@ mod tests {
     }
 
     #[test]
-    fn optimistic_broad_token_families_inherit_edge_insertions() {
+    fn optimistic_broad_token_families_shift_at_start_extend_at_end() {
         for token_type in [
             TokenType::Comment,
             TokenType::String,
@@ -3435,17 +3432,20 @@ mod tests {
                 vec![syntax_span(2, 6, token_type)],
             )));
 
+            // Inserting at the span's first byte lands before the span: it
+            // shifts right unchanged (no leftward color bleed).
             assert!(editor.decorations.apply_edit(&EditOperation::Insert {
                 byte_offset: 2,
                 text: "/".to_string(),
             }));
+            // Inserting at the (shifted) end extends the broad span.
             assert!(editor.decorations.apply_edit(&EditOperation::Insert {
                 byte_offset: 7,
                 text: "\n".to_string(),
             }));
 
             let span = &editor.decorations.chunks[0].spans[0];
-            assert_eq!((span.byte_start, span.byte_end), (2, 8));
+            assert_eq!((span.byte_start, span.byte_end), (3, 8));
         }
     }
 

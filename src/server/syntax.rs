@@ -1585,45 +1585,54 @@ impl TreeSitterSyntaxHandler {
             let mut parser = layer.parser.lock().expect("embedded parser lock poisoned");
             #[allow(deprecated)]
             parser.set_timeout_micros(self.contribution.timeout_micros());
-            if parser.set_included_ranges(&ranges).is_err() {
-                continue;
-            }
-            let Some(embedded_tree) = parser.parse(&window.text, None) else {
-                continue;
-            };
-            let mut cursor = QueryCursor::new();
-            #[allow(deprecated)]
-            cursor.set_timeout_micros(self.contribution.timeout_micros());
-            let mut captures = cursor.captures(
-                &layer.highlights,
-                embedded_tree.root_node(),
-                window.text.as_bytes(),
-            );
             let capture_names = layer.highlights.capture_names();
-            loop {
-                captures.advance();
-                let Some((query_match, capture_index)) = captures.get() else {
-                    break;
+            // Parse each injection range as its own document. Batching every
+            // range into one `set_included_ranges` call feeds the bytes
+            // *between* ranges (newlines, list markers, block punctuation) to
+            // the embedded grammar as inline content, so e.g. markdown_inline
+            // paired backticks across lines and painted following plain text as
+            // code. One parse per range keeps each inline block isolated; the
+            // captures are window-relative and clipped to the viewport later.
+            for range in &ranges {
+                if parser.set_included_ranges(&[*range]).is_err() {
+                    continue;
+                }
+                let Some(embedded_tree) = parser.parse(&window.text, None) else {
+                    continue;
                 };
-                let capture = query_match.captures[*capture_index];
-                let capture_name = capture_names[capture.index as usize];
-                if !self.contribution.style_map.contains_key(capture_name) {
-                    continue;
+                let mut cursor = QueryCursor::new();
+                #[allow(deprecated)]
+                cursor.set_timeout_micros(self.contribution.timeout_micros());
+                let mut captures = cursor.captures(
+                    &layer.highlights,
+                    embedded_tree.root_node(),
+                    window.text.as_bytes(),
+                );
+                loop {
+                    captures.advance();
+                    let Some((query_match, capture_index)) = captures.get() else {
+                        break;
+                    };
+                    let capture = query_match.captures[*capture_index];
+                    let capture_name = capture_names[capture.index as usize];
+                    if !self.contribution.style_map.contains_key(capture_name) {
+                        continue;
+                    }
+                    let absolute_start = window
+                        .byte_start
+                        .saturating_add(capture.node.start_byte() as u64);
+                    let absolute_end = window
+                        .byte_start
+                        .saturating_add(capture.node.end_byte() as u64);
+                    if absolute_start >= absolute_end {
+                        continue;
+                    }
+                    syntax_captures.push(SyntaxCapture {
+                        byte_start: absolute_start,
+                        byte_end: absolute_end,
+                        capture_name: capture_name.to_string(),
+                    });
                 }
-                let absolute_start = window
-                    .byte_start
-                    .saturating_add(capture.node.start_byte() as u64);
-                let absolute_end = window
-                    .byte_start
-                    .saturating_add(capture.node.end_byte() as u64);
-                if absolute_start >= absolute_end {
-                    continue;
-                }
-                syntax_captures.push(SyntaxCapture {
-                    byte_start: absolute_start,
-                    byte_end: absolute_end,
-                    capture_name: capture_name.to_string(),
-                });
             }
         }
         Ok(())

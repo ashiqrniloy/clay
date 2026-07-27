@@ -1808,6 +1808,75 @@ fn markdown_inline_injection_styles_mixed_runs() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn markdown_inline_injection_does_not_pair_backticks_across_lines() {
+    // Regression: batching every `(inline)` injection range into one
+    // `set_included_ranges` call fed the bytes *between* inline blocks
+    // (newlines, `- ` list markers) to markdown_inline, which then paired a
+    // line's closing backtick with the next line's opening backtick. The
+    // result painted following plain text ("\n- `", "\n\nSteps:") as code.
+    // Each inline block must parse in isolation, so a code span never crosses
+    // a line boundary.
+    let registry = SyntaxGrammarRegistry::with_first_party_native();
+    let contribution = registry
+        .get("markdown.markdown")
+        .expect("native Markdown grammar")
+        .clone();
+    let mut handler = TreeSitterSyntaxHandler::new(
+        contribution,
+        tree_sitter_md_025::LANGUAGE.into(),
+        include_str!("../packages/markdown/queries/highlights.scm"),
+    )
+    .expect("Markdown query compiles");
+    handler
+        .enable_injections(include_str!("../packages/markdown/queries/injections.scm"))
+        .expect("Markdown injections query compiles");
+    let source = "Optional bindings you have:\n\n- `Ctrl+Shift+Z` → `clientRequestResync`\n- `Ctrl+Shift+D` → `clientDismissRecovery`\n\nSteps:\n";
+    let set = handler
+        .parse_sync(parse_notification_for("markdown", 1, source))
+        .expect("Markdown parses")
+        .decoration_updates
+        .expect("Markdown decorations");
+
+    for needle in [
+        "`Ctrl+Shift+Z`",
+        "`clientRequestResync`",
+        "`Ctrl+Shift+D`",
+        "`clientDismissRecovery`",
+    ] {
+        let start = source.find(needle).expect("needle") as u64;
+        let end = start + needle.len() as u64;
+        let exact = set.spans.iter().any(|span| {
+            span.token_type == TokenType::CodeSpan
+                && span.byte_start == start
+                && span.byte_end == end
+        });
+        assert!(
+            exact,
+            "{needle} must be exactly one CodeSpan; got {:?}",
+            set.spans
+                .iter()
+                .filter(|span| span.token_type == TokenType::CodeSpan)
+                .map(|span| (span.byte_start, span.byte_end))
+                .collect::<Vec<_>>()
+        );
+    }
+    // No code span may span a newline: the cross-line pairing bug produced
+    // captures like "`clientRequestResync`\n- `".
+    for span in set
+        .spans
+        .iter()
+        .filter(|s| s.token_type == TokenType::CodeSpan)
+    {
+        let slice = &source[span.byte_start as usize..span.byte_end as usize];
+        assert!(
+            !slice.contains('\n'),
+            "CodeSpan must not cross a line boundary: {slice:?}"
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn markdown_decoration_renders_through_tier1_native_engine() {
     let registry = SyntaxGrammarRegistry::with_first_party_native();
     let contribution = registry

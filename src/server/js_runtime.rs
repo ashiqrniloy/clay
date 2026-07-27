@@ -1366,7 +1366,11 @@ fn runtime_error_diagnostic(message: &str) -> RuntimeDiagnostic {
             "Only clay:* facades and relative local configuration modules are allowed."
         }
         "clay.configuration.invalid_module" => {
-            "Configuration modules must be explicit relative .js files under the configuration root."
+            // Secure but actionable: name the allowed import families (clay:*
+            // facades + relative local .js) so a typo (e.g. `clay:themes` vs
+            // `clay:theme`) is diagnosable without echoing the rejected
+            // specifier/URL/path (which must not leak).
+            "Configuration import rejected: only clay:* facades (clay:theme, clay:configuration, clay:keybindings, clay:packages, clay:ui, clay:commands, ...) and explicit relative .js files under the configuration root are allowed. Check the import specifier spelling."
         }
         "clay.runtime.syntax_error" => {
             "JavaScript syntax error while evaluating server-side configuration."
@@ -1394,12 +1398,27 @@ fn runtime_error_diagnostic(message: &str) -> RuntimeDiagnostic {
     RuntimeDiagnostic::error(code, detail)
 }
 
-fn configuration_diagnostic_message(message: &str) -> &'static str {
+fn configuration_diagnostic_message(message: &str) -> String {
+    // Secure but actionable: do not echo the rejected specifier/URL/path
+    // (which must not leak). Name the allowed import families so a config
+    // typo is diagnosable. `message` is only inspected to distinguish the
+    // entry-point case; its contents are never surfaced.
     if message.contains("init.js") {
-        "Configuration entry point init.js could not be loaded."
+        "Configuration entry point init.js could not be loaded.".to_string()
     } else {
-        "Configuration module could not be loaded."
+        "Configuration import rejected: only clay:* facades (clay:theme, clay:configuration, clay:keybindings, clay:packages, clay:ui, clay:commands, ...) and explicit relative .js files under the configuration root are allowed. Check the import specifier spelling.".to_string()
     }
+}
+
+/// Extract the human-readable detail from a `clay.configuration.invalid_module: <detail>`
+/// JS error string so runtime-routed configuration errors name the rejected
+/// module/path instead of an opaque generic message.
+fn configuration_runtime_detail(message: &str) -> Option<&str> {
+    let prefix = "clay.configuration.invalid_module:";
+    message
+        .strip_prefix(prefix)
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
 }
 
 fn extract_clay_error_code(message: &str) -> Option<String> {
@@ -7543,6 +7562,42 @@ mod tests {
                     .contains("clay.configuration.invalid_module")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn configuration_error_diagnostic_names_the_rejected_specifier() {
+        // Phase 20.6: a config typo (e.g. `clay:themes` instead of `clay:theme`)
+        // must produce a diagnostic that names the rejected specifier so the
+        // user can fix it, not an opaque generic string.
+        let root = config_fixture("bad-facade-import");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setAppearance } from "clay:themes";
+            setAppearance("light");
+            "#,
+        )
+        .unwrap();
+        let error = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .unwrap_err();
+        let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic.code, "clay.configuration.invalid_module");
+        // Secure: the rejected specifier (`clay:themes`) must NOT leak...
+        assert!(
+            !diagnostic.message.contains("clay:themes"),
+            "diagnostic must not leak the rejected specifier, got: {}",
+            diagnostic.message
+        );
+        // ...but the message must be actionable: name a real facade example
+        // so the user can spot the typo.
+        assert!(
+            diagnostic.message.contains("clay:theme")
+                && diagnostic.message.contains("specifier spelling"),
+            "diagnostic must name an allowed facade and hint at spelling, got: {}",
+            diagnostic.message
+        );
     }
 
     #[tokio::test]
