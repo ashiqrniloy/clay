@@ -116,6 +116,9 @@ pub struct SduiNativeState {
     dropdown_selected: BTreeMap<u64, usize>,
     /// Phase 20.5: client-local collapse expanded state, keyed by component node id hash.
     collapse_expanded: BTreeSet<u64>,
+    /// Plan 070 task 6.5: retained Masonry rendering compositor for the sidebar
+    /// tree, created lazily on first paint.
+    retained: Option<crate::masonry_sdui_region::RetainedSdui>,
 }
 
 impl SduiNativeState {
@@ -138,6 +141,7 @@ impl SduiNativeState {
             focused_action: None,
             dropdown_selected: BTreeMap::new(),
             collapse_expanded: BTreeSet::new(),
+            retained: None,
         }
     }
 
@@ -154,6 +158,7 @@ impl SduiNativeState {
         self.content_height = 0.0;
         self.viewport_height = 0.0;
         self.actions.clear();
+        self.mark_retained_dirty();
     }
 
     /// Install a resolved UI design-token registry built from the active
@@ -162,6 +167,7 @@ impl SduiNativeState {
     /// (a malformed snapshot) fall back to core fallbacks rather than crash.
     pub(crate) fn set_ui_theme(&mut self, ui_theme: crate::shell::theme::ResolvedUiTheme) {
         self.ui_theme = ui_theme;
+        self.mark_retained_dirty();
     }
 
     /// Resolve the SDUI paint style from the active `ui_theme` so package
@@ -372,6 +378,7 @@ impl SduiNativeState {
         self.nodes = tree.nodes.into_iter().map(|node| (node.id, node)).collect();
         self.scroll_offset = 0.0;
         self.rebuild_derived_state();
+        self.mark_retained_dirty();
     }
 
     pub fn apply_update(&mut self, update: SduiTreeUpdate) -> bool {
@@ -402,6 +409,7 @@ impl SduiNativeState {
         self.ui_version = update.new_ui_version;
         self.scroll_offset = 0.0;
         self.rebuild_derived_state();
+        self.mark_retained_dirty();
         true
     }
 
@@ -1042,29 +1050,60 @@ impl SduiNativeState {
                 &self.ui_theme,
             );
             self.viewport_height = sidebar.height();
-            // Clip panel content to the sidebar so scrolled-out rows do not
-            // paint over the editor main region.
-            scene.push_clip_layer(Affine::IDENTITY, &sidebar);
-            let mut cursor_y = sidebar.y0 + self.theme_style().panel_padding - self.scroll_offset;
-            self.paint_node(
-                ctx,
-                scene,
-                root_id,
-                0,
-                &mut cursor_y,
-                sidebar.width(),
-                sidebar.x0,
-            );
-            // Content height is independent of the current scroll offset: add
-            // it back so clamping reflects the full row extent.
-            self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
-            scene.pop_layer();
-            let max_scroll = (self.content_height - self.viewport_height).max(0.0);
-            if self.scroll_offset > max_scroll {
-                self.scroll_offset = max_scroll;
-            }
+            self.paint_retained(scene, root_id, sidebar);
         }
         self.paint_package_overlays(ctx, scene);
+    }
+
+    /// Render the sidebar through the retained Masonry compositor (plan 070
+    /// task 6.5). `collect_action_regions` produces the hit-test action rects
+    /// and content height \u2014 proven pixel-parity with the retained layout \u2014 so
+    /// interaction stays on that geometry while painting moves to the reconciled
+    /// subtree, composited at the correct z-order point (chrome under, package
+    /// overlays over).
+    fn paint_retained(&mut self, scene: &mut Scene, root_id: SduiNodeId, sidebar: Rect) {
+        let padding = self.theme_style().panel_padding;
+        let mut cursor_y = sidebar.y0 + padding - self.scroll_offset;
+        self.collect_action_regions(root_id, 0, &mut cursor_y, sidebar.width(), sidebar.x0);
+        self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
+        let max_scroll = (self.content_height - self.viewport_height).max(0.0);
+        if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
+
+        let size = Size::new(sidebar.width(), self.content_height.max(1.0));
+        let tree = self.current_tree(root_id);
+        let typography = self.typography.clone();
+        let ui_theme = self.ui_theme.clone();
+        let retained_scene = self
+            .retained
+            .get_or_insert_with(crate::masonry_sdui_region::RetainedSdui::new)
+            .ensure_rendered(tree, &typography, &ui_theme, size);
+
+        scene.push_clip_layer(Affine::IDENTITY, &sidebar);
+        scene.append(
+            retained_scene,
+            Some(Affine::translate((
+                sidebar.x0,
+                sidebar.y0 + padding - self.scroll_offset,
+            ))),
+        );
+        scene.pop_layer();
+    }
+
+    /// Snapshot the current protocol tree for the retained compositor.
+    fn current_tree(&self, root_id: SduiNodeId) -> SduiTree {
+        SduiTree {
+            ui_version: self.ui_version,
+            root_id,
+            nodes: self.nodes.values().cloned().collect(),
+        }
+    }
+
+    fn mark_retained_dirty(&mut self) {
+        if let Some(retained) = self.retained.as_mut() {
+            retained.mark_dirty();
+        }
     }
 
     fn rebuild_derived_state(&mut self) {
@@ -1236,7 +1275,6 @@ impl SduiNativeState {
         }
     }
 
-    #[cfg(test)]
     fn collect_action_regions(
         &mut self,
         node_id: SduiNodeId,
@@ -1380,187 +1418,6 @@ impl SduiNativeState {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn paint_node(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        scene: &mut Scene,
-        node_id: SduiNodeId,
-        depth: usize,
-        cursor_y: &mut f64,
-        width: f64,
-        origin_x: f64,
-    ) {
-        use crate::shell::{
-            InteractionState, component_state_color, list_row_fill_color, paint_focus_ring,
-        };
-        let Some(node) = self.nodes.get(&node_id).cloned() else {
-            return;
-        };
-        match node.kind {
-            SduiNodeKind::Panel { title, children } => {
-                let variant = self.theme_style().title_text;
-                self.paint_text(
-                    ctx,
-                    scene,
-                    &title,
-                    depth,
-                    *cursor_y,
-                    width,
-                    origin_x,
-                    FontRole::Ui,
-                    variant,
-                    self.theme_style().text_color,
-                );
-                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
-                for child_id in children {
-                    self.paint_node(ctx, scene, child_id, depth + 1, cursor_y, width, origin_x);
-                }
-            }
-            SduiNodeKind::Label { text } => {
-                let variant = self.theme_style().body_text;
-                self.paint_text(
-                    ctx,
-                    scene,
-                    &text,
-                    depth,
-                    *cursor_y,
-                    width,
-                    origin_x,
-                    FontRole::Ui,
-                    variant,
-                    self.theme_style().muted_text_color,
-                );
-                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
-            }
-            SduiNodeKind::Button { label, action } => {
-                let variant = self.theme_style().body_text;
-                let metrics = self.text_metrics(FontRole::Ui, variant);
-                let rect =
-                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
-                let state = self.interaction_state(rect, &action, false);
-                if self.is_focused(&action) {
-                    paint_focus_ring(scene, rect, &self.ui_theme);
-                }
-                let fill = component_state_color(&self.ui_theme, "surface.control", state);
-                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                self.actions.push(SduiVisibleAction {
-                    rect,
-                    intent: action,
-                });
-                self.paint_text(
-                    ctx,
-                    scene,
-                    &label,
-                    depth,
-                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
-                    width,
-                    origin_x,
-                    FontRole::Ui,
-                    variant,
-                    self.theme_style().text_color,
-                );
-                *cursor_y += metrics.button_height();
-            }
-            SduiNodeKind::List { items } => {
-                let variant = self.theme_style().body_text;
-                let metrics = self.text_metrics(FontRole::Ui, variant);
-                let detail_metrics = self.text_metrics(FontRole::Ui, UiTextVariant::Detail);
-                let row_height = metrics.list_height(detail_metrics);
-                for item in items {
-                    let rect = self.row_rect(depth, *cursor_y, width, origin_x, row_height);
-                    let (fill, push) = match item.action {
-                        Some(action) => {
-                            let state = self.interaction_state(rect, &action, false);
-                            if self.is_focused(&action) {
-                                paint_focus_ring(scene, rect, &self.ui_theme);
-                            }
-                            (
-                                list_row_fill_color(&self.ui_theme, state, false),
-                                Some(action),
-                            )
-                        }
-                        None => (
-                            list_row_fill_color(&self.ui_theme, InteractionState::Rest, false),
-                            None,
-                        ),
-                    };
-                    scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                    if let Some(intent) = push {
-                        self.actions.push(SduiVisibleAction { rect, intent });
-                    }
-                    self.paint_text(
-                        ctx,
-                        scene,
-                        &item.label,
-                        depth,
-                        *cursor_y,
-                        width,
-                        origin_x,
-                        FontRole::Ui,
-                        variant,
-                        self.theme_style().text_color,
-                    );
-                    if let Some(detail) = item.detail {
-                        self.paint_text(
-                            ctx,
-                            scene,
-                            &detail,
-                            depth,
-                            *cursor_y + metrics.line_height,
-                            width,
-                            origin_x,
-                            FontRole::Ui,
-                            UiTextVariant::Detail,
-                            self.theme_style().muted_text_color,
-                        );
-                    }
-                    *cursor_y += row_height;
-                }
-            }
-            SduiNodeKind::EditorView { binding } => {
-                let variant = self.theme_style().body_text;
-                self.paint_text(
-                    ctx,
-                    scene,
-                    &format!("Editor view · doc {}", binding.document_id),
-                    depth,
-                    *cursor_y,
-                    width,
-                    origin_x,
-                    FontRole::Ui,
-                    variant,
-                    self.theme_style().muted_text_color,
-                );
-                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
-            }
-            SduiNodeKind::Flex {
-                direction,
-                children,
-            } => match direction {
-                SduiFlexDirection::Row => {
-                    for child_id in children {
-                        if !matches!(
-                            self.nodes.get(&child_id).map(|node| &node.kind),
-                            Some(SduiNodeKind::EditorView { .. })
-                        ) {
-                            self.paint_node(ctx, scene, child_id, depth, cursor_y, width, origin_x);
-                        }
-                    }
-                }
-                SduiFlexDirection::Column => {
-                    for child_id in children {
-                        self.paint_node(ctx, scene, child_id, depth, cursor_y, width, origin_x);
-                    }
-                }
-            },
-            SduiNodeKind::Stack { children } => {
-                for child_id in children {
-                    self.paint_node(ctx, scene, child_id, depth, cursor_y, width, origin_x);
-                }
-            }
         }
     }
 
@@ -2107,44 +1964,92 @@ impl SduiNativeState {
         variant: UiTextVariant,
         color: Color,
     ) {
-        let max_width =
-            (width - self.theme_style().panel_padding * 2.0 - depth as f64 * 10.0).max(1.0) as f32;
         let metrics = self.text_metrics(role, variant);
-        let (font_context, layout_context) = ctx.text_contexts();
-        let mut builder = layout_context.ranged_builder(font_context, text, 1.0, true);
-        builder.push_default(StyleProperty::FontStack(
-            self.typography.profile(role).font_stack(),
-        ));
-        builder.push_default(StyleProperty::FontSize(metrics.font_size));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-            UiTextMetrics::LINE_HEIGHT_MULTIPLIER as f32,
-        )));
-        builder.push_default(StyleProperty::Brush(BrushIndex(0)));
-        let mut layout = builder.build(text);
-        layout.break_all_lines(Some(max_width));
-        render_text(
+        paint_sdui_text(
+            &self.typography,
+            self.theme_style().panel_padding,
+            ctx,
             scene,
-            Affine::translate((
-                origin_x + self.theme_style().panel_padding + depth as f64 * 10.0,
-                y,
-            )),
-            &layout,
-            &[color.into()],
-            true,
+            text,
+            depth,
+            y,
+            width,
+            origin_x,
+            role,
+            metrics,
+            color,
         );
     }
 
     /// Compute a row's rect inset by the active panel padding and per-depth
     /// indent (Phase 20.4: padding reads the active theme spacing rhythm).
     fn row_rect(&self, depth: usize, y: f64, width: f64, origin_x: f64, height: f64) -> Rect {
-        let x0 = origin_x + self.theme_style().panel_padding + depth as f64 * 10.0;
-        Rect::new(
-            x0,
+        sdui_row_rect(
+            self.theme_style().panel_padding,
+            depth,
             y,
-            (origin_x + width - self.theme_style().panel_padding).max(x0),
-            y + height,
+            width,
+            origin_x,
+            height,
         )
     }
+}
+
+/// Shared SDUI text paint used by the package-component paint path (via
+/// `paint_text`) and the retained `SduiLegacyLeaf` reconciliation widget (plan
+/// 070 task 6.5), so both render glyphs through one code path.
+pub(crate) fn paint_sdui_text(
+    typography: &TypographyRegistry,
+    panel_padding: f64,
+    ctx: &mut PaintCtx<'_>,
+    scene: &mut Scene,
+    text: &str,
+    depth: usize,
+    y: f64,
+    width: f64,
+    origin_x: f64,
+    role: FontRole,
+    metrics: UiTextMetrics,
+    color: Color,
+) {
+    let max_width = (width - panel_padding * 2.0 - depth as f64 * 10.0).max(1.0) as f32;
+    let (font_context, layout_context) = ctx.text_contexts();
+    let mut builder = layout_context.ranged_builder(font_context, text, 1.0, true);
+    builder.push_default(StyleProperty::FontStack(
+        typography.profile(role).font_stack(),
+    ));
+    builder.push_default(StyleProperty::FontSize(metrics.font_size));
+    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+        UiTextMetrics::LINE_HEIGHT_MULTIPLIER as f32,
+    )));
+    builder.push_default(StyleProperty::Brush(BrushIndex(0)));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(max_width));
+    render_text(
+        scene,
+        Affine::translate((origin_x + panel_padding + depth as f64 * 10.0, y)),
+        &layout,
+        &[color.into()],
+        true,
+    );
+}
+
+/// Shared SDUI row-rect geometry (see [`SduiNativeState::row_rect`]).
+pub(crate) fn sdui_row_rect(
+    panel_padding: f64,
+    depth: usize,
+    y: f64,
+    width: f64,
+    origin_x: f64,
+    height: f64,
+) -> Rect {
+    let x0 = origin_x + panel_padding + depth as f64 * 10.0;
+    Rect::new(
+        x0,
+        y,
+        (origin_x + width - panel_padding).max(x0),
+        y + height,
+    )
 }
 
 impl Default for SduiNativeState {
@@ -2221,35 +2126,45 @@ pub fn editor_region_for_document(
     // overlapping the left file browser after a workspace file opens.
     let defaults = sdui.ui_theme.panel_defaults();
     let full_rect = size.to_rect();
-    let mut layout = sdui.package_ui.slot_layout(&defaults);
-    if (sdui.root_id.is_some() || sdui.editor_binding().is_some())
-        && size.width > defaults.sidebar_width + 100.0
-        && !layout.contains_slot(PaneSlotId::Left)
-    {
-        layout = layout.with_fixed_slot(fixed_sdui_left_slot(&defaults));
+    let layout = sdui.package_ui.slot_layout(&defaults);
+    let want_left = (sdui.root_id.is_some() || sdui.editor_binding().is_some())
+        && size.width > defaults.sidebar_width + 100.0;
+    with_default_left_slot(layout, &defaults, want_left)
+        .compute_geometry(full_rect)
+        .main_rect
+}
+
+/// Single mechanical source for adding the default Clay-owned left slot.
+///
+/// Task 6 (plan 070): the three slot-layout entry points previously each
+/// open-coded the same `contains_slot` + `with_fixed_slot(fixed_sdui_left_slot)`
+/// block. They keep their distinct *gates* (which differ intentionally: the
+/// editor main region reserves on root-or-binding plus a width guard, the panel
+/// sidebar on root only) but share this one application site so the default-left
+/// construction cannot drift between them.
+fn with_default_left_slot(
+    layout: PaneSlotLayout,
+    defaults: &PanelDefaults,
+    want_left: bool,
+) -> PaneSlotLayout {
+    if want_left && !layout.contains_slot(PaneSlotId::Left) {
+        layout.with_fixed_slot(fixed_sdui_left_slot(defaults))
+    } else {
+        layout
     }
-    layout.compute_geometry(full_rect).main_rect
 }
 
 fn sdui_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
     let defaults = sdui.ui_theme.panel_defaults();
-    let mut layout = sdui.package_ui.slot_layout(&defaults);
-    if sdui.editor_binding().is_some()
-        && size.width > defaults.sidebar_width + 100.0
-        && !layout.contains_slot(PaneSlotId::Left)
-    {
-        layout = layout.with_fixed_slot(fixed_sdui_left_slot(&defaults));
-    }
-    layout
+    let layout = sdui.package_ui.slot_layout(&defaults);
+    let want_left = sdui.editor_binding().is_some() && size.width > defaults.sidebar_width + 100.0;
+    with_default_left_slot(layout, &defaults, want_left)
 }
 
 fn sdui_panel_slot_layout(sdui: &SduiNativeState) -> PaneSlotLayout {
     let defaults = sdui.ui_theme.panel_defaults();
-    let mut layout = sdui.package_ui.slot_layout(&defaults);
-    if sdui.root_id.is_some() && !layout.contains_slot(PaneSlotId::Left) {
-        layout = layout.with_fixed_slot(fixed_sdui_left_slot(&defaults));
-    }
-    layout
+    let layout = sdui.package_ui.slot_layout(&defaults);
+    with_default_left_slot(layout, &defaults, sdui.root_id.is_some())
 }
 
 fn combined_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {

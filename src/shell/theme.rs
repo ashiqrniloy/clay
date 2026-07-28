@@ -1093,6 +1093,8 @@ impl PanelDefaults {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct ResolvedUiTheme {
     overrides: BTreeMap<String, ResolvedThemeValue>,
+    /// Editor base palette layered under `overrides` (see [`Self::with_base_ui`]).
+    base_ui: Option<crate::editor::theme::BaseUiColors>,
 }
 
 // ponytail: accessors are the Phase 20.1 cached registry surface consumed by
@@ -1113,15 +1115,50 @@ impl ResolvedUiTheme {
                 return Err(DesignTokenError::DuplicateToken);
             }
         }
-        Ok(Self { overrides: map })
+        Ok(Self {
+            overrides: map,
+            base_ui: None,
+        })
     }
 
-    /// Resolve a token to its value: active override first, then core fallback.
+    /// Resolve a token to its value: active override first, then the editor base
+    /// palette, then core fallback.
     fn resolved(&self, token: &str) -> Option<ResolvedThemeValue> {
         if let Some(value) = self.overrides.get(token) {
             return Some(value.clone());
         }
+        if let Some(color) = self.base_color(token) {
+            return Some(ResolvedThemeValue::Color(color));
+        }
         core_theme_value(token).map(|core| core.value)
+    }
+
+    /// Layer the editor's resolved base palette under the design-token overrides.
+    /// Legacy themes express their palette via `TextThemeOverride` (the editor
+    /// text path) and ship no `designTokens`; without this layer the shell/SDUI
+    /// scrollbar chrome would fall through to the dark core catalog and disagree
+    /// with the editor (e.g. a dark sidebar on a light editor). The editor text
+    /// path reads these same base colors, so this keeps chrome in lock-step with
+    /// it. Design-token overrides (resolved first) always win.
+    pub(crate) fn with_base_ui(mut self, base: &crate::editor::theme::BaseUiColors) -> Self {
+        self.base_ui = Some(*base);
+        self
+    }
+
+    /// Map a shell color token onto the editor base palette, if one is installed.
+    fn base_color(&self, token: &str) -> Option<Color> {
+        let base = self.base_ui.as_ref()?;
+        Some(match token {
+            "surface.panel" | "surface.list" => base.panel_bg,
+            "surface.main" => base.shell_bg,
+            "surface.selected" => base.selection,
+            "surface.control" | "surface.overlay" => base.status_bg,
+            "surface.scrollbar" => base.scrollbar,
+            "surface.scrollbar.track" => base.scrollbar_track,
+            "text.primary" => base.text,
+            "text.muted" | "text.disabled" => base.placeholder,
+            _ => return None,
+        })
     }
 
     /// `true` when no active overrides are installed (core fallbacks only).
@@ -1934,6 +1971,58 @@ mod tests {
         assert_eq!(ui.motion_duration("motion.instant"), Some(0.0));
         assert_eq!(ui.z_level("z.base"), Some(ZLevel::Base));
         assert_eq!(ui.density("density.default"), Some(DensityLevel::Default));
+    }
+
+    #[test]
+    fn base_palette_layers_under_design_tokens_for_legacy_themes() {
+        // A legacy theme ships no designTokens, so without the base layer every
+        // shell color would resolve to the dark core catalog (the bug: a dark
+        // sidebar / scrollbar on a light editor). with_base_ui layers the editor
+        // palette under the overrides so chrome tracks the editor text theme.
+        use crate::editor::theme::BaseUiColors;
+        let base = BaseUiColors {
+            shell_bg: Color::from_rgb8(0x11, 0x00, 0x01),
+            panel_bg: Color::from_rgb8(0x11, 0x00, 0x02),
+            text: Color::from_rgb8(0x11, 0x00, 0x03),
+            placeholder: Color::from_rgb8(0x11, 0x00, 0x04),
+            selection: Color::from_rgb8(0x11, 0x00, 0x05),
+            caret: Color::from_rgb8(0x11, 0x00, 0x06),
+            scrollbar: Color::from_rgb8(0x11, 0x00, 0x07),
+            scrollbar_track: Color::from_rgb8(0x11, 0x00, 0x08),
+            status_bg: Color::from_rgb8(0x11, 0x00, 0x09),
+            status_text: Color::from_rgb8(0x11, 0x00, 0x0a),
+        };
+        let ui = ResolvedUiTheme::from_active_theme(&[])
+            .expect("empty ok")
+            .with_base_ui(&base);
+        assert_eq!(ui.color("surface.panel"), Some(base.panel_bg));
+        assert_eq!(ui.color("surface.list"), Some(base.panel_bg));
+        assert_eq!(ui.color("surface.main"), Some(base.shell_bg));
+        assert_eq!(ui.color("surface.selected"), Some(base.selection));
+        assert_eq!(ui.color("surface.control"), Some(base.status_bg));
+        assert_eq!(ui.color("surface.scrollbar"), Some(base.scrollbar));
+        assert_eq!(
+            ui.color("surface.scrollbar.track"),
+            Some(base.scrollbar_track)
+        );
+        assert_eq!(ui.color("text.primary"), Some(base.text));
+        assert_eq!(ui.color("text.muted"), Some(base.placeholder));
+        // Non-color tokens are not in the base palette: core catalog still wins.
+        assert_eq!(ui.scalar_f64("spacing.panel"), Some(14.0));
+
+        // A design-token override beats the base layer (modern themes win).
+        let ui = ResolvedUiTheme::from_active_theme(&[override_entry(
+            "surface.panel",
+            WireDesignTokenValue::Color([0x22, 0x33, 0x44, 0xff]),
+        )])
+        .expect("valid")
+        .with_base_ui(&base);
+        assert_eq!(
+            ui.color("surface.panel"),
+            Some(Color::from_rgba8(0x22, 0x33, 0x44, 0xff))
+        );
+        // Sibling token without an override still tracks the base palette.
+        assert_eq!(ui.color("surface.scrollbar"), Some(base.scrollbar));
     }
 
     #[test]

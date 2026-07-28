@@ -58,7 +58,6 @@ impl ClipboardCommandOutcome {
 )]
 #[derive(Debug, PartialEq)]
 pub enum EditorAction {
-    ExitRequested,
     ClientConnection(ClientConnectionEvent),
     ClientUiCommand(ClientUiCommandRoute),
     /// Native file dialog finished on a background thread (Linux portal must not
@@ -350,12 +349,9 @@ impl EditorWidget {
         );
         let mut sdui = SduiNativeState::empty();
         sdui.set_typography(editor.typography().clone());
-        sdui.set_ui_theme(
-            crate::shell::theme::ResolvedUiTheme::from_active_theme(
-                &initial_state.active_theme.design_tokens,
-            )
-            .unwrap_or_default(),
-        );
+        // Mirror the editor's resolved theme (base palette + design tokens) so
+        // the SDUI chrome can never diverge from the editor text theme.
+        sdui.set_ui_theme(editor.ui_theme().clone());
         Self {
             editor,
             edit_queue: None,
@@ -492,10 +488,7 @@ impl EditorWidget {
             }
             ClientConnectionEvent::ActiveTheme(theme) => {
                 self.editor.set_active_theme(&theme);
-                self.sdui.set_ui_theme(
-                    crate::shell::theme::ResolvedUiTheme::from_active_theme(&theme.design_tokens)
-                        .unwrap_or_default(),
-                );
+                self.sdui.set_ui_theme(self.editor.ui_theme().clone());
                 true
             }
             ClientConnectionEvent::ActiveTypography(typography) => {
@@ -608,12 +601,7 @@ impl EditorWidget {
         self.editor
             .install_behavior_manifest(candidate.behavior.clone());
         self.editor.set_active_theme(&candidate.active_theme);
-        self.sdui.set_ui_theme(
-            crate::shell::theme::ResolvedUiTheme::from_active_theme(
-                &candidate.active_theme.design_tokens,
-            )
-            .unwrap_or_default(),
-        );
+        self.sdui.set_ui_theme(self.editor.ui_theme().clone());
         let typography_changed = self
             .editor
             .install_runtime_typography(candidate.active_typography.clone());
@@ -2428,12 +2416,11 @@ impl Widget for EditorWidget {
             {
                 match &key_event.key {
                     Key::Named(NamedKey::Escape) => {
-                        if self.editor.has_active_snippet_session() {
-                            self.local_key(ctx, key_stroke(KeyCode::Escape, key_event));
-                        } else {
-                            ctx.submit_action::<Self::Action>(EditorAction::ExitRequested);
-                            ctx.set_handled();
-                        }
+                        // Esc cancels the active package component / menu /
+                        // snippet via `local_key`; a bare Esc is a no-op. It must
+                        // never exit the app \u2014 submitting `ExitRequested` here
+                        // dropped the IPC connection on every Esc press.
+                        self.local_key(ctx, key_stroke(KeyCode::Escape, key_event));
                     }
                     Key::Named(NamedKey::Backspace) => {
                         self.local_command(ctx, EditorCommand::Backspace);

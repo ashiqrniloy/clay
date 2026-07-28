@@ -1423,14 +1423,16 @@ impl EditorSurface {
     /// registry and retain the package specifier for theme-label observability.
     pub(crate) fn set_active_theme(&mut self, theme: &crate::protocol::ActiveTheme) {
         self.theme_specifier = theme.specifier.clone();
-        self.set_theme(crate::editor::theme::StyleRegistry::from_active_theme(
-            theme,
-        ));
-        // Phase 20.2: install resolved UI tokens for shell chrome.
+        let registry = crate::editor::theme::StyleRegistry::from_active_theme(theme);
+        let base = registry.base;
+        self.set_theme(registry);
+        // Phase 20.2: install resolved UI tokens for shell chrome, layered over
+        // the editor base palette so the chrome (scrollbar, panels) matches the
+        // editor text theme instead of falling through to the dark core catalog.
         if let Ok(ui_theme) =
             crate::shell::theme::ResolvedUiTheme::from_active_theme(&theme.design_tokens)
         {
-            self.set_ui_theme(ui_theme);
+            self.set_ui_theme(ui_theme.with_base_ui(&base));
         }
     }
 
@@ -1675,6 +1677,7 @@ impl EditorSurface {
         outcome
     }
 
+    #[cfg(test)]
     pub(crate) fn has_active_snippet_session(&self) -> bool {
         self.snippet_session.is_some()
     }

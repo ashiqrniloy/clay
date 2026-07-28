@@ -290,36 +290,31 @@ pub(crate) fn paint_scroll_chrome(
         &track,
     );
 
-    // Thumb with state-based opacity: dim at rest/disabled, full on interaction.
-    let thumb_opacity = match state {
-        InteractionState::Rest | InteractionState::Disabled => {
-            theme.opacity("opacity.disabled").unwrap_or(0.5)
-        }
-        InteractionState::Hover | InteractionState::Active | InteractionState::Focus => {
-            theme.opacity("opacity.full").unwrap_or(1.0)
-        }
-    };
-
-    let thumb_with_opacity = if thumb_opacity < 1.0 {
-        let rgba = thumb_color.to_rgba8();
-        Color::from_rgba8(
-            rgba.r,
-            rgba.g,
-            rgba.b,
-            (rgba.a as f32 * thumb_opacity) as u8,
-        )
-    } else {
-        thumb_color
-    };
-
     let rounded_thumb = RoundedRect::from_rect(thumb, radius);
     scene.fill(
         masonry::vello::peniko::Fill::NonZero,
         masonry::kurbo::Affine::IDENTITY,
-        thumb_with_opacity,
+        scrollbar_thumb_paint_color(thumb_color, state),
         None,
         &rounded_thumb,
     );
+}
+
+/// Resolve the scrollbar thumb paint color for an [`InteractionState`]. The
+/// theme's `surface.scrollbar` color already encodes its intended *resting*
+/// alpha (e.g. `#9f9f9faa`); the old code halved it via `opacity.disabled`,
+/// which made the thumb disappear on light themes (a ~33% gray smudge on a
+/// near-white track). Rest/Disabled therefore use the theme color verbatim;
+/// Hover/Active/Focus lift it toward opaque for perceptible feedback.
+fn scrollbar_thumb_paint_color(base: Color, state: InteractionState) -> Color {
+    match state {
+        InteractionState::Rest | InteractionState::Disabled => base,
+        // ponytail: 1.5 hover lift toward opaque; add a `scrollbar.hover-alpha`
+        // token if a theme ever needs to control the interaction strength.
+        InteractionState::Hover | InteractionState::Active | InteractionState::Focus => {
+            apply_alpha(base, 1.5)
+        }
+    }
 }
 
 /// Paint a badge/tag.
@@ -656,5 +651,39 @@ mod tests {
             list_row_fill_color(&theme, InteractionState::Disabled, true),
             Color::from_rgba8(0x1b, 0x1a, 0x24, 140)
         );
+    }
+
+    #[test]
+    fn scrollbar_thumb_rest_keeps_theme_alpha_and_hover_lifts() {
+        // Regression: the resting thumb must use the theme color verbatim. The
+        // old `opacity.disabled` halving turned a light theme's `#9f9f9faa` into
+        // a ~33% smudge that vanished on a near-white track.
+        let base = Color::from_rgba8(0x9f, 0x9f, 0x9f, 0xaa);
+        assert_eq!(
+            scrollbar_thumb_paint_color(base, InteractionState::Rest),
+            base,
+            "rest must not dim the theme-authored alpha"
+        );
+        assert_eq!(
+            scrollbar_thumb_paint_color(base, InteractionState::Disabled),
+            base
+        );
+        // Hover/Active/Focus lift toward opaque (170 * 1.5 = 255) for feedback.
+        assert_eq!(
+            scrollbar_thumb_paint_color(base, InteractionState::Hover)
+                .to_rgba8()
+                .a,
+            255
+        );
+        assert_eq!(
+            scrollbar_thumb_paint_color(base, InteractionState::Active)
+                .to_rgba8()
+                .a,
+            255
+        );
+        // A low-alpha theme color lifts but stays below opaque.
+        let faint = Color::from_rgba8(0x9f, 0x9f, 0x9f, 0x22);
+        let lifted = scrollbar_thumb_paint_color(faint, InteractionState::Hover).to_rgba8();
+        assert!(lifted.a > faint.to_rgba8().a && lifted.a < 255);
     }
 }

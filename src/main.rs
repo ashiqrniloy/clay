@@ -25,7 +25,7 @@ use clay::perf::metrics::{PERF_PROFILE_FLAG, PerfConfig, install_global_recorder
 #[cfg(any(unix, windows))]
 use clay::server::{IpcServer, ServerConfig};
 
-const WINDOW_TITLE: &str = "Clay Phase 4";
+const WINDOW_TITLE: &str = "Clay";
 const WINDOW_WIDTH: f64 = 900.0;
 const WINDOW_HEIGHT: f64 = 600.0;
 
@@ -176,10 +176,6 @@ impl AppDriver for Driver {
         };
 
         match *action {
-            EditorAction::ExitRequested => {
-                self.clear_native_dialogs();
-                ctx.exit();
-            }
             EditorAction::ClientConnection(event) => {
                 let editor_widget_id = self.editor_action_target(widget_id);
                 ctx.render_root(window_id)
