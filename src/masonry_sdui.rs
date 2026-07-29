@@ -10,10 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use masonry::accesskit::{Node, NodeId, Role};
-use masonry::core::{
-    AccessCtx, BoxConstraints, BrushIndex, ChildrenIds, LayoutCtx, NoAction, PaintCtx,
-    PropertiesMut, PropertiesRef, RegisterCtx, Widget, WidgetId, render_text,
-};
+use masonry::core::{AccessCtx, BrushIndex, PaintCtx, WidgetId, render_text};
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
 use masonry::peniko::{Color, Fill};
@@ -23,9 +20,8 @@ use crate::{
     editor::typography::{TypographyRegistry, UiTextMetrics, UiTextVariant},
     perf::metrics::global_recorder,
     protocol::{
-        DocumentId, FontRole, SduiActionIntent, SduiActionSource, SduiEditorBinding,
-        SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation,
-        SduiTreeUpdate, SduiVersion,
+        DocumentId, FontRole, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
+        SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
     },
     shell::{
         CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiComponentTree,
@@ -95,14 +91,6 @@ pub struct SduiNativeState {
     // values via the accessors without parsing strings or allocating maps.
     ui_theme: crate::shell::theme::ResolvedUiTheme,
     active_menu: Option<TransientMenuSession>,
-    // Client-local vertical scroll offset (pixels) for the Clay-owned left
-    // file-browser panel. Scroll reveals already-listed rows only; it never
-    // relists directories or calls the server.
-    scroll_offset: f64,
-    // Last measured content (rows) and viewport heights of the left panel,
-    // captured during paint so scroll clamping can run without repainting.
-    content_height: f64,
-    viewport_height: f64,
     // Phase 20.4: client-local interaction inputs for SDUI component state
     // derivation. Paint hit-tests the current action rect against these to
     // derive `InteractionState` (Hover/Active/Focus); no per-component state
@@ -116,9 +104,11 @@ pub struct SduiNativeState {
     dropdown_selected: BTreeMap<u64, usize>,
     /// Phase 20.5: client-local collapse expanded state, keyed by component node id hash.
     collapse_expanded: BTreeSet<u64>,
-    /// Plan 070 task 6.5: retained Masonry rendering compositor for the sidebar
-    /// tree, created lazily on first paint.
-    retained: Option<crate::masonry_sdui_region::RetainedSdui>,
+    /// Plan 070 step 8: set whenever the SDUI tree/theme/typography changes so
+    /// the host (`EditorWidget::sync_region`) rebuilds the reconciled
+    /// `SduiRegionWidget` child on the next event-loop edit. Replaces the
+    /// deleted nested `RetainedSdui` compositor dirty flag.
+    region_dirty: bool,
 }
 
 impl SduiNativeState {
@@ -133,15 +123,12 @@ impl SduiNativeState {
             typography: TypographyRegistry::default(),
             ui_theme: crate::shell::theme::ResolvedUiTheme::default(),
             active_menu: None,
-            scroll_offset: 0.0,
-            content_height: 0.0,
-            viewport_height: 0.0,
             pointer_pos: None,
             pointer_pressed: false,
             focused_action: None,
             dropdown_selected: BTreeMap::new(),
             collapse_expanded: BTreeSet::new(),
-            retained: None,
+            region_dirty: true,
         }
     }
 
@@ -154,11 +141,8 @@ impl SduiNativeState {
             return;
         }
         self.typography = typography;
-        self.scroll_offset = 0.0;
-        self.content_height = 0.0;
-        self.viewport_height = 0.0;
         self.actions.clear();
-        self.mark_retained_dirty();
+        self.mark_region_dirty();
     }
 
     /// Install a resolved UI design-token registry built from the active
@@ -167,7 +151,7 @@ impl SduiNativeState {
     /// (a malformed snapshot) fall back to core fallbacks rather than crash.
     pub(crate) fn set_ui_theme(&mut self, ui_theme: crate::shell::theme::ResolvedUiTheme) {
         self.ui_theme = ui_theme;
-        self.mark_retained_dirty();
+        self.mark_region_dirty();
     }
 
     /// Resolve the SDUI paint style from the active `ui_theme` so package
@@ -376,9 +360,8 @@ impl SduiNativeState {
         self.ui_version = tree.ui_version;
         self.root_id = Some(tree.root_id);
         self.nodes = tree.nodes.into_iter().map(|node| (node.id, node)).collect();
-        self.scroll_offset = 0.0;
         self.rebuild_derived_state();
-        self.mark_retained_dirty();
+        self.mark_region_dirty();
     }
 
     pub fn apply_update(&mut self, update: SduiTreeUpdate) -> bool {
@@ -407,9 +390,8 @@ impl SduiNativeState {
             }
         }
         self.ui_version = update.new_ui_version;
-        self.scroll_offset = 0.0;
         self.rebuild_derived_state();
-        self.mark_retained_dirty();
+        self.mark_region_dirty();
         true
     }
 
@@ -467,31 +449,11 @@ impl SduiNativeState {
 
     /// True when `point` lies inside the Clay-owned left file-browser panel,
     /// i.e. scroll events here should scroll the file browser, not the editor.
+    /// The actual scrolling is handled by the reconciled region's `Portal`
+    /// scroll viewport (plan 070 step 12); this only distinguishes the sidebar
+    /// from the editor for the `EditorWidget` scroll fall-through.
     pub(crate) fn scrolls_point(&self, size: Size, point: Point) -> bool {
         sdui_panel_left_slot_rect(size, self).is_some_and(|rect| rect.contains(point))
-    }
-
-    /// Scroll the left file browser by `delta` pixels (positive = down). Returns
-    /// true when the scroll offset changed. Client-local paint math only.
-    pub(crate) fn scroll_vertical_pixels(&mut self, size: Size, delta: f64) -> bool {
-        let viewport = sdui_panel_left_slot_rect(size, self).map_or(0.0, |r| r.height());
-        self.viewport_height = viewport;
-        let max_scroll = (self.content_height - self.viewport_height).max(0.0);
-        let next = (self.scroll_offset + delta).clamp(0.0, max_scroll);
-        if next == self.scroll_offset {
-            return false;
-        }
-        self.scroll_offset = next;
-        true
-    }
-
-    /// Scroll the left file browser by whole rows (positive = down).
-    pub(crate) fn scroll_lines(&mut self, size: Size, lines: isize) -> bool {
-        self.scroll_vertical_pixels(size, lines as f64 * self.body_metrics().row_height)
-    }
-
-    pub(crate) fn scroll_offset(&self) -> f64 {
-        self.scroll_offset
     }
 
     pub(crate) fn observable_snapshot(&self, widget_size: Size) -> SduiObservableSnapshot {
@@ -528,7 +490,7 @@ impl SduiNativeState {
 
     fn package_overlay_observations(&self, widget_size: Size) -> Vec<PackageUiOverlayObservation> {
         let slot_geometry =
-            combined_slot_layout(widget_size, self).compute_geometry(widget_size.to_rect());
+            sdui_slot_layout(widget_size, self).compute_geometry(widget_size.to_rect());
         let mut overlays: Vec<PackageUiOverlayObservation> = self
             .package_ui
             .overlays()
@@ -594,20 +556,10 @@ impl SduiNativeState {
     }
 
     fn accessibility_entries(&self, size: Size) -> Vec<SduiAccessibilityEntry> {
+        // The SDUI tree's accessibility now flows through the reconciled
+        // `SduiRegionWidget` → `Portal` Masonry subtree (scroll-aware bounds,
+        // plan 070 step 12), so only package/transient chrome is collected here.
         let mut entries = Vec::new();
-        if let Some(root_id) = self.root_id
-            && let Some(sidebar) = sdui_panel_left_slot_rect(size, self)
-        {
-            let mut cursor_y = sidebar.y0 + self.theme_style().panel_padding - self.scroll_offset;
-            self.collect_accessibility_entries(
-                root_id,
-                0,
-                &mut cursor_y,
-                sidebar.width(),
-                sidebar.x0,
-                &mut entries,
-            );
-        }
         for (rect, panel) in self
             .package_ui
             .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
@@ -622,7 +574,7 @@ impl SduiNativeState {
                 &mut entries,
             );
         }
-        let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
+        let slot_geometry = sdui_slot_layout(size, self).compute_geometry(size.to_rect());
         for overlay in self.package_ui.overlays() {
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
             let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
@@ -689,124 +641,6 @@ impl SduiNativeState {
                 label: Some(summary),
                 bounds: self.row_rect(0, *cursor_y, rect.width(), rect.x0, body.row_height),
             });
-        }
-    }
-
-    fn collect_accessibility_entries(
-        &self,
-        node_id: SduiNodeId,
-        depth: usize,
-        cursor_y: &mut f64,
-        width: f64,
-        origin_x: f64,
-        entries: &mut Vec<SduiAccessibilityEntry>,
-    ) {
-        let Some(node) = self.nodes.get(&node_id) else {
-            return;
-        };
-        let body = self.body_metrics();
-        match &node.kind {
-            SduiNodeKind::Panel { title, children } => {
-                let height = self
-                    .text_metrics(FontRole::Ui, self.theme_style().title_text)
-                    .row_height;
-                entries.push(SduiAccessibilityEntry {
-                    role: Role::Pane,
-                    label: Some(title.clone()),
-                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
-                });
-                *cursor_y += height;
-                for child_id in children {
-                    self.collect_accessibility_entries(
-                        *child_id,
-                        depth + 1,
-                        cursor_y,
-                        width,
-                        origin_x,
-                        entries,
-                    );
-                }
-            }
-            SduiNodeKind::Label { text } => {
-                entries.push(SduiAccessibilityEntry {
-                    role: Role::Label,
-                    label: Some(text.clone()),
-                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
-                });
-                *cursor_y += body.row_height;
-            }
-            SduiNodeKind::Button { label, .. } => {
-                let height = body.button_height();
-                entries.push(SduiAccessibilityEntry {
-                    role: Role::Button,
-                    label: Some(label.clone()),
-                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
-                });
-                *cursor_y += height;
-            }
-            SduiNodeKind::List { items } => {
-                let row_height =
-                    body.list_height(self.text_metrics(FontRole::Ui, UiTextVariant::Detail));
-                let list_start = *cursor_y;
-                for item in items {
-                    entries.push(SduiAccessibilityEntry {
-                        role: Role::ListItem,
-                        label: Some(item.label.clone()),
-                        bounds: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
-                    });
-                    *cursor_y += row_height;
-                }
-                entries.push(SduiAccessibilityEntry {
-                    role: Role::List,
-                    label: None,
-                    bounds: self.row_rect(
-                        depth,
-                        list_start,
-                        width,
-                        origin_x,
-                        *cursor_y - list_start,
-                    ),
-                });
-            }
-            SduiNodeKind::EditorView { binding } => {
-                entries.push(SduiAccessibilityEntry {
-                    role: Role::MultilineTextInput,
-                    label: Some(format!("Editor view for document {}", binding.document_id)),
-                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, body.row_height),
-                });
-                *cursor_y += body.row_height;
-            }
-            SduiNodeKind::Flex {
-                direction,
-                children,
-            } => match direction {
-                SduiFlexDirection::Row => {
-                    for child_id in children {
-                        if !matches!(
-                            self.nodes.get(child_id).map(|node| &node.kind),
-                            Some(SduiNodeKind::EditorView { .. })
-                        ) {
-                            self.collect_accessibility_entries(
-                                *child_id, depth, cursor_y, width, origin_x, entries,
-                            );
-                        }
-                    }
-                }
-                SduiFlexDirection::Column => {
-                    for child_id in children {
-                        self.collect_accessibility_entries(
-                            *child_id, depth, cursor_y, width, origin_x, entries,
-                        );
-                    }
-                }
-            },
-            SduiNodeKind::Stack { children } => {
-                for child_id in children {
-                    self.collect_accessibility_entries(
-                        *child_id, depth, cursor_y, width, origin_x, entries,
-                    );
-                }
-            }
         }
     }
 
@@ -1016,26 +850,14 @@ impl SduiNativeState {
                 rect.x0,
             );
         }
-        let Some(root_id) = self.root_id else {
-            return;
-        };
-        let Some(sidebar) = sdui_panel_left_slot_rect(size, self) else {
-            return;
-        };
-        self.viewport_height = sidebar.height();
-        let mut cursor_y = sidebar.y0 + self.theme_style().panel_padding - self.scroll_offset;
-        self.collect_action_regions(root_id, 0, &mut cursor_y, sidebar.width(), sidebar.x0);
-        self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
-        let max_scroll = (self.content_height - self.viewport_height).max(0.0);
-        if self.scroll_offset > max_scroll {
-            self.scroll_offset = max_scroll;
-        }
     }
 
-    pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        self.actions.clear();
+    /// Paint the SDUI chrome that sits BELOW the reconciled sidebar tree:
+    /// package fixed panels and the sidebar panel chrome. Called from
+    /// `EditorWidget::paint` (plan 070 step 8, Composition B).
+    pub(crate) fn paint_chrome(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
         self.paint_package_fixed_panels(ctx, scene);
-        if let Some(root_id) = self.root_id
+        if self.root_id.is_some()
             && let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self)
         {
             // Route sidebar chrome through primitive (Phase 20.2)
@@ -1049,49 +871,43 @@ impl SduiNativeState {
                 },
                 &self.ui_theme,
             );
-            self.viewport_height = sidebar.height();
-            self.paint_retained(scene, root_id, sidebar);
         }
+    }
+
+    /// Paint package transient overlays (dropdowns/modals) ABOVE the reconciled
+    /// sidebar tree. Called from `EditorWidget::post_paint` (plan 070 step 8).
+    pub(crate) fn paint_overlays(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
         self.paint_package_overlays(ctx, scene);
     }
 
-    /// Render the sidebar through the retained Masonry compositor (plan 070
-    /// task 6.5). `collect_action_regions` produces the hit-test action rects
-    /// and content height \u2014 proven pixel-parity with the retained layout \u2014 so
-    /// interaction stays on that geometry while painting moves to the reconciled
-    /// subtree, composited at the correct z-order point (chrome under, package
-    /// overlays over).
-    fn paint_retained(&mut self, scene: &mut Scene, root_id: SduiNodeId, sidebar: Rect) {
+    /// Compute the sidebar slot geometry for the current size. Called from
+    /// `EditorWidget::layout` to place the reconciled region child as a fixed
+    /// scroll viewport. Scroll position/content height are owned by the
+    /// region's `Portal` (plan 070 step 12), so this only reports the slot rect
+    /// and its content padding.
+    pub(crate) fn sidebar_geometry(&self, size: Size) -> Option<SduiSidebarGeometry> {
+        self.root_id?;
+        let sidebar = sdui_panel_left_slot_rect(size, self)?;
         let padding = self.theme_style().panel_padding;
-        let mut cursor_y = sidebar.y0 + padding - self.scroll_offset;
-        self.collect_action_regions(root_id, 0, &mut cursor_y, sidebar.width(), sidebar.x0);
-        self.content_height = (cursor_y - sidebar.y0 + self.scroll_offset).max(0.0);
-        let max_scroll = (self.content_height - self.viewport_height).max(0.0);
-        if self.scroll_offset > max_scroll {
-            self.scroll_offset = max_scroll;
-        }
-
-        let size = Size::new(sidebar.width(), self.content_height.max(1.0));
-        let tree = self.current_tree(root_id);
-        let typography = self.typography.clone();
-        let ui_theme = self.ui_theme.clone();
-        let retained_scene = self
-            .retained
-            .get_or_insert_with(crate::masonry_sdui_region::RetainedSdui::new)
-            .ensure_rendered(tree, &typography, &ui_theme, size);
-
-        scene.push_clip_layer(Affine::IDENTITY, &sidebar);
-        scene.append(
-            retained_scene,
-            Some(Affine::translate((
-                sidebar.x0,
-                sidebar.y0 + padding - self.scroll_offset,
-            ))),
-        );
-        scene.pop_layer();
+        Some(SduiSidebarGeometry {
+            rect: sidebar,
+            padding,
+        })
     }
 
-    /// Snapshot the current protocol tree for the retained compositor.
+    /// Snapshot the reconciled tree + render context for the host to feed the
+    /// `SduiRegionWidget` child. `None` when there is no sidebar tree (the
+    /// region stays inert).
+    pub(crate) fn region_render_input(&self) -> Option<SduiRenderInput> {
+        let root_id = self.root_id?;
+        Some(SduiRenderInput {
+            tree: self.current_tree(root_id),
+            typography: self.typography.clone(),
+            ui_theme: self.ui_theme.clone(),
+        })
+    }
+
+    /// Snapshot the current protocol tree for the reconciled region child.
     fn current_tree(&self, root_id: SduiNodeId) -> SduiTree {
         SduiTree {
             ui_version: self.ui_version,
@@ -1100,10 +916,14 @@ impl SduiNativeState {
         }
     }
 
-    fn mark_retained_dirty(&mut self) {
-        if let Some(retained) = self.retained.as_mut() {
-            retained.mark_dirty();
-        }
+    fn mark_region_dirty(&mut self) {
+        self.region_dirty = true;
+    }
+
+    /// Return and clear the region-dirty flag (plan 070 step 8). The host calls
+    /// this from the event loop to decide whether to rebuild the region child.
+    pub(crate) fn take_region_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.region_dirty)
     }
 
     fn rebuild_derived_state(&mut self) {
@@ -1275,78 +1095,6 @@ impl SduiNativeState {
         }
     }
 
-    fn collect_action_regions(
-        &mut self,
-        node_id: SduiNodeId,
-        depth: usize,
-        cursor_y: &mut f64,
-        width: f64,
-        origin_x: f64,
-    ) {
-        let Some(node) = self.nodes.get(&node_id).cloned() else {
-            return;
-        };
-        let body = self.body_metrics();
-        match node.kind {
-            SduiNodeKind::Panel { children, .. } => {
-                *cursor_y += self
-                    .text_metrics(FontRole::Ui, self.theme_style().title_text)
-                    .row_height;
-                for child_id in children {
-                    self.collect_action_regions(child_id, depth + 1, cursor_y, width, origin_x);
-                }
-            }
-            SduiNodeKind::Label { .. } | SduiNodeKind::EditorView { .. } => {
-                *cursor_y += body.row_height;
-            }
-            SduiNodeKind::Button { action, .. } => {
-                self.actions.push(SduiVisibleAction {
-                    rect: self.row_rect(depth, *cursor_y, width, origin_x, body.button_height()),
-                    intent: action,
-                });
-                *cursor_y += body.button_height();
-            }
-            SduiNodeKind::List { items } => {
-                let row_height =
-                    body.list_height(self.text_metrics(FontRole::Ui, UiTextVariant::Detail));
-                for item in items {
-                    if let Some(action) = item.action {
-                        self.actions.push(SduiVisibleAction {
-                            rect: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
-                            intent: action,
-                        });
-                    }
-                    *cursor_y += row_height;
-                }
-            }
-            SduiNodeKind::Flex {
-                direction,
-                children,
-            } => match direction {
-                SduiFlexDirection::Row => {
-                    for child_id in children {
-                        if !matches!(
-                            self.nodes.get(&child_id).map(|node| &node.kind),
-                            Some(SduiNodeKind::EditorView { .. })
-                        ) {
-                            self.collect_action_regions(child_id, depth, cursor_y, width, origin_x);
-                        }
-                    }
-                }
-                SduiFlexDirection::Column => {
-                    for child_id in children {
-                        self.collect_action_regions(child_id, depth, cursor_y, width, origin_x);
-                    }
-                }
-            },
-            SduiNodeKind::Stack { children } => {
-                for child_id in children {
-                    self.collect_action_regions(child_id, depth, cursor_y, width, origin_x);
-                }
-            }
-        }
-    }
-
     #[cfg(test)]
     fn collect_package_action_regions(
         &mut self,
@@ -1456,7 +1204,7 @@ impl SduiNativeState {
 
     fn paint_package_overlays(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
         let size = ctx.size();
-        let slot_geometry = combined_slot_layout(size, self).compute_geometry(size.to_rect());
+        let slot_geometry = sdui_slot_layout(size, self).compute_geometry(size.to_rect());
         let mut overlays: Vec<crate::shell::TransientPackageOverlay> =
             self.package_ui.overlays().cloned().collect();
         if let Some(menu) = &self.active_menu
@@ -2058,54 +1806,27 @@ impl Default for SduiNativeState {
     }
 }
 
-impl Widget for SduiNativeState {
-    type Action = NoAction;
-
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
-    fn layout(
-        &mut self,
-        _ctx: &mut LayoutCtx<'_>,
-        _props: &mut PropertiesMut<'_>,
-        bc: &BoxConstraints,
-    ) -> Size {
-        if bc.is_width_bounded() && bc.is_height_bounded() {
-            bc.max()
-        } else {
-            bc.constrain(Size::new(
-                self.ui_theme.panel_defaults().sidebar_width,
-                600.0,
-            ))
-        }
-    }
-
-    fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
-        SduiNativeState::paint(self, ctx, scene);
-    }
-
-    fn accessibility_role(&self) -> Role {
-        Role::Group
-    }
-
-    fn accessibility(
-        &mut self,
-        ctx: &mut AccessCtx<'_>,
-        _props: &PropertiesRef<'_>,
-        node: &mut Node,
-    ) {
-        node.set_label("Server-driven UI panels");
-        node.set_children(self.append_accessibility_children(ctx));
-    }
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct SduiVisibleAction {
     rect: Rect,
     intent: SduiActionIntent,
+}
+
+/// Sidebar slot geometry computed by [`SduiNativeState::sidebar_geometry`] for
+/// placing + clipping the reconciled region child (plan 070 step 8).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SduiSidebarGeometry {
+    pub(crate) rect: Rect,
+    pub(crate) padding: f64,
+}
+
+/// Reconciled tree + render context fed to the `SduiRegionWidget` child by the
+/// host (plan 070 step 8).
+#[derive(Clone, Debug)]
+pub(crate) struct SduiRenderInput {
+    pub(crate) tree: SduiTree,
+    pub(crate) typography: TypographyRegistry,
+    pub(crate) ui_theme: crate::shell::theme::ResolvedUiTheme,
 }
 
 pub fn editor_region(size: Size, sdui: &SduiNativeState) -> Rect {
@@ -2165,10 +1886,6 @@ fn sdui_panel_slot_layout(sdui: &SduiNativeState) -> PaneSlotLayout {
     let defaults = sdui.ui_theme.panel_defaults();
     let layout = sdui.package_ui.slot_layout(&defaults);
     with_default_left_slot(layout, &defaults, sdui.root_id.is_some())
-}
-
-fn combined_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
-    sdui_slot_layout(size, sdui)
 }
 
 fn fixed_sdui_left_slot(defaults: &PanelDefaults) -> FixedSlotState {
@@ -2559,24 +2276,33 @@ mod tests {
     }
 
     #[test]
-    fn sdui_actions_still_emit_server_intents_from_slot_geometry() {
+    fn sdui_button_is_served_by_retained_widget_not_legacy_hit_test() {
         let mut state = SduiNativeState::empty();
         state.apply_snapshot(sample_tree());
 
         state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
-        // Phase 20.4: the spacing-rhythm padding (spacing.md) shifted row
-        // geometry, so derive the probe point from the installed action region
-        // instead of hardcoding pixel coordinates.
-        let refresh = state
-            .actions
-            .iter()
-            .find(|a| a.intent.command_id == "workspace.refresh")
-            .expect("workspace.refresh action installed");
-        let intent = state
-            .action_for_point(refresh.rect.center())
-            .expect("button action should be installed in left slot geometry");
-
-        assert_eq!(intent.command_id, "workspace.refresh");
+        // Plan 070 step 9: the SDUI `button` is a real Masonry widget now, so it
+        // is no longer a legacy hit-test action rect — its click is handled by
+        // the reconciled `SduiButton`, which carries the inert intent in its
+        // action (routed through `enqueue_sdui_action`).
+        assert!(
+            !state
+                .actions
+                .iter()
+                .any(|a| a.intent.command_id == "workspace.refresh"),
+            "button must not be a legacy hit-test rect once served by the retained tree"
+        );
+        // The intent is still declared on the SDUI node, ready for the reconciled
+        // button to route through the server-first command path.
+        let button_intent = state
+            .nodes
+            .values()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::Button { action, .. } => Some(action),
+                _ => None,
+            })
+            .expect("button node present");
+        assert_eq!(button_intent.command_id, "workspace.refresh");
     }
 
     #[test]
@@ -3187,44 +2913,6 @@ mod tests {
     }
 
     #[test]
-    fn ui_size_change_scales_row_hit_and_accessibility_bounds_together() {
-        let size = Size::new(900.0, 600.0);
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(sample_tree());
-        state.rebuild_action_regions_for_test(size);
-        let before_action = state.actions[0].rect;
-        let before_accessibility = state
-            .accessibility_entries(size)
-            .into_iter()
-            .find(|entry| entry.role == Role::Button && entry.label.as_deref() == Some("Refresh"))
-            .expect("Refresh accessibility entry")
-            .bounds;
-
-        let mut active = crate::protocol::ActiveTypography {
-            revision: 1,
-            ..crate::protocol::ActiveTypography::default()
-        };
-        active.ui.size = 24.0;
-        state.set_typography(TypographyRegistry::from_active_typography(active).unwrap());
-        state.rebuild_action_regions_for_test(size);
-        let after_action = state.actions[0].rect;
-        let after_accessibility = state
-            .accessibility_entries(size)
-            .into_iter()
-            .find(|entry| entry.role == Role::Button && entry.label.as_deref() == Some("Refresh"))
-            .expect("Refresh accessibility entry after typography update")
-            .bounds;
-
-        assert!(after_action.height() > before_action.height());
-        assert_eq!(after_action, after_accessibility);
-        assert_eq!(before_action, before_accessibility);
-        assert!(
-            (after_action.height() - state.body_metrics().button_height()).abs() < 0.001,
-            "paint, hit test, and accessibility use one UI metric"
-        );
-    }
-
-    #[test]
     fn package_component_font_role_uses_selected_profile_without_concrete_sizes() {
         let component = PackageUiComponentTree::from_declaration(&json!({
             "kind": "panel",
@@ -3339,73 +3027,6 @@ mod tests {
                 SduiNode::new(list, SduiNodeKind::List { items }),
             ],
         }
-    }
-
-    #[test]
-    fn file_browser_scroll_reveals_later_rows_without_relisting() {
-        // A bounded snapshot with more rows than the viewport height. Scrolling
-        // is client-local paint/action math: it never relists directories,
-        // calls the server, runs JS, or enqueues workspace actions.
-        let size = Size::new(900.0, 120.0);
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(browser_tree_with_rows(30));
-        state.rebuild_action_regions_for_test(size);
-
-        assert!(state.scroll_offset() == 0.0);
-        assert!(state.content_height > state.viewport_height);
-
-        // Positive delta scrolls down (reveals later rows): offset increases.
-        assert!(state.scroll_vertical_pixels(size, 72.0));
-        assert_eq!(state.scroll_offset(), 72.0);
-        // Scrolling back up decreases the offset.
-        assert!(state.scroll_vertical_pixels(size, -30.0));
-        assert_eq!(state.scroll_offset(), 42.0);
-        // Scrolling far past the bottom clamps to the max scroll, then stays.
-        let max_scroll = (state.content_height - state.viewport_height).max(0.0);
-        assert!(state.scroll_vertical_pixels(size, 100_000.0));
-        assert_eq!(state.scroll_offset(), max_scroll);
-        assert!(!state.scroll_vertical_pixels(size, 100_000.0));
-    }
-
-    #[test]
-    fn file_browser_scrolled_action_hits_visible_row() {
-        // After scrolling, clicking a screen position must activate the row
-        // currently under the pointer, not the row that occupied that pixel
-        // before scrolling.
-        let size = Size::new(900.0, 120.0);
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(browser_tree_with_rows(30));
-        state.rebuild_action_regions_for_test(size);
-
-        let sidebar = sdui_panel_left_slot_rect(size, &state).expect("left file-browser panel");
-        let row_height = state.body_metrics().row_height;
-        let click_point = Point::new(
-            sidebar.x0 + state.theme_style().panel_padding + 10.0 + 4.0,
-            sidebar.y0 + state.theme_style().panel_padding + row_height + 4.0,
-        );
-
-        let before = state
-            .action_for_point(click_point)
-            .expect("first visible row");
-        let SduiActionSource::ListItem { item_id, .. } = &before.source else {
-            panic!("expected list-item action source");
-        };
-        assert_eq!(item_id, "item-0");
-
-        // Scroll down ~2 rows. The pixel that showed item-0 now shows item-2.
-        let row_pitch = state
-            .body_metrics()
-            .list_height(state.text_metrics(FontRole::Ui, UiTextVariant::Detail));
-        assert!(state.scroll_vertical_pixels(size, row_pitch * 2.0));
-        state.rebuild_action_regions_for_test(size);
-
-        let after = state
-            .action_for_point(click_point)
-            .expect("scrolled-in row");
-        let SduiActionSource::ListItem { item_id, .. } = &after.source else {
-            panic!("expected list-item action source after scroll");
-        };
-        assert_eq!(item_id, "item-2");
     }
 
     #[test]
@@ -3686,13 +3307,6 @@ mod tests {
         assert!(snapshot.button_labels.is_empty());
         assert!(snapshot.list_items.is_empty());
         assert!(snapshot.editor_bindings.is_empty());
-    }
-
-    #[test]
-    fn sdui_accessibility_role_is_group_container() {
-        let state = SduiNativeState::empty();
-
-        assert_eq!(state.accessibility_role(), Role::Group);
     }
 
     #[test]

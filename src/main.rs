@@ -18,10 +18,13 @@ use tokio::sync::mpsc;
 
 use clay::client::{self, ClientConnectionEvent};
 use clay::ipc::{IpcEndpoint, default_endpoint, smoke_endpoint};
-use clay::masonry_editor::{EditorAction, EditorStatus, EditorWidget};
+use clay::masonry_editor::{
+    EditorAction, EditorStatus, EditorWidget, SduiButtonPress, SduiListRowPress,
+};
 use clay::masonry_shell::ClayShellWidget;
 use clay::perf::fixtures::{FixtureKind, FixtureSpec, default_fixture_path, generate_fixture_file};
 use clay::perf::metrics::{PERF_PROFILE_FLAG, PerfConfig, install_global_recorder};
+use clay::protocol::SduiActionIntent;
 #[cfg(any(unix, windows))]
 use clay::server::{IpcServer, ServerConfig};
 
@@ -45,6 +48,25 @@ impl Driver {
         // editor-specific actions aimed at that child even if Masonry reports a
         // shell/root source while the container boundary is settling.
         self.editor_widget_id
+    }
+
+    /// Route a reconciled SDUI widget's inert intent (button step 9 / list row
+    /// step 10, and future transient surfaces) through the editor's existing
+    /// server-first command path.
+    fn route_sdui_intent(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        widget_id: WidgetId,
+        intent: SduiActionIntent,
+    ) {
+        let editor_widget_id = self.editor_action_target(widget_id);
+        ctx.render_root(window_id)
+            .edit_widget(editor_widget_id, |mut widget| {
+                if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                    editor.widget.enqueue_sdui_intent(intent);
+                }
+            });
     }
 
     fn next_dialog_generation(&mut self) -> Option<u64> {
@@ -171,6 +193,24 @@ impl AppDriver for Driver {
         widget_id: WidgetId,
         action: ErasedAction,
     ) {
+        // Reconciled SDUI widget activation (button step 9 / list row step 10):
+        // the widget carries its inert intent in the action; route it through the
+        // editor's existing server-first command path.
+        let action = match action.downcast::<SduiButtonPress>() {
+            Ok(action) => {
+                self.route_sdui_intent(ctx, window_id, widget_id, action.intent);
+                return;
+            }
+            Err(action) => action,
+        };
+        let action = match action.downcast::<SduiListRowPress>() {
+            Ok(action) => {
+                self.route_sdui_intent(ctx, window_id, widget_id, action.intent);
+                return;
+            }
+            Err(action) => action,
+        };
+
         let Ok(action) = action.downcast::<EditorAction>() else {
             return;
         };
@@ -182,6 +222,7 @@ impl AppDriver for Driver {
                     .edit_widget(editor_widget_id, |mut widget| {
                         if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
                             let changed = editor.widget.apply_connection_event(event);
+                            editor.widget.sync_region(&mut editor.ctx);
                             if editor.widget.take_layout_invalidation() {
                                 editor.ctx.request_layout();
                             }
@@ -228,6 +269,7 @@ impl AppDriver for Driver {
                         .edit_widget(editor_widget_id, |mut widget| {
                             if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
                                 let changed = editor.widget.apply_connection_event(event);
+                                editor.widget.sync_region(&mut editor.ctx);
                                 if changed {
                                     editor.ctx.request_render();
                                     editor.ctx.request_accessibility_update();
@@ -504,6 +546,7 @@ fn apply_native_dialog_completion(
                 | ClientUiCommandResult::RequestResync
                 | ClientUiCommandResult::DismissRecovery => false,
             };
+            editor.widget.sync_region(&mut editor.ctx);
             if changed {
                 editor.ctx.request_render();
                 editor.ctx.request_accessibility_update();

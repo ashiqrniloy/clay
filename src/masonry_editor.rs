@@ -4,8 +4,9 @@ use masonry::accesskit::{Node, NodeId, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, KeyboardEvent,
-    LayoutCtx, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut,
-    PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, render_text,
+    LayoutCtx, MutateCtx, NewWidget, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent,
+    PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, WidgetPod,
+    render_text,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -22,6 +23,10 @@ use crate::editor::{
     typography::{UiTextMetrics, UiTextVariant},
 };
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
+use crate::masonry_sdui_region::SduiRegionWidget;
+// Re-exported so the native app driver (`main.rs`) can downcast the reconciled
+// SDUI button's action without exposing the whole `pub(crate)` region module.
+pub use crate::masonry_sdui_region::{SduiButtonPress, SduiListRowPress};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
@@ -277,7 +282,6 @@ struct PendingDefinitionNavigation {
     byte_start: u64,
 }
 
-#[derive(Debug)]
 pub struct EditorWidget {
     editor: EditorSurface,
     edit_queue: Option<ClientEditQueue>,
@@ -290,6 +294,11 @@ pub struct EditorWidget {
     last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
     status: EditorStatus,
     sdui: SduiNativeState,
+    /// Plan 070 step 8: the reconciled SDUI sidebar, hosted as a real child so
+    /// window events route through Masonry. Created once and reconciled in place
+    /// by `sync_region` (stable-identity, step 11c); inert until the first
+    /// sidebar tree.
+    region: WidgetPod<dyn Widget>,
     layout_invalidated: bool,
     /// Last successfully installed runtime generation (0 before any live snapshot).
     runtime_generation_id: RuntimeGenerationId,
@@ -321,6 +330,7 @@ impl Default for EditorWidget {
             last_decoration_viewport: None,
             status,
             sdui: SduiNativeState::empty(),
+            region: Self::new_region_pod(),
             layout_invalidated: false,
             runtime_generation_id: 0,
             sessions: DocumentSessionStore::default(),
@@ -364,6 +374,7 @@ impl EditorWidget {
             last_decoration_viewport: None,
             status,
             sdui,
+            region: Self::new_region_pod(),
             layout_invalidated: false,
             runtime_generation_id: 0,
             sessions: DocumentSessionStore::default(),
@@ -378,6 +389,39 @@ impl EditorWidget {
         std::mem::take(&mut self.layout_invalidated)
     }
 
+    /// Create the inert region child pod (reconciled later by `sync_region`).
+    fn new_region_pod() -> WidgetPod<dyn Widget> {
+        NewWidget::new(SduiRegionWidget::new()).erased().to_pod()
+    }
+
+    /// Reconcile the persistent `SduiRegionWidget` child in place from the
+    /// current SDUI state when it changed (plan 070 step 11c). Called from the
+    /// event loop with a live `MutateCtx`; surviving widgets keep their
+    /// `WidgetId` (and thus Masonry-managed focus/capture state) across updates
+    /// instead of being rebuilt wholesale. The region pod itself is created once
+    /// in [`Self::new_region_pod`] and never replaced.
+    pub fn sync_region(&mut self, ctx: &mut MutateCtx<'_>) {
+        if !self.sdui.take_region_dirty() {
+            return;
+        }
+        let input = self.sdui.region_render_input();
+        let mut region_widget = ctx.get_mut(&mut self.region);
+        let mut region = region_widget
+            .try_downcast::<SduiRegionWidget>()
+            .expect("region child is an SduiRegionWidget");
+        match input {
+            Some(input) => {
+                region
+                    .widget
+                    .set_render_context(input.typography, input.ui_theme);
+                region
+                    .widget
+                    .reconcile_snapshot_live(&mut region.ctx, input.tree);
+            }
+            None => region.widget.clear_live(&mut region.ctx),
+        }
+    }
+
     pub fn with_status(mut self, status: EditorStatus) -> Self {
         self.status = status;
         self
@@ -386,6 +430,18 @@ impl EditorWidget {
     pub fn with_edit_queue(mut self, edit_queue: ClientEditQueue) -> Self {
         self.edit_queue = Some(edit_queue);
         self
+    }
+
+    /// Route a reconciled SDUI button activation (plan 070 step 9) through the
+    /// existing server-first command path. The intent is carried in the Masonry
+    /// button's action, identical to what the retired legacy hit-test enqueued.
+    /// Route a reconciled SDUI widget activation (button or list row) through
+    /// the existing server-first command path. The intent is inert (registered
+    /// command id + bounded args); the server validates and applies it.
+    pub fn enqueue_sdui_intent(&mut self, intent: crate::protocol::SduiActionIntent) {
+        if let Some(edit_queue) = &self.edit_queue {
+            let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
+        }
     }
 
     pub fn apply_connection_event(&mut self, event: ClientConnectionEvent) -> bool {
@@ -2283,7 +2339,7 @@ impl Widget for EditorWidget {
                     if let Some(edit_queue) = &self.edit_queue {
                         let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
                     }
-                    ctx.request_paint_only();
+                    ctx.request_render();
                     (false, true)
                 } else if self
                     .editor
@@ -2295,7 +2351,7 @@ impl Widget for EditorWidget {
                     // capture the pointer for text selection.
                     // ponytail: thumb-drag scrolling is deferred; the press
                     // only sets the Active visual state for now.
-                    ctx.request_paint_only();
+                    ctx.request_render();
                     (false, true)
                 } else if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
                     ctx.capture_pointer();
@@ -2316,7 +2372,7 @@ impl Widget for EditorWidget {
                 // Phase 20.4 task 5: feed the editor chrome hover position so
                 // the scrollbar derives Hover over the track.
                 self.editor.set_pointer_pos(Some(point));
-                ctx.request_paint_only();
+                ctx.request_render();
                 if ctx.is_active() {
                     if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
                         (self.editor.extend_selection_to_point(local_point), true)
@@ -2332,7 +2388,7 @@ impl Widget for EditorWidget {
                 // Phase 20.4 task 5: release the editor chrome press state;
                 // keep the pointer position so hover persists after release.
                 self.editor.set_pointer_pressed(false);
-                ctx.request_paint_only();
+                ctx.request_render();
                 if ctx.is_active() {
                     (false, true)
                 } else {
@@ -2343,7 +2399,7 @@ impl Widget for EditorWidget {
                 self.sdui.clear_pointer_state();
                 // Phase 20.4 task 5: clear editor chrome pointer state too.
                 self.editor.clear_pointer_chrome_state();
-                ctx.request_paint_only();
+                ctx.request_render();
                 if ctx.is_active() {
                     (false, true)
                 } else {
@@ -2354,25 +2410,18 @@ impl Widget for EditorWidget {
                 self.sdui.clear_pointer_state();
                 // Phase 20.4 task 5: clear editor chrome pointer state too.
                 self.editor.clear_pointer_chrome_state();
-                ctx.request_paint_only();
+                ctx.request_render();
                 (false, false)
             }
             PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {
                 let point = ctx.local_position(state.position);
                 if self.sdui.scrolls_point(ctx.size(), point) {
-                    let changed = match delta {
-                        ScrollDelta::LineDelta(_, y) => {
-                            self.sdui.scroll_lines(ctx.size(), (-*y).round() as isize)
-                        }
-                        ScrollDelta::PixelDelta(position) => {
-                            let logical = position.to_logical::<f64>(ctx.get_scale_factor());
-                            self.sdui.scroll_vertical_pixels(ctx.size(), -logical.y)
-                        }
-                        ScrollDelta::PageDelta(_, y) => {
-                            self.sdui.scroll_lines(ctx.size(), (-*y).round() as isize)
-                        }
-                    };
-                    (changed, changed)
+                    // Sidebar scroll is handled by the reconciled region's
+                    // `SduiScrollViewport` as the event bubbles through it (it
+                    // updates its own scroll position and requests a compose
+                    // pass). Nothing for `EditorWidget` to do here — no state
+                    // changed, no repaint, and no editor scroll (plan 070 step 12).
+                    (false, false)
                 } else {
                     let changed = match delta {
                         ScrollDelta::LineDelta(_, y) => {
@@ -2604,7 +2653,9 @@ impl Widget for EditorWidget {
     ) {
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
+        ctx.register_child(&mut self.region);
+    }
 
     fn layout(
         &mut self,
@@ -2627,23 +2678,70 @@ impl Widget for EditorWidget {
             editor_rect.x0 + local.x1,
             editor_rect.y0 + local.y1,
         ));
+        // Place the reconciled SDUI region child (plan 070 step 8). The sidebar
+        // geometry (rect, content height, scroll) comes from the same legacy
+        // walk that produces the hit-test action rects, so the painted region
+        // and the click rects stay pixel-aligned. Scroll is baked into the
+        // placement origin (the compositor's translation).
+        //
+        // The reconciled region is placed as a fixed scroll viewport: sidebar
+        // width × (sidebar height below the top padding), at the sidebar origin
+        // below the padding. Its `SduiScrollViewport` child owns the scroll
+        // position and clips content to the viewport, so no clip path or
+        // scroll-offset placement math lives here (plan 070 step 12).
+        if let Some(geo) = self.sdui.sidebar_geometry(size) {
+            let region_size =
+                Size::new(geo.rect.width(), (geo.rect.height() - geo.padding).max(1.0));
+            let _ = ctx.run_layout(
+                &mut self.region,
+                &BoxConstraints::new(region_size, region_size),
+            );
+            ctx.place_child(
+                &mut self.region,
+                Point::new(geo.rect.x0, geo.rect.y0 + geo.padding),
+            );
+        } else {
+            let _ = ctx.run_layout(
+                &mut self.region,
+                &BoxConstraints::new(Size::ZERO, Size::ZERO),
+            );
+            ctx.place_child(&mut self.region, Point::ZERO);
+        }
         size
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        // SDUI chrome (sidebar panel bg/border) paints BELOW the reconciled
+        // region child (which paints the sidebar tree). The editor canvas,
+        // package overlays, and the status line paint in `post_paint` ABOVE the
+        // region child (plan 070 step 8); the editor sits to the right of the
+        // sidebar so that ordering is z-order-only, no overlap.
+        self.sdui.paint_chrome(ctx, scene);
+    }
+
+    fn post_paint(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        _props: &PropertiesRef<'_>,
+        scene: &mut Scene,
+    ) {
+        // Unclipped (runs after the sidebar clip is popped). Fill the editor
+        // area background + paint the editor canvas. The editor area is right of
+        // the sidebar, so it never overlaps the region child and the later
+        // z-order is harmless. Do NOT fill the full window here — that would
+        // paint over the sidebar tree. Overlays + the status line follow above.
         let recorder = global_recorder();
-        let _scope = recorder.scope("masonry.render_prepare.paint");
-        let rect = ctx.size().to_rect();
+        let _scope = recorder.scope("masonry.render_prepare.post_paint");
+        let editor_main_rect = self.editor_main_rect(ctx.size());
         scene.fill(
             Fill::NonZero,
             masonry::kurbo::Affine::IDENTITY,
             self.editor.theme().base.shell_bg,
             None,
-            &rect,
+            &editor_main_rect,
         );
-        self.editor
-            .paint_in_rect(ctx, scene, self.editor_main_rect(ctx.size()));
-        self.sdui.paint(ctx, scene);
+        self.editor.paint_in_rect(ctx, scene, editor_main_rect);
+        self.sdui.paint_overlays(ctx, scene);
         self.paint_status_line(ctx, scene);
     }
 
@@ -2658,7 +2756,16 @@ impl Widget for EditorWidget {
         node: &mut Node,
     ) {
         node.set_label(self.accessibility_label());
-        let mut children = self.sdui.append_accessibility_children(ctx);
+        // The reconciled SDUI tree's accessibility flows through the region
+        // child's scroll-viewport subtree (scroll-aware bounds, plan 070 step 12).
+        // Include it only when a sidebar tree is present so an empty region
+        // doesn't contribute an empty group; package/transient chrome and the
+        // status line follow.
+        let mut children = Vec::new();
+        if self.sdui.sidebar_geometry(ctx.size()).is_some() {
+            children.push(self.region.id().into());
+        }
+        children.extend(self.sdui.append_accessibility_children(ctx));
         let metrics = self
             .editor
             .typography()
@@ -2685,7 +2792,7 @@ impl Widget for EditorWidget {
     }
 
     fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
+        ChildrenIds::from_slice(&[self.region.id()])
     }
 
     fn accepts_focus(&self) -> bool {

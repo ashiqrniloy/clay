@@ -1149,7 +1149,7 @@ impl ResolvedUiTheme {
     fn base_color(&self, token: &str) -> Option<Color> {
         let base = self.base_ui.as_ref()?;
         Some(match token {
-            "surface.panel" | "surface.list" => base.panel_bg,
+            "surface.panel" | "surface.list" | "surface.tooltip" => base.panel_bg,
             "surface.main" => base.shell_bg,
             "surface.selected" => base.selection,
             "surface.control" | "surface.overlay" => base.status_bg,
@@ -1997,6 +1997,10 @@ mod tests {
             .with_base_ui(&base);
         assert_eq!(ui.color("surface.panel"), Some(base.panel_bg));
         assert_eq!(ui.color("surface.list"), Some(base.panel_bg));
+        // The completion-menu / tooltip popup background tracks the panel too;
+        // without this it fell back to the dark core catalog (a dark completion
+        // menu with dark text on a light editor).
+        assert_eq!(ui.color("surface.tooltip"), Some(base.panel_bg));
         assert_eq!(ui.color("surface.main"), Some(base.shell_bg));
         assert_eq!(ui.color("surface.selected"), Some(base.selection));
         assert_eq!(ui.color("surface.control"), Some(base.status_bg));
