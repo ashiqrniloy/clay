@@ -348,6 +348,17 @@ impl PackageUiRuntimeState {
             .collect()
     }
 
+    /// Visible fixed panels keyed by slot, without geometry (visibility is a
+    /// pure field check). Used by the retained panel host to reconcile the panel
+    /// set; rects are computed separately in layout from the working-area size.
+    pub(crate) fn visible_fixed_panel_components(&self) -> Vec<(FixedSlotId, &FixedPackagePanel)> {
+        self.fixed_panels
+            .iter()
+            .filter(|(_, panel)| panel.visibility == PackagePanelVisibility::Visible)
+            .map(|(slot_id, panel)| (*slot_id, panel))
+            .collect()
+    }
+
     pub(crate) fn overlays(&self) -> impl Iterator<Item = &TransientPackageOverlay> {
         self.transient_overlays.values()
     }

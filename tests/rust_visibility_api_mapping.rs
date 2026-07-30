@@ -296,16 +296,12 @@ fn phase20_4_introduces_no_unexposed_public_rust_function() {
         ("src/shell/theme.rs", &["from_ui_theme", "typography"]),
         (
             "src/masonry_sdui.rs",
-            &[
-                "theme_style",
-                "set_pointer_pos",
-                "set_pointer_pressed",
-                "clear_pointer_state",
-                "set_focused_action",
-                "focused_action",
-                "is_focused",
-                "interaction_state",
-            ],
+            // Plan 070 step 13e deleted the legacy immediate-mode interaction
+            // model (`set_focused_action`/`focused_action`/`is_focused`/
+            // `interaction_state`/`set_pointer_pos`/`set_pointer_pressed`/
+            // `clear_pointer_state`) — interactive + pointer state now lives in
+            // the retained host widgets, which derive it from Masonry's ctx.
+            &["theme_style"],
         ),
         (
             "src/editor/surface.rs",

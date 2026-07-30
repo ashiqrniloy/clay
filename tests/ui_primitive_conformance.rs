@@ -123,23 +123,23 @@ fn shell_chrome_paint_files_have_no_hardcoded_chrome_sizes() {
 
 #[test]
 fn package_component_paint_routes_chrome_through_primitives() {
-    // Plan 063 task 5: package-declared ComponentKind components map onto
-    // primitives by construction because paint_package_component calls the
-    // primitive helpers for chrome (panel/overlay backgrounds/borders).
-    let sdui_src =
-        fs::read_to_string("src/masonry_sdui.rs").expect("src/masonry_sdui.rs should be readable");
+    // Plan 063 task 5 + plan 070 step 13e: package-declared ComponentKind
+    // components map onto primitives by construction because the retained
+    // package widgets call the primitive helpers for chrome (panel/overlay
+    // backgrounds/borders). The legacy immediate-mode `paint_package_component`
+    // walk in masonry_sdui.rs was deleted in step 13e; the chrome paint now
+    // lives in the retained host widgets (masonry_package_region.rs).
+    let region_src = fs::read_to_string("src/masonry_package_region.rs")
+        .expect("src/masonry_package_region.rs should be readable");
 
-    // Assert that SDUI paint routes chrome through primitives.
-    // Search the entire file (not just non-test body) because the paint
-    // functions may be after #[cfg(test)] import sections.
-    // Accept both "shell::primitives::" and "crate::shell::primitives::" forms.
+    // Assert that the retained package widgets route chrome through primitives.
     assert!(
-        sdui_src.contains("primitives::paint_panel_chrome"),
-        "src/masonry_sdui.rs must route panel chrome through primitives::paint_panel_chrome"
+        region_src.contains("paint_panel_chrome"),
+        "src/masonry_package_region.rs must route panel chrome through primitives::paint_panel_chrome"
     );
     assert!(
-        sdui_src.contains("primitives::paint_tooltip_shell"),
-        "src/masonry_sdui.rs must route overlay chrome through primitives::paint_tooltip_shell"
+        region_src.contains("paint_tooltip_shell"),
+        "src/masonry_package_region.rs must route overlay chrome through primitives::paint_tooltip_shell"
     );
 }
 
@@ -288,24 +288,29 @@ fn sdui_paint_wires_focus_ring_and_state_colors_for_interactive_components() {
     // interactive fills through the token-driven state helpers and paint a
     // focus ring on focused components. Source guard complementing the
     // behavioral tests in masonry_sdui::tests.
-    let sdui_src =
-        fs::read_to_string("src/masonry_sdui.rs").expect("src/masonry_sdui.rs should be readable");
-    let body = non_test_body(&sdui_src);
+    // Plan 070 step 13e: the interactive package component paint moved from the
+    // deleted immediate-mode `paint_package_component` walk (masonry_sdui.rs) to
+    // the retained package widgets (masonry_package_region.rs). Focus is now
+    // Masonry-driven (`ctx.is_focus_target()`), so the focus-ring guard checks
+    // `paint_focus_ring` in the retained widgets.
+    let region_src = fs::read_to_string("src/masonry_package_region.rs")
+        .expect("src/masonry_package_region.rs should be readable");
+    let body = non_test_body(&region_src);
     assert!(
         body.contains("component_state_color"),
-        "src/masonry_sdui.rs must route button fills through component_state_color"
+        "src/masonry_package_region.rs must route button fills through component_state_color"
     );
     assert!(
         body.contains("list_row_fill_color"),
-        "src/masonry_sdui.rs must route list row fills through list_row_fill_color"
+        "src/masonry_package_region.rs must route list row fills through list_row_fill_color"
     );
     assert!(
         body.contains("disabled_text_color"),
-        "src/masonry_sdui.rs must dim disabled label/statusItem text via disabled_text_color"
+        "src/masonry_package_region.rs must dim disabled label/statusItem text via disabled_text_color"
     );
     assert!(
-        body.contains("is_focused") && body.contains("paint_focus_ring"),
-        "src/masonry_sdui.rs must paint a focus ring on focused interactive components"
+        body.contains("paint_focus_ring"),
+        "src/masonry_package_region.rs must paint a focus ring on focused interactive components"
     );
 }
 

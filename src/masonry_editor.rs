@@ -1,12 +1,14 @@
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use masonry::accesskit::{Node, NodeId, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, KeyboardEvent,
     LayoutCtx, MutateCtx, NewWidget, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent,
-    PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, WidgetPod,
-    render_text,
+    PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, WidgetMut,
+    WidgetPod, render_text,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -22,11 +24,16 @@ use crate::editor::{
     document_session::{DocumentSessionStore, RetainedDocumentSession},
     typography::{UiTextMetrics, UiTextVariant},
 };
+use crate::masonry_package_region::{PackageOverlayHost, PackagePanelHost};
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::masonry_sdui_region::SduiRegionWidget;
 // Re-exported so the native app driver (`main.rs`) can downcast the reconciled
 // SDUI button's action without exposing the whole `pub(crate)` region module.
 pub use crate::masonry_sdui_region::{SduiButtonPress, SduiListRowPress};
+// Same for the reconciled package fixed-panel button/list-row actions (13b).
+pub use crate::masonry_package_region::{
+    PackageButtonPress, PackageDropdownSelect, PackageListRowPress,
+};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
@@ -76,6 +83,11 @@ pub enum EditorAction {
         generation: u64,
         result: crate::client::FileDialogResult,
     },
+    /// A transient menu's local state (selection/query/cancel) changed via the
+    /// keyboard outside any server connection event. Re-syncs the hosted
+    /// overlay — the reconcile needs a `MutateCtx`, which only the action loop
+    /// provides (`EventCtx` can't reach one), plan 070 step 13e.
+    MenuStateChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,6 +311,17 @@ pub struct EditorWidget {
     /// by `sync_region` (stable-identity, step 11c); inert until the first
     /// sidebar tree.
     region: WidgetPod<dyn Widget>,
+    /// Hosts the package_ui fixed panels as retained Masonry children (plan 070
+    /// step 13b). Ordered BELOW `region` in `children_ids` so the SDUI sidebar
+    /// keeps hit-test/paint priority; reconciled in place by `sync_panels`.
+    panel_host: WidgetPod<PackagePanelHost>,
+    /// Hosts the transient overlays (package overlays + the active menu
+    /// projected as one) as retained Masonry children layered ABOVE `region`
+    /// (plan 070 step 13e). Reconciled in place by `sync_overlays`.
+    overlay_host: WidgetPod<PackageOverlayHost>,
+    /// The editor main rect shared with `overlay_host` (set each layout from
+    /// the SDUI sidebar geometry) so main-pane-anchored overlays resolve.
+    overlay_main_rect: Rc<Cell<Rect>>,
     layout_invalidated: bool,
     /// Last successfully installed runtime generation (0 before any live snapshot).
     runtime_generation_id: RuntimeGenerationId,
@@ -318,6 +341,7 @@ impl Default for EditorWidget {
             editor.document_state().document_version,
             editor.document_state().access.clone(),
         );
+        let overlay_main_rect = Rc::new(Cell::new(Rect::ZERO));
         Self {
             editor,
             edit_queue: None,
@@ -331,6 +355,9 @@ impl Default for EditorWidget {
             status,
             sdui: SduiNativeState::empty(),
             region: Self::new_region_pod(),
+            panel_host: Self::new_panel_host_pod(),
+            overlay_host: Self::new_overlay_host_pod(&overlay_main_rect),
+            overlay_main_rect,
             layout_invalidated: false,
             runtime_generation_id: 0,
             sessions: DocumentSessionStore::default(),
@@ -362,6 +389,7 @@ impl EditorWidget {
         // Mirror the editor's resolved theme (base palette + design tokens) so
         // the SDUI chrome can never diverge from the editor text theme.
         sdui.set_ui_theme(editor.ui_theme().clone());
+        let overlay_main_rect = Rc::new(Cell::new(Rect::ZERO));
         Self {
             editor,
             edit_queue: None,
@@ -375,6 +403,9 @@ impl EditorWidget {
             status,
             sdui,
             region: Self::new_region_pod(),
+            panel_host: Self::new_panel_host_pod(),
+            overlay_host: Self::new_overlay_host_pod(&overlay_main_rect),
+            overlay_main_rect,
             layout_invalidated: false,
             runtime_generation_id: 0,
             sessions: DocumentSessionStore::default(),
@@ -392,6 +423,55 @@ impl EditorWidget {
     /// Create the inert region child pod (reconciled later by `sync_region`).
     fn new_region_pod() -> WidgetPod<dyn Widget> {
         NewWidget::new(SduiRegionWidget::new()).erased().to_pod()
+    }
+
+    fn new_panel_host_pod() -> WidgetPod<PackagePanelHost> {
+        WidgetPod::new(PackagePanelHost::new())
+    }
+
+    fn new_overlay_host_pod(main_rect: &Rc<Cell<Rect>>) -> WidgetPod<PackageOverlayHost> {
+        WidgetPod::new(PackageOverlayHost::new(main_rect.clone()))
+    }
+
+    /// Reconcile the retained fixed-panel children from the current package_ui
+    /// state when it changed (plan 070 step 13b). Mirrors `sync_region`.
+    pub fn sync_panels(&mut self, ctx: &mut MutateCtx<'_>) {
+        if !self.sdui.take_panels_dirty() {
+            return;
+        }
+        let (package_ui, typography, ui_theme) = self.sdui.panels_render_input();
+        let mut host = ctx.get_mut(&mut self.panel_host);
+        host.widget
+            .sync_panels(&mut host.ctx, &package_ui, typography, ui_theme);
+    }
+
+    /// Reconcile the retained overlay children (package transient overlays +
+    /// the active menu projected as one) from the current state when it changed
+    /// (plan 070 step 13e). Mirrors `sync_panels`.
+    pub fn sync_overlays(&mut self, ctx: &mut MutateCtx<'_>) {
+        if !self.sdui.take_overlays_dirty() {
+            return;
+        }
+        let (overlays, typography, ui_theme) = self.sdui.overlays_render_input();
+        let mut host = ctx.get_mut(&mut self.overlay_host);
+        host.widget
+            .sync_overlays(&mut host.ctx, overlays, typography, ui_theme);
+    }
+
+    /// Route a reconciled package `textInput` commit (Enter) to its server
+    /// intent, appending the committed `value` (plan 070 step 13c). `area_id` is
+    /// the inner `TextArea`'s widget id — the source id Masonry reports on
+    /// `TextAction::Entered`. Static so the app driver can call it on a live
+    /// `WidgetMut<EditorWidget>` and then enqueue the resulting intent.
+    pub fn package_text_input_commit(
+        this: &mut WidgetMut<'_, Self>,
+        area_id: masonry::core::WidgetId,
+        value: &str,
+    ) -> Option<crate::protocol::SduiActionIntent> {
+        let mut host = this.ctx.get_mut(&mut this.widget.panel_host);
+        crate::masonry_package_region::PackagePanelHost::text_input_commit(
+            &mut host, area_id, value,
+        )
     }
 
     /// Reconcile the persistent `SduiRegionWidget` child in place from the
@@ -1763,10 +1843,11 @@ impl EditorWidget {
     }
 
     fn local_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
-        if self.route_package_component_key(ctx, &key) {
-            return;
-        }
         if self.route_menu_key(ctx, &key) {
+            // The menu's local state (selection/query/cancel) may have changed
+            // via the keyboard; re-sync the hosted overlay through the action
+            // loop (the reconcile needs a `MutateCtx` `EventCtx` can't reach).
+            ctx.submit_action::<EditorAction>(EditorAction::MenuStateChanged);
             return;
         }
         let outcome = self.editor.route_key_with_event(&key);
@@ -1817,95 +1898,6 @@ impl EditorWidget {
                 );
             }
             ctx.set_handled();
-        }
-    }
-
-    /// Phase 20.5: routes keys to focused package UI components (dropdown,
-    /// collapse, modal focus trap). Returns `true` if the key was consumed.
-    fn route_package_component_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
-        let Some(focused) = self.sdui.focused_action().cloned() else {
-            return false;
-        };
-        match focused.command_id.as_str() {
-            "clay.ui.dropdownToggle" => {
-                let node_hash = match &focused.source {
-                    crate::protocol::SduiActionSource::Button { node_id } => node_id.0,
-                    crate::protocol::SduiActionSource::ListItem { node_id, .. } => node_id.0,
-                };
-                match &key.key {
-                    KeyCode::ArrowDown => {
-                        self.sdui.dropdown_cycle(node_hash, usize::MAX, 1);
-                        ctx.request_render();
-                        ctx.set_handled();
-                        true
-                    }
-                    KeyCode::ArrowUp => {
-                        self.sdui.dropdown_cycle(node_hash, usize::MAX, -1);
-                        ctx.request_render();
-                        ctx.set_handled();
-                        true
-                    }
-                    KeyCode::Enter => {
-                        self.sdui.set_focused_action(None);
-                        ctx.request_render();
-                        ctx.set_handled();
-                        true
-                    }
-                    KeyCode::Character(c) if c == " " => {
-                        self.sdui.set_focused_action(None);
-                        ctx.request_render();
-                        ctx.set_handled();
-                        true
-                    }
-                    _ => false,
-                }
-            }
-            "clay.ui.collapseToggle" => {
-                let node_hash = match &focused.source {
-                    crate::protocol::SduiActionSource::Button { node_id } => node_id.0,
-                    crate::protocol::SduiActionSource::ListItem { node_id, .. } => node_id.0,
-                };
-                match &key.key {
-                    KeyCode::Enter => {
-                        self.sdui.collapse_toggle(node_hash);
-                        ctx.request_render();
-                        ctx.set_handled();
-                        true
-                    }
-                    KeyCode::Character(c) if c == " " => {
-                        self.sdui.collapse_toggle(node_hash);
-                        ctx.request_render();
-                        ctx.set_handled();
-                        true
-                    }
-                    _ => false,
-                }
-            }
-            _ => {
-                // Phase 20.5: modal focus trap — Tab cycles focusable intents
-                // within the active modal overlay.
-                if key.key == KeyCode::Tab {
-                    let intents = self.sdui.modal_focusable_intents();
-                    if intents.is_empty() {
-                        return false;
-                    }
-                    let current_pos = intents
-                        .iter()
-                        .position(|i| *i == focused)
-                        .unwrap_or(intents.len() - 1);
-                    let next = if key.modifiers.shift {
-                        current_pos.checked_sub(1).unwrap_or(intents.len() - 1)
-                    } else {
-                        (current_pos + 1) % intents.len()
-                    };
-                    self.sdui.set_focused_action(Some(intents[next].clone()));
-                    ctx.request_render();
-                    ctx.set_handled();
-                    true
-                } else {
-                    false
-                }
-            }
         }
     }
 
@@ -2325,23 +2317,16 @@ impl Widget for EditorWidget {
                 if button_event.button == Some(PointerButton::Primary) =>
             {
                 let point = ctx.local_position(button_event.state.position);
-                // Phase 20.4: feed pointer press + position into SDUI state so
-                // interactive components render Active/Hover, and record the
-                // focused action for the focus ring.
-                self.sdui.set_pointer_pos(Some(point));
-                self.sdui.set_pointer_pressed(true);
-                // Phase 20.4 task 5: feed the editor chrome the same pointer
-                // state so the scrollbar derives Active on thumb press.
+                // Phase 20.4 task 5: feed the editor chrome the pointer state so
+                // the scrollbar derives Active on thumb press. (Package/SDUI
+                // component pointer state is tracked by the retained host
+                // widgets themselves, plan 070 step 13e.)
                 self.editor.set_pointer_pos(Some(point));
                 self.editor.set_pointer_pressed(true);
-                if let Some(intent) = self.sdui.action_for_point(point) {
-                    self.sdui.set_focused_action(Some(intent.clone()));
-                    if let Some(edit_queue) = &self.edit_queue {
-                        let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
-                    }
-                    ctx.request_render();
-                    (false, true)
-                } else if self
+                // Package/overlay component clicks are handled by the retained
+                // host widgets (`PackageButton`/`PackageListRow`/...), not a
+                // legacy hit-test rect walk (plan 070 step 13e).
+                if self
                     .editor
                     .scrollbar_thumb_rect(self.editor_main_rect(ctx.size()))
                     .is_some_and(|thumb| thumb.contains(point))
@@ -2366,9 +2351,6 @@ impl Widget for EditorWidget {
             }
             PointerEvent::Move(pointer_update) => {
                 let point = ctx.local_position(pointer_update.current.position);
-                // Phase 20.4: track hover position passively (not only during a
-                // drag) so SDUI components render Hover.
-                self.sdui.set_pointer_pos(Some(point));
                 // Phase 20.4 task 5: feed the editor chrome hover position so
                 // the scrollbar derives Hover over the track.
                 self.editor.set_pointer_pos(Some(point));
@@ -2384,7 +2366,6 @@ impl Widget for EditorWidget {
                 }
             }
             PointerEvent::Up(_) => {
-                self.sdui.set_pointer_pressed(false);
                 // Phase 20.4 task 5: release the editor chrome press state;
                 // keep the pointer position so hover persists after release.
                 self.editor.set_pointer_pressed(false);
@@ -2396,7 +2377,6 @@ impl Widget for EditorWidget {
                 }
             }
             PointerEvent::Cancel(_) => {
-                self.sdui.clear_pointer_state();
                 // Phase 20.4 task 5: clear editor chrome pointer state too.
                 self.editor.clear_pointer_chrome_state();
                 ctx.request_render();
@@ -2407,7 +2387,6 @@ impl Widget for EditorWidget {
                 }
             }
             PointerEvent::Leave(_) => {
-                self.sdui.clear_pointer_state();
                 // Phase 20.4 task 5: clear editor chrome pointer state too.
                 self.editor.clear_pointer_chrome_state();
                 ctx.request_render();
@@ -2655,6 +2634,8 @@ impl Widget for EditorWidget {
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         ctx.register_child(&mut self.region);
+        ctx.register_child(&mut self.panel_host);
+        ctx.register_child(&mut self.overlay_host);
     }
 
     fn layout(
@@ -2669,6 +2650,9 @@ impl Widget for EditorWidget {
             bc.constrain(Size::new(900.0, 600.0))
         };
         let editor_rect = self.editor_main_rect(size);
+        // Share the main rect with the overlay host so main-pane-anchored
+        // overlays resolve before its children are laid out below (step 13e).
+        self.overlay_main_rect.set(editor_rect);
         let local = self
             .editor
             .ime_cursor_area(editor_rect.width(), editor_rect.height());
@@ -2707,6 +2691,14 @@ impl Widget for EditorWidget {
             );
             ctx.place_child(&mut self.region, Point::ZERO);
         }
+        // The fixed-panel host fills the working area and places its panel-region
+        // children at their absolute slot rects (plan 070 step 13b).
+        let _ = ctx.run_layout(&mut self.panel_host, &BoxConstraints::new(size, size));
+        ctx.place_child(&mut self.panel_host, Point::ZERO);
+        // The overlay host fills the working area and places each overlay region
+        // at its anchor rect, layered above the region (plan 070 step 13e).
+        let _ = ctx.run_layout(&mut self.overlay_host, &BoxConstraints::new(size, size));
+        ctx.place_child(&mut self.overlay_host, Point::ZERO);
         size
     }
 
@@ -2741,7 +2733,8 @@ impl Widget for EditorWidget {
             &editor_main_rect,
         );
         self.editor.paint_in_rect(ctx, scene, editor_main_rect);
-        self.sdui.paint_overlays(ctx, scene);
+        // Transient overlays (package overlays + the active menu) are painted by
+        // the retained `PackageOverlayHost` child (plan 070 step 13e), not here.
         self.paint_status_line(ctx, scene);
     }
 
@@ -2765,6 +2758,7 @@ impl Widget for EditorWidget {
         if self.sdui.sidebar_geometry(ctx.size()).is_some() {
             children.push(self.region.id().into());
         }
+        children.push(self.panel_host.id().into());
         children.extend(self.sdui.append_accessibility_children(ctx));
         let metrics = self
             .editor
@@ -2792,7 +2786,15 @@ impl Widget for EditorWidget {
     }
 
     fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::from_slice(&[self.region.id()])
+        // `panel_host` first so `region` (the SDUI sidebar) is later/topmost and
+        // wins hit-testing where their rects could meet (plan 070 step 13b);
+        // `overlay_host` last so the transient overlays layer above everything
+        // (plan 070 step 13e).
+        ChildrenIds::from_slice(&[
+            self.panel_host.id(),
+            self.region.id(),
+            self.overlay_host.id(),
+        ])
     }
 
     fn accepts_focus(&self) -> bool {

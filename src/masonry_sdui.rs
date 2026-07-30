@@ -13,7 +13,7 @@ use masonry::accesskit::{Node, NodeId, Role};
 use masonry::core::{AccessCtx, BrushIndex, PaintCtx, WidgetId, render_text};
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
-use masonry::peniko::{Color, Fill};
+use masonry::peniko::Color;
 use masonry::vello::Scene;
 
 use crate::{
@@ -91,24 +91,20 @@ pub struct SduiNativeState {
     // values via the accessors without parsing strings or allocating maps.
     ui_theme: crate::shell::theme::ResolvedUiTheme,
     active_menu: Option<TransientMenuSession>,
-    // Phase 20.4: client-local interaction inputs for SDUI component state
-    // derivation. Paint hit-tests the current action rect against these to
-    // derive `InteractionState` (Hover/Active/Focus); no per-component state
-    // map is kept. `focused_action` is set when a package action is invoked
-    // (pointer Down on an action region); disabled components never receive
-    // focus. All three are client-side only and carry no package authority.
-    pointer_pos: Option<Point>,
-    pointer_pressed: bool,
-    focused_action: Option<SduiActionIntent>,
-    /// Phase 20.5: client-local dropdown selected-item index, keyed by component node id hash.
-    dropdown_selected: BTreeMap<u64, usize>,
-    /// Phase 20.5: client-local collapse expanded state, keyed by component node id hash.
-    collapse_expanded: BTreeSet<u64>,
     /// Plan 070 step 8: set whenever the SDUI tree/theme/typography changes so
     /// the host (`EditorWidget::sync_region`) rebuilds the reconciled
     /// `SduiRegionWidget` child on the next event-loop edit. Replaces the
     /// deleted nested `RetainedSdui` compositor dirty flag.
     region_dirty: bool,
+    /// Plan 070 step 13b: set whenever package_ui/theme/typography changes so the
+    /// host (`EditorWidget::sync_panels`) reconciles the retained fixed-panel
+    /// children on the next event-loop edit.
+    panels_dirty: bool,
+    /// Plan 070 step 13e: set whenever the transient overlays (package overlays
+    /// or the active menu) or the render context changes so the host
+    /// (`EditorWidget::sync_overlays`) reconciles the retained overlay children
+    /// on the next event-loop edit.
+    overlays_dirty: bool,
 }
 
 impl SduiNativeState {
@@ -123,12 +119,9 @@ impl SduiNativeState {
             typography: TypographyRegistry::default(),
             ui_theme: crate::shell::theme::ResolvedUiTheme::default(),
             active_menu: None,
-            pointer_pos: None,
-            pointer_pressed: false,
-            focused_action: None,
-            dropdown_selected: BTreeMap::new(),
-            collapse_expanded: BTreeSet::new(),
             region_dirty: true,
+            panels_dirty: true,
+            overlays_dirty: true,
         }
     }
 
@@ -143,6 +136,8 @@ impl SduiNativeState {
         self.typography = typography;
         self.actions.clear();
         self.mark_region_dirty();
+        self.panels_dirty = true;
+        self.overlays_dirty = true;
     }
 
     /// Install a resolved UI design-token registry built from the active
@@ -152,6 +147,8 @@ impl SduiNativeState {
     pub(crate) fn set_ui_theme(&mut self, ui_theme: crate::shell::theme::ResolvedUiTheme) {
         self.ui_theme = ui_theme;
         self.mark_region_dirty();
+        self.panels_dirty = true;
+        self.overlays_dirty = true;
     }
 
     /// Resolve the SDUI paint style from the active `ui_theme` so package
@@ -161,112 +158,52 @@ impl SduiNativeState {
         SduiThemeStyle::from_ui_theme(&self.ui_theme)
     }
 
-    /// Phase 20.4: update the client-local pointer position used to derive
-    /// `Hover`/`Active` states. `None` clears hover (pointer left the widget).
-    pub(crate) fn set_pointer_pos(&mut self, pos: Option<Point>) {
-        self.pointer_pos = pos;
+    /// Return and clear the panels-dirty flag (plan 070 step 13b). The host
+    /// calls this from the event loop to decide whether to reconcile the
+    /// retained fixed-panel children.
+    pub(crate) fn take_panels_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.panels_dirty)
     }
 
-    /// Phase 20.4: set whether the primary pointer button is currently held,
-    /// used to derive `Active` state.
-    pub(crate) fn set_pointer_pressed(&mut self, pressed: bool) {
-        self.pointer_pressed = pressed;
+    pub(crate) fn take_overlays_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.overlays_dirty)
     }
 
-    /// Phase 20.4: clear pointer hover/press state (pointer leave/cancel).
-    pub(crate) fn clear_pointer_state(&mut self) {
-        self.pointer_pos = None;
-        self.pointer_pressed = false;
-    }
-
-    /// Phase 20.4: set the focused package action. Set when a package action
-    /// region is activated (pointer Down); disabled actions never receive
-    /// focus. Used to paint a focus ring and `Focus` fill.
-    pub(crate) fn set_focused_action(&mut self, action: Option<SduiActionIntent>) {
-        self.focused_action = action;
-    }
-
-    /// Phase 20.4: the currently focused package action, if any (test access).
-    pub(crate) fn focused_action(&self) -> Option<&SduiActionIntent> {
-        self.focused_action.as_ref()
-    }
-
-    /// True when `action` is the currently focused package action.
-    fn is_focused(&self, action: &SduiActionIntent) -> bool {
-        self.focused_action.as_ref() == Some(action)
-    }
-
-    /// Phase 20.5: selected item index for a dropdown component (0 if unset).
-    pub(crate) fn dropdown_selected_index(&self, node_hash: u64) -> usize {
-        self.dropdown_selected.get(&node_hash).copied().unwrap_or(0)
-    }
-
-    /// Phase 20.5: cycle dropdown selection by `delta` (-1 or +1), wrapping.
-    pub(crate) fn dropdown_cycle(&mut self, node_hash: u64, item_count: usize, delta: isize) {
-        if item_count == 0 {
-            return;
-        }
-        let current = self.dropdown_selected.get(&node_hash).copied().unwrap_or(0);
-        let next = if delta >= 0 {
-            (current + 1) % item_count
-        } else {
-            current.checked_sub(1).unwrap_or(item_count - 1)
-        };
-        self.dropdown_selected.insert(node_hash, next);
-    }
-
-    /// Phase 20.5: whether a collapse component is expanded.
-    pub(crate) fn is_collapse_expanded(&self, node_hash: u64) -> bool {
-        self.collapse_expanded.contains(&node_hash)
-    }
-
-    /// Phase 20.5: toggle collapse expanded state.
-    pub(crate) fn collapse_toggle(&mut self, node_hash: u64) {
-        if !self.collapse_expanded.remove(&node_hash) {
-            self.collapse_expanded.insert(node_hash);
-        }
-    }
-
-    /// Phase 20.5: collect focusable action intents from the active modal overlay's
-    /// component tree, in paint order. Used for Tab focus-trap cycling.
-    pub(crate) fn modal_focusable_intents(&self) -> Vec<SduiActionIntent> {
-        let modal_overlay = self
-            .package_ui
-            .overlays()
-            .find(|o| o.focus_policy == "modal");
-        let Some(overlay) = modal_overlay else {
-            return Vec::new();
-        };
-        let mut intents = Vec::new();
-        collect_component_intents(&overlay.component, &mut intents);
-        intents
-    }
-
-    /// Phase 20.4: derive the `InteractionState` for an interactive element
-    /// with action rect `rect` and intent `action`, honoring `disabled`.
-    /// Precedence: Disabled > Active (pressed + over) > Hover (over) > Focus >
-    /// Rest. O(1); no allocation. The focus ring is painted separately by the
-    /// caller when `is_focused(action)`.
-    fn interaction_state(
+    /// Snapshot the transient overlays + render context for the overlay host to
+    /// reconcile its retained overlay children (plan 070 step 13e).
+    pub(crate) fn overlays_render_input(
         &self,
-        rect: Rect,
-        action: &SduiActionIntent,
-        disabled: bool,
-    ) -> crate::shell::primitives::InteractionState {
-        use crate::shell::primitives::InteractionState as S;
-        if disabled {
-            return S::Disabled;
-        }
-        let over = self.pointer_pos.is_some_and(|p| rect.contains(p));
-        if over && self.pointer_pressed {
-            S::Active
-        } else if over {
-            S::Hover
-        } else if self.is_focused(action) {
-            S::Focus
-        } else {
-            S::Rest
-        }
+    ) -> (
+        Vec<crate::shell::TransientPackageOverlay>,
+        TypographyRegistry,
+        crate::shell::theme::ResolvedUiTheme,
+    ) {
+        (
+            self.transient_overlays(),
+            self.typography.clone(),
+            self.ui_theme.clone(),
+        )
+    }
+
+    /// The package_ui runtime state the panel host reconciles against.
+    pub(crate) fn package_ui(&self) -> &PackageUiRuntimeState {
+        &self.package_ui
+    }
+
+    /// Snapshot the package_ui state + render context for the panel host to
+    /// reconcile its retained fixed-panel children (plan 070 step 13b).
+    pub(crate) fn panels_render_input(
+        &self,
+    ) -> (
+        PackageUiRuntimeState,
+        TypographyRegistry,
+        crate::shell::theme::ResolvedUiTheme,
+    ) {
+        (
+            self.package_ui.clone(),
+            self.typography.clone(),
+            self.ui_theme.clone(),
+        )
     }
 
     fn text_metrics(&self, role: FontRole, variant: UiTextVariant) -> UiTextMetrics {
@@ -297,21 +234,25 @@ impl SduiNativeState {
 
     pub(crate) fn set_active_menu(&mut self, menu: TransientMenuSession) {
         self.active_menu = Some(menu);
+        self.overlays_dirty = true;
     }
 
     pub(crate) fn clear_active_menu(&mut self) {
         self.active_menu = None;
+        self.overlays_dirty = true;
     }
 
     pub(crate) fn menu_select_next(&mut self) {
         if let Some(menu) = &mut self.active_menu {
             menu.select_next();
+            self.overlays_dirty = true;
         }
     }
 
     pub(crate) fn menu_select_previous(&mut self) {
         if let Some(menu) = &mut self.active_menu {
             menu.select_previous();
+            self.overlays_dirty = true;
         }
     }
 
@@ -350,6 +291,7 @@ impl SduiNativeState {
     pub(crate) fn menu_cancel(&mut self) {
         if let Some(menu) = &mut self.active_menu {
             menu.cancel();
+            self.overlays_dirty = true;
         }
     }
 
@@ -409,6 +351,9 @@ impl SduiNativeState {
     ) -> Result<(), PackageUiRuntimeError> {
         self.package_ui.apply_update(update)?;
         self.actions.clear();
+        // package_ui drives both the fixed panels and the transient overlays.
+        self.panels_dirty = true;
+        self.overlays_dirty = true;
         Ok(())
     }
 
@@ -418,6 +363,8 @@ impl SduiNativeState {
     ) {
         self.package_ui.install_runtime_snapshot(snapshot);
         self.actions.clear();
+        self.panels_dirty = true;
+        self.overlays_dirty = true;
     }
 
     pub(crate) fn package_ui_version(&self) -> u64 {
@@ -556,24 +503,13 @@ impl SduiNativeState {
     }
 
     fn accessibility_entries(&self, size: Size) -> Vec<SduiAccessibilityEntry> {
-        // The SDUI tree's accessibility now flows through the reconciled
-        // `SduiRegionWidget` → `Portal` Masonry subtree (scroll-aware bounds,
-        // plan 070 step 12), so only package/transient chrome is collected here.
+        // The SDUI tree's accessibility flows through the reconciled
+        // `SduiRegionWidget` Masonry subtree (step 12), and the package *fixed
+        // panels'* accessibility flows through the hosted `PackagePanelHost` →
+        // `PackageRegionWidget` Masonry subtree (steps 13b/13c), so only the
+        // not-yet-hosted transient chrome (overlays, active menu) is collected
+        // here.
         let mut entries = Vec::new();
-        for (rect, panel) in self
-            .package_ui
-            .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
-        {
-            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
-            self.collect_package_accessibility_entries(
-                &panel.component,
-                0,
-                &mut cursor_y,
-                rect.width(),
-                rect.x0,
-                &mut entries,
-            );
-        }
         let slot_geometry = sdui_slot_layout(size, self).compute_geometry(size.to_rect());
         for overlay in self.package_ui.overlays() {
             let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
@@ -748,22 +684,10 @@ impl SduiNativeState {
                     );
                 }
             }
-            // Phase 20.5: dropdown — ComboBox role for the trigger.
-            "dropdown" => {
-                let height = body.button_height();
-                entries.push(SduiAccessibilityEntry {
-                    role: Role::ComboBox,
-                    label: Some(
-                        component
-                            .label
-                            .clone()
-                            .or_else(|| component.text.clone())
-                            .unwrap_or_else(|| component.id.clone()),
-                    ),
-                    bounds: self.row_rect(depth, *cursor_y, width, origin_x, height),
-                });
-                *cursor_y += height;
-            }
+            // `dropdown` is a retained `PackageDropdown` widget (plan 070 step
+            // 13d); its accessibility flows through the hosted Masonry subtree,
+            // so no legacy overlay a11y entry is collected here.
+            "dropdown" => {}
             // Phase 20.5: collapse — group role with title, then children.
             "collapse" => {
                 let title = component
@@ -852,11 +776,11 @@ impl SduiNativeState {
         }
     }
 
-    /// Paint the SDUI chrome that sits BELOW the reconciled sidebar tree:
-    /// package fixed panels and the sidebar panel chrome. Called from
-    /// `EditorWidget::paint` (plan 070 step 8, Composition B).
+    /// Paint the SDUI chrome that sits BELOW the reconciled sidebar tree: the
+    /// sidebar panel chrome. (Package fixed panels are now hosted as retained
+    /// Masonry children by `PackagePanelHost`, plan 070 step 13b, not painted
+    /// here.) Called from `EditorWidget::paint` (plan 070 step 8, Composition B).
     pub(crate) fn paint_chrome(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        self.paint_package_fixed_panels(ctx, scene);
         if self.root_id.is_some()
             && let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self)
         {
@@ -872,12 +796,6 @@ impl SduiNativeState {
                 &self.ui_theme,
             );
         }
-    }
-
-    /// Paint package transient overlays (dropdowns/modals) ABOVE the reconciled
-    /// sidebar tree. Called from `EditorWidget::post_paint` (plan 070 step 8).
-    pub(crate) fn paint_overlays(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        self.paint_package_overlays(ctx, scene);
     }
 
     /// Compute the sidebar slot geometry for the current size. Called from
@@ -1169,42 +1087,11 @@ impl SduiNativeState {
         }
     }
 
-    fn paint_package_fixed_panels(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        let size = ctx.size();
-        let fixed_panels: Vec<_> = self
-            .package_ui
-            .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
-            .into_iter()
-            .map(|(rect, panel)| (rect, panel.clone()))
-            .collect();
-        for (rect, panel) in fixed_panels {
-            // Route panel chrome through primitive (Phase 20.2)
-            crate::shell::primitives::paint_panel_chrome(
-                scene,
-                rect,
-                &crate::shell::primitives::PanelChrome {
-                    title: None,
-                    collapse: crate::shell::primitives::InteractionState::Rest,
-                    resize: crate::shell::primitives::InteractionState::Rest,
-                },
-                &self.ui_theme,
-            );
-            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
-            self.paint_package_component(
-                ctx,
-                scene,
-                &panel.component,
-                0,
-                &mut cursor_y,
-                rect.width(),
-                rect.x0,
-            );
-        }
-    }
-
-    fn paint_package_overlays(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        let size = ctx.size();
-        let slot_geometry = sdui_slot_layout(size, self).compute_geometry(size.to_rect());
+    /// Transient overlays in stacking order (`z.overlay` < `z.modal` <
+    /// `z.tooltip`): the package transient overlays plus the active menu
+    /// projected as an overlay. Shared by the retained overlay host (step 13e)
+    /// and the legacy immediate-mode paint walk below.
+    pub(crate) fn transient_overlays(&self) -> Vec<crate::shell::TransientPackageOverlay> {
         let mut overlays: Vec<crate::shell::TransientPackageOverlay> =
             self.package_ui.overlays().cloned().collect();
         if let Some(menu) = &self.active_menu
@@ -1214,489 +1101,8 @@ impl SduiNativeState {
                 menu,
             ));
         }
-        // Phase 20.5: sort overlays by z-level token before painting.
-        // Order: z.overlay (0) < z.modal (1) < z.tooltip (2).
-        fn z_order(token: &str) -> u8 {
-            match token {
-                "z.modal" => 1,
-                "z.tooltip" => 2,
-                _ => 0, // z.overlay and any unknown token
-            }
-        }
-        overlays.sort_by_key(|o| z_order(o.z_level_token));
-        for overlay in overlays {
-            let rect = overlay.anchor.rect(size.to_rect(), slot_geometry.main_rect);
-            // Route overlay chrome through primitive (Phase 20.2)
-            crate::shell::primitives::paint_tooltip_shell(scene, rect, &self.ui_theme);
-            // Phase 20.5: cursor inset sourced from ui_theme (not theme_style cache).
-            let overlay_padding = self.ui_theme.scalar_f64("spacing.panel").unwrap_or(16.0);
-            let mut cursor_y = rect.y0 + overlay_padding;
-            self.paint_package_component(
-                ctx,
-                scene,
-                &overlay.component,
-                0,
-                &mut cursor_y,
-                rect.width(),
-                rect.x0,
-            );
-        }
-    }
-
-    fn paint_package_component(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        scene: &mut Scene,
-        component: &PackageUiComponentTree,
-        depth: usize,
-        cursor_y: &mut f64,
-        width: f64,
-        origin_x: f64,
-    ) {
-        use crate::shell::{
-            InteractionState, component_state_color, disabled_text_color, list_row_fill_color,
-            paint_focus_ring,
-        };
-        match component.kind.as_str() {
-            "panel" => {
-                if let Some(title) = &component.title {
-                    let variant = Self::component_variant(component, self.theme_style().title_text);
-                    self.paint_text(
-                        ctx,
-                        scene,
-                        title,
-                        depth,
-                        *cursor_y,
-                        width,
-                        origin_x,
-                        component.font_role,
-                        variant,
-                        self.theme_style().text_color,
-                    );
-                    *cursor_y += self.text_metrics(component.font_role, variant).row_height;
-                }
-                for child in &component.children {
-                    self.paint_package_component(
-                        ctx,
-                        scene,
-                        child,
-                        depth + 1,
-                        cursor_y,
-                        width,
-                        origin_x,
-                    );
-                }
-            }
-            "label" | "statusItem" => {
-                let text = component
-                    .text
-                    .as_deref()
-                    .or(component.label.as_deref())
-                    .unwrap_or(&component.id);
-                let fallback = if component.kind == "statusItem" {
-                    self.theme_style().status_text
-                } else {
-                    self.theme_style().body_text
-                };
-                let variant = Self::component_variant(component, fallback);
-                let metrics = self.text_metrics(component.font_role, variant);
-                // Labels/statusItems are non-interactive (no action region);
-                // only the Disabled state applies (dimmed text). Focus/hover
-                // are N/A without an action rect to hit-test.
-                let text_color = if component.disabled {
-                    disabled_text_color(&self.ui_theme)
-                } else {
-                    self.theme_style().muted_text_color
-                };
-                self.paint_text(
-                    ctx,
-                    scene,
-                    text,
-                    depth,
-                    *cursor_y,
-                    width,
-                    origin_x,
-                    component.font_role,
-                    variant,
-                    text_color,
-                );
-                *cursor_y += metrics.row_height;
-            }
-            "button" => {
-                let variant = Self::component_variant(component, self.theme_style().body_text);
-                let metrics = self.text_metrics(component.font_role, variant);
-                let rect =
-                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
-                let fill = match &component.action_command_id {
-                    Some(command_id) if !component.disabled => {
-                        let intent = package_action_intent(command_id, &component.id);
-                        let state = self.interaction_state(rect, &intent, false);
-                        if self.is_focused(&intent) {
-                            paint_focus_ring(scene, rect, &self.ui_theme);
-                        }
-                        self.actions.push(SduiVisibleAction { rect, intent });
-                        component_state_color(&self.ui_theme, "surface.control", state)
-                    }
-                    _ => component_state_color(
-                        &self.ui_theme,
-                        "surface.control",
-                        InteractionState::Disabled,
-                    ),
-                };
-                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                let label = component.label.as_deref().unwrap_or(&component.id);
-                let label_color = if component.disabled {
-                    disabled_text_color(&self.ui_theme)
-                } else {
-                    self.theme_style().text_color
-                };
-                self.paint_text(
-                    ctx,
-                    scene,
-                    label,
-                    depth,
-                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
-                    width,
-                    origin_x,
-                    component.font_role,
-                    variant,
-                    label_color,
-                );
-                *cursor_y += metrics.button_height();
-            }
-            "list" => {
-                let variant = Self::component_variant(component, self.theme_style().body_text);
-                let metrics = self.text_metrics(component.font_role, variant);
-                let detail_metrics = self.text_metrics(component.font_role, UiTextVariant::Detail);
-                let row_height = metrics.list_height(detail_metrics);
-                for item in &component.items {
-                    let rect = self.row_rect(depth, *cursor_y, width, origin_x, row_height);
-                    let source_id = format!("{}.{}", component.id, item.id);
-                    let (fill, label_color) = match &item.action_command_id {
-                        Some(command_id) if !item.disabled => {
-                            let intent = package_action_intent(command_id, &source_id);
-                            let state = self.interaction_state(rect, &intent, false);
-                            if self.is_focused(&intent) {
-                                paint_focus_ring(scene, rect, &self.ui_theme);
-                            }
-                            self.actions.push(SduiVisibleAction { rect, intent });
-                            (
-                                list_row_fill_color(&self.ui_theme, state, item.selected),
-                                self.theme_style().text_color,
-                            )
-                        }
-                        _ => (
-                            list_row_fill_color(
-                                &self.ui_theme,
-                                InteractionState::Disabled,
-                                item.selected,
-                            ),
-                            disabled_text_color(&self.ui_theme),
-                        ),
-                    };
-                    scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                    self.paint_text(
-                        ctx,
-                        scene,
-                        &item.label,
-                        depth,
-                        *cursor_y,
-                        width,
-                        origin_x,
-                        component.font_role,
-                        variant,
-                        label_color,
-                    );
-                    if let Some(detail) = &item.detail {
-                        self.paint_text(
-                            ctx,
-                            scene,
-                            detail,
-                            depth,
-                            *cursor_y + metrics.line_height,
-                            width,
-                            origin_x,
-                            component.font_role,
-                            UiTextVariant::Detail,
-                            self.theme_style().muted_text_color,
-                        );
-                    }
-                    *cursor_y += row_height;
-                }
-            }
-            "editorView" => {
-                let variant = self.theme_style().body_text;
-                self.paint_text(
-                    ctx,
-                    scene,
-                    &format!("Editor view · {}", component.id),
-                    depth,
-                    *cursor_y,
-                    width,
-                    origin_x,
-                    FontRole::Ui,
-                    variant,
-                    self.theme_style().muted_text_color,
-                );
-                *cursor_y += self.text_metrics(FontRole::Ui, variant).row_height;
-            }
-            "flex" | "stack" | "overlay" | "scroll" | "portal" => {
-                for child in &component.children {
-                    self.paint_package_component(
-                        ctx, scene, child, depth, cursor_y, width, origin_x,
-                    );
-                }
-            }
-            // Phase 20.5: dropdown trigger row — label + chevron, list-in-overlay
-            // when open. Paint renders the closed trigger; the open list is
-            // routed through paint_package_overlays via the overlay primitive.
-            "dropdown" => {
-                let variant = Self::component_variant(component, self.theme_style().body_text);
-                let metrics = self.text_metrics(component.font_role, variant);
-                let rect =
-                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
-                let node_hash = stable_package_source_id(&component.id);
-                let is_focused = match &component.action_command_id {
-                    Some(command_id) if !component.disabled => {
-                        let intent = package_action_intent(command_id, &component.id);
-                        let state = self.interaction_state(rect, &intent, false);
-                        let focused = self.is_focused(&intent);
-                        if focused {
-                            paint_focus_ring(scene, rect, &self.ui_theme);
-                        }
-                        self.actions.push(SduiVisibleAction { rect, intent });
-                        let fill = component_state_color(&self.ui_theme, "surface.control", state);
-                        scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                        focused
-                    }
-                    _ => {
-                        let fill = component_state_color(
-                            &self.ui_theme,
-                            "surface.control",
-                            InteractionState::Disabled,
-                        );
-                        scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                        false
-                    }
-                };
-                // Phase 20.5: show selected item label from keyboard nav state.
-                let selected_index = self.dropdown_selected_index(node_hash);
-                let label = component
-                    .items
-                    .get(selected_index)
-                    .map(|item| item.label.as_str())
-                    .or(component.label.as_deref())
-                    .or(component.text.as_deref())
-                    .unwrap_or(&component.id);
-                let label_color = if component.disabled {
-                    disabled_text_color(&self.ui_theme)
-                } else {
-                    self.theme_style().text_color
-                };
-                self.paint_text(
-                    ctx,
-                    scene,
-                    label,
-                    depth,
-                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
-                    width,
-                    origin_x,
-                    component.font_role,
-                    variant,
-                    label_color,
-                );
-                *cursor_y += metrics.button_height();
-                // Phase 20.5: paint item list when focused (open state).
-                if is_focused && !component.disabled {
-                    for child in &component.children {
-                        self.paint_package_component(
-                            ctx,
-                            scene,
-                            child,
-                            depth + 1,
-                            cursor_y,
-                            width,
-                            origin_x,
-                        );
-                    }
-                }
-            }
-            // Phase 20.5: collapse section — title row with toggle action, children when expanded.
-            "collapse" => {
-                let title = component
-                    .title
-                    .as_deref()
-                    .or(component.label.as_deref())
-                    .unwrap_or(&component.id);
-                let variant = Self::component_variant(component, self.theme_style().title_text);
-                let metrics = self.text_metrics(component.font_role, variant);
-                let rect = self.row_rect(depth, *cursor_y, width, origin_x, metrics.row_height);
-                let node_hash = stable_package_source_id(&component.id);
-                // Phase 20.5: toggle action so collapse can receive focus and keyboard events.
-                if !component.disabled {
-                    let intent = package_action_intent("clay.ui.collapseToggle", &component.id);
-                    if self.is_focused(&intent) {
-                        paint_focus_ring(scene, rect, &self.ui_theme);
-                    }
-                    self.actions.push(SduiVisibleAction { rect, intent });
-                }
-                let text_color = if component.disabled {
-                    disabled_text_color(&self.ui_theme)
-                } else {
-                    self.theme_style().text_color
-                };
-                self.paint_text(
-                    ctx,
-                    scene,
-                    title,
-                    depth,
-                    *cursor_y,
-                    width,
-                    origin_x,
-                    component.font_role,
-                    variant,
-                    text_color,
-                );
-                *cursor_y += metrics.row_height;
-                // Phase 20.5: children visible only when expanded (keyboard toggled).
-                if !component.disabled && self.is_collapse_expanded(node_hash) {
-                    for child in &component.children {
-                        self.paint_package_component(
-                            ctx,
-                            scene,
-                            child,
-                            depth + 1,
-                            cursor_y,
-                            width,
-                            origin_x,
-                        );
-                    }
-                }
-            }
-            // Phase 20.5: modal dialog — overlay-surface chrome, title, children.
-            // Focus-trap and z.modal stacking are enforced by the overlay routing
-            // layer; paint renders the dialog body.
-            "modal" => {
-                crate::shell::primitives::paint_tooltip_shell(
-                    scene,
-                    self.row_rect(depth, *cursor_y, width, origin_x, 1.0),
-                    &self.ui_theme,
-                );
-                if let Some(title) = &component.title {
-                    let variant = Self::component_variant(component, self.theme_style().title_text);
-                    let metrics = self.text_metrics(component.font_role, variant);
-                    let text_color = if component.disabled {
-                        disabled_text_color(&self.ui_theme)
-                    } else {
-                        self.theme_style().text_color
-                    };
-                    self.paint_text(
-                        ctx,
-                        scene,
-                        title,
-                        depth,
-                        *cursor_y,
-                        width,
-                        origin_x,
-                        component.font_role,
-                        variant,
-                        text_color,
-                    );
-                    *cursor_y += metrics.row_height;
-                }
-                for child in &component.children {
-                    self.paint_package_component(
-                        ctx,
-                        scene,
-                        child,
-                        depth + 1,
-                        cursor_y,
-                        width,
-                        origin_x,
-                    );
-                }
-            }
-            // Phase 20.5: single-line text input — bordered field, placeholder,
-            // focus ring, validation-state border color.
-            "textInput" => {
-                let variant = Self::component_variant(component, self.theme_style().body_text);
-                let metrics = self.text_metrics(component.font_role, variant);
-                let rect =
-                    self.row_rect(depth, *cursor_y, width, origin_x, metrics.button_height());
-                // Border color: validation state > focus > default.
-                let border_color = match component.validation_state.as_deref() {
-                    Some("error") => self
-                        .ui_theme
-                        .color("diagnostic.error")
-                        .unwrap_or(Color::TRANSPARENT),
-                    Some("warning") => self
-                        .ui_theme
-                        .color("diagnostic.warning")
-                        .unwrap_or(Color::TRANSPARENT),
-                    Some("success") => self
-                        .ui_theme
-                        .color("diagnostic.success")
-                        .unwrap_or(Color::TRANSPARENT),
-                    _ => self
-                        .ui_theme
-                        .color("border.subtle")
-                        .unwrap_or(Color::TRANSPARENT),
-                };
-                let fill = component_state_color(
-                    &self.ui_theme,
-                    "surface.control",
-                    if component.disabled {
-                        InteractionState::Disabled
-                    } else {
-                        InteractionState::Rest
-                    },
-                );
-                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                // Border stroke (1px inset rect).
-                let border_rect = Rect::new(rect.x0, rect.y0, rect.x1, rect.y0 + 1.0);
-                scene.fill(
-                    Fill::NonZero,
-                    Affine::IDENTITY,
-                    border_color,
-                    None,
-                    &border_rect,
-                );
-                let intent = package_action_intent("clay.ui.textInputFocus", &component.id);
-                if self.is_focused(&intent) {
-                    paint_focus_ring(scene, rect, &self.ui_theme);
-                }
-                if !component.disabled {
-                    self.actions.push(SduiVisibleAction { rect, intent });
-                }
-                // Placeholder text (text field as placeholder when unfocused/empty).
-                let placeholder = component
-                    .text
-                    .as_deref()
-                    .or(component.label.as_deref())
-                    .unwrap_or("");
-                let placeholder_color = if component.disabled {
-                    disabled_text_color(&self.ui_theme)
-                } else {
-                    self.ui_theme
-                        .color("text.muted")
-                        .unwrap_or(Color::TRANSPARENT)
-                };
-                self.paint_text(
-                    ctx,
-                    scene,
-                    placeholder,
-                    depth,
-                    *cursor_y + (metrics.button_height() - metrics.line_height) / 2.0,
-                    width,
-                    origin_x,
-                    component.font_role,
-                    variant,
-                    placeholder_color,
-                );
-                *cursor_y += metrics.button_height();
-            }
-            _ => {}
-        }
+        overlays.sort_by_key(|o| overlay_z_order(o.z_level_token));
+        overlays
     }
 
     fn paint_text(
@@ -1909,7 +1315,7 @@ fn sdui_panel_left_slot_rect(size: Size, sdui: &SduiNativeState) -> Option<Rect>
         .map(|slot| slot.rect)
 }
 
-fn package_action_intent(command_id: &str, source_id: &str) -> SduiActionIntent {
+pub(crate) fn package_action_intent(command_id: &str, source_id: &str) -> SduiActionIntent {
     SduiActionIntent::command(
         command_id.to_string(),
         SduiActionSource::Button {
@@ -1979,7 +1385,18 @@ fn json_object_to_sdui_arguments(
         .collect()
 }
 
-fn stable_package_source_id(source_id: &str) -> u64 {
+/// Stacking order for transient overlays: `z.overlay` (0) < `z.modal` (1) <
+/// `z.tooltip` (2). Unknown tokens sort as `z.overlay`. Shared by the retained
+/// overlay host (step 13e) and the legacy overlay paint walk.
+pub(crate) fn overlay_z_order(token: &str) -> u8 {
+    match token {
+        "z.modal" => 1,
+        "z.tooltip" => 2,
+        _ => 0,
+    }
+}
+
+pub(crate) fn stable_package_source_id(source_id: &str) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for byte in source_id.as_bytes() {
         hash ^= u64::from(*byte);
@@ -2471,84 +1888,6 @@ mod tests {
         assert!(
             !cmds.contains(&"cmd.row.off".to_string()),
             "disabled list row action must be gated out"
-        );
-    }
-
-    #[test]
-    fn focused_component_tracks_focus_and_derives_interaction_state() {
-        // Plan 065 (Phase 20.4) task 4: focused interactive components track
-        // focus (for the focus ring) and derive InteractionState from
-        // pointer/focus/disabled with the precedence Disabled > Active > Hover >
-        // Focus > Rest.
-        use crate::shell::primitives::InteractionState;
-
-        let panel = PackageUiComponentTree::from_declaration(&json!({
-            "kind": "panel",
-            "id": "focus.test.root",
-            "children": [{
-                "kind": "button", "id": "btn", "label": "Go",
-                "action": { "commandId": "cmd.go" }
-            }]
-        }))
-        .unwrap();
-        let mut state = SduiNativeState::empty();
-        state
-            .apply_package_ui_update(PackageUiRuntimeUpdate {
-                base_version: 0,
-                fixed_panels: vec![FixedPackagePanel::new(
-                    "focus.test",
-                    FixedSlotId::Left,
-                    PackagePanelVisibility::Visible,
-                    panel,
-                    Vec::new(),
-                )],
-                transient_overlays: Vec::new(),
-                input_routing: Vec::new(),
-            })
-            .unwrap();
-        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
-
-        let action = state
-            .actions
-            .iter()
-            .find(|a| a.intent.command_id == "cmd.go")
-            .expect("button action");
-        let rect = action.rect;
-        let intent = action.intent.clone();
-
-        // Rest: no pointer, no focus.
-        assert_eq!(
-            state.interaction_state(rect, &intent, false),
-            InteractionState::Rest
-        );
-
-        // Focus: focused action, pointer off-rect, not pressed.
-        state.set_focused_action(Some(intent.clone()));
-        assert!(state.is_focused(&intent));
-        assert_eq!(state.focused_action(), Some(&intent));
-        assert_eq!(
-            state.interaction_state(rect, &intent, false),
-            InteractionState::Focus
-        );
-
-        // Hover overrides Focus when the pointer is over the rect (not pressed).
-        state.set_pointer_pos(Some(rect.center()));
-        assert_eq!(
-            state.interaction_state(rect, &intent, false),
-            InteractionState::Hover
-        );
-
-        // Active overrides Hover when pressed + over.
-        state.set_pointer_pressed(true);
-        assert_eq!(
-            state.interaction_state(rect, &intent, false),
-            InteractionState::Active
-        );
-
-        // Disabled overrides everything.
-        assert_eq!(
-            state.interaction_state(rect, &intent, true),
-            InteractionState::Disabled
         );
     }
 
