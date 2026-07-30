@@ -2752,14 +2752,16 @@ impl Widget for EditorWidget {
         // The reconciled SDUI tree's accessibility flows through the region
         // child's scroll-viewport subtree (scroll-aware bounds, plan 070 step 12).
         // Include it only when a sidebar tree is present so an empty region
-        // doesn't contribute an empty group; package/transient chrome and the
-        // status line follow.
+        // doesn't contribute an empty group; package fixed panels flow through
+        // the `panel_host` child (step 13b), and transient overlays/menus flow
+        // through the `overlay_host` child (step 13f — the hosted
+        // `PackageRegionWidget` reports `Menu`/`MenuItem`/`Status` for menus).
         let mut children = Vec::new();
         if self.sdui.sidebar_geometry(ctx.size()).is_some() {
             children.push(self.region.id().into());
         }
         children.push(self.panel_host.id().into());
-        children.extend(self.sdui.append_accessibility_children(ctx));
+        children.push(self.overlay_host.id().into());
         let metrics = self
             .editor
             .typography()

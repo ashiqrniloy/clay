@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
-use masonry::accesskit::{Node, Role};
+use masonry::accesskit::{Node, NodeId, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget,
@@ -53,8 +53,8 @@ use crate::masonry_sdui::{
 };
 use crate::protocol::{FontRole, SduiActionArgument, SduiActionIntent, SduiActionValue};
 use crate::shell::package_ui::{
-    PackageOverlayAnchor, PackageUiComponentTree, PackageUiListItem, PackageUiRuntimeState,
-    TransientPackageOverlay,
+    MenuA11y, PackageOverlayAnchor, PackageUiComponentTree, PackageUiListItem,
+    PackageUiRuntimeState, TransientPackageOverlay,
 };
 use crate::shell::primitives::paint_tooltip_shell;
 use crate::shell::theme::{ResolvedUiTheme, SduiThemeStyle};
@@ -106,6 +106,11 @@ pub(crate) struct PackageRegionWidget {
     focusable_sink: Vec<WidgetId>,
     typography: TypographyRegistry,
     ui_theme: ResolvedUiTheme,
+    /// Plan 070 step 13f: when `Some`, this region hosts a transient menu and
+    /// `accessibility()` reports a `Menu`/`MenuItem`/`Status` subtree built from
+    /// it (excluding the generic reconciled subtree) instead of the default
+    /// `Group` + children flow. Set by `PackageOverlayHost::sync_overlays`.
+    menu_a11y: Option<MenuA11y>,
 }
 
 impl PackageRegionWidget {
@@ -119,6 +124,7 @@ impl PackageRegionWidget {
             focusable_sink: Vec::new(),
             typography: TypographyRegistry::default(),
             ui_theme: ResolvedUiTheme::default(),
+            menu_a11y: None,
         }
     }
 
@@ -148,6 +154,12 @@ impl PackageRegionWidget {
     ) {
         self.typography = typography;
         self.ui_theme = ui_theme;
+    }
+
+    /// Plan 070 step 13f: install the hosted-menu a11y payload (`Some` for menu
+    /// overlays, `None` for package-declared overlays/fixed panels).
+    pub(crate) fn set_menu_a11y(&mut self, menu_a11y: Option<MenuA11y>) {
+        self.menu_a11y = menu_a11y;
     }
 
     /// The reconciled root component's `WidgetId` (test accessor).
@@ -726,16 +738,50 @@ impl Widget for PackageRegionWidget {
     }
 
     fn accessibility_role(&self) -> Role {
-        Role::Group
+        if self.menu_a11y.is_some() {
+            Role::Menu
+        } else {
+            Role::Group
+        }
     }
 
     fn accessibility(
         &mut self,
-        _ctx: &mut AccessCtx<'_>,
+        ctx: &mut AccessCtx<'_>,
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        node.set_label("Package UI region");
+        // Plan 070 step 13f: a hosted transient menu reports a `Menu`/
+        // `MenuItem`/`Status` a11y subtree built from the menu payload, excluding
+        // the generic reconciled subtree (which would report `Group`/`ListItem`)
+        // so the screen-reader contract matches the legacy
+        // `collect_active_menu_accessibility_entries` path.
+        if let Some(menu) = &self.menu_a11y {
+            node.set_label(menu.prompt.clone());
+            let mut children = Vec::new();
+            for item in &menu.items {
+                let id = NodeId::from(WidgetId::next());
+                let label = if item.selected {
+                    format!("{} selected", item.label)
+                } else {
+                    item.label.clone()
+                };
+                let mut item_node = Node::new(Role::MenuItem);
+                item_node.set_label(label);
+                ctx.tree_update().nodes.push((id, item_node));
+                children.push(id);
+            }
+            if let Some(status) = &menu.status {
+                let id = NodeId::from(WidgetId::next());
+                let mut status_node = Node::new(Role::Status);
+                status_node.set_label(status.clone());
+                ctx.tree_update().nodes.push((id, status_node));
+                children.push(id);
+            }
+            node.set_children(children);
+        } else {
+            node.set_label("Package UI region");
+        }
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -2935,12 +2981,14 @@ impl PackageOverlayHost {
                 region
                     .widget
                     .set_render_context(typography.clone(), ui_theme.clone());
+                region.widget.set_menu_a11y(overlay.menu_a11y.clone());
                 region
                     .widget
                     .reconcile_tree_live(&mut region.ctx, &overlay.component);
             } else {
                 let mut region = PackageRegionWidget::new();
                 region.set_render_context(typography.clone(), ui_theme.clone());
+                region.set_menu_a11y(overlay.menu_a11y.clone());
                 region.reconcile_tree(&overlay.component);
                 kept.push(HostedOverlay {
                     id: overlay.id.clone(),
@@ -4316,6 +4364,76 @@ mod tests {
         assert!(
             menu_row_selected(&rr, host_id, 1),
             "row 1 selected after nav"
+        );
+    }
+
+    /// Plan 070 step 13f: the hosted menu overlay reports `Menu`/`MenuItem`/
+    /// `Status` a11y (with the active item's "selected" suffix + custom
+    /// accessibility labels), matching the legacy
+    /// `collect_active_menu_accessibility_entries` contract that this replaces.
+    #[test]
+    fn hosted_menu_overlay_exposes_menu_role_and_item_accessibility_labels() {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+        };
+
+        let menu = TransientMenuSession::new(TransientMenuSessionId(9), "Conflict recovery")
+            .with_items(vec![
+                TransientMenuItem::new(
+                    "reload",
+                    "Reload",
+                    TransientMenuAction::new("clay.documents.serverReloadDocument"),
+                )
+                .with_accessibility_label("Reload from disk"),
+                TransientMenuItem::new(
+                    "keep",
+                    "Keep editing",
+                    TransientMenuAction::new("clay.documents.dismissConflict"),
+                )
+                .with_accessibility_label("Keep dirty buffer"),
+            ]);
+        let overlay = TransientPackageOverlay::from_menu_session(&menu);
+
+        let cell = Rc::new(Cell::new(Rect::new(0.0, 0.0, 900.0, 600.0)));
+        let host_widget = NewWidget::new(PackageOverlayHost::new(cell));
+        let host_id = host_widget.id();
+        let mut rr = RenderRoot::new(host_widget, |_| {}, render_root_options());
+        rr.edit_widget(host_id, |mut w| {
+            let mut host = w
+                .try_downcast::<PackageOverlayHost>()
+                .expect("overlay host");
+            host.widget.sync_overlays(
+                &mut host.ctx,
+                vec![overlay],
+                TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+        });
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, tree_update) = rr.redraw();
+        let tree_update = tree_update.expect("access tree active after EnableAccessTree");
+
+        // Menu container labelled with the (sanitized) prompt.
+        assert!(
+            tree_update
+                .nodes
+                .iter()
+                .any(|(_, n)| { n.role() == Role::Menu && n.label() == Some("Conflict recovery") }),
+            "hosted menu reports a Menu node labelled with the prompt"
+        );
+        // Active item carries its custom accessibility label + "selected" suffix.
+        assert!(
+            tree_update.nodes.iter().any(|(_, n)| {
+                n.role() == Role::MenuItem && n.label() == Some("Reload from disk selected")
+            }),
+            "selected menu item uses its accessibility label + selected suffix"
+        );
+        // Non-selected item uses its accessibility label without the suffix.
+        assert!(
+            tree_update.nodes.iter().any(|(_, n)| {
+                n.role() == Role::MenuItem && n.label() == Some("Keep dirty buffer")
+            }),
+            "non-selected menu item uses its accessibility label"
         );
     }
 }

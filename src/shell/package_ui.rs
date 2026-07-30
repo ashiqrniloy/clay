@@ -75,6 +75,32 @@ pub(crate) struct TransientPackageOverlay {
     /// Phase 20.5: z-level token name for overlay stacking order.
     /// One of `"z.overlay"`, `"z.modal"`, `"z.tooltip"`.
     pub(crate) z_level_token: &'static str,
+    /// Plan 070 step 13f: hosted menu a11y payload. `Some` only for overlays built
+    /// by [`TransientPackageOverlay::from_menu_session`]; the hosted
+    /// `PackageRegionWidget` builds a `Menu`/`MenuItem`/`Status` a11y subtree
+    /// from it instead of letting the generic `Group`/`ListItem` subtree flow.
+    /// `None` for package-declared overlays (they keep the generic subtree).
+    pub(crate) menu_a11y: Option<MenuA11y>,
+}
+
+/// Plan 070 step 13f: a11y payload for a hosted transient menu — the hosted
+/// `PackageRegionWidget` reports `Role::Menu` (prompt) > `Role::MenuItem`
+/// (rows, with a `" selected"` suffix on the active item) + `Role::Status`
+/// (empty-state message), matching the legacy `collect_active_menu_accessibility_entries`
+/// screen-reader contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MenuA11y {
+    pub(crate) prompt: String,
+    pub(crate) items: Vec<MenuA11yItem>,
+    pub(crate) status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MenuA11yItem {
+    /// Resolved row label: the item's `accessibility_label` when non-empty, else
+    /// its display `label` (matches the legacy `base` selection).
+    pub(crate) label: String,
+    pub(crate) selected: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -445,6 +471,7 @@ impl TransientPackageOverlay {
             component,
             action_targets,
             z_level_token,
+            menu_a11y: None,
         }
     }
 
@@ -453,6 +480,33 @@ impl TransientPackageOverlay {
     /// tree carries only inert command IDs and bounded JSON arguments; it does
     /// not embed callbacks, native handles, raw CSS, or executable code.
     pub(crate) fn from_menu_session(session: &TransientMenuSession) -> Self {
+        // Plan 070 step 13f: hosted menu a11y payload (prompt, resolved item
+        // labels + selected, empty-state status). Built once from the session;
+        // the hosted `PackageRegionWidget` reports `Menu`/`MenuItem`/`Status`
+        // from it regardless of which component-tree branch renders below.
+        let menu_a11y = MenuA11y {
+            prompt: crate::editor::accessibility::sanitize_recovery_summary(session.prompt())
+                .unwrap_or_else(|| "Transient menu".to_string()),
+            items: session
+                .items()
+                .iter()
+                .enumerate()
+                .map(|(index, item)| MenuA11yItem {
+                    label: if item.accessibility_label.trim().is_empty() {
+                        item.label.clone()
+                    } else {
+                        item.accessibility_label.clone()
+                    },
+                    selected: index == session.selected_index(),
+                })
+                .collect(),
+            status: match session.status() {
+                TransientMenuStatus::Empty { message } => {
+                    crate::editor::accessibility::sanitize_recovery_summary(message)
+                }
+                _ => None,
+            },
+        };
         // Phase 20.5: anchor selected by surface origin.
         let anchor = match session.origin() {
             TransientMenuOrigin::ContextMenu => PackageOverlayAnchor::Pointer,
@@ -564,6 +618,7 @@ impl TransientPackageOverlay {
                     },
                     action_targets,
                     z_level_token: "z.overlay",
+                    menu_a11y: Some(menu_a11y.clone()),
                 };
             }
         }
@@ -592,6 +647,7 @@ impl TransientPackageOverlay {
             },
             action_targets: Vec::new(),
             z_level_token: "z.overlay",
+            menu_a11y: Some(menu_a11y),
         }
     }
 }

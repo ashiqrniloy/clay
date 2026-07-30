@@ -26,8 +26,7 @@ pub(crate) use theme::ResolvedUiTheme;
 pub(crate) use transient_menu::TransientMenuSession;
 pub(crate) use transient_menu::{
     CompletionMenuAcceptAction, TransientMenuAction, TransientMenuItem, TransientMenuSessionId,
-    TransientMenuStatus, completion_result_to_menu_session,
-    language_intelligence_result_to_menu_session,
+    completion_result_to_menu_session, language_intelligence_result_to_menu_session,
 };
 
 #[cfg(test)]
