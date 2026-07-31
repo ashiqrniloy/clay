@@ -2674,16 +2674,16 @@ impl Widget for EditorWidget {
         // position and clips content to the viewport, so no clip path or
         // scroll-offset placement math lives here (plan 070 step 12).
         if let Some(geo) = self.sdui.sidebar_geometry(size) {
-            let region_size =
-                Size::new(geo.rect.width(), (geo.rect.height() - geo.padding).max(1.0));
+            // The region is the fixed sidebar frame: it paints the panel chrome
+            // across the full sidebar rect and places its scroll viewport below
+            // the top `panel_padding` internally (plan 070 step 14 — chrome moved
+            // out of `EditorWidget`/`SduiNativeState::paint_chrome`).
+            let region_size = Size::new(geo.rect.width(), geo.rect.height());
             let _ = ctx.run_layout(
                 &mut self.region,
                 &BoxConstraints::new(region_size, region_size),
             );
-            ctx.place_child(
-                &mut self.region,
-                Point::new(geo.rect.x0, geo.rect.y0 + geo.padding),
-            );
+            ctx.place_child(&mut self.region, Point::new(geo.rect.x0, geo.rect.y0));
         } else {
             let _ = ctx.run_layout(
                 &mut self.region,
@@ -2712,8 +2712,10 @@ impl Widget for EditorWidget {
         // stays in `post_paint` so it remains above the overlays (plan 070 step
         // 13e). The editor sits right of the sidebar so the region child and
         // editor canvas never overlap; the sidebar clip that used to force
-        // editor content into `post_paint` was removed in step 8.
-        self.sdui.paint_chrome(ctx, scene);
+        // editor content into `post_paint` was removed in step 8. The sidebar
+        // panel chrome is painted by the `region` child itself (plan 070 step
+        // 14 — moved out of `SduiNativeState::paint_chrome`), so `EditorWidget`
+        // no longer paints any SDUI chrome.
         let editor_main_rect = self.editor_main_rect(ctx.size());
         scene.fill(
             Fill::NonZero,

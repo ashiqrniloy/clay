@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "SDUI reconciliation seam is staged for per-component migration (plan 070); it is exercised by its own tests before the reconciled tree is composed into the shell"
-)]
-
 //! SDUI → Masonry reconciliation seam (plan 070, tasks 2/5/6/6.5).
 //!
 //! The SDUI data model (`crate::protocol::sdui`) is a retained, versioned tree
@@ -15,7 +10,8 @@
 //!
 //! Mapping (the per-kind whitelist lives in [`SduiRegionWidget::build_node`]):
 //! container kinds (`panel`/`flex`/`stack`) map to Masonry `Flex`/`ZStack`;
-//! leaf kinds (`label`/`button`/`list`/`editorView`) map to [`SduiLegacyLeaf`],
+//! leaf kinds (`label`/`button`/`list`/`editorView`) map to [`SduiLabel`],
+//! [`SduiButton`], [`SduiListRow`], and [`EditorViewWidget`] (plan 070 step 14),
 //! a thin widget that reports the *exact* legacy row height and paints through
 //! the *same* shared helpers (`paint_sdui_text`/`sdui_row_rect`/state fills) as
 //! the legacy renderer. Because every kind maps to a widget, the reconciled
@@ -27,11 +23,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem::{Discriminant, discriminant};
 
 use masonry::accesskit::{Node, Role};
+#[cfg(test)]
+use masonry::core::WidgetId;
 use masonry::core::keyboard::{Key, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, Axis, BoxConstraints, ChildrenIds, ComposeCtx, EventCtx, LayoutCtx,
     MutateCtx, NewWidget, NoAction, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef,
-    RegisterCtx, ScrollDelta, TextEvent, Update, UpdateCtx, Widget, WidgetId, WidgetMut, WidgetPod,
+    RegisterCtx, ScrollDelta, TextEvent, Update, UpdateCtx, Widget, WidgetMut, WidgetPod,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size, Vec2};
 use masonry::peniko::{Color, Fill};
@@ -41,12 +39,14 @@ use masonry::widgets::{Flex, ZStack};
 
 use crate::editor::typography::{TypographyRegistry, UiTextMetrics, UiTextVariant};
 use crate::masonry_sdui::{paint_sdui_text, sdui_row_rect};
+use crate::protocol::SduiVersion;
 use crate::protocol::{
-    FontRole, SduiActionIntent, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId,
-    SduiNodeKind, SduiTree,
+    FontRole, SduiActionIntent, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode,
+    SduiNodeId, SduiNodeKind, SduiTree,
 };
-use crate::protocol::{SduiTreeOperation, SduiTreeUpdate, SduiVersion};
-use crate::shell::primitives::paint_scroll_chrome;
+#[cfg(test)]
+use crate::protocol::{SduiTreeOperation, SduiTreeUpdate};
+use crate::shell::primitives::{PanelChrome, paint_panel_chrome, paint_scroll_chrome};
 use crate::shell::theme::{ResolvedUiTheme, SduiThemeStyle};
 use crate::shell::{
     InteractionState, component_state_color, disabled_text_color, list_row_fill_color,
@@ -73,6 +73,7 @@ enum ChildKey {
 /// which force a rebuild rather than an in-place prop update).
 #[derive(Clone, Copy)]
 struct PodRecord {
+    #[cfg(test)]
     id: WidgetId,
     kind: Discriminant<SduiNodeKind>,
 }
@@ -96,9 +97,10 @@ pub(crate) struct SduiRegionWidget {
     /// `Flex`/`ZStack` children vec. Drives the keyed child-list diff so
     /// add/remove (and same-order survival) reuse child pods in place.
     child_keys: BTreeMap<SduiNodeId, Vec<ChildKey>>,
-    /// Render context cloned into each [`SduiLegacyLeaf`] so leaves paint with
-    /// the active typography/theme. Fed by `SduiNativeState` at the cutover;
-    /// defaults (base catalog) until then.
+    /// Render context cloned into each retained leaf (`SduiLabel`/`SduiButton`/
+    /// `SduiListRow`/`EditorViewWidget`) so leaves paint with the active
+    /// typography/theme. Fed by `SduiNativeState` at the cutover; defaults (base
+    /// catalog) until then.
     typography: TypographyRegistry,
     ui_theme: ResolvedUiTheme,
 }
@@ -142,6 +144,7 @@ impl SduiRegionWidget {
 
     /// Apply incremental operations to the retained tree (data only). Returns
     /// `false` and leaves state untouched when `base_ui_version` is stale.
+    #[cfg(test)]
     fn apply_update_data(&mut self, update: SduiTreeUpdate) -> bool {
         if update.base_ui_version != self.ui_version {
             return false;
@@ -167,6 +170,7 @@ impl SduiRegionWidget {
     /// (no live tree required). Standalone-test path and the current
     /// `sync_region` wholesale swap; the stable-identity in-place equivalent is
     /// [`Self::reconcile_snapshot_live`].
+    #[cfg(test)]
     pub(crate) fn reconcile_snapshot(&mut self, tree: SduiTree) {
         self.set_snapshot_data(tree);
         self.rebuild();
@@ -175,6 +179,7 @@ impl SduiRegionWidget {
     /// Apply incremental operations, then rebuild the reconciled subtree
     /// wholesale. Returns `false` on a stale `base_ui_version`. Standalone-test
     /// path; the in-place equivalent is [`Self::apply_update_live`].
+    #[cfg(test)]
     pub(crate) fn apply_update(&mut self, update: SduiTreeUpdate) -> bool {
         if !self.apply_update_data(update) {
             return false;
@@ -194,6 +199,7 @@ impl SduiRegionWidget {
     /// 11b): surviving nodes keep their `WidgetId` (and thus Masonry-managed
     /// state); only added/removed/changed nodes are touched. Returns `false` on
     /// a stale `base_ui_version`.
+    #[cfg(test)]
     pub(crate) fn apply_update_live(
         &mut self,
         ctx: &mut MutateCtx<'_>,
@@ -216,19 +222,18 @@ impl SduiRegionWidget {
         self.reconcile(ctx);
     }
 
+    #[cfg(test)]
     pub(crate) fn ui_version(&self) -> SduiVersion {
         self.ui_version
     }
 
+    #[cfg(test)]
     pub(crate) fn root_id(&self) -> Option<SduiNodeId> {
         self.root_id
     }
 
-    pub(crate) fn node_count(&self) -> usize {
-        self.nodes.len()
-    }
-
     /// Whether the current tree reconciled into a Masonry subtree at all.
+    #[cfg(test)]
     pub(crate) fn has_root_pod(&self) -> bool {
         self.root_pod.is_some()
     }
@@ -236,28 +241,33 @@ impl SduiRegionWidget {
     /// The reconciled content root's `WidgetId` (the tree root inside the
     /// `SduiScrollViewport`), used by tests to traverse the reconciled subtree
     /// without picking up the scroll viewport wrapper itself.
+    #[cfg(test)]
     pub(crate) fn content_root_pod_id(&self) -> Option<WidgetId> {
         self.root_id.and_then(|root_id| self.pod_id_for(root_id))
     }
 
+    #[cfg(test)]
     pub(crate) fn root_pod_id(&self) -> Option<WidgetId> {
         self.root_pod.as_ref().map(|pod| pod.id())
     }
 
     /// The reconciled `WidgetId` for an SDUI node, if it reconciled (plan 070
     /// step 11b; tests assert stable identity across updates via this).
+    #[cfg(test)]
     pub(crate) fn pod_id_for(&self, node_id: SduiNodeId) -> Option<WidgetId> {
         self.pods.get(&node_id).map(|record| record.id)
     }
 
     /// The region is inert (takes no space, intercepts no input) until it has a
     /// reconciled subtree.
+    #[cfg(test)]
     fn is_inert(&self) -> bool {
         self.root_pod.is_none()
     }
 
     /// Wholesale fresh rebuild (no live tree): clears the identity maps and
     /// re-creates every pod via [`Self::build_node`], which repopulates them.
+    #[cfg(test)]
     fn rebuild(&mut self) {
         self.pods.clear();
         self.child_keys.clear();
@@ -318,7 +328,7 @@ impl SduiRegionWidget {
                 // Panel renders as a column: a title leaf followed by children
                 // indented one level deeper (mirrors legacy immediate-mode renderer).
                 let mut column = Flex::column().with_gap(Length::ZERO);
-                column = column.with_child(NewWidget::new(SduiLegacyLeaf::panel_title(
+                column = column.with_child(NewWidget::new(SduiLabel::panel_title(
                     title.clone(),
                     depth,
                     self.typography.clone(),
@@ -363,11 +373,23 @@ impl SduiRegionWidget {
                 }
                 (NewWidget::new(column).erased(), keys)
             }
-            // Leaf kinds: render through the legacy-paint leaf so the reconciled
-            // subtree is complete and pixel-identical to the legacy renderer.
-            SduiNodeKind::Label { .. } | SduiNodeKind::EditorView { .. } => (
-                NewWidget::new(SduiLegacyLeaf::new(
-                    node.kind.clone(),
+            // Leaf kinds: `Label` -> `SduiLabel`, `EditorView` ->
+            // `EditorViewWidget` (plan 070 step 14). The editor canvas itself
+            // stays bespoke-painted by `EditorWidget` (hot path unchanged);
+            // `EditorViewWidget` is the binding/slot component in the tree.
+            SduiNodeKind::Label { text } => (
+                NewWidget::new(SduiLabel::new(
+                    text.clone(),
+                    depth,
+                    self.typography.clone(),
+                    self.ui_theme.clone(),
+                ))
+                .erased(),
+                Vec::new(),
+            ),
+            SduiNodeKind::EditorView { binding } => (
+                NewWidget::new(EditorViewWidget::new(
+                    binding.clone(),
                     depth,
                     self.typography.clone(),
                     self.ui_theme.clone(),
@@ -379,6 +401,7 @@ impl SduiRegionWidget {
         self.pods.insert(
             node_id,
             PodRecord {
+                #[cfg(test)]
                 id: new_widget.id(),
                 kind,
             },
@@ -455,13 +478,27 @@ impl SduiRegionWidget {
             return;
         };
         match &node.kind {
-            SduiNodeKind::Label { .. } | SduiNodeKind::EditorView { .. } => {
-                if let Some(mut leaf) = widget.try_downcast::<SduiLegacyLeaf>() {
-                    leaf.widget.kind = node.kind.clone();
-                    leaf.widget.depth = depth;
-                    leaf.widget.typography = self.typography.clone();
-                    leaf.widget.ui_theme = self.ui_theme.clone();
-                    leaf.ctx.request_layout();
+            SduiNodeKind::Label { text } => {
+                if let Some(mut label) = widget.try_downcast::<SduiLabel>() {
+                    label.widget.update_from(
+                        text.clone(),
+                        depth,
+                        false,
+                        self.typography.clone(),
+                        self.ui_theme.clone(),
+                    );
+                    label.ctx.request_layout();
+                }
+            }
+            SduiNodeKind::EditorView { binding } => {
+                if let Some(mut view) = widget.try_downcast::<EditorViewWidget>() {
+                    view.widget.update_from(
+                        binding.clone(),
+                        depth,
+                        self.typography.clone(),
+                        self.ui_theme.clone(),
+                    );
+                    view.ctx.request_layout();
                 }
             }
             SduiNodeKind::Button { label, action } => {
@@ -642,13 +679,15 @@ impl SduiRegionWidget {
                     }) => title.clone(),
                     _ => return,
                 };
-                if let Some(mut leaf) = child.try_downcast::<SduiLegacyLeaf>() {
-                    leaf.widget.kind = SduiNodeKind::Label { text: title };
-                    leaf.widget.depth = depth;
-                    leaf.widget.title = true;
-                    leaf.widget.typography = self.typography.clone();
-                    leaf.widget.ui_theme = self.ui_theme.clone();
-                    leaf.ctx.request_layout();
+                if let Some(mut label) = child.try_downcast::<SduiLabel>() {
+                    label.widget.update_from(
+                        title,
+                        depth,
+                        true,
+                        self.typography.clone(),
+                        self.ui_theme.clone(),
+                    );
+                    label.ctx.request_layout();
                 }
             }
             ChildKey::ListRow(item_id) => {
@@ -694,7 +733,7 @@ impl SduiRegionWidget {
                     }) => title.clone(),
                     _ => String::new(),
                 };
-                NewWidget::new(SduiLegacyLeaf::panel_title(
+                NewWidget::new(SduiLabel::panel_title(
                     title,
                     depth,
                     self.typography.clone(),
@@ -777,17 +816,39 @@ impl Widget for SduiRegionWidget {
         let Some(pod) = &mut self.root_pod else {
             return Size::ZERO;
         };
-        let child_size = ctx.run_layout(pod, bc);
-        ctx.place_child(pod, Point::ZERO);
-        if bc.is_width_bounded() && bc.is_height_bounded() {
+        // The region is the fixed sidebar frame: paint the panel chrome across
+        // its full rect (see `paint`) and place the scrolling content below the
+        // top `panel_padding` (plan 070 step 14 — chrome moved here from
+        // `EditorWidget`/`SduiNativeState::paint_chrome`).
+        let size = if bc.is_width_bounded() && bc.is_height_bounded() {
             bc.max()
         } else {
-            bc.constrain(child_size)
-        }
+            bc.constrain(Size::new(240.0, 600.0))
+        };
+        let padding = SduiThemeStyle::from_ui_theme(&self.ui_theme).panel_padding;
+        let viewport_size = Size::new(size.width, (size.height - padding).max(1.0));
+        let _ = ctx.run_layout(pod, &BoxConstraints::new(viewport_size, viewport_size));
+        ctx.place_child(pod, Point::new(0.0, padding));
+        size
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _scene: &mut Scene) {
-        // The reconciled subtree paints itself through the Masonry render pass.
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        // Sidebar panel chrome (bg/border) paints as the fixed frame BEHIND the
+        // scrolling content child (plan 070 step 14 — moved from
+        // `SduiNativeState::paint_chrome`/`EditorWidget`). The scrollbar paints
+        // in the scroll viewport's `post_paint` above the content.
+        if self.root_pod.is_some() {
+            paint_panel_chrome(
+                scene,
+                ctx.size().to_rect(),
+                &PanelChrome {
+                    title: None,
+                    collapse: InteractionState::Rest,
+                    resize: InteractionState::Rest,
+                },
+                &self.ui_theme,
+            );
+        }
     }
 
     fn accessibility_role(&self) -> Role {
@@ -1511,26 +1572,26 @@ impl Widget for SduiListRow {
 /// the legacy renderer at Rest state. Interaction (hover/active/focus fills,
 /// focus ring, action registration) stays on the legacy hit-test path until
 /// each kind is swapped for a real Masonry widget (tasks 3/4/7).
-pub(crate) struct SduiLegacyLeaf {
-    kind: SduiNodeKind,
+pub(crate) struct SduiLabel {
+    text: String,
     depth: usize,
     /// Panel title rows render with the `title_text` typography variant and
-    /// primary text color (mirrors the legacy immediate-mode renderer Panel arm); plain
-    /// labels use `body_text` + muted color.
+    /// primary text color (mirrors the legacy immediate-mode renderer Panel arm);
+    /// plain labels use `body_text` + muted color.
     title: bool,
     typography: TypographyRegistry,
     ui_theme: ResolvedUiTheme,
 }
 
-impl SduiLegacyLeaf {
-    fn new(
-        kind: SduiNodeKind,
+impl SduiLabel {
+    pub(crate) fn new(
+        text: String,
         depth: usize,
         typography: TypographyRegistry,
         ui_theme: ResolvedUiTheme,
     ) -> Self {
         Self {
-            kind,
+            text,
             depth,
             title: false,
             typography,
@@ -1538,15 +1599,15 @@ impl SduiLegacyLeaf {
         }
     }
 
-    /// Panel title leaf (uses the title typography variant + primary color).
-    fn panel_title(
-        title: String,
+    /// Panel title leaf (title typography variant + primary color).
+    pub(crate) fn panel_title(
+        text: String,
         depth: usize,
         typography: TypographyRegistry,
         ui_theme: ResolvedUiTheme,
     ) -> Self {
         Self {
-            kind: SduiNodeKind::Label { text: title },
+            text,
             depth,
             title: true,
             typography,
@@ -1562,7 +1623,6 @@ impl SduiLegacyLeaf {
         self.typography.ui_text_metrics(FontRole::Ui, variant)
     }
 
-    /// The typography variant + color this leaf's text renders with.
     fn label_presentation(&self) -> (UiTextVariant, Color) {
         let style = self.style();
         if self.title {
@@ -1572,28 +1632,30 @@ impl SduiLegacyLeaf {
         }
     }
 
-    /// The exact height the legacy immediate-mode renderer advances `cursor_y` by for this
-    /// node. This is the layout-parity contract with the legacy renderer.
+    /// The exact height the legacy immediate-mode renderer advances `cursor_y`
+    /// by for a label row (the layout-parity contract with the legacy renderer).
     pub(crate) fn legacy_height(&self) -> f64 {
-        let style = self.style();
-        match &self.kind {
-            SduiNodeKind::Label { .. } | SduiNodeKind::EditorView { .. } => {
-                let (variant, _) = self.label_presentation();
-                self.metrics(variant).row_height
-            }
-            SduiNodeKind::Button { .. } => self.metrics(style.body_text).button_height(),
-            SduiNodeKind::List { items } => {
-                let body = self.metrics(style.body_text);
-                let detail = self.metrics(UiTextVariant::Detail);
-                items.len() as f64 * body.list_height(detail)
-            }
-            // Containers are never leaves; they map to Masonry containers.
-            _ => 0.0,
-        }
+        let (variant, _) = self.label_presentation();
+        self.metrics(variant).row_height
+    }
+
+    fn update_from(
+        &mut self,
+        text: String,
+        depth: usize,
+        title: bool,
+        typography: TypographyRegistry,
+        ui_theme: ResolvedUiTheme,
+    ) {
+        self.text = text;
+        self.depth = depth;
+        self.title = title;
+        self.typography = typography;
+        self.ui_theme = ui_theme;
     }
 }
 
-impl Widget for SduiLegacyLeaf {
+impl Widget for SduiLabel {
     type Action = NoAction;
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
@@ -1605,14 +1667,7 @@ impl Widget for SduiLegacyLeaf {
         bc: &BoxConstraints,
     ) -> Size {
         let height = self.legacy_height();
-        // The `EditorView` leaf is a placeholder inside the sidebar region; the
-        // real editor surface is painted by `EditorWidget`. Give it zero width
-        // so the reconciled root `Flex(Row)[panel, editor]` fits the sidebar
-        // viewport horizontally — otherwise the content would be wider than the
-        // viewport and enable an unwanted horizontal scroll range.
-        let width = if matches!(self.kind, SduiNodeKind::EditorView { .. }) {
-            0.0
-        } else if bc.is_width_bounded() {
+        let width = if bc.is_width_bounded() {
             bc.max().width
         } else {
             0.0
@@ -1624,119 +1679,25 @@ impl Widget for SduiLegacyLeaf {
         let style = self.style();
         let padding = style.panel_padding;
         let width = ctx.size().width;
-        let depth = self.depth;
-        match &self.kind {
-            SduiNodeKind::Label { text } => {
-                let (variant, color) = self.label_presentation();
-                paint_sdui_text(
-                    &self.typography,
-                    padding,
-                    ctx,
-                    scene,
-                    text,
-                    depth,
-                    0.0,
-                    width,
-                    0.0,
-                    FontRole::Ui,
-                    self.metrics(variant),
-                    color,
-                );
-            }
-            SduiNodeKind::Button { label, .. } => {
-                let metrics = self.metrics(style.body_text);
-                let height = metrics.button_height();
-                let rect = sdui_row_rect(padding, depth, 0.0, width, 0.0, height);
-                let fill = component_state_color(
-                    &self.ui_theme,
-                    "surface.control",
-                    InteractionState::Rest,
-                );
-                scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                paint_sdui_text(
-                    &self.typography,
-                    padding,
-                    ctx,
-                    scene,
-                    label,
-                    depth,
-                    (height - metrics.line_height) / 2.0,
-                    width,
-                    0.0,
-                    FontRole::Ui,
-                    metrics,
-                    style.text_color,
-                );
-            }
-            SduiNodeKind::List { items } => {
-                let body = self.metrics(style.body_text);
-                let detail = self.metrics(UiTextVariant::Detail);
-                let row_height = body.list_height(detail);
-                for (index, item) in items.iter().enumerate() {
-                    let y = index as f64 * row_height;
-                    let rect = sdui_row_rect(padding, depth, y, width, 0.0, row_height);
-                    let fill = list_row_fill_color(&self.ui_theme, InteractionState::Rest, false);
-                    scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &rect);
-                    paint_sdui_text(
-                        &self.typography,
-                        padding,
-                        ctx,
-                        scene,
-                        &item.label,
-                        depth,
-                        y,
-                        width,
-                        0.0,
-                        FontRole::Ui,
-                        body,
-                        style.text_color,
-                    );
-                    if let Some(detail_text) = &item.detail {
-                        paint_sdui_text(
-                            &self.typography,
-                            padding,
-                            ctx,
-                            scene,
-                            detail_text,
-                            depth,
-                            y + body.line_height,
-                            width,
-                            0.0,
-                            FontRole::Ui,
-                            detail,
-                            style.muted_text_color,
-                        );
-                    }
-                }
-            }
-            SduiNodeKind::EditorView { binding } => {
-                let text = format!("Editor view · doc {}", binding.document_id);
-                paint_sdui_text(
-                    &self.typography,
-                    padding,
-                    ctx,
-                    scene,
-                    &text,
-                    depth,
-                    0.0,
-                    width,
-                    0.0,
-                    FontRole::Ui,
-                    self.metrics(style.body_text),
-                    style.muted_text_color,
-                );
-            }
-            // Containers never reach the leaf; mapped to Masonry containers.
-            _ => {}
-        }
+        let (variant, color) = self.label_presentation();
+        paint_sdui_text(
+            &self.typography,
+            padding,
+            ctx,
+            scene,
+            &self.text,
+            self.depth,
+            0.0,
+            width,
+            0.0,
+            FontRole::Ui,
+            self.metrics(variant),
+            color,
+        );
     }
 
     fn accessibility_role(&self) -> Role {
-        match &self.kind {
-            SduiNodeKind::Button { .. } => Role::Button,
-            SduiNodeKind::List { .. } => Role::List,
-            _ => Role::Label,
-        }
+        Role::Label
     }
 
     fn accessibility(
@@ -1745,16 +1706,111 @@ impl Widget for SduiLegacyLeaf {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        let label = match &self.kind {
-            SduiNodeKind::Label { text } => text.clone(),
-            SduiNodeKind::Button { label, .. } => label.clone(),
-            SduiNodeKind::EditorView { binding } => {
-                format!("Editor view · doc {}", binding.document_id)
-            }
-            SduiNodeKind::List { items } => format!("{} rows", items.len()),
-            _ => String::new(),
-        };
-        node.set_label(label);
+        node.set_label(self.text.clone());
+    }
+
+    fn children_ids(&self) -> ChildrenIds {
+        ChildrenIds::new()
+    }
+}
+
+/// The `EditorView` SDUI node rendered as a retained widget (plan 070 step 14).
+///
+/// The real editor surface is bespoke-virtualized and stays painted by
+/// `EditorWidget` (hot path unchanged — `concept.md` Phase 3). This widget is
+/// the binding/slot component in the reconciled tree: it carries the
+/// [`SduiEditorBinding`] (which document this view is), reports the editor a11y
+/// label, and reserves zero width so the sidebar `Flex(Row)[panel, editor]` fits
+/// the sidebar viewport (the editor canvas paints over the editor area to the
+/// right of the sidebar).
+pub(crate) struct EditorViewWidget {
+    binding: SduiEditorBinding,
+    depth: usize,
+    typography: TypographyRegistry,
+    ui_theme: ResolvedUiTheme,
+}
+
+impl EditorViewWidget {
+    pub(crate) fn new(
+        binding: SduiEditorBinding,
+        depth: usize,
+        typography: TypographyRegistry,
+        ui_theme: ResolvedUiTheme,
+    ) -> Self {
+        Self {
+            binding,
+            depth,
+            typography,
+            ui_theme,
+        }
+    }
+
+    fn style(&self) -> SduiThemeStyle {
+        SduiThemeStyle::from_ui_theme(&self.ui_theme)
+    }
+
+    fn metrics(&self) -> UiTextMetrics {
+        self.typography
+            .ui_text_metrics(FontRole::Ui, self.style().body_text)
+    }
+
+    /// The exact height the legacy immediate-mode renderer advances `cursor_y`
+    /// by for an `EditorView` row (the layout-parity contract).
+    pub(crate) fn legacy_height(&self) -> f64 {
+        self.metrics().row_height
+    }
+
+    fn label(&self) -> String {
+        format!("Editor view · doc {}", self.binding.document_id)
+    }
+
+    fn update_from(
+        &mut self,
+        binding: SduiEditorBinding,
+        depth: usize,
+        typography: TypographyRegistry,
+        ui_theme: ResolvedUiTheme,
+    ) {
+        self.binding = binding;
+        self.depth = depth;
+        self.typography = typography;
+        self.ui_theme = ui_theme;
+    }
+}
+
+impl Widget for EditorViewWidget {
+    type Action = NoAction;
+
+    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+
+    fn layout(
+        &mut self,
+        _ctx: &mut LayoutCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        bc: &BoxConstraints,
+    ) -> Size {
+        // Zero width: the real editor canvas is painted by `EditorWidget` to the
+        // right of the sidebar; a non-zero width would make the reconciled root
+        // `Flex(Row)[panel, editor]` wider than the sidebar viewport and enable
+        // an unwanted horizontal scroll range.
+        bc.constrain(Size::new(0.0, self.legacy_height()))
+    }
+
+    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _scene: &mut Scene) {
+        // Placeholder — the editor canvas is painted by `EditorWidget`.
+    }
+
+    fn accessibility_role(&self) -> Role {
+        Role::Label
+    }
+
+    fn accessibility(
+        &mut self,
+        _ctx: &mut AccessCtx<'_>,
+        _props: &PropertiesRef<'_>,
+        node: &mut Node,
+    ) {
+        node.set_label(self.label());
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -1884,23 +1940,39 @@ mod tests {
     }
 
     #[test]
-    fn legacy_leaf_heights_match_the_legacy_cursor_advances() {
+    fn label_and_editor_view_heights_match_the_legacy_cursor_advances() {
         let typography = TypographyRegistry::default();
         let style = default_style();
         let body = typography.ui_text_metrics(FontRole::Ui, style.body_text);
-        let detail = typography.ui_text_metrics(FontRole::Ui, UiTextVariant::Detail);
 
-        let cases = [
-            (label_node(1, "x"), body.row_height),
-            (button_node(1), body.button_height()),
-            (list_node(1, 3), 3.0 * body.list_height(detail)),
-            (editor_view_node(1), body.row_height),
-        ];
-        for (node, expected) in cases {
-            let leaf =
-                SduiLegacyLeaf::new(node.kind, 0, typography.clone(), ResolvedUiTheme::default());
-            assert!((leaf.legacy_height() - expected).abs() < 1e-9);
-        }
+        let label = SduiLabel::new(
+            "x".to_string(),
+            0,
+            typography.clone(),
+            ResolvedUiTheme::default(),
+        );
+        assert!((label.legacy_height() - body.row_height).abs() < 1e-9);
+
+        let title = SduiLabel::panel_title(
+            "T".to_string(),
+            0,
+            typography.clone(),
+            ResolvedUiTheme::default(),
+        );
+        let title_variant = SduiThemeStyle::from_ui_theme(&ResolvedUiTheme::default()).title_text;
+        let title_metrics = typography.ui_text_metrics(FontRole::Ui, title_variant);
+        assert!((title.legacy_height() - title_metrics.row_height).abs() < 1e-9);
+
+        let view = EditorViewWidget::new(
+            SduiEditorBinding {
+                document_id: 7,
+                expected_version: None,
+            },
+            0,
+            typography.clone(),
+            ResolvedUiTheme::default(),
+        );
+        assert!((view.legacy_height() - body.row_height).abs() < 1e-9);
     }
 
     #[test]
@@ -2377,7 +2449,7 @@ mod tests {
         let hit = rr
             .get_widget(region_id)
             .unwrap()
-            .find_widget_under_pointer(Point::new(10.0, 10.0))
+            .find_widget_under_pointer(Point::new(10.0, default_style().panel_padding + 10.0))
             .expect("rebuilt region must still hit-test");
         assert_ne!(hit.id(), region_id, "must descend into a rebuilt leaf");
     }
@@ -2763,8 +2835,8 @@ mod tests {
     #[test]
     fn viewport_scrollbar_thumb_tracks_scroll_and_overflow() {
         let mut viewport = SduiScrollViewport::new(
-            NewWidget::new(SduiLegacyLeaf::new(
-                label_node(1, "x").kind,
+            NewWidget::new(SduiLabel::new(
+                "x".to_string(),
                 0,
                 TypographyRegistry::default(),
                 ResolvedUiTheme::default(),
@@ -2800,8 +2872,8 @@ mod tests {
     #[test]
     fn viewport_scrollbar_interaction_state_tracks_pointer() {
         let mut viewport = SduiScrollViewport::new(
-            NewWidget::new(SduiLegacyLeaf::new(
-                label_node(1, "x").kind,
+            NewWidget::new(SduiLabel::new(
+                "x".to_string(),
                 0,
                 TypographyRegistry::default(),
                 ResolvedUiTheme::default(),
@@ -2863,8 +2935,14 @@ mod tests {
                 let mut viewport_widget = region.ctx.get_mut(&mut pod);
                 if let Some(mut viewport) = viewport_widget.try_downcast::<SduiScrollViewport>() {
                     let mut content = SduiScrollViewport::content_mut(&mut viewport);
-                    if let Some(leaf) = content.try_downcast::<SduiLegacyLeaf>() {
-                        kind = Some(leaf.widget.kind.clone());
+                    if let Some(label) = content.try_downcast::<SduiLabel>() {
+                        kind = Some(SduiNodeKind::Label {
+                            text: label.widget.text.clone(),
+                        });
+                    } else if let Some(view) = content.try_downcast::<EditorViewWidget>() {
+                        kind = Some(SduiNodeKind::EditorView {
+                            binding: view.widget.binding.clone(),
+                        });
                     }
                 }
             }
@@ -3205,7 +3283,10 @@ mod tests {
         let body =
             TypographyRegistry::default().ui_text_metrics(FontRole::Ui, default_style().body_text);
         let state = PointerState {
-            position: PhysicalPosition::new(450.0, body.line_height / 2.0),
+            position: PhysicalPosition::new(
+                450.0,
+                default_style().panel_padding + body.line_height / 2.0,
+            ),
             ..Default::default()
         };
         rr.handle_pointer_event(PointerEvent::Move(PointerUpdate {

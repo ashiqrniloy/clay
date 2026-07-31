@@ -495,28 +495,6 @@ impl SduiNativeState {
         }
     }
 
-    /// Paint the SDUI chrome that sits BELOW the reconciled sidebar tree: the
-    /// sidebar panel chrome. (Package fixed panels are now hosted as retained
-    /// Masonry children by `PackagePanelHost`, plan 070 step 13b, not painted
-    /// here.) Called from `EditorWidget::paint` (plan 070 step 8, Composition B).
-    pub(crate) fn paint_chrome(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        if self.root_id.is_some()
-            && let Some(sidebar) = sdui_panel_left_slot_rect(ctx.size(), self)
-        {
-            // Route sidebar chrome through primitive (Phase 20.2)
-            crate::shell::primitives::paint_panel_chrome(
-                scene,
-                sidebar,
-                &crate::shell::primitives::PanelChrome {
-                    title: None,
-                    collapse: crate::shell::primitives::InteractionState::Rest,
-                    resize: crate::shell::primitives::InteractionState::Rest,
-                },
-                &self.ui_theme,
-            );
-        }
-    }
-
     /// Compute the sidebar slot geometry for the current size. Called from
     /// `EditorWidget::layout` to place the reconciled region child as a fixed
     /// scroll viewport. Scroll position/content height are owned by the
