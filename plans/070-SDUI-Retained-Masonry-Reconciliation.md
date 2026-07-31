@@ -62,7 +62,7 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 | 14 | Retire god-object: host `EditorView`/editor surface as child; delete `SduiNativeState::paint` + `SduiLegacyLeaf`; shrink `masonry_sdui.rs` | done | 13f | `EditorViewWidget` binding/slot component; `SduiLabel`/`EditorViewWidget` replace `SduiLegacyLeaf`; chrome moved to `SduiRegionWidget`; legacy hit-test + a11y walker + dead paint helpers removed (−556 lines); reframed test-infra allow |
 | 15 | Update package UI/layout/rendering docs | done | 14 | rendering-strategy/shell-layout/creating-packages updated; `temporary compatibility bridge` wording removed; Plan 070 retained-reconciliation row added; components.md substrate notes updated; drift gates green |
 | 16 | Verify Clay JS APIs (no new surface) | done | 14 | verify-and-no-op: all reconciliation widgets `pub(crate)`; 5 `pub` action types are bin-crate `ErasedAction::downcast` surface (not JS); no new op/facade/registry row; 38 `clay_js_doc_registry` gates green |
-| 17 | Verify configuration APIs (no new surface) | open | 14 | config conformance gates |
+| 17 | Verify configuration APIs (no new surface) | done | 14 | verify-and-no-op: no new command/key binding/config option; CLAY_SDUI_RETAINED deleted in Step 8; layout.json/preferences.json/init.js unchanged; 15 configuration/keybinding gates green |
 | 18 | Update code wiki | open | 15–17 | manual wiki review |
 | 19 | Drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]`: `#[cfg(test)]`-gate or wire the observability/not-yet-wired API | open | 14 | no `#![allow(dead_code)]` in `masonry_sdui.rs`; `cargo clippy --all-targets -- -D warnings` clean |
 
@@ -794,12 +794,13 @@ Follow this sequence one step at a time; each step is independently verifiable. 
   - Test Cases to Write:
     - Visibility audit: `cargo test` doc-registry/lookup gates pass with no new public API rows. ✓ — 38 `clay_js_doc_registry` tests pass; no new rows.
 
-- [ ] **(Step 17 — requires Step 14)** Create or verify Clay configuration APIs
+- [x] **(Step 17 — requires Step 14)** Create or verify Clay configuration APIs
+  - **Status: done (2026-07-31, verify-and-no-op).** Confirmed no new user-visible command, key binding, or configuration option was introduced; panel size/visibility config continues through existing documented surfaces; layout persistence path unchanged; no config path grants filesystem/network/shell/extension/AI/workspace authority.
   - Acceptance Criteria:
-    - Functional: Confirm no new user-visible command, key binding, or configuration option is introduced; panel size/visibility configuration continues through existing documented surfaces; no hidden config keys added.
-    - Performance: N/A.
-    - Code Quality: No undocumented config keys; layout persistence path (`~/.config/clay/layout.json`) unchanged.
-    - Security: No configuration path grants filesystem/network/shell/extension/AI/workspace authority.
+    - Functional: Confirm no new user-visible command, key binding, or configuration option is introduced; panel size/visibility configuration continues through existing documented surfaces; no hidden config keys added. ✓ — plan 070 is a client-internal rendering-substrate migration; no new command/key binding/config option was added. The only env var the plan introduced (`CLAY_SDUI_RETAINED`, Step 6.5 kill-switch) was deleted in Step 8 when the compositor became the sole path. Remaining production env vars (`CLAY_PERF_PROFILE`, `CLAY_ALLOW_LIFECYCLE_SCRIPTS`) are pre-existing. Panel size/visibility continues through `WorkingAreaLayout`/`PaneSlotLayout` + `~/.config/clay/layout.json` (`src/shell/layout_persist.rs`), unchanged.
+    - Performance: N/A. ✓
+    - Code Quality: No undocumented config keys; layout persistence path (`~/.config/clay/layout.json`) unchanged. ✓ — `git log 96bda33..071a7ef -- src/shell/layout_persist.rs src/server/configuration.rs src/shell/layout.rs` is empty (no plan-070 commit touched any config/persist/keymap surface).
+    - Security: No configuration path grants filesystem/network/shell/extension/AI/workspace authority. ✓ — `clay_js_api_inventory::configuration_surface_is_closed_and_security_controls_are_not_properties` + `clay_js_doc_registry::configuration_api_no_authority_grant` + `generated_registry_configuration_security_denies_implicit_external_authority` pass; init.js closed-package-option surface unchanged.
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/create-plan/references/clay.md` (Clay Configuration Task), `.agents/skills/project-patterns/references/configuration-system.md`.
@@ -807,17 +808,19 @@ Follow this sequence one step at a time; each step is independently verifiable. 
       - Add a reconciliation debug config toggle: rejected (YAGNI) — observability stays internal.
       - Verify-and-no-op: chosen.
     - Chosen Approach:
-      - Verify existing configuration surfaces remain the only ones; document no-op in plan.
+      - Verify existing configuration surfaces remain the only ones; document no-op in plan. Audit performed via env-var grep (`CLAY_*` in src), `git log` over config/persist/keymap files, and the 15 configuration/keybinding conformance gates.
     - API Notes and Examples:
       ```text
-      ~/.config/clay/init.js  # unchanged entry point; no new options
+      ~/.config/clay/init.js      # unchanged entry point; no new options
+      ~/.config/clay/layout.json  # unchanged layout persistence path
+      ~/.config/clay/preferences.json  # unchanged bounded preferences
       ```
     - Files to Create/Edit:
-      - None expected (verify only).
+      - None expected (verify only). ✓ — no edits required.
     - References:
       - `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`.
   - Test Cases to Write:
-    - Configuration conformance gates pass with no new undocumented keys.
+    - Configuration conformance gates pass with no new undocumented keys. ✓ — 15 configuration/keybinding gates green (`configuration_surface_is_closed_and_security_controls_are_not_properties`, `configuration_api_no_authority_grant`, `configuration_entrypoint_is_documented_and_indexed`, `keybinding_configuration_apis_have_empty_defaults`, `language_package_docs_have_no_hidden_configuration_surface`, `no_public_configuration_needed_for_internal_perf_hooks`, etc.).
 
 - [ ] **(Step 18 — requires Steps 15–17)** Update or verify the code wiki after implementation
   - Acceptance Criteria:
