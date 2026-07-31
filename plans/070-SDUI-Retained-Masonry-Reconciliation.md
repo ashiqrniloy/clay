@@ -64,6 +64,7 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 | 16 | Verify Clay JS APIs (no new surface) | open | 14 | visibility audit |
 | 17 | Verify configuration APIs (no new surface) | open | 14 | config conformance gates |
 | 18 | Update code wiki | open | 15–17 | manual wiki review |
+| 19 | Drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]`: `#[cfg(test)]`-gate or wire the observability/not-yet-wired API | open | 14 | no `#![allow(dead_code)]` in `masonry_sdui.rs`; `cargo clippy --all-targets -- -D warnings` clean |
 
 ## Objectives
 
@@ -839,6 +840,25 @@ Follow this sequence one step at a time; each step is independently verifiable. 
   - Test Cases to Write:
     - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
 
+- [ ] **(Step 19 — requires Step 14)** Drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]`
+  - **Context:** Step 14 reframed the `masonry_sdui.rs` module-level `#![allow(dead_code)]` from "staged for runtime wiring" (a migration staging block) to "test/agent observability surface not wired into production rendering". The actual migration staging block (`masonry_sdui_region.rs`) was removed in Step 14; this remaining allow is test-infrastructure + not-yet-wired API, not migration staging. This step retires it so no module-level dead-code allow remains in the SDUI surface.
+  - Acceptance Criteria:
+    - Functional: The `#![allow(dead_code)]` is removed from `masonry_sdui.rs`; every item it masked is either `#[cfg(test)]`-gated (if test-only) or wired into production (if intended for production). No `dead_code` warnings under `cargo clippy --all-targets`.
+    - Code Quality: `cargo clippy --all-targets -- -D warnings` clean with no module-level `#![allow(dead_code)]` in `masonry_sdui.rs`.
+    - No Regression: `cargo test --lib` / `--test editor` / `--test runtime` green; the observability-snapshot tests still pass (gated, not deleted).
+  - Approach:
+    - Items to `#[cfg(test)]`-gate (test-only observability): `observable_snapshot`, `collect_observable_snapshot`, `package_overlay_observations`, `SduiObservableSnapshot`, `SduiObservableListItem`, + the `sdui_observable_snapshot_*` tests that exercise them.
+    - Items to decide (test-only OR not-yet-wired): `apply_package_ui_update` (production uses `install_package_ui_snapshot`; `apply_package_ui_update` is called only from test modules in `masonry_editor.rs`), `package_ui_version`, `typography_revision`, `package_ui` (the accessor method, not the field — `panels_render_input` reads the field). Either `#[cfg(test)]`-gate them (if purely test-only) or wire the package-UI incremental path (if intended for production). Confirm intent per item before gating — some may be reserved for a future Clay JS observability facade (see the file's `// Internal test/agent observability surface only...` comment).
+    - Cascading helpers: `body_metrics` / `text_metrics` / `component_variant` / `component_metrics` — gate or remove once their only callers are gated/removed; `theme_style` is production (sidebar_geometry) and stays.
+    - Chosen Approach: `#[cfg(test)]`-gate test-only items; for not-yet-wired items prefer `#[cfg(test)]`-gating (honest about current status) over speculative wiring unless a concrete production consumer exists; then drop the `#![allow(dead_code)]`.
+  - Files to Edit:
+    - `src/masonry_sdui.rs`: remove `#![allow(dead_code)]`; `#[cfg(test)]`-gate the test-only observability API + structs; gate or wire the not-yet-wired introspection methods; prune cascading dead helpers.
+  - References:
+    - `src/masonry_sdui.rs` `// Internal test/agent observability surface only...` comment; `src/masonry_editor.rs` test modules calling `apply_package_ui_update` / `package_ui_version` / `typography_revision`.
+  - Test Cases to Write:
+    - `cargo clippy --all-targets -- -D warnings` clean with the allow removed (the gate).
+    - Existing `sdui_observable_snapshot_*` tests still compile + pass under `#[cfg(test)]`.
+
 ## Compromises Made
 - **Step 13e — `PackageModalDismiss` not production-wired.** Zero packages declare `modal` components at runtime, so the modal's Escape-dismiss action is emitted but not downcast in `main.rs`; routing is future work when a real package modal ships.
 - **Step 14 — `EditorViewWidget` is a binding/slot component, not the editor painter.** Masonry's `EventCtx` has no `get_mut`, so the `EditorSurface` cannot move into a child widget (editor event handling cannot mutate a child's state). An `Rc<RefCell<EditorSurface>>` share was rejected (~hundreds of `self.editor.` call sites + borrow-panic risk). `EditorViewWidget` carries the `SduiEditorBinding` + a11y + reserves the zero-width editor slot in the reconciled tree; `EditorWidget` still paints the canvas (hot path unchanged, per the performance criterion).
@@ -846,4 +866,4 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 
 ## Further Actions
 - **Step 15 (open):** update the package UI/layout/rendering docs (`creating-packages.md`, `shell-layout-strategy.md`, `rendering-strategy.md`) to reflect that SDUI kinds now render through a retained reconciled Masonry subtree (not immediate-mode paint), removing the "temporary compatibility bridge" status.
-- **Future cleanup (post-14):** fully remove/gate the `masonry_sdui.rs` test-infra `#![allow(dead_code)]` — `#[cfg(test)]`-gate `observable_snapshot`/`collect_observable_snapshot`/`package_overlay_observations`/`SduiObservableSnapshot`/`SduiObservableListItem` + the not-yet-wired `apply_package_ui_update`/`package_ui_version`/`typography_revision`/`package_ui` (or wire the package-UI incremental path), then drop the allow.
+- **Step 19 (open, post-14 cleanup):** drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]` — `#[cfg(test)]`-gate `observable_snapshot`/`collect_observable_snapshot`/`package_overlay_observations`/`SduiObservableSnapshot`/`SduiObservableListItem` + the not-yet-wired `apply_package_ui_update`/`package_ui_version`/`typography_revision`/`package_ui` (or wire the package-UI incremental path), then drop the allow. (Tracked as Step 19 in the execution table + detailed block.)
