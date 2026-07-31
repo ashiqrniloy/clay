@@ -21,17 +21,17 @@ Declared in `src/shell/components.rs` (`ComponentKind`). Packages compose these;
 | `scroll` | implemented | Scrollable region | Scrollbar chrome from `paint_scroll_chrome`; container, no body chrome |
 | `portal` | implemented | Renders outside normal slot flow | For transient surfaces; container, no chrome of its own |
 | `statusItem` | implemented | Status bar entry | Supports text font role; disabled → `text.disabled` × `opacity.disabled` |
-| `dropdown` | implemented | Single-select drop-down | Phase 20.5: button-like trigger row; `Role::ComboBox`; keyboard nav (ArrowUp/Down cycles `dropdown_selected`, Enter/Space confirms); children painted when focused; fill via `component_state_color("surface.control", state)` |
-| `collapse` | implemented | Expand/collapse section | Phase 20.5: title row with `clay.ui.collapseToggle` action; `Role::Group`; Enter/Space toggles `collapse_expanded`; children painted only when expanded |
-| `modal` | implemented | Blocking dialog | Phase 20.5: `paint_tooltip_shell` chrome + title + children; `Role::Dialog`; Tab focus-trap cycles `modal_focusable_intents()`; `z.modal` stacking |
+| `dropdown` | implemented | Single-select drop-down | Phase 20.5: button-like trigger row; `Role::ComboBox`; keyboard nav (ArrowUp/Down cycles the widget's `selected_index`, Enter/Space confirms); open list painted by `PackageDropdown`; fill via `component_state_color("surface.control", state)` |
+| `collapse` | implemented | Expand/collapse section | Phase 20.5: title row with `clay.ui.collapseToggle` action; `Role::Group`; Enter/Space toggles `PackageCollapse.expanded`; content shown/hidden via a layout clip |
+| `modal` | implemented | Blocking dialog | Phase 20.5: `paint_tooltip_shell` chrome (painted by the overlay host) + title + children; `Role::Dialog`; Tab focus-trap cycles the modal's widget-local focusable descendants; `z.modal` stacking |
 | `textInput` | implemented | Single-line editable text field | Phase 20.5: bordered field, placeholder in `text.muted`, focus ring, validation-state border (`diagnostic.error`/`warning`/`success` or `border.subtle`); `Role::TextInput`; `style.validationState` and `style.placeholderColor` style variables |
 | `table` | reserved | Tabular data | Deferred; no first-party package need identified as of Phase 20.5 |
 
 ### Phase 20.4 interaction-state and spacing rhythm notes
 
-Phase 20.4 restyled the implemented kinds to the minimalist design language using Phase 20.1 tokens and Phase 20.2 primitives, with no kind/style-variable/token-name change.
+Phase 20.4 restyled the implemented kinds to the minimalist design language using Phase 20.1 tokens and Phase 20.2 primitives, with no kind/style-variable/token-name change. Plan 070 later moved every kind onto a retained reconciled Masonry widget (see below); the interaction-state contract below is unchanged — it is now derived per-widget from Masonry `EventCtx`/`QueryCtx` state (`is_disabled`/`is_active`/`is_focus_target`/`is_hovered`) rather than a god-object `interaction_state` field.
 
-**Interaction states** (derived from client-local pointer/focus hit-testing in `SduiNativeState::interaction_state`; precedence `Disabled` > `Active` > `Hover` > `Focus` > `Rest`):
+**Interaction states** (derived per-widget from Masonry pointer/focus state; precedence `Disabled` > `Active` > `Hover` > `Focus` > `Rest`):
 - `button`: all five states; `Rest`=`surface.control`, `Hover`=`surface.hover`, `Active`=`surface.active`, `Focus`=`accent.primary` + `paint_focus_ring` (`border.focus`), `Disabled`=`surface.disabled`×`opacity.disabled` with `text.disabled` text and action gated.
 - `list`: per-row `Rest`/`Hover`/`Active`/`Focus` honor `selected` (`surface.selected` vs `surface.list`); `Hover`/`Active` override selection; `Disabled` dims and gates the action.
 - `label` / `statusItem`: text `text.muted` at `Rest`; `Disabled` → `text.disabled`×`opacity.disabled`; `Focus` paints a focus ring. No fill.
@@ -41,23 +41,32 @@ Phase 20.4 restyled the implemented kinds to the minimalist design language usin
 
 **Spacing rhythm**: SDUI panel padding reads `spacing.md` (16) × `spacing_scale()` (`compact`=0.875 / `default`=1.0 / `spacious`=1.125). The status bar uses `spacing.sm` × `spacing_scale()` insets with a `border.hairline` top divider. Per-element `spacing.xs`/`sm`/`lg` differentiation is deferred to a later spacing pass.
 
-**Active-theme routing**: SDUI paint reads the active `ResolvedUiTheme` via `SduiThemeStyle::from_ui_theme`; theme `clay.contributions.designTokens` overrides flow through to component paint automatically.
+**Active-theme routing**: component paint reads the active `ResolvedUiTheme` via `SduiThemeStyle::from_ui_theme` (SDUI widgets) / the package widget's `ui_theme` field; theme `clay.contributions.designTokens` overrides flow through to component paint automatically.
+
+### Plan 070 retained reconciliation notes
+
+Plan 070 replaced the immediate-mode `SduiNativeState::paint` compatibility bridge with a retained reconciled Masonry subtree. Each package-facing kind now maps to a real Masonry widget that owns its paint, interaction state, focus, scroll, and a11y:
+
+- **SDUI tree** (`SduiRegionWidget`, `src/masonry_sdui_region.rs`): `label`→`SduiLabel`, `button`→`SduiButton`, `list`→`SduiListRow` (column of rows), `editorView`→`EditorViewWidget` (binding/slot component; the editor canvas itself stays bespoke-painted by `EditorWidget`), under a Clay-owned `SduiScrollViewport`. The region is a real child of `EditorWidget`; sidebar chrome is painted by the region widget.
+- **Package component trees** (`PackageRegionWidget`, `src/masonry_package_region.rs`): `label`/`statusItem`→`PackageLeaf`, `button`→`PackageButton`, `list` rows→`PackageListRow`, `collapse`→`PackageCollapse`, `dropdown`→`PackageDropdown`, `textInput`→`PackageTextInput` (wraps Masonry `TextArea<true>`), `modal`→`PackageModal` (Dialog + Tab focus-trap). Fixed panels are hosted by `PackagePanelHost`; transient overlays + the active menu by `PackageOverlayHost`; both are children of `EditorWidget`.
+- **State moved out of the god-object**: `dropdown_selected`, `collapse_expanded`, `modal_focusable_intents`, `focused_action`, and pointer hit-test state are deleted from `SduiNativeState`; each is now widget-local (`PackageDropdown.selected_index`, `PackageCollapse.expanded`, `PackageModal` focusable list, etc.). The legacy `paint_package_component`/`paint_package_overlays` immediate-mode paths are deleted.
+- **Compatibility guarantee**: no `ComponentKind`, style-variable, token-name, or package-facing contract change — the cutover is a client-internal substrate change. Packages require no manifest or style edit.
 
 ### Phase 20.5 overlay, menu, and input component notes
 
 Phase 20.5 promoted `dropdown`, `collapse`, `modal` from reserved to implemented, added `textInput`, and uplifted all transient surfaces onto the shared overlay primitive.
 
 **New kind interaction states**:
-- `dropdown`: `Rest`/`Hover`/`Active`/`Focus`/`Disabled` via `component_state_color("surface.control", state)`; focus ring on `Focus`; children (item list) painted only when focused; selected item label from `dropdown_selected_index(node_hash)`; ArrowUp/Down cycles, Enter/Space confirms (clears focus).
-- `collapse`: title row with `clay.ui.collapseToggle` action intent; focus ring on `Focus`; children painted only when `is_collapse_expanded(node_hash)`; Enter/Space toggles.
-- `modal`: `paint_tooltip_shell` chrome (state-independent); title + children; `Role::Dialog`; Tab/Shift+Tab cycles `modal_focusable_intents()` (focus trap); `z.modal` stacking order.
+- `dropdown`: `Rest`/`Hover`/`Active`/`Focus`/`Disabled` via `component_state_color("surface.control", state)`; focus ring on `Focus`; the open item list is painted by `PackageDropdown` from its `items` (single source of truth for trigger label + selectable rows); selected item label from the widget's `selected_index`; ArrowUp/Down cycles, Enter/Space confirms and closes.
+- `collapse`: title row with `clay.ui.collapseToggle` action intent; focus ring on `Focus`; content children are shown/hidden by `PackageCollapse` via a layout clip (expanded/collapsed is widget-local state); Enter/Space toggles.
+- `modal`: `paint_tooltip_shell` chrome (state-independent, painted by the overlay host behind children); title + children; `Role::Dialog`; Tab/Shift+Tab cycles the modal's focusable descendants (focus trap, widget-local list); `z.modal` stacking order.
 - `textInput`: bordered field with `surface.control` fill; validation-state border color (`diagnostic.error`/`warning`/`success` or `border.subtle`); focus ring on `Focus`; placeholder text in `text.muted`; `Role::TextInput`; `style.validationState` (`none`/`error`/`warning`/`success`) and `style.placeholderColor` (color-role token) style variables.
 
-**Z-level stacking**: `TransientPackageOverlay` carries `z_level_token: &'static str`; `paint_package_overlays` sorts by z-order before painting: `z.overlay` (0) < `z.modal` (1) < `z.tooltip` (2). `from_menu_session` sets `"z.overlay"`; modal overlays set `"z.modal"`; tooltip-anchored overlays set `"z.tooltip"`.
+**Z-level stacking**: `TransientPackageOverlay` carries a `z_level_token: &'static str`; `PackageOverlayHost` sorts children by z-order: `z.overlay` (0) < `z.modal` (1) < `z.tooltip` (2). `from_menu_session` sets `"z.overlay"`; modal overlays set `"z.modal"`; tooltip-anchored overlays set `"z.tooltip"`.
 
 **Surface origin**: `TransientMenuOrigin` (`CommandPalette`/`ContextMenu`/`MenuBar`) on `TransientMenuSession` selects the overlay anchor: `Bottom`/`Pointer`/`Main` respectively. `TransientPackageOverlay::from_menu_session` reads `session.origin()` instead of hardcoding `Bottom`.
 
-**Overlay cursor inset**: `paint_package_overlays` reads `self.ui_theme.scalar_f64("spacing.panel")` directly (not `theme_style()` cache), consistent with `paint_tooltip_shell` which reads `ResolvedUiTheme` tokens directly.
+**Overlay cursor inset**: `PackageOverlayHost` reads `ui_theme.scalar_f64("spacing.panel")` for overlay padding, consistent with `paint_tooltip_shell` which reads `ResolvedUiTheme` tokens directly.
 
 ## Typed Style Variables
 

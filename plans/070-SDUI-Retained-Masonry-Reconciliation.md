@@ -60,7 +60,7 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 | 13e | Overlay hosting (`EditorWidget` multi-child, above region) + `modal` focus trap + `overlay`/`portal` containers; delete `focused_action`/`modal_focusable_intents` | done | 13a,13b | modal Tab/Shift+Tab trap + z-order (z.overlay<z.modal<z.tooltip) + pointer routing; menu nav re-sync via `MenuStateChanged` action |
 | 13f | Hosted menu a11y parity (`MenuItem` role + selected state + custom labels on the hosted overlay path); delete the legacy overlay/menu a11y branch + re-include `overlay_host` in a11y children | done | 13e | hosted menu a11y test asserts `MenuItem` roles + selected suffix + custom labels; legacy `collect_active_menu_accessibility_entries` deleted; no double-report |
 | 14 | Retire god-object: host `EditorView`/editor surface as child; delete `SduiNativeState::paint` + `SduiLegacyLeaf`; shrink `masonry_sdui.rs` | done | 13f | `EditorViewWidget` binding/slot component; `SduiLabel`/`EditorViewWidget` replace `SduiLegacyLeaf`; chrome moved to `SduiRegionWidget`; legacy hit-test + a11y walker + dead paint helpers removed (−556 lines); reframed test-infra allow |
-| 15 | Update package UI/layout/rendering docs | open | 14 | doc/catalog drift gates |
+| 15 | Update package UI/layout/rendering docs | done | 14 | rendering-strategy/shell-layout/creating-packages updated; `temporary compatibility bridge` wording removed; Plan 070 retained-reconciliation row added; components.md substrate notes updated; drift gates green |
 | 16 | Verify Clay JS APIs (no new surface) | open | 14 | visibility audit |
 | 17 | Verify configuration APIs (no new surface) | open | 14 | config conformance gates |
 | 18 | Update code wiki | open | 15–17 | manual wiki review |
@@ -736,12 +736,13 @@ Follow this sequence one step at a time; each step is independently verifiable. 
     - Full SDUI snapshot renders entirely through retained tree; legacy paint path absent (compile-time: removed functions). ✓ (`SduiLegacyLeaf`/`paint_chrome`/`paint_text` removed at compile time).
     - Typing hot path non-regression (existing edit/scroll tests + perf scope). — existing editor tests pass; perf scope unchanged (EditorWidget still paints the canvas).
 
-- [ ] **(Step 15 — requires Step 14)** Update the package UI/layout authoring contract and package guide
+- [x] **(Step 15 — requires Step 14)** Update the package UI/layout authoring contract and package guide
+  - **Status: done (2026-07-31).** Updated the three authoring-contract docs + the clay-ui component catalog to describe the retained reconciled Masonry substrate and remove the "temporary compatibility bridge" status. Package-facing contract (inert declarations, Clay-owned widgets, component kinds, style variables, tokens) is unchanged — the cutover is documented as a client-internal substrate change with a compatibility guarantee.
   - Acceptance Criteria:
-    - Functional: `docs/reference/packages/creating-packages.md`, `docs/reference/primitives/shell-layout-strategy.md`, and `docs/reference/primitives/rendering-strategy.md` reflect that SDUI kinds now render through a retained reconciled Masonry subtree (not immediate-mode paint), with the "temporary compatibility bridge" status removed; package-facing contract (inert declarations, Clay-owned widgets) unchanged.
-    - Performance: Docs note the no-hot-path invariant is preserved.
-    - Code Quality: Catalog drift guards still pass; `.agents/skills/clay-ui/references/components.md`/`tokens.md` updated if any kind note changed (implementation substrate changed, package-facing kinds did not).
-    - Security: Docs reaffirm no raw CSS/client JS/native widget authority for packages.
+    - Functional: `docs/reference/packages/creating-packages.md`, `docs/reference/primitives/shell-layout-strategy.md`, and `docs/reference/primitives/rendering-strategy.md` reflect that SDUI kinds now render through a retained reconciled Masonry subtree (not immediate-mode paint), with the "temporary compatibility bridge" status removed; package-facing contract (inert declarations, Clay-owned widgets) unchanged. ✓ — rendering-strategy.md SDUI sections + Client Rendering Attachment Points rewritten (SduiRegionWidget/SduiLabel/SduiButton/SduiListRow/EditorViewWidget/SduiScrollViewport, hosted as EditorWidget children; SduiNativeState::paint removed); shell-layout-strategy.md "temporary SDUI sidebar"/"compatibility bridge" wording replaced with "retained reconciled Masonry subtree"; creating-packages.md Phase 18.2 bullet + Plan 070 phase-row added + anti-pattern wording updated.
+    - Performance: Docs note the no-hot-path invariant is preserved. ✓ — rendering-strategy.md states snapshots/updates applied outside paint handlers + syncs the region in place; no package work in paint/layout/event handlers.
+    - Code Quality: Catalog drift guards still pass; `.agents/skills/clay-ui/references/components.md` updated where implementation-substrate notes changed (package-facing kinds did not). ✓ — components.md interaction-state notes + dropdown/collapse/modal table Notes + Plan 070 retained-reconciliation notes added; `tokens.md` needed no change (no token change). Drift gates green: `creating_packages_status_markers_match_clay_ui_catalog`, `component_catalog_status_partition_is_current`, `no_component_kind_or_token_renamed`, `clay_ui_catalog_notes_state_completeness`.
+    - Security: Docs reaffirm no raw CSS/client JS/native widget authority for packages. ✓ — unchanged security wording in all three docs (packages cannot mutate Masonry widgets, run client JS, inject CSS, etc.).
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/project-patterns/references/package-ui-layout.md`, `documentation-as-code.md`.
@@ -750,18 +751,20 @@ Follow this sequence one step at a time; each step is independently verifiable. 
       - Document as a new package API: rejected — no package-facing change; this is client-internal substrate.
       - Update strategy/rendering docs to describe the retained reconciliation substrate: chosen.
     - Chosen Approach:
-      - Edit strategy/rendering docs + catalog notes to match implementation; keep package contract stable.
+      - Edit strategy/rendering docs + catalog notes to match implementation; keep package contract stable. Added a Plan 070 row to the creating-packages.md phase-update table documenting the retained-reconciliation cutover + compatibility guarantee.
     - API Notes and Examples:
       ```text
-      docs/reference/primitives/shell-layout-strategy.md  # remove "temporary bridge" wording
-      docs/reference/packages/creating-packages.md        # rendering substrate note
+      docs/reference/primitives/shell-layout-strategy.md  # removed "temporary bridge" wording
+      docs/reference/primitives/rendering-strategy.md     # SDUI sections rewritten for retained subtree
+      docs/reference/packages/creating-packages.md        # Plan 070 phase row + substrate note
+      .agents/skills/clay-ui/references/components.md     # interaction-state + Plan 070 substrate notes
       ```
     - Files to Create/Edit:
       - `docs/reference/primitives/shell-layout-strategy.md`, `docs/reference/primitives/rendering-strategy.md`, `docs/reference/packages/creating-packages.md`, `.agents/skills/clay-ui/references/components.md`.
     - References:
       - `decision-logs/2026-06-09-1431-...md`.
   - Test Cases to Write:
-    - Doc/catalog drift checks pass (`cargo test` documentation-contract gates).
+    - Doc/catalog drift checks pass (`cargo test` documentation-contract gates). ✓ — all primitives_docs/package_ui_conformance/package_loading_docs gates green (only pre-existing plan061/package_manifest failures remain, unrelated).
 
 - [ ] **(Step 16 — requires Step 14)** Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
@@ -865,5 +868,5 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 - **Step 14 — `masonry_sdui.rs` retains a reframed `#![allow(dead_code)]`.** The original "staged for runtime wiring" reason (a migration staging block) is replaced with "test/agent observability surface not wired into production rendering". It covers `observable_snapshot`/`package_ui` introspection/`apply_package_ui_update`/`package_ui_version`/`typography_revision` (test-only or not-yet-wired; production uses `install_package_ui_snapshot`) + cascading helpers. The actual migration staging block (`masonry_sdui_region.rs`) was removed. Full removal/`#[cfg(test)]`-gating of the remaining ~10 methods + 2 structs is future cleanup.
 
 ## Further Actions
-- **Step 15 (open):** update the package UI/layout/rendering docs (`creating-packages.md`, `shell-layout-strategy.md`, `rendering-strategy.md`) to reflect that SDUI kinds now render through a retained reconciled Masonry subtree (not immediate-mode paint), removing the "temporary compatibility bridge" status.
+- **Step 15 (done):** updated `creating-packages.md`, `shell-layout-strategy.md`, `rendering-strategy.md`, and `.agents/skills/clay-ui/references/components.md` to describe the retained reconciled Masonry subtree, removed the "temporary compatibility bridge" wording, and added a Plan 070 phase row; package-facing contract unchanged. Drift gates green.
 - **Step 19 (open, post-14 cleanup):** drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]` — `#[cfg(test)]`-gate `observable_snapshot`/`collect_observable_snapshot`/`package_overlay_observations`/`SduiObservableSnapshot`/`SduiObservableListItem` + the not-yet-wired `apply_package_ui_update`/`package_ui_version`/`typography_revision`/`package_ui` (or wire the package-UI incremental path), then drop the allow. (Tracked as Step 19 in the execution table + detailed block.)
