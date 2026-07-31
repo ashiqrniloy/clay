@@ -2704,26 +2704,16 @@ impl Widget for EditorWidget {
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
         // SDUI chrome (sidebar panel bg/border) paints BELOW the reconciled
-        // region child (which paints the sidebar tree). The editor canvas,
-        // package overlays, and the status line paint in `post_paint` ABOVE the
-        // region child (plan 070 step 8); the editor sits to the right of the
-        // sidebar so that ordering is z-order-only, no overlap.
+        // region child (which paints the sidebar tree). The editor canvas also
+        // paints here in `paint()` so it lands BELOW the `overlay_host` child
+        // (transient overlays/menus): Masonry order is parent.paint() ->
+        // children -> parent.post_paint(), and overlays are a child, so editor
+        // content must be in `paint()` to sit beneath them. The status line
+        // stays in `post_paint` so it remains above the overlays (plan 070 step
+        // 13e). The editor sits right of the sidebar so the region child and
+        // editor canvas never overlap; the sidebar clip that used to force
+        // editor content into `post_paint` was removed in step 8.
         self.sdui.paint_chrome(ctx, scene);
-    }
-
-    fn post_paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        _props: &PropertiesRef<'_>,
-        scene: &mut Scene,
-    ) {
-        // Unclipped (runs after the sidebar clip is popped). Fill the editor
-        // area background + paint the editor canvas. The editor area is right of
-        // the sidebar, so it never overlaps the region child and the later
-        // z-order is harmless. Do NOT fill the full window here — that would
-        // paint over the sidebar tree. Overlays + the status line follow above.
-        let recorder = global_recorder();
-        let _scope = recorder.scope("masonry.render_prepare.post_paint");
         let editor_main_rect = self.editor_main_rect(ctx.size());
         scene.fill(
             Fill::NonZero,
@@ -2733,8 +2723,21 @@ impl Widget for EditorWidget {
             &editor_main_rect,
         );
         self.editor.paint_in_rect(ctx, scene, editor_main_rect);
-        // Transient overlays (package overlays + the active menu) are painted by
-        // the retained `PackageOverlayHost` child (plan 070 step 13e), not here.
+    }
+
+    fn post_paint(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        _props: &PropertiesRef<'_>,
+        scene: &mut Scene,
+    ) {
+        // Runs AFTER the children pass, so the status line paints above the
+        // `overlay_host` child (transient overlays/menus). The editor bg +
+        // canvas moved to `paint()` so overlays render above them (plan 070
+        // step 13e z-order fix). Do NOT fill the full window here — that would
+        // paint over the sidebar tree.
+        let recorder = global_recorder();
+        let _scope = recorder.scope("masonry.render_prepare.post_paint");
         self.paint_status_line(ctx, scene);
     }
 
