@@ -61,7 +61,7 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 | 13f | Hosted menu a11y parity (`MenuItem` role + selected state + custom labels on the hosted overlay path); delete the legacy overlay/menu a11y branch + re-include `overlay_host` in a11y children | done | 13e | hosted menu a11y test asserts `MenuItem` roles + selected suffix + custom labels; legacy `collect_active_menu_accessibility_entries` deleted; no double-report |
 | 14 | Retire god-object: host `EditorView`/editor surface as child; delete `SduiNativeState::paint` + `SduiLegacyLeaf`; shrink `masonry_sdui.rs` | done | 13f | `EditorViewWidget` binding/slot component; `SduiLabel`/`EditorViewWidget` replace `SduiLegacyLeaf`; chrome moved to `SduiRegionWidget`; legacy hit-test + a11y walker + dead paint helpers removed (−556 lines); reframed test-infra allow |
 | 15 | Update package UI/layout/rendering docs | done | 14 | rendering-strategy/shell-layout/creating-packages updated; `temporary compatibility bridge` wording removed; Plan 070 retained-reconciliation row added; components.md substrate notes updated; drift gates green |
-| 16 | Verify Clay JS APIs (no new surface) | open | 14 | visibility audit |
+| 16 | Verify Clay JS APIs (no new surface) | done | 14 | verify-and-no-op: all reconciliation widgets `pub(crate)`; 5 `pub` action types are bin-crate `ErasedAction::downcast` surface (not JS); no new op/facade/registry row; 38 `clay_js_doc_registry` gates green |
 | 17 | Verify configuration APIs (no new surface) | open | 14 | config conformance gates |
 | 18 | Update code wiki | open | 15–17 | manual wiki review |
 | 19 | Drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]`: `#[cfg(test)]`-gate or wire the observability/not-yet-wired API | open | 14 | no `#![allow(dead_code)]` in `masonry_sdui.rs`; `cargo clippy --all-targets -- -D warnings` clean |
@@ -766,12 +766,13 @@ Follow this sequence one step at a time; each step is independently verifiable. 
   - Test Cases to Write:
     - Doc/catalog drift checks pass (`cargo test` documentation-contract gates). ✓ — all primitives_docs/package_ui_conformance/package_loading_docs gates green (only pre-existing plan061/package_manifest failures remain, unrelated).
 
-- [ ] **(Step 16 — requires Step 14)** Create or verify Clay JS APIs for public programmatic surfaces
+- [x] **(Step 16 — requires Step 14)** Create or verify Clay JS APIs for public programmatic surfaces
+  - **Status: done (2026-07-31, verify-and-no-op).** Visibility audit confirmed no new public programmatic/JS surface was introduced; all reconciliation widgets/containers are `pub(crate)`; the only `pub` items are 5 Masonry `ErasedAction` types required by `main.rs` (a separate bin crate) for action downcast — they are re-exported via `pub mod masonry_editor` and are NOT a JS surface (no op, no facade, not in the runtime doc registry). No new op/facade/registry row was added.
   - Acceptance Criteria:
-    - Functional: Confirm this plan introduces no new public programmatic capability; all new reconciliation types are `pub(crate)`; any inadvertently-public client function is made `pub(crate)`; no new op/facade required.
-    - Performance: N/A (no new API surface).
-    - Code Quality: Rust visibility audit — reconciliation container and helpers not exposed across the lib/bin boundary beyond what `main.rs` needs; `#[doc(hidden)]` native-only types stay non-registry.
-    - Security: No raw `Deno.core.ops`, native widget handle, or client JS surface added; registry unchanged.
+    - Functional: Confirm this plan introduces no new public programmatic capability; all new reconciliation types are `pub(crate)`; any inadvertently-public client function is made `pub(crate)`; no new op/facade required. ✓ — `SduiRegionWidget`/`SduiScrollViewport`/`SduiButton`/`SduiListRow`/`SduiLabel`/`EditorViewWidget` (masonry_sdui_region.rs) and `PackageRegionWidget`/`PackageLeaf`/`PackageButton`/`PackageListRow`/`PackageCollapse`/`PackageDropdown`/`PackageModal`/`PackageTextInput`/`PackagePanelHost`/`PackageOverlayHost` (masonry_package_region.rs) are all `pub(crate) struct`. The two modules are `pub(crate) mod` in lib.rs. The 5 `pub struct` action types (`SduiButtonPress`/`SduiListRowPress`/`PackageButtonPress`/`PackageListRowPress`/`PackageDropdownSelect`) are intentionally public: `main.rs` is a separate bin crate (`use clay::masonry_editor::{...}`) and needs them for `ErasedAction::downcast` in the action-routing chain; they carry `SduiActionIntent` payloads, not JS-facing data. `PackageModalDismiss` is `pub(crate)` (test-only/future, not used by main.rs). No inadvertently-public client function found.
+    - Performance: N/A (no new API surface). ✓
+    - Code Quality: Rust visibility audit — reconciliation container and helpers not exposed across the lib/bin boundary beyond what `main.rs` needs; `#[doc(hidden)]` native-only types stay non-registry. ✓ — `main.rs` imports only `EditorWidget`, `EditorAction`, `EditorStatus`, and the 5 action types via `clay::masonry_editor`; no reconciliation widget/container leaks. `masonry_sdui_region`/`masonry_package_region` are `pub(crate) mod`, so their `pub` action types are crate-internal except where re-exported by `pub mod masonry_editor` for the bin crate.
+    - Security: No raw `Deno.core.ops`, native widget handle, or client JS surface added; registry unchanged. ✓ — `git log 96bda33..03e91dc -- runtime/js src/server/ops src/server/ui.rs` is empty (no plan-070 commit touched JS runtime or server ops). 38 `clay_js_doc_registry` gates pass (`clay_js_api_inventory_unchanged_or_documented`, `generated_registry_contains_*`, etc.).
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/create-plan/references/clay.md` (Clay JS API Task), `.agents/skills/project-patterns/references/clay-js-api-boundary.md`, `clay-js-api-naming.md`.
@@ -779,17 +780,19 @@ Follow this sequence one step at a time; each step is independently verifiable. 
       - Expose reconciliation state for agents: rejected — observability stays internal test/agent surface (`SduiObservableSnapshot`), not a public API.
       - Verify-and-no-op with a visibility audit: chosen.
     - Chosen Approach:
-      - Audit visibility; keep internals `pub(crate)`; document in the plan that no Clay JS API is added.
+      - Audit visibility; keep internals `pub(crate)`; document in the plan that no Clay JS API is added. Audit performed via `grep ^pub struct/^pub fn` across the two region modules + lib.rs module visibility + main.rs import surface + `git log` over `runtime/js`/`src/server/ops` + the 38 `clay_js_doc_registry` protocol gates.
     - API Notes and Examples:
       ```rust
       pub(crate) struct SduiRegionWidget { /* ... */ } // not a JS-facing surface
+      pub(crate) mod masonry_sdui_region;               // lib.rs
+      pub use crate::masonry_sdui_region::{SduiButtonPress, SduiListRowPress}; // bin-crate action downcast only
       ```
     - Files to Create/Edit:
-      - `src/masonry_sdui_region.rs` / `src/lib.rs`: enforce `pub(crate)` visibility.
+      - `src/masonry_sdui_region.rs` / `src/lib.rs`: enforce `pub(crate)` visibility. ✓ — already `pub(crate)`; no edits required.
     - References:
       - `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`.
   - Test Cases to Write:
-    - Visibility audit: `cargo test` doc-registry/lookup gates pass with no new public API rows.
+    - Visibility audit: `cargo test` doc-registry/lookup gates pass with no new public API rows. ✓ — 38 `clay_js_doc_registry` tests pass; no new rows.
 
 - [ ] **(Step 17 — requires Step 14)** Create or verify Clay configuration APIs
   - Acceptance Criteria:
