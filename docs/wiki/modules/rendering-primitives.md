@@ -71,7 +71,7 @@ The implemented render hook preserves these boundaries:
 - `src/editor/surface.rs::EditorSurface` holds current document/version-matched decoration state near visible snapshot/layout-cache computation.
 - `src/editor/layout.rs::LayoutState::paint_text` renders syntax/semantic ranges with cached Parley foreground brushes; selection fills and diagnostic squiggles remain separate Vello layers.
 - `src/masonry_editor.rs::EditorWidget::paint` does not run package JavaScript, validate large payloads, or parse package declarations. It only renders already-applied state.
-- `src/masonry_sdui.rs::SduiNativeState::apply_snapshot` and `apply_update` remain the SDUI panel/status application path, while `SduiNativeState::paint` renders the validated native UI tree.
+- `src/masonry_sdui.rs::SduiNativeState::apply_snapshot` and `apply_update` remain the SDUI panel/status application path; the validated native UI tree is rendered by a retained reconciled Masonry subtree (`SduiRegionWidget`, `src/masonry_sdui_region.rs`) hosted as a child of `EditorWidget` (see [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md)).
 
 ## Viewport and Incremental Policy
 

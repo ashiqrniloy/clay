@@ -63,7 +63,7 @@ Follow this sequence one step at a time; each step is independently verifiable. 
 | 15 | Update package UI/layout/rendering docs | done | 14 | rendering-strategy/shell-layout/creating-packages updated; `temporary compatibility bridge` wording removed; Plan 070 retained-reconciliation row added; components.md substrate notes updated; drift gates green |
 | 16 | Verify Clay JS APIs (no new surface) | done | 14 | verify-and-no-op: all reconciliation widgets `pub(crate)`; 5 `pub` action types are bin-crate `ErasedAction::downcast` surface (not JS); no new op/facade/registry row; 38 `clay_js_doc_registry` gates green |
 | 17 | Verify configuration APIs (no new surface) | done | 14 | verify-and-no-op: no new command/key binding/config option; CLAY_SDUI_RETAINED deleted in Step 8; layout.json/preferences.json/init.js unchanged; 15 configuration/keybinding gates green |
-| 18 | Update code wiki | open | 15–17 | manual wiki review |
+| 18 | Update code wiki | done | 15–17 | new `masonry-sdui-region.md` page; `server-driven-ui.md`/`masonry-editor.md`/`rendering-primitives.md` surgically updated; index linked; full gate green |
 | 19 | Drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]`: `#[cfg(test)]`-gate or wire the observability/not-yet-wired API | open | 14 | no `#![allow(dead_code)]` in `masonry_sdui.rs`; `cargo clippy --all-targets -- -D warnings` clean |
 
 ## Objectives
@@ -822,32 +822,36 @@ Follow this sequence one step at a time; each step is independently verifiable. 
   - Test Cases to Write:
     - Configuration conformance gates pass with no new undocumented keys. ✓ — 15 configuration/keybinding gates green (`configuration_surface_is_closed_and_security_controls_are_not_properties`, `configuration_api_no_authority_grant`, `configuration_entrypoint_is_documented_and_indexed`, `keybinding_configuration_apis_have_empty_defaults`, `language_package_docs_have_no_hidden_configuration_surface`, `no_public_configuration_needed_for_internal_perf_hooks`, etc.).
 
-- [ ] **(Step 18 — requires Steps 15–17)** Update or verify the code wiki after implementation
+- [x] **(Step 18 — requires Steps 15–17)** Update or verify the code wiki after implementation
+  - **Status: done (2026-07-31).** Updated the project code wiki per the `project-wiki` workflow: created a new dedicated page for the retained reconciliation module, surgically updated the living reference pages that described the deleted immediate-mode paint path, and linked the new page from the master index. Historical phase-review pages (phase18.2/18.3/20.4/20.5) were left as historical records since they document the state at their respective phase times.
   - Acceptance Criteria:
-    - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
-    - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
-    - Code Quality: Wiki pages explain what changed code does, how it works, invariants/tradeoffs, source/test paths, examples where useful, and links from the master wiki index.
-    - Security: Wiki pages document touched security boundaries, permissions, validation, secrets handling, or external authority without exposing secrets.
+    - Functional: The project code wiki is updated after all implementation tasks are complete. ✓ — new page `docs/wiki/modules/masonry-sdui-region.md` documents the `SduiRegionWidget`/`PackageRegionWidget` reconcilers, widget inventory, `EditorWidget` three-child hosting + z-order, stable-identity reconcile, action routing, active-menu pipeline + `MenuA11y`, sync wiring, invariants, tests. `docs/wiki/modules/server-driven-ui.md` rewritten (Overview, Responsibilities, How It Works client-rendering paragraphs, Phase 20.4 interaction-state section, Tests list, Related) to describe the retained subtree + link the new page; deleted-test references removed. `docs/wiki/modules/masonry-editor.md` updated (Overview, hosting model, accessibility line, Phase 20.4 pointer-state section) to reflect three-child hosting + deleted god-object pointer state. `docs/wiki/modules/rendering-primitives.md` fixed (one stale `SduiNativeState::paint` line). `docs/wiki/index.md` links the new page.
+    - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan. ✓ — the new page documents the no-hot-path invariant (editor canvas paint stays in `EditorWidget::paint`), the `post_paint`/`request_render` constraint, and `SduiScrollViewport` scroll ownership.
+    - Code Quality: Wiki pages explain what changed code does, how it works, invariants/tradeoffs, source/test paths, examples where useful, and links from the master wiki index. ✓ — the new page covers Source/Overview/EditorWidget Multi-Child Hosting/Stable-Identity Reconciliation/Widget Inventory/Action Routing/Active Menu/Menu Accessibility/Sync Wiring/Invariants/Tests/Related; master index links it with a one-line summary.
+    - Security: Wiki pages document touched security boundaries, permissions, validation, secrets handling, or external authority without exposing secrets. ✓ — Invariants section documents that SDUI/package actions are inert `SduiActionIntent` command intents with no filesystem/network/shell/extension/AI/workspace/client-JS authority, all widgets are `pub(crate)` (no JS API surface), and no new op/facade/config/env var was introduced.
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/project-wiki/SKILL.md`: Use the project wiki workflow and quality bar.
     - Options Considered:
       - Update after each task: more granular, but noisy and likely to churn.
-      - Update once after tests pass: keeps docs aligned with final code.
+      - Update once after tests pass: keeps docs aligned with final code. ✓ chosen.
     - Chosen Approach:
-      - After implementation and verification pass, update the Markdown code wiki once using `project-wiki`, including the master index and relevant pages (new `masonry_sdui_region` reconciliation module, retired immediate-mode path, unified slot geometry).
+      - After implementation and verification pass, update the Markdown code wiki once using `project-wiki`, including the master index and relevant pages (new `masonry_sdui_region` reconciliation module, retired immediate-mode path, unified slot geometry). Created `masonry-sdui-region.md` as the core new page; surgically fixed actively-misleading stale claims in the three living reference pages (`server-driven-ui.md`, `masonry-editor.md`, `rendering-primitives.md`); left historical phase-review pages as historical records.
     - API Notes and Examples:
       ```text
-      docs/wiki/index.md
-      docs/wiki/modules/<module>.md
+      docs/wiki/index.md                              # new page linked
+      docs/wiki/modules/masonry-sdui-region.md        # NEW: retained reconciliation module
+      docs/wiki/modules/server-driven-ui.md           # updated: retained subtree + deleted tests
+      docs/wiki/modules/masonry-editor.md             # updated: 3-child hosting + deleted pointer state
+      docs/wiki/modules/rendering-primitives.md       # updated: one stale paint line
       ```
     - Files to Create/Edit:
-      - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas.
-      - `docs/wiki/**`: Add or update implementation wiki pages for changed code.
+      - `docs/wiki/index.md`: Add or update navigation links for changed implementation areas. ✓
+      - `docs/wiki/**`: Add or update implementation wiki pages for changed code. ✓
     - References:
       - `.agents/skills/project-wiki/SKILL.md`
   - Test Cases to Write:
-    - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
+    - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works. ✓ — master index links the new page; full gate green (lib 1146, editor 149, runtime 196, protocol 139+1 pre-existing; fmt ok).
 
 - [ ] **(Step 19 — requires Step 14)** Drop the `masonry_sdui.rs` test-infra `#![allow(dead_code)]`
   - **Context:** Step 14 reframed the `masonry_sdui.rs` module-level `#![allow(dead_code)]` from "staged for runtime wiring" (a migration staging block) to "test/agent observability surface not wired into production rendering". The actual migration staging block (`masonry_sdui_region.rs`) was removed in Step 14; this remaining allow is test-infrastructure + not-yet-wired API, not migration staging. This step retires it so no module-level dead-code allow remains in the SDUI surface.
