@@ -1,13 +1,12 @@
 #![allow(
-    dead_code,
-    reason = "SduiNativeState retains a test/agent observability surface (observable_snapshot, package_ui introspection, a11y walker) that is not wired into production rendering after plan 070 step 14 retired the god-object paint path; the live tree flows through the hosted SduiRegionWidget/PackageRegionWidget children. This is test infrastructure, not a migration staging block — full removal/gating is future cleanup"
-)]
-#![allow(
     clippy::too_many_arguments,
     reason = "Masonry paint/layout helpers pass explicit render context and geometry instead of hiding hot-path state in heap structs"
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+
+#[cfg(test)]
+use std::collections::BTreeSet;
 
 use masonry::core::{BrushIndex, PaintCtx, render_text};
 use masonry::kurbo::{Affine, Point, Rect, Size};
@@ -16,18 +15,26 @@ use masonry::peniko::Color;
 use masonry::vello::Scene;
 
 use crate::{
-    editor::typography::{TypographyRegistry, UiTextMetrics, UiTextVariant},
+    editor::typography::{TypographyRegistry, UiTextMetrics},
     perf::metrics::global_recorder,
     protocol::{
         DocumentId, FontRole, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode,
         SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
     },
     shell::{
-        CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiComponentTree,
-        PackageUiOverlayObservation, PackageUiPanelObservation, PackageUiRuntimeError,
-        PackageUiRuntimeState, PackageUiRuntimeUpdate, PaneSlotLayout, TransientMenuSession,
+        CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiRuntimeState,
+        PaneSlotLayout, TransientMenuSession,
         layout::PaneSlotId,
         theme::{PanelDefaults, SduiThemeStyle},
+    },
+};
+
+#[cfg(test)]
+use crate::{
+    editor::typography::UiTextVariant,
+    shell::{
+        PackageUiComponentTree, PackageUiOverlayObservation, PackageUiPanelObservation,
+        PackageUiRuntimeError, PackageUiRuntimeUpdate,
     },
 };
 
@@ -39,6 +46,7 @@ use crate::shell::{
 #[cfg(test)]
 const SIDEBAR_WIDTH: f64 = 240.0;
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SduiObservableListItem {
     pub id: String,
@@ -47,6 +55,7 @@ pub(crate) struct SduiObservableListItem {
 
 // Internal test/agent observability surface only. If SDUI state becomes a public
 // Clay JS API, expose it through a dedicated facade instead of widening this type.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SduiObservableSnapshot {
     pub ui_version: SduiVersion,
@@ -168,11 +177,6 @@ impl SduiNativeState {
         )
     }
 
-    /// The package_ui runtime state the panel host reconciles against.
-    pub(crate) fn package_ui(&self) -> &PackageUiRuntimeState {
-        &self.package_ui
-    }
-
     /// Snapshot the package_ui state + render context for the panel host to
     /// reconcile its retained fixed-panel children (plan 070 step 13b).
     pub(crate) fn panels_render_input(
@@ -186,32 +190,6 @@ impl SduiNativeState {
             self.package_ui.clone(),
             self.typography.clone(),
             self.ui_theme.clone(),
-        )
-    }
-
-    fn text_metrics(&self, role: FontRole, variant: UiTextVariant) -> UiTextMetrics {
-        self.typography.ui_text_metrics(role, variant)
-    }
-
-    fn body_metrics(&self) -> UiTextMetrics {
-        self.text_metrics(FontRole::Ui, self.theme_style().body_text)
-    }
-
-    fn component_variant(
-        component: &PackageUiComponentTree,
-        fallback: UiTextVariant,
-    ) -> UiTextVariant {
-        component.text_variant.unwrap_or(fallback)
-    }
-
-    fn component_metrics(
-        &self,
-        component: &PackageUiComponentTree,
-        fallback: UiTextVariant,
-    ) -> UiTextMetrics {
-        self.text_metrics(
-            component.font_role,
-            Self::component_variant(component, fallback),
         )
     }
 
@@ -324,10 +302,12 @@ impl SduiNativeState {
         self.ui_version
     }
 
+    #[cfg(test)]
     pub(crate) fn typography_revision(&self) -> u64 {
         self.typography.revision()
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_package_ui_update(
         &mut self,
         update: PackageUiRuntimeUpdate,
@@ -348,6 +328,7 @@ impl SduiNativeState {
         self.overlays_dirty = true;
     }
 
+    #[cfg(test)]
     pub(crate) fn package_ui_version(&self) -> u64 {
         self.package_ui.version()
     }
@@ -377,6 +358,7 @@ impl SduiNativeState {
         sdui_panel_left_slot_rect(size, self).is_some_and(|rect| rect.contains(point))
     }
 
+    #[cfg(test)]
     pub(crate) fn observable_snapshot(&self, widget_size: Size) -> SduiObservableSnapshot {
         let mut snapshot = SduiObservableSnapshot {
             ui_version: self.ui_version,
@@ -409,6 +391,7 @@ impl SduiNativeState {
         snapshot
     }
 
+    #[cfg(test)]
     fn package_overlay_observations(&self, widget_size: Size) -> Vec<PackageUiOverlayObservation> {
         let slot_geometry =
             sdui_slot_layout(widget_size, self).compute_geometry(widget_size.to_rect());
@@ -554,6 +537,7 @@ impl SduiNativeState {
         }
     }
 
+    #[cfg(test)]
     fn collect_observable_snapshot(
         &self,
         node_id: SduiNodeId,
@@ -827,6 +811,7 @@ fn json_object_to_sdui_arguments(
 /// `z.tooltip` (2). Unknown tokens sort as `z.overlay`. Shared by the retained
 /// overlay host (step 13e) and the legacy overlay paint walk.
 /// The kind name for an SDUI node (test/observability surface).
+#[cfg(test)]
 fn sdui_node_kind_name(kind: &SduiNodeKind) -> &'static str {
     match kind {
         SduiNodeKind::Panel { .. } => "Panel",

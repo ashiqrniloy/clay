@@ -15,9 +15,11 @@ pub(crate) use layout::{
 };
 pub(crate) use package_ui::{
     FixedPackagePanel, PackageInputRouting, PackageOverlayAnchor, PackagePanelVisibility,
-    PackageUiComponentTree, PackageUiOverlayObservation, PackageUiPanelObservation,
-    PackageUiRuntimeError, PackageUiRuntimeState, PackageUiRuntimeUpdate, TransientPackageOverlay,
+    PackageUiComponentTree, PackageUiRuntimeError, PackageUiRuntimeState, PackageUiRuntimeUpdate,
+    TransientPackageOverlay,
 };
+#[cfg(test)]
+pub(crate) use package_ui::{PackageUiOverlayObservation, PackageUiPanelObservation};
 pub(crate) use primitives::{
     Axis, InteractionState, PanelChrome, component_state_color, disabled_text_color,
     list_row_fill_color, paint_divider, paint_focus_ring, paint_panel_chrome,
