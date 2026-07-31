@@ -1,6 +1,6 @@
 #![allow(
     dead_code,
-    reason = "SDUI observability/package UI bridge structs are staged for runtime wiring and covered by docs/tests before every callsite is live"
+    reason = "SduiNativeState retains a test/agent observability surface (observable_snapshot, package_ui introspection, a11y walker) that is not wired into production rendering after plan 070 step 14 retired the god-object paint path; the live tree flows through the hosted SduiRegionWidget/PackageRegionWidget children. This is test infrastructure, not a migration staging block — full removal/gating is future cleanup"
 )]
 #![allow(
     clippy::too_many_arguments,
@@ -9,7 +9,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use masonry::accesskit::Role;
 use masonry::core::{BrushIndex, PaintCtx, render_text};
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -46,12 +45,6 @@ pub(crate) struct SduiObservableListItem {
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SduiAccessibleNode {
-    pub role: Role,
-    pub label: Option<String>,
-}
-
 // Internal test/agent observability surface only. If SDUI state becomes a public
 // Clay JS API, expose it through a dedicated facade instead of widening this type.
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +68,6 @@ pub struct SduiNativeState {
     root_id: Option<SduiNodeId>,
     nodes: BTreeMap<SduiNodeId, SduiNode>,
     editor_binding: Option<SduiEditorBinding>,
-    actions: Vec<SduiVisibleAction>,
     package_ui: PackageUiRuntimeState,
     typography: TypographyRegistry,
     // Phase 20.1: cached resolved UI design-token registry layered over the
@@ -107,7 +99,6 @@ impl SduiNativeState {
             root_id: None,
             nodes: BTreeMap::new(),
             editor_binding: None,
-            actions: Vec::new(),
             package_ui: PackageUiRuntimeState::new(),
             typography: TypographyRegistry::default(),
             ui_theme: crate::shell::theme::ResolvedUiTheme::default(),
@@ -127,7 +118,6 @@ impl SduiNativeState {
             return;
         }
         self.typography = typography;
-        self.actions.clear();
         self.mark_region_dirty();
         self.panels_dirty = true;
         self.overlays_dirty = true;
@@ -343,7 +333,6 @@ impl SduiNativeState {
         update: PackageUiRuntimeUpdate,
     ) -> Result<(), PackageUiRuntimeError> {
         self.package_ui.apply_update(update)?;
-        self.actions.clear();
         // package_ui drives both the fixed panels and the transient overlays.
         self.panels_dirty = true;
         self.overlays_dirty = true;
@@ -355,7 +344,6 @@ impl SduiNativeState {
         snapshot: &crate::protocol::PackageUiSnapshot,
     ) {
         self.package_ui.install_runtime_snapshot(snapshot);
-        self.actions.clear();
         self.panels_dirty = true;
         self.overlays_dirty = true;
     }
@@ -378,13 +366,6 @@ impl SduiNativeState {
             self.collect_visible_texts(root_id, &mut texts);
         }
         texts
-    }
-
-    pub fn action_for_point(&self, point: Point) -> Option<SduiActionIntent> {
-        self.actions
-            .iter()
-            .find(|action| action.rect.contains(point))
-            .map(|action| action.intent.clone())
     }
 
     /// True when `point` lies inside the Clay-owned left file-browser panel,
@@ -465,36 +446,6 @@ impl SduiNativeState {
         overlays
     }
 
-    pub(crate) fn accessibility_nodes(&self) -> Vec<SduiAccessibleNode> {
-        let mut nodes = Vec::new();
-        if let Some(root_id) = self.root_id {
-            let mut visited = BTreeSet::new();
-            self.collect_accessibility_nodes(root_id, &mut visited, &mut nodes);
-        }
-        nodes
-    }
-
-    #[cfg(test)]
-    fn rebuild_action_regions_for_test(&mut self, size: Size) {
-        self.actions.clear();
-        let package_panels: Vec<_> = self
-            .package_ui
-            .visible_fixed_panels(size.to_rect(), &self.ui_theme.panel_defaults())
-            .into_iter()
-            .map(|(rect, panel)| (rect, panel.clone()))
-            .collect();
-        for (rect, panel) in package_panels {
-            let mut cursor_y = rect.y0 + self.theme_style().panel_padding;
-            self.collect_package_action_regions(
-                &panel.component,
-                0,
-                &mut cursor_y,
-                rect.width(),
-                rect.x0,
-            );
-        }
-    }
-
     /// Compute the sidebar slot geometry for the current size. Called from
     /// `EditorWidget::layout` to place the reconciled region child as a fixed
     /// scroll viewport. Scroll position/content height are owned by the
@@ -546,7 +497,6 @@ impl SduiNativeState {
         if let Some(root_id) = self.root_id {
             self.find_editor_binding(root_id);
         }
-        self.actions.clear();
     }
 
     fn find_editor_binding(&mut self, node_id: SduiNodeId) {
@@ -652,138 +602,6 @@ impl SduiNativeState {
         }
     }
 
-    fn collect_accessibility_nodes(
-        &self,
-        node_id: SduiNodeId,
-        visited: &mut BTreeSet<SduiNodeId>,
-        nodes: &mut Vec<SduiAccessibleNode>,
-    ) {
-        if !visited.insert(node_id) {
-            return;
-        }
-        let Some(node) = self.nodes.get(&node_id) else {
-            return;
-        };
-        match &node.kind {
-            SduiNodeKind::Panel { title, children } => {
-                nodes.push(SduiAccessibleNode {
-                    role: Role::Pane,
-                    label: Some(title.clone()),
-                });
-                for child_id in children {
-                    self.collect_accessibility_nodes(*child_id, visited, nodes);
-                }
-            }
-            SduiNodeKind::Label { text } => nodes.push(SduiAccessibleNode {
-                role: Role::Label,
-                label: Some(text.clone()),
-            }),
-            SduiNodeKind::Button { label, .. } => nodes.push(SduiAccessibleNode {
-                role: Role::Button,
-                label: Some(label.clone()),
-            }),
-            SduiNodeKind::List { items } => {
-                nodes.push(SduiAccessibleNode {
-                    role: Role::List,
-                    label: None,
-                });
-                for item in items {
-                    nodes.push(SduiAccessibleNode {
-                        role: Role::ListItem,
-                        label: Some(item.label.clone()),
-                    });
-                }
-            }
-            SduiNodeKind::EditorView { binding } => nodes.push(SduiAccessibleNode {
-                role: Role::MultilineTextInput,
-                label: Some(format!("Editor view for document {}", binding.document_id)),
-            }),
-            SduiNodeKind::Flex { children, .. } | SduiNodeKind::Stack { children } => {
-                nodes.push(SduiAccessibleNode {
-                    role: Role::Pane,
-                    label: None,
-                });
-                for child_id in children {
-                    self.collect_accessibility_nodes(*child_id, visited, nodes);
-                }
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn collect_package_action_regions(
-        &mut self,
-        component: &PackageUiComponentTree,
-        depth: usize,
-        cursor_y: &mut f64,
-        width: f64,
-        origin_x: f64,
-    ) {
-        let metrics = self.component_metrics(component, self.theme_style().body_text);
-        match component.kind.as_str() {
-            "panel" => {
-                if component.title.is_some() {
-                    *cursor_y += self
-                        .component_metrics(component, self.theme_style().title_text)
-                        .row_height;
-                }
-                for child in &component.children {
-                    self.collect_package_action_regions(
-                        child,
-                        depth + 1,
-                        cursor_y,
-                        width,
-                        origin_x,
-                    );
-                }
-            }
-            "button" => {
-                if !component.disabled
-                    && let Some(command_id) = &component.action_command_id
-                {
-                    self.actions.push(SduiVisibleAction {
-                        rect: self.row_rect(
-                            depth,
-                            *cursor_y,
-                            width,
-                            origin_x,
-                            metrics.button_height(),
-                        ),
-                        intent: package_action_intent(command_id, &component.id),
-                    });
-                }
-                *cursor_y += metrics.button_height();
-            }
-            "list" => {
-                let row_height = metrics
-                    .list_height(self.text_metrics(component.font_role, UiTextVariant::Detail));
-                for item in &component.items {
-                    if !item.disabled
-                        && let Some(command_id) = &item.action_command_id
-                    {
-                        self.actions.push(SduiVisibleAction {
-                            rect: self.row_rect(depth, *cursor_y, width, origin_x, row_height),
-                            intent: package_action_intent(
-                                command_id,
-                                &format!("{}.{}", component.id, item.id),
-                            ),
-                        });
-                    }
-                    *cursor_y += row_height;
-                }
-            }
-            "label" | "statusItem" | "editorView" => {
-                *cursor_y += metrics.row_height;
-            }
-            "flex" | "stack" | "overlay" | "scroll" | "portal" => {
-                for child in &component.children {
-                    self.collect_package_action_regions(child, depth, cursor_y, width, origin_x);
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Transient overlays in stacking order (`z.overlay` < `z.modal` <
     /// `z.tooltip`): the package transient overlays plus the active menu
     /// projected as an overlay. Shared by the retained overlay host (step 13e)
@@ -800,49 +618,6 @@ impl SduiNativeState {
         }
         overlays.sort_by_key(|o| overlay_z_order(o.z_level_token));
         overlays
-    }
-
-    fn paint_text(
-        &self,
-        ctx: &mut PaintCtx<'_>,
-        scene: &mut Scene,
-        text: &str,
-        depth: usize,
-        y: f64,
-        width: f64,
-        origin_x: f64,
-        role: FontRole,
-        variant: UiTextVariant,
-        color: Color,
-    ) {
-        let metrics = self.text_metrics(role, variant);
-        paint_sdui_text(
-            &self.typography,
-            self.theme_style().panel_padding,
-            ctx,
-            scene,
-            text,
-            depth,
-            y,
-            width,
-            origin_x,
-            role,
-            metrics,
-            color,
-        );
-    }
-
-    /// Compute a row's rect inset by the active panel padding and per-depth
-    /// indent (Phase 20.4: padding reads the active theme spacing rhythm).
-    fn row_rect(&self, depth: usize, y: f64, width: f64, origin_x: f64, height: f64) -> Rect {
-        sdui_row_rect(
-            self.theme_style().panel_padding,
-            depth,
-            y,
-            width,
-            origin_x,
-            height,
-        )
     }
 }
 
@@ -907,12 +682,6 @@ impl Default for SduiNativeState {
     fn default() -> Self {
         Self::empty()
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct SduiVisibleAction {
-    rect: Rect,
-    intent: SduiActionIntent,
 }
 
 /// Sidebar slot geometry computed by [`SduiNativeState::sidebar_geometry`] for
@@ -1021,34 +790,6 @@ pub(crate) fn package_action_intent(command_id: &str, source_id: &str) -> SduiAc
     )
 }
 
-/// Phase 20.5: collect focusable action intents from a component tree in paint order.
-/// Used for modal focus-trap Tab cycling.
-fn collect_component_intents(
-    component: &crate::shell::PackageUiComponentTree,
-    intents: &mut Vec<SduiActionIntent>,
-) {
-    if component.disabled {
-        return;
-    }
-    if let Some(command_id) = &component.action_command_id {
-        intents.push(package_action_intent(command_id, &component.id));
-    }
-    for item in &component.items {
-        if let Some(command_id) = &item.action_command_id {
-            intents.push(SduiActionIntent::command(
-                command_id.clone(),
-                SduiActionSource::ListItem {
-                    node_id: SduiNodeId(stable_package_source_id(&component.id)),
-                    item_id: item.id.clone(),
-                },
-            ));
-        }
-    }
-    for child in &component.children {
-        collect_component_intents(child, intents);
-    }
-}
-
 fn json_object_to_sdui_arguments(
     value: &serde_json::Value,
 ) -> Vec<crate::protocol::SduiActionArgument> {
@@ -1085,6 +826,19 @@ fn json_object_to_sdui_arguments(
 /// Stacking order for transient overlays: `z.overlay` (0) < `z.modal` (1) <
 /// `z.tooltip` (2). Unknown tokens sort as `z.overlay`. Shared by the retained
 /// overlay host (step 13e) and the legacy overlay paint walk.
+/// The kind name for an SDUI node (test/observability surface).
+fn sdui_node_kind_name(kind: &SduiNodeKind) -> &'static str {
+    match kind {
+        SduiNodeKind::Panel { .. } => "Panel",
+        SduiNodeKind::Label { .. } => "Label",
+        SduiNodeKind::Button { .. } => "Button",
+        SduiNodeKind::List { .. } => "List",
+        SduiNodeKind::EditorView { .. } => "EditorView",
+        SduiNodeKind::Flex { .. } => "Flex",
+        SduiNodeKind::Stack { .. } => "Stack",
+    }
+}
+
 pub(crate) fn overlay_z_order(token: &str) -> u8 {
     match token {
         "z.modal" => 1,
@@ -1100,18 +854,6 @@ pub(crate) fn stable_package_source_id(source_id: &str) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash.max(1)
-}
-
-fn sdui_node_kind_name(kind: &SduiNodeKind) -> &'static str {
-    match kind {
-        SduiNodeKind::Panel { .. } => "Panel",
-        SduiNodeKind::Label { .. } => "Label",
-        SduiNodeKind::Button { .. } => "Button",
-        SduiNodeKind::List { .. } => "List",
-        SduiNodeKind::EditorView { .. } => "EditorView",
-        SduiNodeKind::Flex { .. } => "Flex",
-        SduiNodeKind::Stack { .. } => "Stack",
-    }
 }
 
 #[cfg(test)]
@@ -1321,33 +1063,6 @@ mod tests {
     }
 
     #[test]
-    fn slot_ui_actions_emit_registered_command_intents_only() {
-        let mut state = SduiNativeState::empty();
-        state
-            .apply_package_ui_update(PackageUiRuntimeUpdate {
-                base_version: 0,
-                fixed_panels: vec![FixedPackagePanel::new(
-                    "markdown.preview",
-                    FixedSlotId::Left,
-                    PackagePanelVisibility::Visible,
-                    package_component("markdown.preview.root"),
-                    vec!["markdown.togglePreview".to_string()],
-                )],
-                transient_overlays: Vec::new(),
-                input_routing: Vec::new(),
-            })
-            .unwrap();
-        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
-
-        let action = state
-            .action_for_point(Point::new(40.0, 45.0))
-            .expect("package button should install an inert command hit region");
-
-        assert_eq!(action.command_id, "markdown.togglePreview");
-        assert!(matches!(action.source, SduiActionSource::Button { .. }));
-    }
-
-    #[test]
     fn slot_ui_observation_omits_document_text_native_handles_and_raw_authority() {
         let mut state = SduiNativeState::empty();
         state.apply_snapshot(sample_tree());
@@ -1387,36 +1102,6 @@ mod tests {
         ] {
             assert!(!debug.contains(forbidden), "observation leaked {forbidden}");
         }
-    }
-
-    #[test]
-    fn sdui_button_is_served_by_retained_widget_not_legacy_hit_test() {
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(sample_tree());
-
-        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
-        // Plan 070 step 9: the SDUI `button` is a real Masonry widget now, so it
-        // is no longer a legacy hit-test action rect — its click is handled by
-        // the reconciled `SduiButton`, which carries the inert intent in its
-        // action (routed through `enqueue_sdui_action`).
-        assert!(
-            !state
-                .actions
-                .iter()
-                .any(|a| a.intent.command_id == "workspace.refresh"),
-            "button must not be a legacy hit-test rect once served by the retained tree"
-        );
-        // The intent is still declared on the SDUI node, ready for the reconciled
-        // button to route through the server-first command path.
-        let button_intent = state
-            .nodes
-            .values()
-            .find_map(|node| match &node.kind {
-                SduiNodeKind::Button { action, .. } => Some(action),
-                _ => None,
-            })
-            .expect("button node present");
-        assert_eq!(button_intent.command_id, "workspace.refresh");
     }
 
     #[test]
@@ -1506,86 +1191,6 @@ mod tests {
             ResolvedUiTheme::from_active_theme(&[spacious]).expect("spacious density"),
         );
         assert_eq!(state.theme_style().panel_padding, 16.0 * 1.125);
-    }
-
-    #[test]
-    fn disabled_component_applies_opacity_disabled_and_gates_actions() {
-        // Plan 065 (Phase 20.4) task 4: disabled components render with the
-        // disabled state tokens (dimmed) and are gated out of SduiVisibleAction
-        // (their actions are not dispatchable). Enabled siblings remain.
-        use crate::shell::primitives::{
-            InteractionState, component_state_color, disabled_text_color,
-        };
-        use crate::shell::theme::ResolvedUiTheme;
-
-        let theme = ResolvedUiTheme::from_active_theme(&[]).unwrap();
-        // Disabled button fill: surface.disabled dimmed by opacity.disabled.
-        assert_eq!(
-            component_state_color(&theme, "surface.control", InteractionState::Disabled),
-            Color::from_rgba8(0x1b, 0x1a, 0x24, 140)
-        );
-        // Disabled label text: text.disabled dimmed by opacity.disabled.
-        assert_eq!(
-            disabled_text_color(&theme),
-            Color::from_rgba8(0x6f, 0x6a, 0x87, 140)
-        );
-
-        let panel = PackageUiComponentTree::from_declaration(&json!({
-            "kind": "panel",
-            "id": "disabled.test.root",
-            "children": [
-                { "kind": "button", "id": "enabled.btn", "label": "On",
-                  "action": { "commandId": "cmd.enabled" } },
-                { "kind": "button", "id": "disabled.btn", "label": "Off",
-                  "disabled": true, "action": { "commandId": "cmd.disabled" } },
-                { "kind": "list", "id": "list", "items": [
-                    { "id": "i.on", "label": "row on",
-                      "action": { "commandId": "cmd.row.on" } },
-                    { "id": "i.off", "label": "row off", "disabled": true,
-                      "action": { "commandId": "cmd.row.off" } }
-                ]}
-            ]
-        }))
-        .unwrap();
-
-        let mut state = SduiNativeState::empty();
-        state
-            .apply_package_ui_update(PackageUiRuntimeUpdate {
-                base_version: 0,
-                fixed_panels: vec![FixedPackagePanel::new(
-                    "disabled.test",
-                    FixedSlotId::Left,
-                    PackagePanelVisibility::Visible,
-                    panel,
-                    Vec::new(),
-                )],
-                transient_overlays: Vec::new(),
-                input_routing: Vec::new(),
-            })
-            .unwrap();
-        state.rebuild_action_regions_for_test(Size::new(900.0, 600.0));
-
-        let cmds: Vec<String> = state
-            .actions
-            .iter()
-            .map(|a| a.intent.command_id.clone())
-            .collect();
-        assert!(
-            cmds.contains(&"cmd.enabled".to_string()),
-            "enabled button action present"
-        );
-        assert!(
-            cmds.contains(&"cmd.row.on".to_string()),
-            "enabled list row action present"
-        );
-        assert!(
-            !cmds.contains(&"cmd.disabled".to_string()),
-            "disabled button action must be gated out"
-        );
-        assert!(
-            !cmds.contains(&"cmd.row.off".to_string()),
-            "disabled list row action must be gated out"
-        );
     }
 
     /// Plan 065 task 7: per-component-per-state structural observability
@@ -1949,63 +1554,6 @@ mod tests {
     }
 
     #[test]
-    fn package_component_font_role_uses_selected_profile_without_concrete_sizes() {
-        let component = PackageUiComponentTree::from_declaration(&json!({
-            "kind": "panel",
-            "id": "markdown.preview.root",
-            "title": "Preview",
-            "children": [{
-                "kind": "button",
-                "id": "markdown.preview.toggle",
-                "label": "Toggle",
-                "style": { "fontRole": "monospace", "typography": "typography.body" },
-                "action": { "commandId": "markdown.togglePreview" }
-            }]
-        }))
-        .unwrap();
-        assert_eq!(component.children[0].font_role, FontRole::Monospace);
-        assert_eq!(
-            component.children[0].text_variant,
-            Some(UiTextVariant::Body)
-        );
-
-        let size = Size::new(900.0, 600.0);
-        let mut state = SduiNativeState::empty();
-        state
-            .apply_package_ui_update(PackageUiRuntimeUpdate {
-                base_version: 0,
-                fixed_panels: vec![FixedPackagePanel::new(
-                    "markdown.preview",
-                    FixedSlotId::Right,
-                    PackagePanelVisibility::Visible,
-                    component,
-                    vec!["markdown.togglePreview".to_string()],
-                )],
-                transient_overlays: Vec::new(),
-                input_routing: Vec::new(),
-            })
-            .unwrap();
-        let mut active = crate::protocol::ActiveTypography {
-            revision: 1,
-            ..crate::protocol::ActiveTypography::default()
-        };
-        active.ui.size = 10.0;
-        active.monospace.size = 24.0;
-        state.set_typography(TypographyRegistry::from_active_typography(active).unwrap());
-        state.rebuild_action_regions_for_test(size);
-
-        let action = state.actions.first().expect("package button action").rect;
-        assert!(
-            (action.height()
-                - state
-                    .text_metrics(FontRole::Monospace, UiTextVariant::Body)
-                    .button_height())
-            .abs()
-                < 0.001
-        );
-    }
-
-    #[test]
     fn workspace_browser_reserves_left_slot_after_document_id_changes() {
         let mut state = SduiNativeState::empty();
         state.apply_snapshot(sample_tree());
@@ -2343,88 +1891,6 @@ mod tests {
         assert!(snapshot.button_labels.is_empty());
         assert!(snapshot.list_items.is_empty());
         assert!(snapshot.editor_bindings.is_empty());
-    }
-
-    #[test]
-    fn sdui_accessibility_panel_label_matches_title() {
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(sample_tree());
-
-        assert!(state.accessibility_nodes().contains(&SduiAccessibleNode {
-            role: Role::Pane,
-            label: Some("Workspace".to_string()),
-        }));
-    }
-
-    #[test]
-    fn sdui_accessibility_button_label_matches_button_label() {
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(sample_tree());
-
-        assert!(state.accessibility_nodes().contains(&SduiAccessibleNode {
-            role: Role::Button,
-            label: Some("Refresh".to_string()),
-        }));
-    }
-
-    #[test]
-    fn sdui_accessibility_list_items_match_item_labels() {
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(sample_tree());
-
-        assert!(state.accessibility_nodes().contains(&SduiAccessibleNode {
-            role: Role::ListItem,
-            label: Some("Document 7".to_string()),
-        }));
-    }
-
-    #[test]
-    fn sdui_accessibility_representative_tree_covers_all_node_kinds() {
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(representative_sdui_tree());
-
-        let nodes = state.accessibility_nodes();
-        assert_eq!(
-            nodes.iter().filter(|node| node.role == Role::Pane).count(),
-            3
-        );
-        assert!(nodes.iter().any(|node| node.role == Role::Label));
-        assert!(nodes.iter().any(|node| node.role == Role::Button));
-        assert!(nodes.iter().any(|node| node.role == Role::List));
-        assert!(nodes.iter().any(|node| node.role == Role::ListItem));
-        assert!(
-            nodes
-                .iter()
-                .any(|node| node.role == Role::MultilineTextInput)
-        );
-    }
-
-    #[test]
-    fn sdui_accessibility_editor_view_label_includes_document_id() {
-        let mut state = SduiNativeState::empty();
-        state.apply_snapshot(sample_tree());
-
-        assert!(state.accessibility_nodes().contains(&SduiAccessibleNode {
-            role: Role::MultilineTextInput,
-            label: Some("Editor view for document 7".to_string()),
-        }));
-    }
-
-    #[test]
-    fn sdui_accessibility_empty_state_does_not_panic() {
-        let state = SduiNativeState::empty();
-
-        assert!(state.accessibility_nodes().is_empty());
-    }
-
-    #[test]
-    fn sdui_accessibility_labels_are_stable_for_equivalent_trees() {
-        let mut first = SduiNativeState::empty();
-        let mut second = SduiNativeState::empty();
-        first.apply_snapshot(sample_tree());
-        second.apply_snapshot(sample_tree());
-
-        assert_eq!(first.accessibility_nodes(), second.accessibility_nodes());
     }
 
     #[test]
