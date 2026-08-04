@@ -2450,10 +2450,19 @@ impl EditorSurface {
             .unwrap_or(self.theme.caret_style)
     }
 
-    /// Set (or clear, with `None`) the runtime caret style override.
-    pub fn set_caret_style_override(&mut self, style: Option<CaretStyle>) {
+    /// Runtime caret style override set by `clientSetCursorStyle`.
+    pub fn caret_style_override(&self) -> Option<CaretStyle> {
+        self.caret_style_override
+    }
+
+    /// Set (or clear, with `None`) the runtime caret style override. Returns
+    /// `true` when the style actually changed (caller should repaint); the
+    /// blink clock resets either way so a fresh cycle starts visible.
+    pub fn set_caret_style_override(&mut self, style: Option<CaretStyle>) -> bool {
+        let changed = self.caret_style_override != style;
         self.caret_style_override = style;
         self.caret_blink.reset();
+        changed
     }
 
     /// Advance the blink clock by `delta_ms` under the effective blink style.

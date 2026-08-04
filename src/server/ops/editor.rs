@@ -17,11 +17,14 @@
 //! ## `editor-control` trust gate (approved 2026-08-03)
 //!
 //! All editor ops are registered in BOTH runtime domains. Every call passes
-//! [`require_editor_control`]: with an executing-package context the package
-//! must hold approved `editor-control` AND the active document's major mode
-//! must be one of its declared `clay.editorControl.modes` (deny-by-default).
-//! Trusted-domain callers without a package context (user configuration) are
-//! allowed; package callers never bypass the mode gate.
+//! [`require_editor_control`]: inside a package activation (a `loadPackage`
+//! loadEntry or a host-invoked package callback) the package must hold
+//! approved `editor-control` AND the active document's major mode must be one
+//! of its declared `clay.editorControl.modes` (deny-by-default).
+//! Trusted-domain callers outside any package activation (user configuration)
+//! are allowed; package callers never bypass the mode gate. The attribution
+//! stamp may outlive activations for later package-facing registrations, so
+//! the gate keys on the activation scope, not on stamp presence.
 
 use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
@@ -34,8 +37,8 @@ pub(super) fn require_editor_control(state: &OpState) -> Result<(), JsErrorBox> 
     let op_state = state
         .borrow::<Arc<crate::server::ops::ClayOpState>>()
         .clone();
-    if !op_state.has_current_package() {
-        // No executing package: trusted user configuration only.
+    if !op_state.in_package_activation() {
+        // Outside package code: trusted user configuration only.
         if matches!(
             op_state.domain,
             crate::packages::bundled::RuntimeDomain::Trusted
@@ -254,22 +257,26 @@ pub(super) fn validate_set_selection(options_json: &str) -> Result<String, JsErr
 /// are optional; present-but-unknown `shape`/`blink` values error.
 pub(super) fn validate_set_cursor_style(options_json: &str) -> Result<String, JsErrorBox> {
     let value = parse_options(options_json, "clay.editor.invalid_set_cursor_style")?;
+    validate_set_cursor_style_value(&value)
+}
+
+fn validate_set_cursor_style_value(value: &Value) -> Result<String, JsErrorBox> {
     let shape = optional_string_strict(
-        &value,
+        value,
         "shape",
         CURSOR_SHAPES,
         "clay.editor.invalid_set_cursor_style",
     )?;
     let blink = optional_string_strict(
-        &value,
+        value,
         "blink",
         CURSOR_BLINKS,
         "clay.editor.invalid_set_cursor_style",
     )?;
     let width_px = value.get("widthPx").and_then(Value::as_f64);
     let height_pct = value.get("heightPct").and_then(Value::as_f64);
-    let hollow = optional_bool(&value, "hollow", false);
-    let stop_blink_on_typing = optional_bool(&value, "stopBlinkOnTyping", true);
+    let hollow = optional_bool(value, "hollow", false);
+    let stop_blink_on_typing = optional_bool(value, "stopBlinkOnTyping", true);
     serde_json::to_string(&json!({
         "commandId": "clay.editor.clientSetCursorStyle",
         "shape": shape,
@@ -284,6 +291,41 @@ pub(super) fn validate_set_cursor_style(options_json: &str) -> Result<String, Js
             "clay.editor.invalid_set_cursor_style: failed to serialize result ({error})"
         ))
     })
+}
+
+/// Build the runtime caret override from partial options: recognized fields
+/// merge over the active below-override style (manifest `caret_style`, else
+/// the Clay default); no recognized field clears the override (`None`) so the
+/// layers below show through again.
+fn build_cursor_style_override(
+    state: &OpState,
+    value: &Value,
+) -> Result<Option<crate::protocol::CaretStyle>, JsErrorBox> {
+    const RECOGNIZED: &[&str] = &[
+        "shape",
+        "blink",
+        "widthPx",
+        "heightPct",
+        "hollow",
+        "smoothAnimationMs",
+        "stopBlinkOnTyping",
+    ];
+    if !RECOGNIZED.iter().any(|key| value.get(key).is_some()) {
+        return Ok(None);
+    }
+    let base = state
+        .borrow::<Arc<crate::server::ops::ClayOpState>>()
+        .behavior_manifest()
+        .editor_rules
+        .caret_style
+        .unwrap_or_default();
+    let style = super::modes::merge_caret_style(base, value);
+    style.validate().map_err(|_| {
+        JsErrorBox::generic(
+            "clay.editor.invalid_set_cursor_style: caret style fields out of bounds",
+        )
+    })?;
+    Ok(Some(style))
 }
 
 #[op2]
@@ -313,7 +355,16 @@ pub(super) fn op_clay_editor_set_cursor_style(
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
     require_editor_control(state)?;
-    validate_set_cursor_style(&options_json)
+    let value = parse_options(&options_json, "clay.editor.invalid_set_cursor_style")?;
+    let descriptor = validate_set_cursor_style_value(&value)?;
+    // Plan 071 caret-transport fix: validation alone never reached the
+    // client; publish the merged override (or `None` to clear) so the
+    // running editor applies it.
+    let override_style = build_cursor_style_override(state, &value)?;
+    state
+        .borrow::<Arc<crate::server::ops::ClayOpState>>()
+        .publish_caret_style_override(override_style);
+    Ok(descriptor)
 }
 
 /// Validate `clientAddCursor` options (deny-by-default enum). Returns the
@@ -439,7 +490,7 @@ pub(super) fn op_clay_editor_execute_command(
         )));
     }
 
-    let package_prefix = if op_state.has_current_package() {
+    let package_prefix = if op_state.in_package_activation() {
         op_state
             .current_package_record()
             .map_err(|_| {

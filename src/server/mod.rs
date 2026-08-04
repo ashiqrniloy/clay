@@ -315,6 +315,19 @@ impl RuntimeGenerationStore {
         self.current_service().await.subscribe_editor_commands()
     }
 
+    /// Plan 071 caret-transport fix: subscribe to runtime caret override
+    /// updates. The channel is shared across runtime generations.
+    pub(crate) async fn subscribe_caret_styles(
+        &self,
+    ) -> broadcast::Receiver<Option<crate::protocol::CaretStyle>> {
+        self.current_service().await.subscribe_caret_styles()
+    }
+
+    /// Current runtime caret override (connection initial sync / lag replay).
+    pub(crate) async fn caret_style_override(&self) -> Option<crate::protocol::CaretStyle> {
+        self.current_service().await.caret_style_override()
+    }
+
     pub(crate) fn behavior_grace(&self) -> &BehaviorGraceState {
         &self.behavior_grace
     }
@@ -2336,6 +2349,44 @@ mod runtime_generation_tests {
             1
         );
         assert!(current.evaluation.is_some());
+    }
+
+    #[tokio::test]
+    async fn example_configuration_loads_cleanly_and_applies_effects() {
+        // examples/init.js is the canonical user-facing configuration. Any
+        // edit to it — or to the APIs it calls — must keep it loading through
+        // the real runtime-generation path: syntax, package specifiers,
+        // language-server contribution ids, grant-before-loadPackage ordering,
+        // theme/typography/keybinding effects. Language-server grants degrade
+        // independently when tooling is absent (see the grantLanguageServer
+        // helper in the file), so this test is environment-independent.
+        let example = fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/init.js"),
+        )
+        .expect("examples/init.js ships in the repository");
+        let root = temp_config_root("example-configuration", &example);
+        let server = server_with_config(root);
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(
+            outcome.reloaded,
+            "examples/init.js must load cleanly; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+        // Observable proof the configuration actually executed: the example's
+        // setTypography call replaced the default monospace profile.
+        let typography = server.runtime_generation.active_typography().await;
+        assert_eq!(typography.monospace.size, 16.0);
+        assert!(
+            typography
+                .monospace
+                .families
+                .iter()
+                .any(|family| family == "MartianMono Nerd Font"),
+            "example typography families missing: {:?}",
+            typography.monospace.families
+        );
     }
 
     #[tokio::test]

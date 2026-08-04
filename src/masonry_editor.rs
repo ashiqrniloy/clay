@@ -543,6 +543,13 @@ impl EditorWidget {
         )
     }
 
+    /// Plan 071 caret-transport fix: whether the effective caret style
+    /// animates. The event loop uses it to kick the blink loop the moment a
+    /// runtime caret override lands (`update` only self-kicks on focus change).
+    pub fn caret_animates(&self) -> bool {
+        self.editor.caret_animates()
+    }
+
     /// Reconcile the persistent `SduiRegionWidget` child in place from the
     /// current SDUI state when it changed (plan 070 step 11c). Called from the
     /// event loop with a live `MutateCtx`; surviving widgets keep their
@@ -737,6 +744,9 @@ impl EditorWidget {
             }
             ClientConnectionEvent::EditorCommandRequest(request) => {
                 self.apply_editor_command_request(request)
+            }
+            ClientConnectionEvent::CaretStyleOverride(style) => {
+                self.editor.set_caret_style_override(style)
             }
             ClientConnectionEvent::CompletionRejected { request_id, .. } => {
                 if self.active_completion_request_id == Some(request_id) {
@@ -954,12 +964,16 @@ impl EditorWidget {
         let theme_specifier = self.editor.theme_specifier().to_string();
         let typography = self.editor.typography().clone();
         let behavior = self.editor.document_state().behavior_manifest.clone();
+        let ui_theme = self.editor.ui_theme().clone();
+        let caret_override = self.editor.caret_style_override();
         let outgoing = std::mem::take(&mut self.editor);
         // Leave a blank surface with shared theme/typography/behavior until caller loads.
         self.editor = EditorSurface::default();
         self.editor.set_theme(theme);
         self.editor.set_theme_specifier(theme_specifier);
         self.editor.set_typography_registry(typography);
+        self.editor.set_ui_theme(ui_theme);
+        self.editor.set_caret_style_override(caret_override);
         if let Some(manifest) = behavior {
             self.editor.install_behavior_manifest(manifest);
         }
@@ -1007,10 +1021,14 @@ impl EditorWidget {
         let theme = self.editor.theme();
         let theme_specifier = self.editor.theme_specifier().to_string();
         let typography = self.editor.typography().clone();
+        let ui_theme = self.editor.ui_theme().clone();
+        let caret_override = self.editor.caret_style_override();
         self.editor = retained.surface;
         self.editor.set_theme(theme);
         self.editor.set_theme_specifier(theme_specifier);
         self.editor.set_typography_registry(typography);
+        self.editor.set_ui_theme(ui_theme);
+        self.editor.set_caret_style_override(caret_override);
         self.editor.cancel_composition();
 
         if let Some(queue) = self.edit_queue.as_mut() {
@@ -4823,6 +4841,108 @@ mod tests {
         assert_eq!(widget.editor.visible_text(), edited);
         assert!(widget.editor.undo_with_event().changed);
         assert_eq!(widget.editor.visible_text(), "abc");
+    }
+
+    /// Plan 071 caret-transport fix: the server-pushed caret override event
+    /// must land in the editor surface (before the fix no such transport
+    /// existed, so blink/phase configuration never changed the caret).
+    #[test]
+    fn caret_style_override_event_applies_and_reports_change() {
+        let mut widget = EditorWidget::default();
+        let style = crate::protocol::CaretStyle {
+            shape: crate::protocol::CaretShape::Underline,
+            blink: crate::protocol::BlinkStyle::Phase { period_ms: 1000 },
+            ..crate::protocol::CaretStyle::default_bar()
+        };
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::CaretStyleOverride(Some(style)))
+        );
+        assert_eq!(widget.editor.caret_style_override(), Some(style));
+        assert!(widget.caret_animates(), "phase blink must animate");
+        // Same value again: no change, no repaint churn.
+        assert!(
+            !widget.apply_connection_event(ClientConnectionEvent::CaretStyleOverride(Some(style)))
+        );
+        // Clearing falls back to the manifest/theme layers (solid default).
+        assert!(widget.apply_connection_event(ClientConnectionEvent::CaretStyleOverride(None)));
+        assert_eq!(widget.editor.caret_style_override(), None);
+        assert!(!widget.caret_animates(), "Clay default caret is solid");
+    }
+
+    #[test]
+    fn document_switch_preserves_ui_theme_scrollbar_track_and_caret_override() {
+        let mut widget = EditorWidget::default();
+        assert!(
+            widget.apply_connection_event(ClientConnectionEvent::ActiveTheme(
+                crate::protocol::ActiveTheme {
+                    specifier: "@clay/theme-modus-operandi".to_string(),
+                    overrides: vec![crate::protocol::TextThemeOverride {
+                        token: "scrollbarTrack".to_string(),
+                        color: Some([0x11, 0x22, 0x33, 0x80]),
+                        bold: None,
+                        italic: None,
+                        underline: None,
+                        strike: None,
+                        provenance: "theme-modus-operandi".to_string(),
+                    }],
+                    design_tokens: Vec::new(),
+                },
+            ))
+        );
+        let track_before = widget.editor.ui_theme().color("surface.scrollbar.track");
+        assert_ne!(
+            track_before,
+            crate::shell::theme::ResolvedUiTheme::default().color("surface.scrollbar.track"),
+            "themed track must resolve through the base palette, not the dark core fallback"
+        );
+        let caret_override = crate::protocol::CaretStyle {
+            shape: crate::protocol::CaretShape::Block,
+            ..crate::protocol::CaretStyle::default_bar()
+        };
+        widget.editor.set_caret_style_override(Some(caret_override));
+
+        let open = |document_id: u64, path: &str| ClientConnectionEvent::DocumentOpened {
+            metadata: DocumentMetadata {
+                document_id,
+                version: 1,
+                access: DocumentAccess::Editable {
+                    lease_id: document_id,
+                },
+                lease_id: Some(document_id),
+                dirty: false,
+                workspace_root_id: 1,
+                path: path.to_string(),
+            },
+            text: format!("text-{document_id}"),
+        };
+
+        // First open keeps the themed ui_theme.
+        assert!(widget.apply_connection_event(open(1, "a.txt")));
+        assert_eq!(
+            widget.editor.ui_theme().color("surface.scrollbar.track"),
+            track_before
+        );
+
+        // Opening a second document stashes the active session behind a fresh
+        // surface; the themed ui_theme (scrollbar track) and the runtime caret
+        // override must survive the replacement.
+        assert!(widget.apply_connection_event(open(2, "b.txt")));
+        assert_eq!(
+            widget.editor.ui_theme().color("surface.scrollbar.track"),
+            track_before,
+            "stashed replacement surface lost the themed ui_theme"
+        );
+        assert_eq!(widget.editor.caret_style_override(), Some(caret_override));
+
+        // Switching back restores the retained surface, refreshed with the
+        // current shared presentation state.
+        assert!(widget.activate_document(1));
+        assert_eq!(
+            widget.editor.ui_theme().color("surface.scrollbar.track"),
+            track_before,
+            "retained surface lost the themed ui_theme"
+        );
+        assert_eq!(widget.editor.caret_style_override(), Some(caret_override));
     }
 
     #[test]

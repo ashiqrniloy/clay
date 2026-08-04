@@ -75,6 +75,12 @@ pub(crate) struct ClayJsRuntimeService {
     /// workers (each op state holds a sender clone) and subscribed by every
     /// connection loop. Survives `production_reload`.
     editor_commands: tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>,
+    /// Plan 071 caret-transport fix: runtime caret override channel plus the
+    /// current-value store shared by both domain workers. Survives
+    /// `production_reload` so one subscription covers reloads; the store
+    /// feeds connection initial sync and lag replay.
+    caret_styles: tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>,
+    caret_style_state: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>,
 }
 
 impl std::fmt::Debug for ClayJsRuntimeService {
@@ -145,6 +151,15 @@ impl ClayJsRuntimeService {
             .expect("Clay runtime service worker mutex poisoned")
             .op_state
             .set_editor_command_publisher(current.editor_commands.clone());
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_caret_style_publisher(
+                current.caret_styles.clone(),
+                std::sync::Arc::clone(&current.caret_style_state),
+            );
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
             timeout: current.timeout,
@@ -159,6 +174,8 @@ impl ClayJsRuntimeService {
             trusted,
             third_party: current.third_party.clone(),
             editor_commands: current.editor_commands.clone(),
+            caret_styles: current.caret_styles.clone(),
+            caret_style_state: std::sync::Arc::clone(&current.caret_style_state),
         }
     }
 
@@ -217,6 +234,10 @@ impl ClayJsRuntimeService {
         // approved third-party package dispatches its load evaluation to the
         // third-party worker (Plan 061 task 12).
         let (editor_commands, _) = tokio::sync::broadcast::channel(16);
+        // Plan 071 caret-transport fix: runtime caret override lane.
+        let (caret_styles, _) = tokio::sync::broadcast::channel(4);
+        let caret_style_state =
+            std::sync::Arc::new(std::sync::Mutex::new(None::<crate::protocol::CaretStyle>));
         trusted
             .worker
             .lock()
@@ -236,12 +257,30 @@ impl ClayJsRuntimeService {
             .expect("Clay runtime service worker mutex poisoned")
             .op_state
             .set_editor_command_publisher(editor_commands.clone());
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_caret_style_publisher(
+                caret_styles.clone(),
+                std::sync::Arc::clone(&caret_style_state),
+            );
         third_party
             .worker
             .lock()
             .expect("Clay runtime service worker mutex poisoned")
             .op_state
             .set_editor_command_publisher(editor_commands.clone());
+        third_party
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_caret_style_publisher(
+                caret_styles.clone(),
+                std::sync::Arc::clone(&caret_style_state),
+            );
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
             timeout,
@@ -256,6 +295,8 @@ impl ClayJsRuntimeService {
             trusted,
             third_party,
             editor_commands,
+            caret_styles,
+            caret_style_state,
         }
     }
 
@@ -291,6 +332,23 @@ impl ClayJsRuntimeService {
         self.editor_commands.subscribe()
     }
 
+    /// Plan 071 caret-transport fix: subscribe to runtime caret override
+    /// updates (`None` clears). Shared across generations.
+    pub(crate) fn subscribe_caret_styles(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<Option<crate::protocol::CaretStyle>> {
+        self.caret_styles.subscribe()
+    }
+
+    /// Current runtime caret override for connection initial sync and lag
+    /// replay.
+    pub(crate) fn caret_style_override(&self) -> Option<crate::protocol::CaretStyle> {
+        *self
+            .caret_style_state
+            .lock()
+            .expect("caret style state mutex poisoned")
+    }
+
     fn domain(&self, domain: crate::packages::bundled::RuntimeDomain) -> &DomainRuntime {
         match domain {
             crate::packages::bundled::RuntimeDomain::Trusted => &self.trusted,
@@ -322,6 +380,10 @@ impl ClayJsRuntimeService {
         replacement
             .op_state
             .set_editor_command_publisher(self.editor_commands.clone());
+        replacement.op_state.set_caret_style_publisher(
+            self.caret_styles.clone(),
+            std::sync::Arc::clone(&self.caret_style_state),
+        );
         *self
             .domain(domain)
             .worker
@@ -1676,6 +1738,7 @@ fn run_runtime_worker(
                         op_state.begin_evaluation();
                         if let Some(context) = package_context {
                             op_state.set_current_package(Some(context));
+                            op_state.enter_package_activation();
                         }
                         heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                         loader.set_entry(
@@ -1715,6 +1778,7 @@ fn run_runtime_worker(
                 op_state.set_current_package(Some(
                     crate::server::ops::PackageContext::from_record(&registration.package),
                 ));
+                op_state.enter_package_activation();
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let result = tokio_runtime.block_on(evaluate_js_parse_handler(
                     &mut runtime,
@@ -1742,6 +1806,7 @@ fn run_runtime_worker(
                 op_state.set_current_package(Some(
                     crate::server::ops::PackageContext::from_record(&registration.package),
                 ));
+                op_state.enter_package_activation();
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let result = tokio_runtime.block_on(evaluate_js_completion_provider(
                     &mut runtime,
@@ -1770,6 +1835,7 @@ fn run_runtime_worker(
                 op_state.set_current_package(Some(
                     crate::server::ops::PackageContext::from_record(&registration.package),
                 ));
+                op_state.enter_package_activation();
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let analysis_timeout = if matches!(
                     &event,
@@ -1808,6 +1874,7 @@ fn run_runtime_worker(
                 op_state.set_current_package(Some(
                     crate::server::ops::PackageContext::from_record(&registration.package),
                 ));
+                op_state.enter_package_activation();
                 heap_limit_hit.store(false, std::sync::atomic::Ordering::Relaxed);
                 let result = tokio_runtime.block_on(evaluate_js_language_intelligence_provider(
                     &mut runtime,
@@ -8626,6 +8693,42 @@ mod tests {
         );
         assert_eq!(request.package_prefix, "fixtureeditorexec");
         assert_eq!(request.mode_id, "fixtureeditorexec");
+    }
+
+    /// Plan 071 caret-transport fix: `clientSetCursorStyle` from user
+    /// configuration publishes the merged runtime caret override on the
+    /// connection lane. Before the fix the op only validated and returned a
+    /// descriptor, so blink/phase settings never reached the client.
+    #[tokio::test]
+    async fn set_cursor_style_publishes_runtime_caret_override() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let mut receiver = service.subscribe_caret_styles();
+        let root = config_fixture("set-cursor-style");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { clientSetCursorStyle } from "clay:editor";
+            clientSetCursorStyle({ shape: "underline", blink: "phase" });
+            "#,
+        )
+        .unwrap();
+        service
+            .load_configuration_from_root(root)
+            .await
+            .expect("caret style configuration loads");
+        let style = receiver
+            .recv()
+            .await
+            .expect("caret override lane delivers")
+            .expect("override is set, not cleared");
+        assert_eq!(style.shape, crate::protocol::CaretShape::Underline);
+        assert!(matches!(
+            style.blink,
+            crate::protocol::BlinkStyle::Phase { .. }
+        ));
+        // Current-value store feeds connection initial sync / lag replay.
+        assert_eq!(service.caret_style_override(), Some(style));
     }
 
     /// Follow-up round (`editor-control`): third-party packages pass the same

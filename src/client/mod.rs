@@ -28,7 +28,7 @@ use crate::editor::{
 use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
-    ActiveTypography, BehaviorManifest, BehaviorVersion, ClientId, ClientMessage,
+    ActiveTypography, BehaviorManifest, BehaviorVersion, CaretStyle, ClientId, ClientMessage,
     CompletionRejection, CompletionRequest, CompletionRequestId, CompletionResultSet,
     DecorationSet, DiagnosticSet, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion,
     EditOperation, EditRejection, EditorCommandRequest, FileErrorCode,
@@ -668,6 +668,9 @@ pub enum ClientConnectionEvent {
     /// Plan 071 follow-up round (`editor-control`): gated programmatic
     /// editor-command execution request pushed by the server.
     EditorCommandRequest(EditorCommandRequest),
+    /// Plan 071 caret-transport fix: runtime caret appearance override from
+    /// `clientSetCursorStyle`; `None` clears back to manifest/theme layers.
+    CaretStyleOverride(Option<CaretStyle>),
     RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
     ServerError {
@@ -1162,6 +1165,14 @@ async fn run_connection<S>(
                             .send(ClientConnectionEvent::EditorCommandRequest(*request))
                             .await;
                     }
+                    Ok(ServerMessage::CaretStyleOverride(style))
+                        if style.as_ref().is_none_or(|style| style.validate().is_ok()) =>
+                    {
+                        let _ = events
+                            .send(ClientConnectionEvent::CaretStyleOverride(style))
+                            .await;
+                    }
+                    Ok(ServerMessage::CaretStyleOverride(_)) => {}
                     Ok(ServerMessage::RuntimeDiagnostic(diagnostic)) => {
                         let _ = events.send(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)).await;
                     }
@@ -3367,7 +3378,13 @@ mod tests {
             .unwrap();
 
         let mut event = session.events.recv().await.unwrap();
-        if matches!(event, ClientConnectionEvent::SduiSnapshot { .. }) {
+        // Handshake extras (SDUI snapshot, runtime caret override) are
+        // legitimate at any point; skip past them to the event under test.
+        while matches!(
+            event,
+            ClientConnectionEvent::SduiSnapshot { .. }
+                | ClientConnectionEvent::CaretStyleOverride(_)
+        ) {
             event = session.events.recv().await.unwrap();
         }
 
@@ -3564,7 +3581,13 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             .unwrap();
 
         let mut event = session.events.recv().await.unwrap();
-        if matches!(event, ClientConnectionEvent::SduiSnapshot { .. }) {
+        // Handshake extras (SDUI snapshot, runtime caret override) are
+        // legitimate at any point; skip past them to the event under test.
+        while matches!(
+            event,
+            ClientConnectionEvent::SduiSnapshot { .. }
+                | ClientConnectionEvent::CaretStyleOverride(_)
+        ) {
             event = session.events.recv().await.unwrap();
         }
 
@@ -3691,6 +3714,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                 ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
@@ -3807,6 +3831,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                 ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),

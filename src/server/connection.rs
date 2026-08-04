@@ -277,6 +277,11 @@ where
     // the channel survives generation replacement so one subscription
     // covers the connection's lifetime.
     let mut editor_command_updates = runtime_generation.subscribe_editor_commands().await;
+    // Plan 071 caret-transport fix: runtime caret override lane. Shares the
+    // editor-command channel's lifetime semantics: survives generation
+    // replacement, so one subscription covers the connection; lag replays
+    // the current value instead of dropping state.
+    let mut caret_style_updates = runtime_generation.subscribe_caret_styles().await;
     // Plan 060 T6 (P1-8): bounded per-connection result lanes. A saturated
     // lane means the client is not reading; results drop with a counter and
     // log line instead of growing memory without bound.
@@ -417,6 +422,29 @@ where
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     // Advisory execution requests never replay: drop and move on.
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            caret_style = caret_style_updates.recv() => match caret_style {
+                Ok(style) => {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::CaretStyleOverride(style),
+                        )
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // State, not advice: replay the current value.
+                    let style = runtime_generation.caret_style_override().await;
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::CaretStyleOverride(style),
+                        )
+                        .await?;
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
@@ -1763,6 +1791,14 @@ where
             &ServerMessage::ActiveTypography(runtime_generation.active_typography().await),
         )
         .await?;
+    // Plan 071 caret-transport fix: deliver the current runtime caret
+    // override so reconnecting/late clients see the active style. `None` is
+    // the client default, so only an active override goes on the wire.
+    if let Some(style) = runtime_generation.caret_style_override().await {
+        codec
+            .write_server_message(stream, &ServerMessage::CaretStyleOverride(Some(style)))
+            .await?;
+    }
 
     let (document_id, document_version) = match &initial_document {
         ServerMessage::InitialDocument {

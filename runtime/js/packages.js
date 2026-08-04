@@ -109,9 +109,18 @@ export async function loadPackage(specifier) {
     // authority. The loadEntry contract is: a module whose default export is the
     // activation function. Curated `clay:` facade imports inside the loadEntry are
     // always allowed by the module loader; no new authority is granted here.
-    const loadEntry = await import(result.loadEntrySpecifier);
-    if (typeof loadEntry.default === "function") {
-        await loadEntry.default();
+    // The host stamps package provenance and enters the package-activation
+    // scope for the registration calls inside the activation; the `finally`
+    // ends that scope so later user-configuration statements in the same
+    // init.js run outside package code again (the provenance stamp persists
+    // for attribution of later package-facing calls).
+    try {
+        const loadEntry = await import(result.loadEntrySpecifier);
+        if (typeof loadEntry.default === "function") {
+            await loadEntry.default();
+        }
+    } finally {
+        requireOps().op_clay_packages_end_package_activation();
     }
     loadedPackages[specifier] = result;
     return result;

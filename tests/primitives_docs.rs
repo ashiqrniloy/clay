@@ -344,7 +344,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 77);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 78);
 
     let facades = read("src/server/facades.rs")
         .lines()

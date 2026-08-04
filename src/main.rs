@@ -284,6 +284,10 @@ impl AppDriver for Driver {
                 ctx.render_root(window_id)
                     .edit_widget(editor_widget_id, |mut widget| {
                         if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                            let caret_override = matches!(
+                                &event,
+                                clay::client::ClientConnectionEvent::CaretStyleOverride(_)
+                            );
                             let changed = editor.widget.apply_connection_event(event);
                             editor.widget.sync_region(&mut editor.ctx);
                             editor.widget.sync_panels(&mut editor.ctx);
@@ -294,6 +298,13 @@ impl AppDriver for Driver {
                             if changed {
                                 editor.ctx.request_render();
                                 editor.ctx.request_accessibility_update();
+                            }
+                            // Plan 071 caret-transport fix: a newly installed
+                            // animating caret style must start its blink loop
+                            // immediately; the widget only self-kicks on focus
+                            // change.
+                            if caret_override && editor.widget.caret_animates() {
+                                editor.ctx.request_anim_frame();
                             }
                         }
                     });

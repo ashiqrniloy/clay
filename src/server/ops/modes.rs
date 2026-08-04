@@ -395,17 +395,24 @@ fn parse_movement_rules(value: Option<&Value>) -> MovementRules {
 /// Parse the optional `editorRules.caretStyle` override. Returns `None` when
 /// absent so the editor `StyleRegistry` default applies; partial objects fall
 /// back field-by-field to [`CaretStyle::default`].
-fn parse_caret_style(value: Option<&Value>) -> Option<CaretStyle> {
+pub(super) fn parse_caret_style(value: Option<&Value>) -> Option<CaretStyle> {
     let value = value?;
-    let base = CaretStyle::default();
-    let shape = match value.get("shape").and_then(Value::as_str) {
+    Some(merge_caret_style(CaretStyle::default(), value))
+}
+
+/// Merge the caret-style fields present in `value` over `style`; absent
+/// fields keep the base. Shared by manifest parsing (base = Clay default)
+/// and the `clientSetCursorStyle` runtime override (base = active
+/// manifest/theme style), so both honour "absent fields fall back".
+pub(super) fn merge_caret_style(mut style: CaretStyle, value: &Value) -> CaretStyle {
+    style.shape = match value.get("shape").and_then(Value::as_str) {
         Some("bar") => CaretShape::Bar,
         Some("line") => CaretShape::Line,
         Some("block") => CaretShape::Block,
         Some("underline") => CaretShape::Underline,
-        _ => base.shape,
+        _ => style.shape,
     };
-    let blink = match value.get("blink").and_then(Value::as_str) {
+    style.blink = match value.get("blink").and_then(Value::as_str) {
         Some("solid") => BlinkStyle::Solid,
         Some("blink") => BlinkStyle::Blink {
             on_ms: 500,
@@ -414,35 +421,24 @@ fn parse_caret_style(value: Option<&Value>) -> Option<CaretStyle> {
         },
         Some("phase") => BlinkStyle::Phase { period_ms: 1000 },
         Some("smooth") => BlinkStyle::Smooth { period_ms: 1000 },
-        _ => base.blink,
+        _ => style.blink,
     };
-    Some(CaretStyle {
-        shape,
-        width_px: value
-            .get("widthPx")
-            .and_then(Value::as_f64)
-            .map(|v| v as f32)
-            .unwrap_or(base.width_px),
-        height_pct: value
-            .get("heightPct")
-            .and_then(Value::as_f64)
-            .map(|v| v as f32)
-            .unwrap_or(base.height_pct),
-        hollow: value
-            .get("hollow")
-            .and_then(Value::as_bool)
-            .unwrap_or(base.hollow),
-        blink,
-        smooth_animation_ms: value
-            .get("smoothAnimationMs")
-            .and_then(Value::as_u64)
-            .map(|v| v as u32)
-            .unwrap_or(base.smooth_animation_ms),
-        stop_blink_on_typing: value
-            .get("stopBlinkOnTyping")
-            .and_then(Value::as_bool)
-            .unwrap_or(base.stop_blink_on_typing),
-    })
+    if let Some(width_px) = value.get("widthPx").and_then(Value::as_f64) {
+        style.width_px = width_px as f32;
+    }
+    if let Some(height_pct) = value.get("heightPct").and_then(Value::as_f64) {
+        style.height_pct = height_pct as f32;
+    }
+    if let Some(hollow) = value.get("hollow").and_then(Value::as_bool) {
+        style.hollow = hollow;
+    }
+    if let Some(ms) = value.get("smoothAnimationMs").and_then(Value::as_u64) {
+        style.smooth_animation_ms = ms as u32;
+    }
+    if let Some(stop) = value.get("stopBlinkOnTyping").and_then(Value::as_bool) {
+        style.stop_blink_on_typing = stop;
+    }
+    style
 }
 
 fn parse_enter_rule(value: &Value) -> Result<EnterRule, String> {

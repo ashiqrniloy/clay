@@ -50,25 +50,38 @@
 //
 import { authorizeLanguageServer } from "clay:language-server";
 
-await authorizeLanguageServer({
+// Grants fail closed on environmental problems — missing executable
+// (executable_not_found) or no matching workspace root
+// (unknown_workspace_root). Keep that from sinking the rest of the
+// configuration: each grant degrades independently and only its language
+// server stays inactive until the tooling exists.
+async function grantLanguageServer(options) {
+  try {
+    await authorizeLanguageServer(options);
+  } catch {
+    // Tooling not installed (or root absent) — skip this server only.
+  }
+}
+
+await grantLanguageServer({
   package: "@clay/lsp-rust",
   contribution: "lsp-rust.server",
   workspaceRootIds: [1],
 });
 
-await authorizeLanguageServer({
+await grantLanguageServer({
   package: "@clay/lsp-typescript",
   contribution: "lsp-typescript.server",
   workspaceRootIds: [1],
 });
 
-await authorizeLanguageServer({
+await grantLanguageServer({
   package: "@clay/lsp-javascript",
   contribution: "lsp-javascript.server",
   workspaceRootIds: [1],
 });
 
-await authorizeLanguageServer({
+await grantLanguageServer({
   package: "@clay/lsp-markdown",
   contribution: "lsp-markdown.server",
   workspaceRootIds: [1],
@@ -151,7 +164,7 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // standard → contextual → discretionary → rawFeatures → disableFeatures.
 setTypography({
   monospace: {
-    families: ["JetBrains Mono", "monospace"],
+    families: ["MartianMono Nerd Font", "monospace"],
     size: 16,
     ligatures: { enableStandard: true, enableContextual: true },
     // Ligature examples:
@@ -160,7 +173,7 @@ setTypography({
     //   ligatures: { disableFeatures: ["calt"] }      // force calt off
     //   ligatures: { rawFeatures: '"calt" 0, "zero" 1' }
   },
-  proportional: { families: ["Inter", "sans-serif"], size: 17 },
+  proportional: { families: ["Noto Sans", "sans-serif"], size: 17 },
   ui: { families: ["system-ui"], size: 13 },
 });
 

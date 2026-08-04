@@ -597,6 +597,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
             clay_state.set_current_package(Some(crate::server::ops::PackageContext::from_record(
                 &record,
             )));
+            clay_state.enter_package_activation();
         }
 
         json!({
@@ -633,6 +634,19 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
     };
 
     serde_json::to_string(&summary).map_err(serialize_error("clay.packages.load_failed"))
+}
+
+/// End the package-activation scope once a `loadPackage` activation finishes.
+/// `op_clay_packages_load_package_by_specifier` enters the scope (and stamps
+/// provenance) so the loadEntry's registrations attribute to the package and
+/// package-gated ops see a package caller. The provenance stamp intentionally
+/// persists for later package-facing attribution; only the activation scope
+/// ends, so subsequent user-configuration statements in the same init.js
+/// evaluation are seen as user configuration again (e.g. by the
+/// editor-control gate).
+#[op2(fast)]
+pub(super) fn op_clay_packages_end_package_activation(state: &mut OpState) {
+    state.borrow::<Arc<ClayOpState>>().exit_package_activation();
 }
 
 fn is_valid_first_party_package_segment(package_name: &str) -> bool {

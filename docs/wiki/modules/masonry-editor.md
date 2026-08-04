@@ -136,7 +136,7 @@ assert_eq!(observation.sync_version, Some(5));
 
 ## Multi-document sessions (Phase 20)
 
-`EditorWidget` keeps a bounded `DocumentSessionStore` of inactive documents. `DocumentOpened` for another `DocumentId` stashes the prior `EditorSurface` (text, caret/selection, viewport, history, dirty chrome) instead of destroying it. `show_open_documents_menu` / `activate_document` switch locally without re-downloading text. Server open-registry/lease/dirty authority is unchanged. Ceiling: `CLIENT_DOCUMENT_SESSION_MAX` (64).
+`EditorWidget` keeps a bounded `DocumentSessionStore` of inactive documents. `DocumentOpened` for another `DocumentId` stashes the prior `EditorSurface` (text, caret/selection, viewport, history, dirty chrome) instead of destroying it. `show_open_documents_menu` / `activate_document` switch locally without re-downloading text. Shared presentation state is document-independent and must survive every surface replacement (`stash_active_session` / `activate_document` carry it explicitly): `StyleRegistry` theme, theme specifier, `ResolvedUiTheme` (scrollbar/chrome tokens), typography registry, behavior manifest, and the runtime caret-style override. Server open-registry/lease/dirty authority is unchanged. Ceiling: `CLIENT_DOCUMENT_SESSION_MAX` (64).
 
 ## Save / conflict persistence UX (Phase 20)
 

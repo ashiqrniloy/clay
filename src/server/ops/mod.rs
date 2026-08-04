@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use deno_core::{OpState, extension, op2};
@@ -89,9 +89,10 @@ use self::{
         op_clay_modes_register_pattern,
     },
     packages::{
-        op_clay_packages_list_first_party_specifiers, op_clay_packages_load_in_package_domain,
-        op_clay_packages_load_package, op_clay_packages_load_package_by_specifier,
-        op_clay_packages_validate_manifest, op_clay_packages_validate_permissions,
+        op_clay_packages_end_package_activation, op_clay_packages_list_first_party_specifiers,
+        op_clay_packages_load_in_package_domain, op_clay_packages_load_package,
+        op_clay_packages_load_package_by_specifier, op_clay_packages_validate_manifest,
+        op_clay_packages_validate_permissions,
     },
     parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
@@ -155,6 +156,7 @@ pub(crate) struct ClayOpState {
     domain: crate::packages::bundled::RuntimeDomain,
     /// Currently executing package provenance; see [`PackageContext`].
     current_package: Mutex<Option<PackageContext>>,
+    package_activation_depth: AtomicUsize,
     /// Cross-domain bridge (Plan 061 task 12): the trusted worker dispatches
     /// third-party package load evaluations to the CURRENT third-party
     /// worker. Rewired on every third-party worker replacement; always `None`
@@ -173,6 +175,16 @@ pub(crate) struct ClayOpState {
     /// runtime service for both domains; `None` in unit-test states.
     editor_command_publisher:
         Mutex<Option<tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>>>,
+    /// Plan 071 caret-transport fix: bounded publisher for the runtime caret
+    /// appearance override set by `clientSetCursorStyle`. Wired by the JS
+    /// runtime service for both domains; `None` in unit-test states.
+    caret_style_publisher:
+        Mutex<Option<tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>>>,
+    /// Shared last-known caret override (service-owned, both domains write
+    /// through it) so connection initial sync and lag replay can resend the
+    /// current value.
+    caret_style_store:
+        Mutex<Option<std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>>>,
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
@@ -316,8 +328,11 @@ impl ClayOpState {
                 configuration_evaluation: false,
             }),
             current_package: Mutex::new(None),
+            package_activation_depth: AtomicUsize::new(0),
             replicated_active_editor_mode: Mutex::new(None),
             editor_command_publisher: Mutex::new(None),
+            caret_style_publisher: Mutex::new(None),
+            caret_style_store: Mutex::new(None),
             third_party_commands: Mutex::new(None),
             package_service,
             language_server_authority_sealed: AtomicBool::new(
@@ -503,6 +518,30 @@ impl ClayOpState {
             .is_some()
     }
 
+    /// Whether execution is currently inside package code: a `loadPackage`
+    /// loadEntry activation or a host-invoked package callback (parse,
+    /// completion, analysis). Tracked as a nesting depth because controlled
+    /// package evaluations may contain loadPackage activations. The
+    /// attribution stamp (`current_package`) intentionally outlives
+    /// activations so later package-facing calls still attribute correctly;
+    /// gates that must distinguish package callers from user configuration
+    /// therefore use this flag, not `has_current_package`.
+    pub(crate) fn in_package_activation(&self) -> bool {
+        self.package_activation_depth.load(Ordering::Acquire) > 0
+    }
+
+    pub(crate) fn enter_package_activation(&self) {
+        self.package_activation_depth.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn exit_package_activation(&self) {
+        let _ = self.package_activation_depth.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |depth| Some(depth.saturating_sub(1)),
+        );
+    }
+
     /// Mode ID of the active major mode for the active document, when the
     /// active behavior manifest is document-scoped and a major mode is
     /// activated for it. Trusted-worker source of truth for the
@@ -552,6 +591,48 @@ impl ClayOpState {
             return false;
         };
         let _ = sender.send(request);
+        true
+    }
+
+    pub(crate) fn set_caret_style_publisher(
+        &self,
+        sender: tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>,
+        store: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>,
+    ) {
+        *self
+            .caret_style_publisher
+            .lock()
+            .expect("caret style publisher mutex poisoned") = Some(sender);
+        *self
+            .caret_style_store
+            .lock()
+            .expect("caret style store mutex poisoned") = Some(store);
+    }
+
+    /// Publish the runtime caret appearance override (`None` clears it) to
+    /// connected clients and record it as the current value. Returns `true`
+    /// when a publisher is wired.
+    pub(crate) fn publish_caret_style_override(
+        &self,
+        style: Option<crate::protocol::CaretStyle>,
+    ) -> bool {
+        if let Some(store) = self
+            .caret_style_store
+            .lock()
+            .expect("caret style store mutex poisoned")
+            .clone()
+        {
+            *store.lock().expect("caret style state mutex poisoned") = style;
+        }
+        let Some(sender) = self
+            .caret_style_publisher
+            .lock()
+            .expect("caret style publisher mutex poisoned")
+            .clone()
+        else {
+            return false;
+        };
+        let _ = sender.send(style);
         true
     }
 
@@ -667,6 +748,7 @@ impl ClayOpState {
         // Stale package provenance must never leak across commands; the
         // load op or the worker handler branch re-stamps it when needed.
         self.set_current_package(None);
+        self.package_activation_depth.store(0, Ordering::Release);
         self.runtime_records
             .lock()
             .expect("Clay runtime op state mutex poisoned")
@@ -1616,7 +1698,7 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
 }
 
 // Trusted domain: configuration evaluation and bundled first-party packages.
-// This is the full op set (66 ops).
+// This is the full op set (78 ops).
 extension!(
     clay_runtime_trusted_extension,
     ops = [
@@ -1660,6 +1742,7 @@ extension!(
         op_clay_packages_validate_permissions,
         op_clay_packages_load_package,
         op_clay_packages_load_package_by_specifier,
+        op_clay_packages_end_package_activation,
         op_clay_packages_load_in_package_domain,
         op_clay_packages_list_first_party_specifiers,
         op_clay_language_server_authorize,
@@ -1814,7 +1897,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 77);
+        assert_eq!(trusted.len(), 78);
         // 44 = 36 public contribution ops + the seven shared `editor-control`
         // gated editor ops + the gated programmatic execution op (follow-up
         // round); visibility grants nothing without approved permission +
@@ -1850,6 +1933,7 @@ mod domain_extension_tests {
             "op_clay_packages_validate_permissions",
             "op_clay_packages_load_package",
             "op_clay_packages_load_package_by_specifier",
+            "op_clay_packages_end_package_activation",
             "op_clay_packages_load_in_package_domain",
             "op_clay_packages_list_first_party_specifiers",
             "op_clay_language_server_authorize",

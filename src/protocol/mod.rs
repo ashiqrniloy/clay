@@ -28,8 +28,10 @@ pub use textobjects::*;
 /// tree-sitter text objects and smart select (Plan 071 task 10).
 /// Version 8 adds `EditorCommandRequest` for the gated `editor-control`
 /// programmatic execution channel (Plan 071 follow-up round).
+/// Version 9 adds `CaretStyleOverride` so the gated `clientSetCursorStyle`
+/// runtime override reaches the client (Plan 071 caret-transport fix).
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -575,6 +577,50 @@ impl CaretStyle {
             stop_blink_on_typing: true,
         }
     }
+
+    /// Wire-validation bounds for untrusted transports: geometry must be
+    /// finite and within sane caret ranges, and animating blink phases must
+    /// not be degenerate (a zero period would flicker every frame).
+    pub fn validate(&self) -> Result<(), CaretStyleValidationError> {
+        let finite = self.width_px.is_finite()
+            && self.height_pct.is_finite()
+            && self.smooth_animation_ms <= MAX_CARET_SMOOTH_ANIMATION_MS;
+        let geometry = self.width_px > 0.0
+            && self.width_px <= MAX_CARET_WIDTH_PX
+            && self.height_pct > 0.0
+            && self.height_pct <= MAX_CARET_HEIGHT_PCT;
+        let blink = match self.blink {
+            BlinkStyle::Solid => true,
+            BlinkStyle::Blink {
+                on_ms,
+                off_ms,
+                wait_ms,
+            } => {
+                on_ms <= MAX_CARET_BLINK_PHASE_MS
+                    && off_ms <= MAX_CARET_BLINK_PHASE_MS
+                    && wait_ms <= MAX_CARET_BLINK_PHASE_MS
+            }
+            BlinkStyle::Phase { period_ms } | BlinkStyle::Smooth { period_ms } => {
+                (2..=MAX_CARET_BLINK_PHASE_MS).contains(&period_ms)
+            }
+        };
+        if finite && geometry && blink {
+            Ok(())
+        } else {
+            Err(CaretStyleValidationError::OutOfBounds)
+        }
+    }
+}
+
+/// Upper bounds enforced by [`CaretStyle::validate`] on wire payloads.
+pub const MAX_CARET_WIDTH_PX: f32 = 64.0;
+pub const MAX_CARET_HEIGHT_PCT: f32 = 4.0;
+pub const MAX_CARET_BLINK_PHASE_MS: u32 = 60_000;
+pub const MAX_CARET_SMOOTH_ANIMATION_MS: u32 = 60_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretStyleValidationError {
+    OutOfBounds,
 }
 
 impl Default for CaretStyle {
@@ -1530,6 +1576,10 @@ pub enum ServerMessage {
     /// inline size never inflates small payloads. Advisory: the client
     /// re-parses the command ID deny-by-default and drops unknown IDs.
     EditorCommandRequest(Box<EditorCommandRequest>),
+    /// Runtime caret appearance override from `clientSetCursorStyle`
+    /// (editor-control gated). `None` clears the override so the effective
+    /// style falls back to the per-mode manifest then the theme default.
+    CaretStyleOverride(Option<CaretStyle>),
     /// Phase 18.15 (Plan 046) resolved active theme snapshot. Sent once after
     /// the welcome `BehaviorManifest` when `setTheme("...")` ran in `init.js`;
     /// absent when no theme is selected (Clay default theme applies). The
